@@ -229,22 +229,45 @@ func Reseal(c domain.CallRecord) domain.CallRecord {
 	return c
 }
 
-// Finish moves c to a terminal state at finishedSeq. A COMPLETED call gets
-// a valid outcome for its latest attempt.
+// NewOutcome returns the outcome of c's latest attempt in state
+// (COMPLETED or FAILED).
+func NewOutcome(c domain.CallRecord, state domain.CallState, retryable bool) domain.CallOutcome {
+	o := domain.CallOutcome{Attempt: c.Attempts, State: state, Retryable: retryable}
+	if state == domain.CallCompleted {
+		o.Response = []byte("response " + c.CallID)
+		o.ResponseHash = domain.HashBytes(o.Response)
+	} else {
+		o.FailureReason = "failure " + c.CallID
+	}
+	return o
+}
+
+// Finish returns c in terminal state at finishedSeq carrying the evidence
+// CallRecord.Validate requires: COMPLETED and FAILED (after an attempt)
+// get the latest attempt's outcome; an unsent FAILED call and an ABANDONED
+// call get a reason instead.
 func Finish(c domain.CallRecord, state domain.CallState, finishedSeq uint64) domain.CallRecord {
 	c = c.Clone()
 	c.State, c.FinishedSeq = state, finishedSeq
-	if state == domain.CallCompleted {
-		resp := []byte("response " + c.CallID)
-		c.Outcome = &domain.CallOutcome{
-			Attempt:      max(c.Attempts, 1),
-			State:        domain.CallCompleted,
-			ResponseHash: domain.HashBytes(resp),
-			Response:     resp,
-		}
-		c.OutcomeHash = c.Outcome.OutcomeHash()
+	c.Outcome, c.OutcomeHash, c.Reason = nil, "", ""
+	switch {
+	case state == domain.CallAbandoned, state == domain.CallFailed && c.Attempts == 0:
+		c.Reason = "reason " + c.CallID
+	default:
+		o := NewOutcome(c, state, false)
+		c.Outcome, c.OutcomeHash = &o, o.OutcomeHash()
 	}
 	return c
+}
+
+// CloseAttempt returns a closed at finishedSeq in state. COMPLETED and
+// FAILED attempts take outcomeHash; ABANDONED takes none.
+func CloseAttempt(a domain.CallAttempt, state domain.AttemptState, outcomeHash string, finishedSeq uint64) domain.CallAttempt {
+	a.State, a.FinishedSeq, a.FinishedAt = state, finishedSeq, T0.Add(1e9)
+	if state != domain.AttemptAbandoned {
+		a.OutcomeHash = outcomeHash
+	}
+	return a
 }
 
 // NewAttempt returns a valid SENT attempt.

@@ -139,11 +139,8 @@ func (t *tx) UpdateItem(id string, expectedVersion uint64, change domain.ItemCha
 		return domain.ContextItem{}, fmt.Errorf("item %s: version %d, expected %d: %w",
 			id, cur.Version, expectedVersion, domain.ErrVersionConflict)
 	}
-	if err := t.checkLifecycleEvent(event); err != nil {
+	if err := t.checkTargetEvent(event, domain.TargetItem, id); err != nil {
 		return domain.ContextItem{}, err
-	}
-	if event.TargetKind != domain.TargetItem || event.TargetID != id {
-		return domain.ContextItem{}, invalid("item %s: lifecycle event %s targets %s %s", id, event.ID, event.TargetKind, event.TargetID)
 	}
 	next, err := change.Apply(cur)
 	if err != nil {
@@ -290,7 +287,7 @@ func sameObligation(a, b domain.ObligationVersion) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func (t *tx) AppendObligationTransition(tr domain.ObligationTransition) (domain.ObligationVersion, error) {
+func (t *tx) AppendObligationTransition(tr domain.ObligationTransition, expectedRevision uint64) (domain.ObligationVersion, error) {
 	if err := t.own(tr.SessionID); err != nil {
 		return domain.ObligationVersion{}, err
 	}
@@ -307,6 +304,10 @@ func (t *tx) AppendObligationTransition(tr domain.ObligationTransition) (domain.
 	cur, ok := t.obligations.peek(key)
 	if !ok {
 		return domain.ObligationVersion{}, notFound("obligation", fmt.Sprintf("%s/%d", tr.ObligationID, tr.Version))
+	}
+	if cur.Revision != expectedRevision {
+		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: revision %d, expected %d: %w",
+			tr.ObligationID, tr.Version, cur.Revision, expectedRevision, domain.ErrVersionConflict)
 	}
 	if !cur.Current {
 		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: retired versions do not transition: %w",
@@ -348,30 +349,31 @@ func (t *tx) InsertGrant(g domain.MutationGrant) error {
 	return nil
 }
 
-func (t *tx) RevokeGrant(id string, seq uint64) error {
+func (t *tx) RevokeGrant(id string, event domain.LifecycleEvent) (domain.MutationGrant, error) {
 	if err := t.check(); err != nil {
-		return err
+		return domain.MutationGrant{}, err
 	}
 	g, ok := t.grants.get(id)
 	if !ok {
-		return notFound("grant", id)
+		return domain.MutationGrant{}, notFound("grant", id)
 	}
 	if g.RevokedSeq != 0 {
-		return fmt.Errorf("grant %s: already revoked: %w", id, domain.ErrInvalidTransition)
+		return domain.MutationGrant{}, fmt.Errorf("grant %s: already revoked: %w", id, domain.ErrInvalidTransition)
 	}
-	if err := t.fresh("grant "+id+" revocation", seq); err != nil {
-		return err
+	if err := t.checkTargetEvent(event, domain.TargetGrant, id); err != nil {
+		return domain.MutationGrant{}, err
 	}
-	g.RevokedSeq = seq
+	g.RevokedSeq = event.Seq
 	t.grants.put(id, g)
-	return nil
+	t.lifecycle.put(event.ID, event)
+	return g, nil
 }
 
-func (t *tx) PutTask(ts domain.TaskState, expectedVersion uint64) (domain.TaskState, error) {
+func (t *tx) PutTask(ts domain.TaskState, expectedVersion uint64, event *domain.LifecycleEvent) (domain.TaskState, error) {
 	if err := t.own(ts.SessionID); err != nil {
 		return domain.TaskState{}, err
 	}
-	cur, _ := t.tasks.peek(ts.TaskID) // absent reads as version 0
+	cur, ok := t.tasks.peek(ts.TaskID) // absent reads as version 0
 	if cur.Version != expectedVersion {
 		return domain.TaskState{}, fmt.Errorf("task %s: version %d, expected %d: %w",
 			ts.TaskID, cur.Version, expectedVersion, domain.ErrVersionConflict)
@@ -383,8 +385,30 @@ func (t *tx) PutTask(ts domain.TaskState, expectedVersion uint64) (domain.TaskSt
 	if err := t.freshIfChanged("task "+ts.TaskID, cur.CompletedSeq, ts.CompletedSeq); err != nil {
 		return domain.TaskState{}, err
 	}
+	// Creation and status changes are audited; other changes are not.
+	if audited := !ok || ts.Status != cur.Status; audited != (event != nil) {
+		return domain.TaskState{}, invalid("task %s: an audit event is required exactly for creation and status changes", ts.TaskID)
+	}
+	if event != nil {
+		if err := t.checkTargetEvent(*event, domain.TargetTask, ts.TaskID); err != nil {
+			return domain.TaskState{}, err
+		}
+		t.lifecycle.put(event.ID, *event)
+	}
 	t.tasks.put(ts.TaskID, ts)
 	return ts, nil
+}
+
+// checkTargetEvent validates an audit event that must describe a change to
+// the given target.
+func (t *tx) checkTargetEvent(e domain.LifecycleEvent, kind domain.TargetKind, id string) error {
+	if err := t.checkLifecycleEvent(e); err != nil {
+		return err
+	}
+	if e.TargetKind != kind || e.TargetID != id {
+		return invalid("lifecycle event %s targets %s %s, want %s %s", e.ID, e.TargetKind, e.TargetID, kind, id)
+	}
+	return nil
 }
 
 // checkLifecycleEvent validates an audit event about to be appended.
@@ -442,10 +466,12 @@ func (t *tx) InsertCall(c domain.CallRecord) error {
 	if c.Revision != 1 {
 		return invalid("call %s: new calls start at revision 1", c.CallID)
 	}
-	if err := t.fresh("call "+c.CallID, c.PreparedSeq); err != nil {
-		return err
+	// Later states need attempt evidence that only UpdateCall checks, so a
+	// call enters the ledger PREPARED with no attempts.
+	if c.State != domain.CallPrepared || c.Attempts != 0 {
+		return invalid("call %s: new calls start PREPARED with no attempts", c.CallID)
 	}
-	if err := t.freshIfChanged("call "+c.CallID, 0, c.FinishedSeq); err != nil {
+	if err := t.fresh("call "+c.CallID, c.PreparedSeq); err != nil {
 		return err
 	}
 	if t.calls.has(c.CallID) {
@@ -480,6 +506,10 @@ func (t *tx) UpdateCall(c domain.CallRecord, expectedRevision uint64) (domain.Ca
 	if c.State != cur.State && !domain.ValidCallTransition(cur.State, c.State) {
 		return domain.CallRecord{}, fmt.Errorf("call %s: %s -> %s: %w", c.CallID, cur.State, c.State, domain.ErrInvalidTransition)
 	}
+	if c.State != cur.State && !t.hasEvidence(cur.State, c) {
+		return domain.CallRecord{}, fmt.Errorf("call %s: %s -> %s without matching attempt %d: %w",
+			c.CallID, cur.State, c.State, c.Attempts, domain.ErrInvalidTransition)
+	}
 	if !sameCallProposal(cur, c) {
 		return domain.CallRecord{}, fmt.Errorf("call %s: frozen proposal fields cannot change: %w", c.CallID, domain.ErrImmutable)
 	}
@@ -505,6 +535,34 @@ func sameCallProposal(a, b domain.CallRecord) bool {
 	return reflect.DeepEqual(a, b)
 }
 
+// hasEvidence reports whether the stored attempt c.Attempts justifies moving
+// c from state from to c.State: no call transition may outrun the transport
+// attempt that caused it.
+func (t *tx) hasEvidence(from domain.CallState, c domain.CallRecord) bool {
+	if from != domain.CallSent && from != domain.CallUnknown && !(from == domain.CallPrepared && c.State == domain.CallSent) {
+		return true // PREPARED -> FAILED is a cancellation of an unsent call
+	}
+	a, ok := t.attempts.peek(attemptKey{c.CallID, c.Attempts})
+	if !ok {
+		return false
+	}
+	switch c.State {
+	case domain.CallSent:
+		return a.State == domain.AttemptSent
+	case domain.CallCompleted:
+		return a.State == domain.AttemptCompleted && a.OutcomeHash == c.OutcomeHash
+	case domain.CallFailed:
+		return a.State == domain.AttemptFailed && a.OutcomeHash == c.OutcomeHash
+	case domain.CallPrepared:
+		return from == domain.CallSent && a.State == domain.AttemptFailed && a.Retryable
+	case domain.CallUnknown:
+		return a.State == domain.AttemptUnknown
+	case domain.CallAbandoned:
+		return a.State == domain.AttemptAbandoned
+	}
+	return false
+}
+
 // checkReservation enforces FR-CALL-005: at most one call per conversation
 // is PREPARED, SENT, or UNKNOWN.
 func (t *tx) checkReservation(c domain.CallRecord) error {
@@ -523,23 +581,42 @@ func (t *tx) PutCallAttempt(a domain.CallAttempt) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
-	if a.OutcomeHash != "" && !domain.ValidHash(a.OutcomeHash) {
-		return invalid("call attempt %s/%d: malformed outcome hash", a.CallID, a.Attempt)
-	}
-	if !t.calls.has(a.CallID) {
+	call, ok := t.calls.peek(a.CallID)
+	if !ok {
 		return notFound("call", a.CallID)
 	}
 	key := attemptKey{a.CallID, a.Attempt}
 	cur, exists := t.attempts.peek(key)
-	if !exists && a.Attempt > 1 && !t.attempts.has(attemptKey{a.CallID, a.Attempt - 1}) {
-		return invalid("call attempt %s/%d: attempts are numbered densely from 1", a.CallID, a.Attempt)
+	if !exists {
+		if a.Attempt > 1 && !t.attempts.has(attemptKey{a.CallID, a.Attempt - 1}) {
+			return invalid("call attempt %s/%d: attempts are numbered densely from 1", a.CallID, a.Attempt)
+		}
+		if a.State != domain.AttemptSent || call.State != domain.CallPrepared {
+			return fmt.Errorf("call attempt %s/%d: a new attempt starts SENT from a PREPARED call: %w",
+				a.CallID, a.Attempt, domain.ErrInvalidTransition)
+		}
+		if err := t.fresh("call attempt "+a.CallID, a.SentSeq); err != nil {
+			return err
+		}
+		t.attempts.put(key, a)
+		return nil
 	}
-	if exists && cur.OutcomeHash != "" && (a.State != cur.State || a.OutcomeHash != cur.OutcomeHash) {
-		return fmt.Errorf("call attempt %s/%d: a closed attempt's state and outcome cannot change: %w",
+	if a == cur {
+		return nil
+	}
+	switch cur.State {
+	case domain.AttemptCompleted, domain.AttemptFailed, domain.AttemptAbandoned:
+		return fmt.Errorf("call attempt %s/%d: closed attempts are immutable: %w", a.CallID, a.Attempt, domain.ErrImmutable)
+	}
+	probe := a
+	probe.State, probe.OutcomeHash, probe.Retryable = cur.State, cur.OutcomeHash, cur.Retryable
+	probe.FinishedSeq, probe.FinishedAt = cur.FinishedSeq, cur.FinishedAt
+	if probe != cur {
+		return fmt.Errorf("call attempt %s/%d: only state, outcome, and finish fields may change: %w",
 			a.CallID, a.Attempt, domain.ErrImmutable)
 	}
-	if err := t.freshIfChanged("call attempt "+a.CallID, cur.SentSeq, a.SentSeq); err != nil {
-		return err
+	if !domain.ValidAttemptTransition(cur.State, a.State) {
+		return fmt.Errorf("call attempt %s/%d: %s -> %s: %w", a.CallID, a.Attempt, cur.State, a.State, domain.ErrInvalidTransition)
 	}
 	if err := t.freshIfChanged("call attempt "+a.CallID, cur.FinishedSeq, a.FinishedSeq); err != nil {
 		return err

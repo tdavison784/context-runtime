@@ -73,6 +73,7 @@ var suite = []testCase{
 	{"UpdateItem", testUpdateItem},
 	{"GoalLifecycle", testGoalLifecycle},
 	{"Relationships", testRelationships},
+	{"RelationshipFilters", testRelationshipFilters},
 	{"SupersessionAcyclic", testSupersessionAcyclic},
 	{"Events", testEvents},
 	{"Blobs", testBlobs},
@@ -87,6 +88,7 @@ var suite = []testCase{
 	{"Conversations", testConversations},
 	{"Calls", testCalls},
 	{"CallReservation", testCallReservation},
+	{"CallEvidence", testCallEvidence},
 	{"CallAttempts", testCallAttempts},
 }
 

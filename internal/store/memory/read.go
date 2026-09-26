@@ -48,7 +48,7 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		sessionID:   sessionID,
 		lastSeq:     st.lastSeq,
 		items:       newTable(st.items, writable, domain.ContextItem.Clone),
-		rels:        newTable(st.rels, writable, cloneRelationship),
+		rels:        newTable(st.rels, writable, domain.Relationship.Clone),
 		supersedes:  newIndex(st.supersedes, writable),
 		relsFrom:    newIndex(st.relsFrom, writable),
 		relsTo:      newIndex(st.relsTo, writable),
@@ -155,7 +155,7 @@ func (r *readTx) Relationships(f store.RelationshipFilter) ([]domain.Relationshi
 		if (f.Type == "" || rel.Type == f.Type) &&
 			(f.FromID == "" || rel.FromID == f.FromID) &&
 			(f.ToID == "" || rel.ToID == f.ToID) {
-			out = append(out, cloneRelationship(rel))
+			out = append(out, rel.Clone())
 		}
 	}
 	slices.SortFunc(out, func(a, b domain.Relationship) int {

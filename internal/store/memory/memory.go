@@ -167,14 +167,6 @@ func (s *Store) Close() error {
 	return nil
 }
 
-func cloneRelationship(r domain.Relationship) domain.Relationship {
-	if r.Coverage != nil {
-		c := *r.Coverage
-		r.Coverage = &c
-	}
-	return r
-}
-
 func cloneBlob(b domain.Blob) domain.Blob {
 	b.Data = slices.Clone(b.Data)
 	return b

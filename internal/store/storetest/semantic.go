@@ -717,3 +717,66 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 	})
 	wantErr(t, err, errRollback)
 }
+
+// testRelationshipFilters checks filtered relationship reads across
+// committed edges and a transaction's own edges, and that a rolled-back
+// transaction's edges never appear. Stores may answer filters from indexes;
+// the results must equal a full scan's.
+func testRelationshipFilters(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		for _, id := range []string{"a", "b", "c", "d"} {
+			noErr(t, tx.InsertItem(NewItem(sessA, id, tx.NextSeq(), id)))
+		}
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e1", domain.RelSupersedes, "a", "b", tx.NextSeq())))
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e2", domain.RelDerivedFrom, "a", "c", tx.NextSeq())))
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e3", domain.RelReferences, "c", "b", tx.NextSeq())))
+		return nil
+	})
+	cases := []struct {
+		f    store.RelationshipFilter
+		want []string
+	}{
+		{store.RelationshipFilter{FromID: "a"}, []string{"e1", "e2", "e5"}},
+		{store.RelationshipFilter{ToID: "b"}, []string{"e1", "e3", "e4"}},
+		{store.RelationshipFilter{Type: domain.RelSupersedes}, []string{"e1", "e4"}},
+		{store.RelationshipFilter{FromID: "a", Type: domain.RelReferences}, []string{"e5"}},
+		{store.RelationshipFilter{FromID: "a", ToID: "c"}, []string{"e2"}},
+		{store.RelationshipFilter{ToID: "b", Type: domain.RelReferences}, []string{"e3"}},
+		{store.RelationshipFilter{FromID: "b"}, nil},
+		{store.RelationshipFilter{}, []string{"e1", "e2", "e3", "e4", "e5"}},
+	}
+	check := func(tx store.ReadTx, when string) {
+		t.Helper()
+		for _, tc := range cases {
+			got, err := tx.Relationships(tc.f)
+			noErr(t, err)
+			var ids []string
+			for _, r := range got {
+				ids = append(ids, r.ID)
+			}
+			if !slices.Equal(ids, tc.want) {
+				t.Errorf("%s: Relationships(%+v) = %v, want %v", when, tc.f, ids, tc.want)
+			}
+		}
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e4", domain.RelSupersedes, "d", "b", tx.NextSeq())))
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e5", domain.RelReferences, "a", "d", tx.NextSeq())))
+		check(tx, "inside the writing transaction")
+		return nil
+	})
+	err := s.Update(ctx, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e6", domain.RelDuplicateOf, "a", "b", tx.NextSeq())))
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e7", domain.RelSupersedes, "b", "c", tx.NextSeq())))
+		return errRollback
+	})
+	wantErr(t, err, errRollback)
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		check(tx, "after commit and rollback")
+		return nil
+	})
+	// The rolled-back SUPERSEDES edge b -> c must not count toward cycles.
+	update(t, s, sessA, func(tx store.Tx) error {
+		return tx.InsertRelationship(NewRelationship(sessA, "e8", domain.RelSupersedes, "c", "b", tx.NextSeq()))
+	})
+}
