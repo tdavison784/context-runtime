@@ -98,7 +98,12 @@ type testStore struct {
 	store.Store
 	mu        sync.Mutex
 	committed map[string]*semState
+	// failAt, when positive, makes the failAt-th facet write of the next
+	// Update fail with errInjected (failure injection, P3-1).
+	failAt int
 }
+
+var errInjected = errors.New("semstore: injected write failure")
 
 func newTestStore() *testStore {
 	return &testStore{Store: memory.New(), committed: map[string]*semState{}}
@@ -115,8 +120,10 @@ func (f *testStore) Update(ctx context.Context, session string, fn func(store.Tx
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	st := f.state(session).clone()
+	failAt := f.failAt
+	f.failAt = 0
 	err := f.Store.Update(ctx, session, func(tx store.Tx) error {
-		ftx := &semTx{Tx: tx, st: st}
+		ftx := &semTx{Tx: tx, st: st, failAt: failAt}
 		if err := fn(ftx); err != nil {
 			return err
 		}
@@ -150,6 +157,8 @@ type semTx struct {
 	store.Tx
 	st       *semState
 	poisoned error
+	failAt   int
+	writes   int
 }
 
 func (t *semTx) Poison(err error) {
@@ -191,6 +200,10 @@ func (b *semBackend) write(meta *domain.SemanticMeta, f func() error) error {
 		return b.tx.poisoned
 	}
 	err := func() error {
+		b.tx.writes++
+		if b.tx.writes == b.tx.failAt {
+			return errInjected
+		}
 		if meta != nil {
 			if err := meta.Validate(); err != nil {
 				return err
