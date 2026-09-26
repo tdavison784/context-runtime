@@ -259,7 +259,12 @@ func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) er
 		return err
 	}
 	tx := &transaction{conn: c, ctx: ctx, session: session, last: last, allocated: make(map[uint64]bool), writable: true}
-	if err = fn(tx); err != nil {
+	g := store.NewGuard(tx)
+	err = fn(g)
+	if p := g.Poisoned(); p != nil {
+		return p // the deferred ROLLBACK discards everything (DUR-1.3)
+	}
+	if err != nil {
 		return err
 	}
 	if err = ctx.Err(); err != nil {
@@ -347,7 +352,7 @@ type transaction struct {
 	semanticSeqs       map[uint64]bool
 }
 
-var _ store.Tx = (*transaction)(nil)
+var _ store.TxBase = (*transaction)(nil)
 
 func (t *transaction) SessionID() string { return t.session }
 func (t *transaction) LastSeq() uint64   { return t.last }

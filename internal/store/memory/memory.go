@@ -185,7 +185,12 @@ func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) 
 	defer sess.mu.Unlock()
 	t := &tx{readTx: newReadTx(sessionID, sess.st, true), baseSeq: sess.st.lastSeq}
 	defer t.finish()
-	if err := fn(t); err != nil {
+	g := store.NewGuard(t)
+	err = fn(g)
+	if p := g.Poisoned(); p != nil {
+		return p // the overlay is discarded: nothing commits (DUR-1.3)
+	}
+	if err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
