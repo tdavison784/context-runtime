@@ -332,35 +332,44 @@ func IsCurrent(tx store.ReadTx, itemID string) (bool, error) {
 // ResolveLifecycleTarget resolves a lifecycle command's bare id (SDD v0.8,
 // SPEC-2.2, e.g. "Resolve [id]" or "Unpin [id]") to exactly one accessible,
 // current item ID. id is tried two ways, since a caller may hold either
-// form:
+// form, and BOTH namespaces are gathered into one candidate set before any
+// decision is made (SPEC-3.1): an inaccessible or noncurrent candidate in
+// either namespace is dropped silently, exactly like a missing one, rather
+// than short-circuiting the other namespace's lookup. Checking the literal
+// item first and returning on any failure there would let a hidden item
+// that merely happens to share an ID with an accessible directive change
+// the result (an existence oracle) and block an otherwise-authorized
+// Resolve/Unpin.
 //
-//  1. As a literal item ID: if id names an item, it must be accessible to
-//     actor and current, or the call fails with domain.ErrNotFound (an
-//     inaccessible or superseded item is not a valid target and is never
-//     distinguished from a missing one).
+//  1. As a literal item ID: id is a candidate if it names an item that is
+//     accessible to actor and current.
 //  2. As a directive ID: id's current versions are read across every
 //     access boundary in taskID (FR-DIR-002 v0.7/v0.8: a directive's
 //     identity includes its boundary, so one bare ID can have several
-//     simultaneously current versions) and filtered to those actor can
-//     access. Zero accessible versions is domain.ErrNotFound. Exactly one
-//     is the answer. More than one is ErrAmbiguousDirective: a lifecycle
-//     mutation must never guess which visible version was meant.
+//     simultaneously current versions) and each accessible one is a
+//     candidate too.
 //
-// Boundaries actor cannot access are never consulted, so the result
-// discloses nothing beyond what actor could already see.
+// Zero candidates is domain.ErrNotFound. Exactly one is the answer. More
+// than one — whether two directive versions, or an item ID and a directive
+// ID that happen to collide — is ErrAmbiguousDirective: a lifecycle
+// mutation must never guess which accessible target was meant. Boundaries
+// actor cannot access are never consulted, so the result discloses nothing
+// beyond what actor could already see.
 func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id string) (string, error) {
+	var candidates []string
+	seen := map[string]bool{}
+
 	if it, err := tx.Item(id); err == nil {
-		if !it.Access.Permits(actor) {
-			return "", domain.ErrNotFound
+		if it.Access.Permits(actor) {
+			cur, err := IsCurrent(tx, id)
+			if err != nil {
+				return "", err
+			}
+			if cur {
+				candidates = append(candidates, id)
+				seen[id] = true
+			}
 		}
-		cur, err := IsCurrent(tx, id)
-		if err != nil {
-			return "", err
-		}
-		if !cur {
-			return "", domain.ErrNotFound
-		}
-		return id, nil
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return "", err
 	}
@@ -369,8 +378,10 @@ func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id 
 	if err != nil {
 		return "", err
 	}
-	var accessible []string
 	for _, versionID := range versions {
+		if seen[versionID] {
+			continue
+		}
 		it, err := tx.Item(versionID)
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
@@ -379,14 +390,16 @@ func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id 
 			return "", err
 		}
 		if it.Access.Permits(actor) {
-			accessible = append(accessible, versionID)
+			candidates = append(candidates, versionID)
+			seen[versionID] = true
 		}
 	}
-	switch len(accessible) {
+
+	switch len(candidates) {
 	case 0:
 		return "", domain.ErrNotFound
 	case 1:
-		return accessible[0], nil
+		return candidates[0], nil
 	default:
 		return "", ErrAmbiguousDirective
 	}
