@@ -244,3 +244,37 @@ func TestReferenceLinksTruncated(t *testing.T) {
 		t.Errorf("accepted the reason with another code")
 	}
 }
+
+// TestCommandRecordDetailRedaction is SEC-3.2: a command record is readable
+// at its transcript boundary, but its resolution only where DetailAccess
+// permits; any other viewer gets a target-independent WITHHELD copy, so a
+// hidden target and a missing one read identically.
+func TestCommandRecordDetailRedaction(t *testing.T) {
+	c := commandRecordFixture()
+	owner := c.Actor
+	c.DetailAccess = c.Access
+	c.DetailAccess.AgentID = owner.AgentID
+	if owner.AgentID == "" {
+		t.Fatal("fixture actor needs an agent")
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid record rejected: %v", err)
+	}
+	if got := c.Redacted(owner); got.Resolution != c.Resolution || got.ResolvedItemID != c.ResolvedItemID {
+		t.Errorf("owner's view redacted: %+v", got)
+	}
+	other := owner
+	other.AgentID = "someone-else"
+	got := c.Redacted(other)
+	if got.Resolution != TargetWithheld || got.ResolvedItemID != "" || got.ResolvedVersion != 0 || got.DetailAccess != c.Access {
+		t.Errorf("other's view = %+v, want WITHHELD with no item and no detail boundary", got)
+	}
+	if err := got.Validate(); err != nil {
+		t.Errorf("redacted view invalid: %v", err)
+	}
+	wide := c
+	wide.DetailAccess = AccessBoundary{Scope: ScopeSession, SessionID: c.SessionID}
+	if wide.Access.TaskID != "" && wide.Validate() == nil {
+		t.Errorf("accepted a detail boundary wider than the record's")
+	}
+}

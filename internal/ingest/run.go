@@ -44,6 +44,7 @@ type run struct {
 	repls     []domain.IngestLink
 
 	suppliedBlobs map[string]bool // blob hashes whose bytes this event supplied
+	unverified    map[string]bool // unverified items already reported (DUR-3.1)
 }
 
 func isNotFound(err error) bool { return errors.Is(err, domain.ErrNotFound) }
@@ -67,6 +68,7 @@ func (r *run) apply() (domain.IngestReceipt, error) {
 	r.seq = r.tx.NextSeq()
 	r.diags = newDiagnostics(r.limits)
 	r.suppliedBlobs = map[string]bool{}
+	r.unverified = map[string]bool{}
 	r.derived = map[int]int{}
 
 	if err := r.advanceTask(); err != nil {
@@ -321,9 +323,14 @@ func (r *run) blob(si, pi int, part domain.InputPart, access domain.AccessBounda
 // verification (DUR-1.4). The match never decides anything and never
 // blocks the event; reading it directly still fails with ErrIntegrity. The
 // store only reports matches the viewer can access, and the record is
-// readable at access, so it discloses nothing hidden.
+// readable at access, so it discloses nothing hidden. Each item is reported
+// once per event, however many lookups or pages return it (DUR-3.1).
 func (r *run) reportUnverified(si, pi int, rng domain.ByteRange, access domain.AccessBoundary, ids []string) {
-	for range ids {
+	for _, id := range ids {
+		if r.unverified[id] {
+			continue
+		}
+		r.unverified[id] = true
 		r.diags.add(domain.Diagnostic{SpanIndex: si, PartIndex: pi, Code: domain.ItemUnverified, Reason: domain.ReasonUnverifiedItem, Range: rng}, access)
 	}
 }

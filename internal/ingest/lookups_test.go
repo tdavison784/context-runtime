@@ -118,3 +118,46 @@ func TestUnverifiedMatchesNeverBlock_DUR14(t *testing.T) {
 		}
 	})
 }
+
+// repeatUnverifiedStore reports the same unverified legacy ID on every
+// source page, as SQLite's lookahead could (DUR-3.1).
+type repeatUnverifiedStore struct{ store.Store }
+
+func (s repeatUnverifiedStore) Update(ctx context.Context, sessionID string, fn func(store.Tx) error) error {
+	return s.Store.Update(ctx, sessionID, func(tx store.Tx) error { return fn(repeatUnverifiedTx{tx}) })
+}
+
+type repeatUnverifiedTx struct{ store.Tx }
+
+func (t repeatUnverifiedTx) SourceItems(f store.SourceFilter) (store.Lookup, error) {
+	l, err := t.Tx.SourceItems(f)
+	l.Unverified = append(l.Unverified, "itm_legacy")
+	return l, err
+}
+
+// TestUnverifiedReportedOncePerEvent_DUR31: a legacy item reported on more
+// than one lookup page yields one ItemUnverified diagnostic, not one per
+// page, in the immutable receipt.
+func TestUnverifiedReportedOncePerEvent_DUR31(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("u0", "hi", false))
+		for i := range 3 {
+			e := sourceEvent(fmt.Sprintf("s%d", i), "p.md", taskAccess())
+			e.Spans[0].Parts[0].Text = fmt.Sprintf("p.md revision %d", i)
+			f.mustIngest(user, e)
+		}
+		f.s = repeatUnverifiedStore{f.s}
+		f.in.LookupLimit = 1 // one source per page: three pages
+		r := f.mustIngest(user, userEvent("r", "## References\n- p.md\n", true))
+		n := 0
+		for _, d := range r.Diagnostics {
+			if d.Code == domain.ItemUnverified {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("ItemUnverified diagnostics = %d, want 1 for one legacy item", n)
+		}
+	})
+}

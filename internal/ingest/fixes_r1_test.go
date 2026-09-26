@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -167,6 +168,37 @@ func TestRecordsNeverRevealHiddenVersions_SEC22(t *testing.T) {
 			t.Fatalf("setup: no boundary conflict: %+v", r.Diagnostics)
 		}
 
+		// Hidden versus missing (SEC-3.2): A unpins its private [solo] and
+		// an ID that names nothing. Agent B, who can read both transcripts,
+		// must see identical records for the two: one per command, with
+		// no target-dependent detail, and the same diagnostics.
+		f.mustIngest(agentA, userEvent("a5", "## Pinned [solo] scope=AGENT\nA's private solo.\n", true))
+		hidden := f.mustIngest(agentA, userEvent("a6", "## Unpin [solo]\n", true))
+		missing := f.mustIngest(agentA, userEvent("a7", "## Unpin [nothing]\n", true))
+		f.view(func(tx store.ReadTx) error {
+			shape := func(occ string) string {
+				cs, err := tx.LifecycleCommands(store.CommandFilter{Viewer: agentB, OccurrenceID: occ})
+				ds, derr := tx.Diagnostics(store.DiagnosticFilter{Viewer: agentB, OccurrenceID: occ})
+				if err != nil || derr != nil {
+					t.Fatalf("reads: %v %v", err, derr)
+				}
+				out := fmt.Sprintf("commands=%d diagnostics=%d", len(cs), len(ds))
+				for _, c := range cs {
+					out += fmt.Sprintf(" status=%s resolution=%s item=%q v=%d", c.Status, c.Resolution, c.ResolvedItemID, c.ResolvedVersion)
+				}
+				return out
+			}
+			if h, m := shape(hidden.OccurrenceID), shape(missing.OccurrenceID); h != m {
+				t.Errorf("agent B tells a hidden target from a missing one:\n hidden:  %s\n missing: %s", h, m)
+			}
+			// The source actor still reads the full resolution.
+			cs, err := tx.LifecycleCommands(store.CommandFilter{Viewer: agentA, OccurrenceID: hidden.OccurrenceID})
+			if err != nil || len(cs) != 1 || cs[0].Resolution != domain.TargetResolved || cs[0].ResolvedItemID == "" {
+				t.Errorf("agent A's own record = %+v, %v", cs, err)
+			}
+			return nil
+		})
+
 		f.view(func(tx store.ReadTx) error {
 			cs, err := tx.LifecycleCommands(store.CommandFilter{Viewer: agentB})
 			if err != nil {
@@ -272,4 +304,42 @@ func TestSizeGateMatchesValidateFor_SEC21(t *testing.T) {
 			t.Errorf("text %d blob %d: gate accepts %v, ValidateFor accepts %v", c.text, c.blob, gate, exact)
 		}
 	}
+}
+
+// TestKnownEventIDCannotSmuggleOversizePayload_SEC31: the cheap read that
+// admits an over-limit retry also proves it can match: the stored receipt
+// must be this principal's and the event's per-span and per-part counts
+// and byte lengths must equal the stored envelope's. Otherwise it is a bare
+// ErrEventIDConflict from the read, and the oversized payload is never
+// copied, hashed, or taken into a write transaction, for the same
+// principal or another; an exact retry still replays (F3).
+func TestKnownEventIDCannotSmuggleOversizePayload_SEC31(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("known", "small original", false))
+		img := domain.Event{EventID: "img", Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(),
+			Parts: []domain.InputPart{{Type: domain.PartImage, MediaType: "image/png", Data: make([]byte, 2048)}}}}}
+		f.mustIngest(user, img)
+
+		updates := 0
+		f.s = countingStore{f.s, &updates}
+		f.in.Limits = domain.Limits{MaxSpanBytes: 1024, MaxEventBytes: 1024, MaxBlobBytes: 1024}
+		huge := domain.InputPart{Type: domain.PartImage, MediaType: "image/png", Data: make([]byte, 64<<10)}
+		other := domain.Principal{SessionID: sess, WorkflowID: "wf2", TaskID: "T2", AgentID: "Z", Authority: domain.AuthorityUser}
+		for name, c := range map[string]struct {
+			p domain.Principal
+			a domain.AccessBoundary
+		}{"same principal": {user, taskAccess()}, "other principal": {other, domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: "T2"}}} {
+			e := domain.Event{EventID: "known", Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: c.a, Parts: []domain.InputPart{huge}}}}
+			if _, err := f.ingest(c.p, e); err != domain.ErrEventIDConflict {
+				t.Errorf("%s: err = %v, want bare ErrEventIDConflict", name, err)
+			}
+		}
+		if updates != 0 {
+			t.Errorf("mismatched over-limit retries entered %d write transactions, want 0", updates)
+		}
+		if _, err := f.ingest(user, img); err != nil {
+			t.Errorf("exact over-limit retry: %v (F3)", err)
+		}
+	})
 }

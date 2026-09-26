@@ -84,8 +84,10 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	// Admission (SEC-2.1), from lengths alone and outside any write
 	// transaction: the hard ceiling first, then the configured limits. An
 	// over-limit event is admitted only as the retry of a known EventID
-	// (F3), established by a cheap read of its receipt; a new or anonymous
-	// over-limit event is rejected before its payload is copied or hashed.
+	// (F3), and only when cheap reads prove it can match: the stored receipt
+	// is this principal's and the stored envelope has the same shape
+	// (SEC-3.1). A new, anonymous, or mismatched over-limit event is
+	// rejected before its payload is copied or hashed.
 	if err := checkSizes(e, hardSizes()); err != nil {
 		return domain.IngestReceipt{}, err
 	}
@@ -93,23 +95,15 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 		if e.EventID == "" || p.Validate() != nil {
 			return domain.IngestReceipt{}, err
 		}
-		known := false
-		verr := s.View(ctx, p.SessionID, func(tx store.ReadTx) error {
-			_, rerr := tx.Receipt(domain.CallerOccurrenceID(p.SessionID, e.EventID))
-			if rerr == nil {
-				known = true
-				return nil
-			}
-			if isNotFound(rerr) {
-				return nil
-			}
-			return rerr
-		})
-		if verr != nil {
+		var admit error
+		if verr := s.View(ctx, p.SessionID, func(tx store.ReadTx) error {
+			admit = admitKnownRetry(tx, p, e, err)
+			return nil
+		}); verr != nil {
 			return domain.IngestReceipt{}, verr
 		}
-		if !known {
-			return domain.IngestReceipt{}, err
+		if admit != nil {
+			return domain.IngestReceipt{}, admit
 		}
 	}
 	e = e.Clone()
@@ -169,11 +163,8 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 		if e.EventID == "" || p.Validate() != nil {
 			return domain.IngestReceipt{}, err
 		}
-		if _, rerr := tx.Receipt(domain.CallerOccurrenceID(p.SessionID, e.EventID)); rerr != nil {
-			if isNotFound(rerr) {
-				return domain.IngestReceipt{}, err
-			}
-			return domain.IngestReceipt{}, rerr
+		if admit := admitKnownRetry(tx, p, e, err); admit != nil {
+			return domain.IngestReceipt{}, admit
 		}
 		validation = retryCeiling(g.Limits)
 	}

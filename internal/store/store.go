@@ -153,8 +153,10 @@ type DiagnosticFilter struct {
 }
 
 // CommandFilter selects recorded lifecycle commands (D1) the way
-// DiagnosticFilter selects diagnostics: only records whose source span
-// boundary permits Viewer, ordered by receipt Seq, then Ordinal.
+// DiagnosticFilter selects diagnostics: only records whose boundary permits
+// Viewer, ordered by receipt Seq, then Ordinal. Each is returned as
+// domain.LifecycleCommandRecord.Redacted(Viewer): its resolution is withheld
+// unless the record's DetailAccess permits Viewer too (SEC-3.2).
 type CommandFilter struct {
 	Viewer       domain.Principal
 	OccurrenceID string

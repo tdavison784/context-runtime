@@ -512,7 +512,9 @@ func (r *readTx) LifecycleCommands(f store.CommandFilter) ([]domain.LifecycleCom
 	for _, rec := range recs {
 		for _, c := range rec.Lifecycle {
 			if c.Access.Permits(f.Viewer) {
-				out = append(out, c)
+				// The record is visible at its transcript boundary; its
+				// resolution only where DetailAccess permits (SEC-3.2).
+				out = append(out, c.Redacted(f.Viewer))
 			}
 		}
 	}

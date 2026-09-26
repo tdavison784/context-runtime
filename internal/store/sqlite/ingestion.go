@@ -262,7 +262,9 @@ func (t *transaction) LifecycleCommands(f store.CommandFilter) ([]domain.Lifecyc
 	for _, r := range recs {
 		for _, c := range r.Lifecycle {
 			if c.Access.Permits(f.Viewer) {
-				out = append(out, c)
+				// The record is visible at its transcript boundary; its
+				// resolution only where DetailAccess permits (SEC-3.2).
+				out = append(out, c.Redacted(f.Viewer))
 			}
 		}
 	}
