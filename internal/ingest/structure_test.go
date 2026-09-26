@@ -1,10 +1,12 @@
 package ingest
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 // TestResidueFollowsParserStructure: ingestion derives residual text only
@@ -39,4 +41,41 @@ func TestResidueFollowsParserStructure(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestSuppressedListContent_Ingest (SPEC-1.1): the review's reproductions
+// create no pin, command or obligation on either store, even in a SYSTEM
+// span where directive parsing is always on.
+func TestSuppressedListContent_Ingest(t *testing.T) {
+	inputs := []string{
+		"## Pinned\n- a\n```\n- [evil] fenced\n```\n- b\n",
+		"## Pinned\n- a\n  ```\n- [evil2] fenced\n  ```\n",
+		"## Pinned\n- a <!--\n- [evil3] {obligation=tests_pass} commented\n  -->\n",
+		"## Unpin\n- [a]\n```\n- [evil]\n```\n",
+	}
+	eachStore(t, func(t *testing.T, f *fixture) {
+		sys := principal(domain.AuthoritySystem)
+		f.mustIngest(sys, sysEvent("seed", "## Pinned\n- [a] existing pin\n"))
+		for i, in := range inputs {
+			r := f.mustIngest(sys, sysEvent(fmt.Sprintf("in%d", i), in))
+			for _, it := range semantic(r) {
+				if it.Section != domain.SectionNone || it.Kind == domain.KindConstraint {
+					t.Fatalf("%q created a directive item: %+v", in, it)
+				}
+			}
+			if len(r.Lifecycle) != 0 {
+				t.Fatalf("%q created lifecycle commands: %+v", in, r.Lifecycle)
+			}
+		}
+		f.view(func(tx store.ReadTx) error {
+			obs, err := tx.Obligations("")
+			if len(obs) != 0 {
+				t.Errorf("obligations = %+v", obs)
+			}
+			return err
+		})
+		if pins := currentIDs(t, f.s, domain.KindConstraint); len(pins) != 1 {
+			t.Fatalf("current pins = %v, want only the seeded pin", pins)
+		}
+	})
 }
