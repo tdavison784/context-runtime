@@ -1,7 +1,5 @@
 package store
 
-type ProofReader interface{}
-type ProofWriter interface{}
 type ResourceReader interface{}
 type ResourceWriter interface{}
 type MembershipReader interface{}
