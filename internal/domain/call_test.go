@@ -437,12 +437,30 @@ func TestCallRecordValidate(t *testing.T) {
 		},
 		{
 			"terminal state without a finished seq rejected",
-			func(c CallRecord) CallRecord { c.State = CallCompleted; return c },
+			func(c CallRecord) CallRecord {
+				c.State = CallCompleted
+				c.Attempts = 1
+				response := []byte("response bytes")
+				outcome := &CallOutcome{Attempt: 1, State: CallCompleted, ResponseHash: HashBytes(response), Response: response}
+				c.Outcome = outcome
+				c.OutcomeHash = outcome.OutcomeHash()
+				// FinishedSeq deliberately left at 0.
+				return c
+			},
 			ErrInvalidRecord,
 		},
 		{
 			"terminal state with a finished seq ok",
-			func(c CallRecord) CallRecord { c.State = CallCompleted; c.FinishedSeq = 5; return c },
+			func(c CallRecord) CallRecord {
+				c.State = CallCompleted
+				c.FinishedSeq = 5
+				c.Attempts = 1
+				response := []byte("response bytes")
+				outcome := &CallOutcome{Attempt: 1, State: CallCompleted, ResponseHash: HashBytes(response), Response: response}
+				c.Outcome = outcome
+				c.OutcomeHash = outcome.OutcomeHash()
+				return c
+			},
 			nil,
 		},
 		{
@@ -466,6 +484,7 @@ func TestCallRecordValidate(t *testing.T) {
 			func(c CallRecord) CallRecord {
 				c.State = CallCompleted
 				c.FinishedSeq = 5
+				c.Attempts = 1
 				response := []byte("response bytes")
 				outcome := &CallOutcome{Attempt: 1, State: CallCompleted, ResponseHash: HashBytes(response), Response: response}
 				c.Outcome = outcome
@@ -491,6 +510,7 @@ func TestCallRecordValidate(t *testing.T) {
 			func(c CallRecord) CallRecord {
 				c.State = CallCompleted
 				c.FinishedSeq = 5
+				c.Attempts = 1
 				response := []byte("response bytes")
 				outcome := &CallOutcome{Attempt: 1, State: CallCompleted, ResponseHash: HashBytes(response), Response: response}
 				c.Outcome = outcome
@@ -499,10 +519,162 @@ func TestCallRecordValidate(t *testing.T) {
 			},
 			ErrInvalidRecord,
 		},
+		{
+			"outcome state disagrees with call state",
+			func(c CallRecord) CallRecord {
+				c.State = CallCompleted
+				c.FinishedSeq = 5
+				c.Attempts = 1
+				outcome := &CallOutcome{Attempt: 1, State: CallFailed, FailureReason: "boom"}
+				c.Outcome = outcome
+				c.OutcomeHash = outcome.OutcomeHash()
+				return c
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"outcome attempt disagrees with call attempts",
+			func(c CallRecord) CallRecord {
+				c.State = CallCompleted
+				c.FinishedSeq = 5
+				c.Attempts = 2 // outcome closes attempt 1, not 2
+				response := []byte("response bytes")
+				outcome := &CallOutcome{Attempt: 1, State: CallCompleted, ResponseHash: HashBytes(response), Response: response}
+				c.Outcome = outcome
+				c.OutcomeHash = outcome.OutcomeHash()
+				return c
+			},
+			ErrInvalidRecord,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			err := c.mutate(validCallRecord()).Validate()
+			if c.wantErr == nil {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, c.wantErr) {
+				t.Fatalf("Validate() = %v, want error wrapping %v", err, c.wantErr)
+			}
+		})
+	}
+}
+
+// TestCallRecordValidate_TerminalEvidenceMatrix is the dedicated matrix for
+// contract v3's terminal-evidence rule: each state carries exactly the
+// evidence that ended it. PREPARED/SENT/UNKNOWN (non-terminal) carry no
+// outcome; COMPLETED requires one; FAILED requires one, OR (no outcome) a
+// cancellation reason with zero attempts; ABANDONED requires a reason and no
+// outcome.
+func TestCallRecordValidate_TerminalEvidenceMatrix(t *testing.T) {
+	response := []byte("response bytes")
+	completedOutcome := func() *CallOutcome {
+		return &CallOutcome{Attempt: 1, State: CallCompleted, ResponseHash: HashBytes(response), Response: response}
+	}
+	failedOutcome := func() *CallOutcome {
+		return &CallOutcome{Attempt: 1, State: CallFailed, FailureReason: "known failure"}
+	}
+
+	// apply builds a record from validCallRecord() with the state/evidence
+	// combination under test; it always sets OutcomeHash to match a
+	// non-nil Outcome so only the state-machine rule under test can fail.
+	apply := func(state CallState, outcome *CallOutcome, attempts int, reason string, finishedSeq uint64) CallRecord {
+		c := validCallRecord()
+		c.State = state
+		c.Attempts = attempts
+		c.Reason = reason
+		c.FinishedSeq = finishedSeq
+		c.Outcome = outcome
+		if outcome != nil {
+			c.OutcomeHash = outcome.OutcomeHash()
+		}
+		return c
+	}
+
+	cases := []struct {
+		name    string
+		c       CallRecord
+		wantErr error
+	}{
+		{"PREPARED with no outcome ok", apply(CallPrepared, nil, 0, "", 0), nil},
+		{"SENT with no outcome ok", apply(CallSent, nil, 1, "", 0), nil},
+		{"UNKNOWN with no outcome ok", apply(CallUnknown, nil, 1, "", 0), nil},
+		{
+			"PREPARED carrying an outcome rejected",
+			apply(CallPrepared, completedOutcome(), 1, "", 0),
+			ErrInvalidRecord,
+		},
+		{
+			"SENT carrying an outcome rejected",
+			apply(CallSent, completedOutcome(), 1, "", 0),
+			ErrInvalidRecord,
+		},
+		{
+			"UNKNOWN carrying an outcome rejected",
+			apply(CallUnknown, completedOutcome(), 1, "", 0),
+			ErrInvalidRecord,
+		},
+		{
+			"COMPLETED with a matching outcome ok",
+			apply(CallCompleted, completedOutcome(), 1, "", 5),
+			nil,
+		},
+		{
+			"COMPLETED without an outcome rejected",
+			apply(CallCompleted, nil, 1, "", 5),
+			ErrInvalidRecord,
+		},
+		{
+			"FAILED with a known-failure outcome ok",
+			apply(CallFailed, failedOutcome(), 1, "", 5),
+			nil,
+		},
+		{
+			"FAILED cancellation before any attempt ok (reason, no outcome, zero attempts)",
+			apply(CallFailed, nil, 0, "cancelled before dispatch", 5),
+			nil,
+		},
+		{
+			"FAILED with neither an outcome nor a reason rejected",
+			apply(CallFailed, nil, 0, "", 5),
+			ErrInvalidRecord,
+		},
+		{
+			"FAILED without an outcome but with attempts made rejected",
+			apply(CallFailed, nil, 1, "should have an outcome", 5),
+			ErrInvalidRecord,
+		},
+		{
+			"ABANDONED with a reason and no outcome ok",
+			apply(CallAbandoned, nil, 2, "explicit abandonment", 5),
+			nil,
+		},
+		{
+			"ABANDONED without a reason rejected",
+			apply(CallAbandoned, nil, 2, "", 5),
+			ErrInvalidRecord,
+		},
+		{
+			"ABANDONED carrying an outcome rejected",
+			apply(CallAbandoned, completedOutcome(), 1, "explicit abandonment", 5),
+			ErrInvalidRecord,
+		},
+		{
+			"an outcome hash without an outcome is rejected regardless of state",
+			func() CallRecord {
+				c := apply(CallPrepared, nil, 0, "", 0)
+				c.OutcomeHash = "sha256:" + strings.Repeat("a", 64) // no Outcome to back it
+				return c
+			}(),
+			ErrInvalidRecord,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.c.Validate()
 			if c.wantErr == nil {
 				if err != nil {
 					t.Fatalf("Validate() = %v, want nil", err)
@@ -601,27 +773,194 @@ func TestConversationValidate(t *testing.T) {
 
 // --- CallAttempt ------------------------------------------------------------
 
+// TestCallAttemptValidate covers the structural rules plus contract v3's
+// open/closed state consistency: SENT/UNKNOWN are open (no finish or
+// outcome), COMPLETED/FAILED are closed (both required), ABANDONED is
+// finished without an outcome, and Retryable is meaningful only on FAILED.
 func TestCallAttemptValidate(t *testing.T) {
-	base := CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptSent, SentSeq: 1}
-	if err := base.Validate(); err != nil {
+	validHash := "sha256:" + strings.Repeat("a", 64)
+	openAttempt := CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptSent, SentSeq: 1}
+	if err := openAttempt.Validate(); err != nil {
 		t.Fatalf("Validate() = %v, want nil", err)
 	}
 
 	cases := []struct {
-		name   string
-		mutate func(CallAttempt) CallAttempt
+		name    string
+		a       CallAttempt
+		wantErr error
 	}{
-		{"missing call id", func(a CallAttempt) CallAttempt { a.CallID = ""; return a }},
-		{"missing session", func(a CallAttempt) CallAttempt { a.SessionID = ""; return a }},
-		{"attempt below 1", func(a CallAttempt) CallAttempt { a.Attempt = 0; return a }},
-		{"zero sent seq", func(a CallAttempt) CallAttempt { a.SentSeq = 0; return a }},
-		{"invalid state", func(a CallAttempt) CallAttempt { a.State = "bogus"; return a }},
+		{"valid open SENT attempt", openAttempt, nil},
+		{
+			"valid open UNKNOWN attempt",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptUnknown, SentSeq: 1},
+			nil,
+		},
+		{
+			"valid closed COMPLETED attempt",
+			CallAttempt{
+				CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptCompleted,
+				SentSeq: 1, FinishedSeq: 2, OutcomeHash: validHash,
+			},
+			nil,
+		},
+		{
+			"valid closed FAILED attempt, not retryable",
+			CallAttempt{
+				CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptFailed,
+				SentSeq: 1, FinishedSeq: 2, OutcomeHash: validHash,
+			},
+			nil,
+		},
+		{
+			"valid closed FAILED attempt, retryable",
+			CallAttempt{
+				CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptFailed,
+				SentSeq: 1, FinishedSeq: 2, OutcomeHash: validHash, Retryable: true,
+			},
+			nil,
+		},
+		{
+			"valid finished ABANDONED attempt with no outcome",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptAbandoned, SentSeq: 1, FinishedSeq: 2},
+			nil,
+		},
+		{
+			"missing call id",
+			CallAttempt{SessionID: "s1", Attempt: 1, State: AttemptSent, SentSeq: 1},
+			ErrInvalidRecord,
+		},
+		{
+			"missing session",
+			CallAttempt{CallID: "call_1", Attempt: 1, State: AttemptSent, SentSeq: 1},
+			ErrInvalidRecord,
+		},
+		{
+			"attempt below 1",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 0, State: AttemptSent, SentSeq: 1},
+			ErrInvalidRecord,
+		},
+		{
+			"zero sent seq",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptSent, SentSeq: 0},
+			ErrInvalidRecord,
+		},
+		{
+			"invalid state",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: "bogus", SentSeq: 1},
+			ErrInvalidRecord,
+		},
+		{
+			"malformed outcome hash",
+			CallAttempt{
+				CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptCompleted,
+				SentSeq: 1, FinishedSeq: 2, OutcomeHash: "not-a-hash",
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"retryable on a non-FAILED (SENT) state rejected",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptSent, SentSeq: 1, Retryable: true},
+			ErrInvalidRecord,
+		},
+		{
+			"retryable on COMPLETED rejected",
+			CallAttempt{
+				CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptCompleted,
+				SentSeq: 1, FinishedSeq: 2, OutcomeHash: validHash, Retryable: true,
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"open SENT with a finish sequence rejected",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptSent, SentSeq: 1, FinishedSeq: 2},
+			ErrInvalidRecord,
+		},
+		{
+			"open UNKNOWN with an outcome hash rejected",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptUnknown, SentSeq: 1, OutcomeHash: validHash},
+			ErrInvalidRecord,
+		},
+		{
+			"closed COMPLETED missing finish sequence rejected",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptCompleted, SentSeq: 1, OutcomeHash: validHash},
+			ErrInvalidRecord,
+		},
+		{
+			"closed FAILED missing outcome hash rejected",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptFailed, SentSeq: 1, FinishedSeq: 2},
+			ErrInvalidRecord,
+		},
+		{
+			"ABANDONED with an outcome hash rejected",
+			CallAttempt{
+				CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptAbandoned,
+				SentSeq: 1, FinishedSeq: 2, OutcomeHash: validHash,
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"ABANDONED without a finish sequence rejected",
+			CallAttempt{CallID: "call_1", SessionID: "s1", Attempt: 1, State: AttemptAbandoned, SentSeq: 1},
+			ErrInvalidRecord,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if err := c.mutate(base).Validate(); !errors.Is(err, ErrInvalidRecord) {
-				t.Fatalf("Validate() = %v, want ErrInvalidRecord", err)
+			err := c.a.Validate()
+			if c.wantErr == nil {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, c.wantErr) {
+				t.Fatalf("Validate() = %v, want error wrapping %v", err, c.wantErr)
 			}
 		})
+	}
+}
+
+// TestValidAttemptTransitionMatrix exhaustively checks every (from, to) pair
+// among the five attempt states: SENT closes as COMPLETED, FAILED, or
+// UNKNOWN; UNKNOWN reconciles to COMPLETED, FAILED, or ABANDONED; every
+// other state (including the closed/terminal ones as a "from") has no valid
+// outgoing transition.
+func TestValidAttemptTransitionMatrix(t *testing.T) {
+	allowed := map[[2]AttemptState]bool{
+		{AttemptSent, AttemptCompleted}:    true,
+		{AttemptSent, AttemptFailed}:       true,
+		{AttemptSent, AttemptUnknown}:      true,
+		{AttemptUnknown, AttemptCompleted}: true,
+		{AttemptUnknown, AttemptFailed}:    true,
+		{AttemptUnknown, AttemptAbandoned}: true,
+	}
+	states := []AttemptState{AttemptSent, AttemptCompleted, AttemptFailed, AttemptUnknown, AttemptAbandoned}
+	for _, from := range states {
+		for _, to := range states {
+			want := allowed[[2]AttemptState{from, to}]
+			if got := ValidAttemptTransition(from, to); got != want {
+				t.Errorf("ValidAttemptTransition(%s, %s) = %v, want %v", from, to, got, want)
+			}
+		}
+	}
+}
+
+func TestValidAttemptTransition_ClosedAttemptsAreImmutable(t *testing.T) {
+	states := []AttemptState{AttemptSent, AttemptCompleted, AttemptFailed, AttemptUnknown, AttemptAbandoned}
+	for _, from := range []AttemptState{AttemptCompleted, AttemptFailed, AttemptAbandoned} {
+		for _, to := range states {
+			if ValidAttemptTransition(from, to) {
+				t.Errorf("ValidAttemptTransition(%s, %s) = true, want false (closed attempt)", from, to)
+			}
+		}
+	}
+}
+
+func TestValidAttemptTransition_NoSelfOrBackwardLoop(t *testing.T) {
+	if ValidAttemptTransition(AttemptSent, AttemptSent) {
+		t.Error("SENT -> SENT must be false")
+	}
+	if ValidAttemptTransition(AttemptUnknown, AttemptSent) {
+		t.Error("UNKNOWN -> SENT must be false: no automatic resend")
 	}
 }
