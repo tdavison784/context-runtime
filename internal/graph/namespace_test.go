@@ -116,13 +116,14 @@ func TestR13_CheckBoundaryConflict(t *testing.T) {
 			return it
 		}
 		view(t, s, sess, func(tx store.ReadTx) error {
-			if err := CheckBoundaryConflict(tx, user, probe("p1", dirID, domain.ScopeTurn)); !errors.Is(err, ErrBoundaryConflict) {
-				t.Errorf("other visible boundary: err = %v, want ErrBoundaryConflict", err)
+			causes, err := CheckBoundaryConflict(tx, user, probe("p1", dirID, domain.ScopeTurn))
+			if !errors.Is(err, ErrBoundaryConflict) || len(causes) != 1 || causes[0].Scope != domain.ScopeTask {
+				t.Errorf("other visible boundary: %v, %v; want ErrBoundaryConflict naming the TASK version's boundary (SEC-2.2)", causes, err)
 			}
-			if err := CheckBoundaryConflict(tx, user, probe("p2", dirID, domain.ScopeTask)); err != nil {
+			if _, err := CheckBoundaryConflict(tx, user, probe("p2", dirID, domain.ScopeTask)); err != nil {
 				t.Errorf("same boundary (a replacement): err = %v", err)
 			}
-			if err := CheckBoundaryConflict(tx, user, probe("p3", "h", domain.ScopeTask)); err != nil {
+			if _, err := CheckBoundaryConflict(tx, user, probe("p3", "h", domain.ScopeTask)); err != nil {
 				t.Errorf("hidden boundary: err = %v, want nil", err)
 			}
 			return nil

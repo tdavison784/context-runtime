@@ -225,11 +225,11 @@ func (r *run) workingSection(c unitCtx, si int) error {
 		if err != nil {
 			return err
 		}
-		if err := graph.CheckBoundaryConflict(r.tx, c.actor, it); err != nil {
+		if causes, err := graph.CheckBoundaryConflict(r.tx, c.actor, it); err != nil {
 			if !errors.Is(err, graph.ErrBoundaryConflict) {
 				return err
 			}
-			r.diagnose(c, item, it.Access, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
+			r.diagnose(c, item, r.causeAccess(it.Access, causes), domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
 			conflict = true
 		} else if !item.ExplicitID {
 			lower, err := r.derivedSlotHeldAbove(c.actor, it)
@@ -280,6 +280,23 @@ func (r *run) workingSection(c unitCtx, si int) error {
 		return errLimit("MaxRelationships")
 	}
 	return nil
+}
+
+// causeAccess returns the boundary at which a record caused by versions
+// at causes is readable (SEC-2.2): base narrowed by every cause, so it
+// names nothing a reader could not already see. Causes are all visible to
+// the source actor, so they intersect; if they somehow do not, it falls
+// back to the actor's own narrowest boundary, which fails closed.
+func (r *run) causeAccess(base domain.AccessBoundary, causes []domain.AccessBoundary) domain.AccessBoundary {
+	acc := base
+	for _, c := range causes {
+		next, ok := domain.Intersect(acc.Scope, acc, c)
+		if !ok {
+			return domain.AccessBoundary{Scope: base.Scope, SessionID: r.p.SessionID, WorkflowID: r.p.WorkflowID, TaskID: r.p.TaskID, AgentID: r.p.AgentID}
+		}
+		acc = next
+	}
+	return acc
 }
 
 // derivedSlotHeldAbove reports whether a Working member with a derived ID
@@ -347,6 +364,9 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 		rec.Resolution = domain.TargetNotFound
 		diag(domain.DiagnosticNotFound, domain.ReasonUnknownTarget)
 	case errors.Is(err, graph.ErrAmbiguousDirective):
+		// Readable only where every version that made it ambiguous is
+		// (SEC-2.2).
+		rec.Access = r.causeAccess(rec.Access, auth.CandidateAccess)
 		rec.Resolution = domain.TargetAmbiguous
 		diag(domain.ErrAmbiguousDirective, domain.ReasonAmbiguousTarget)
 	case errors.Is(err, graph.ErrLifecycleTargetMismatch):

@@ -34,6 +34,11 @@ type LifecycleAuthorization struct {
 	// TargetAccess is the target's access boundary, so a record of the
 	// command can be narrowed to it (F6, SEC-1.3).
 	TargetAccess domain.AccessBoundary
+	// CandidateAccess, with ErrAmbiguousDirective only, lists the access
+	// boundaries of the accessible current versions that made the target
+	// ambiguous, so a record of it is readable only where they all are
+	// (SEC-2.2).
+	CandidateAccess []domain.AccessBoundary
 	// GrantID names the action-specific grant that authorized the command
 	// (FR-AUTH-002), or is empty when the source actor's own authority did.
 	GrantID string
@@ -74,10 +79,22 @@ func AuthorizeLifecycleCommand(tx store.ReadTx, caller domain.Principal, taskID 
 		return LifecycleAuthorization{}, err
 	}
 
-	targetID, err := ResolveLifecycleTarget(tx, actor, taskID, cmd.TargetID)
+	candidates, err := lifecycleCandidates(tx, actor, taskID, cmd.TargetID)
 	if err != nil {
 		return LifecycleAuthorization{}, err
 	}
+	switch len(candidates) {
+	case 0:
+		return LifecycleAuthorization{}, domain.ErrNotFound
+	case 1:
+	default:
+		amb := LifecycleAuthorization{Command: cmd, SourceActor: actor}
+		for _, c := range candidates {
+			amb.CandidateAccess = append(amb.CandidateAccess, c.Access)
+		}
+		return amb, ErrAmbiguousDirective
+	}
+	targetID := candidates[0].ID
 	target, err := loadAccessible(tx, actor, targetID)
 	if err != nil {
 		return LifecycleAuthorization{}, err
