@@ -2279,7 +2279,11 @@ fixed.
   that already keeps the transcript hot, so this restores the integrity
   guarantee without reopening the quadratic cost SPEC-3.1 item 2 fixed.
   `store.go`'s `InsertRelationship` contract now states the integrity
-  requirement explicitly. Store-level item bytes loaded, 500 vs.
+  requirement explicitly. Test:
+  `TestInsertRelationshipRejectsCorruptEndpoint_SPEC44`
+  (`internal/store/sqlite/endpoint_integrity_test.go`, corrupt endpoints
+  on either side fail with `ErrIntegrity` and write no edge).
+  Store-level item bytes loaded, 500 vs.
   4000 derived items from one transcript: x65.5 before caching, x8.0 with
   the (then-unbounded) cache (linear in item count, not transcript size
   too); end-to-end SQLite ingest of one event, 500 vs. 4000 Pinned items:
