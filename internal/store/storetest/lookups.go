@@ -156,3 +156,64 @@ func testDuplicateCandidates(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// sourcedItem returns an item whose source is a locator of the given kind.
+func sourcedItem(sess, id string, seq uint64, kind domain.SourceKind, locator string) domain.ContextItem {
+	it := NewItem(sess, id, seq, "contents of "+id)
+	it.Source = &domain.SourceRef{Kind: kind, Locator: locator}
+	return it
+}
+
+// testItemsBySourceKey checks the bounded lookup of items by the rule-v1 key
+// of their source locator (R19, M5, R2): lexically equal paths match, keys
+// are exact bytes, non-locators are never indexed, and another session's
+// items never appear.
+func testItemsBySourceKey(t *testing.T, s store.Store) {
+	update(t, s, sessB, func(tx store.Tx) error {
+		return tx.InsertItem(sourcedItem(sessB, "foreign", tx.NextSeq(), domain.SourcePath, "docs/a.md"))
+	})
+	var a, b, u domain.ContextItem
+	update(t, s, sessA, func(tx store.Tx) error {
+		seq := tx.NextSeq()
+		b = sourcedItem(sessA, "b", seq, domain.SourcePath, "./docs//a.md")
+		a = sourcedItem(sessA, "a", seq, domain.SourcePath, "docs/a.md")
+		u = sourcedItem(sessA, "u", tx.NextSeq(), domain.SourceURL, "https://example.com/a.md")
+		for _, it := range []domain.ContextItem{b, a, u,
+			sourcedItem(sessA, "abs", tx.NextSeq(), domain.SourcePath, "/docs/a.md"),
+			sourcedItem(sessA, "escape", tx.NextSeq(), domain.SourcePath, "../docs/a.md"),
+			sourcedItem(sessA, "tool", tx.NextSeq(), domain.SourceTool, "docs/a.md"),
+			NewItem(sessA, "unsourced", tx.NextSeq(), "x"),
+		} {
+			noErr(t, tx.InsertItem(it))
+		}
+		got, err := tx.ItemsBySourceKey("path:docs/a.md", 2)
+		noErr(t, err)
+		assertEqual(t, "own writes", got, []domain.ContextItem{a, b})
+		return nil
+	})
+	err := s.Update(ctx, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertItem(sourcedItem(sessA, "rolled-back", tx.NextSeq(), domain.SourcePath, "docs/a.md")))
+		return errRollback
+	})
+	wantErr(t, err, errRollback)
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		got, err := tx.ItemsBySourceKey("path:docs/a.md", 2)
+		noErr(t, err)
+		assertEqual(t, "path key", got, []domain.ContextItem{a, b})
+		got, err = tx.ItemsBySourceKey("url:https://example.com/a.md", 1)
+		noErr(t, err)
+		assertEqual(t, "url key", got, []domain.ContextItem{u})
+		for _, key := range []string{"path:/docs/a.md", "path:../docs/a.md", "path:docs/a.md/", "docs/a.md"} {
+			got, err = tx.ItemsBySourceKey(key, 1)
+			noErr(t, err)
+			assertEqual(t, "key "+key, got, []domain.ContextItem{})
+		}
+		_, err = tx.ItemsBySourceKey("path:docs/a.md", 1)
+		wantErr(t, err, store.ErrLimitExceeded)
+		_, err = tx.ItemsBySourceKey("path:docs/a.md", 0)
+		wantErr(t, err, domain.ErrInvalidRecord)
+		_, err = tx.ItemsBySourceKey("", 1)
+		wantErr(t, err, domain.ErrInvalidRecord)
+		return nil
+	})
+}

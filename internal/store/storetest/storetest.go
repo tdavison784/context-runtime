@@ -74,6 +74,7 @@ var suite = []testCase{
 	{"ItemProvenance", testItemProvenance},
 	{"ItemsByBlob", testItemsByBlob},
 	{"DuplicateCandidates", testDuplicateCandidates},
+	{"ItemsBySourceKey", testItemsBySourceKey},
 	{"ItemInsertRules", testItemInsertRules},
 	{"ItemBlobIntegrity", testItemBlobIntegrity},
 	{"ItemsFilterOrder", testItemsFilterOrder},

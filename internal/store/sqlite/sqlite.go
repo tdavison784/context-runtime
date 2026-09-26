@@ -163,7 +163,10 @@ func (s *Store) applyMigrations(ctx context.Context, source fs.FS) error {
 					return fmt.Errorf("migration %d checksum mismatch", number)
 				}
 			case errors.Is(err, sql.ErrNoRows):
-				if _, err = conn.ExecContext(ctx, string(sqlBytes)); err == nil {
+				if _, err = conn.ExecContext(ctx, string(sqlBytes)); err == nil && migrationSteps[number] != nil {
+					err = migrationSteps[number](ctx, conn)
+				}
+				if err == nil {
 					_, err = conn.ExecContext(ctx, "INSERT INTO schema_migrations(version,name,checksum) VALUES(?,?,?)", number, base, checksum)
 				}
 				if err != nil {

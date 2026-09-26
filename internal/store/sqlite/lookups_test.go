@@ -103,3 +103,39 @@ func TestUnresolvedReferencesByKeyUseIndex(t *testing.T) {
 	assertIndexed(t, s, base+referenceOrderSQL, "s", "k", 2)
 	assertIndexed(t, s, base+" AND f_rule_version=?"+referenceOrderSQL, "s", "k", "locator/v1", 2)
 }
+
+func TestItemsBySourceKeyUsesIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	assertIndexed(t, s, sourceKeySQL, "s", domain.LocatorRuleVersion, "path:a", 2)
+}
+
+// TestUpgradeItemSourceIndex checks that migration 0011's Go step indexes
+// items stored before it, under the same keys InsertItem uses.
+func TestUpgradeItemSourceIndex(t *testing.T) {
+	l := openLegacy(t, 10)
+	for i, src := range []*domain.SourceRef{
+		{Kind: domain.SourcePath, Locator: "./docs//a.md"},
+		{Kind: domain.SourcePath, Locator: "/abs"},
+		{Kind: domain.SourceTool, Locator: "docs/a.md"},
+		nil,
+	} {
+		it := storetest.NewItem("s", "legacy-"+string(rune('0'+i)), uint64(i+1), "x")
+		it.Source = src
+		l.insert("item", it, nil)
+	}
+	s := l.upgrade()
+	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		it := storetest.NewItem("s", "new", tx.NextSeq(), "y")
+		it.Source = &domain.SourceRef{Kind: domain.SourcePath, Locator: "docs/a.md"}
+		if err := tx.InsertItem(it); err != nil {
+			return err
+		}
+		got, err := tx.ItemsBySourceKey("path:docs/a.md", 2)
+		if err != nil || len(got) != 2 || got[0].ID != "legacy-0" || got[1].ID != "new" {
+			t.Errorf("ItemsBySourceKey after upgrade = %v, %v", got, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

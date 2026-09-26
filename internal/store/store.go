@@ -226,6 +226,14 @@ type ReadTx interface {
 	// fail with ErrLimitExceeded. Callers filter by access: possession of a
 	// hash authorizes nothing.
 	ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, error)
+	// ItemsBySourceKey returns every item whose source locator has the given
+	// key under domain.LocatorRuleVersion (domain.LocatorKey of its
+	// Source.Kind and Locator), ordered by Seq then ID (R19, M5, R2). Items
+	// without a source, or whose source is not a linkable locator, are never
+	// returned. Bounded like ItemsByBlob: an empty or over-long key or a
+	// non-positive limit is domain.ErrInvalidRecord; more matches than limit
+	// fail with ErrLimitExceeded. Callers apply access and authorization.
+	ItemsBySourceKey(locatorKey string, limit int) ([]domain.ContextItem, error)
 	// DuplicateCandidates returns the items f selects, ordered by Seq then
 	// ID; more than f.Limit fail with ErrLimitExceeded. Callers apply the
 	// remaining duplicate rules (directive ID, metadata, currentness, D10).

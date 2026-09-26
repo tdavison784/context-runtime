@@ -42,6 +42,7 @@ func (t *tx) commit(st *state) bool {
 	t.itemsByBlob.commit()
 	t.duplicates.commit()
 	t.refsByKey.commit()
+	t.itemsByKey.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
 	t.events.commit()
@@ -160,6 +161,11 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 		}
 	}
 	t.duplicates.add(itemDuplicateKey(it), it.ID)
+	if it.Source != nil {
+		if key, ok := domain.LocatorKey(it.Source.Kind, it.Source.Locator); ok {
+			t.itemsByKey.add(key, it.ID)
+		}
+	}
 	t.markSequenced()
 	return nil
 }
