@@ -28,12 +28,12 @@ func TestFixtureSanitization(t *testing.T) {
 // must redact those IDs itself.
 func TestScrubErrorRedactsObjectIDs(t *testing.T) {
 	cases := []string{
-		"Previous response with id 'resp_0e1a837efed155ff016ab7c084a82887d1821f5984226b74ab' not found.",
-		"The encrypted content for item rs_0e1a837efed155ff016ab7c08642ec87d197604182ade7125e could not be verified.",
+		"Previous response with id 'resp_00000000000000000000000000000000000000000000000001' not found.",
+		"The encrypted content for item rs_00000000000000000000000000000000000000000000000002 could not be verified.",
 	}
 	ids := []string{
-		"resp_0e1a837efed155ff016ab7c084a82887d1821f5984226b74ab",
-		"rs_0e1a837efed155ff016ab7c08642ec87d197604182ade7125e",
+		"resp_00000000000000000000000000000000000000000000000001",
+		"rs_00000000000000000000000000000000000000000000000002",
 	}
 	for i, s := range cases {
 		got := scrubError(s)
