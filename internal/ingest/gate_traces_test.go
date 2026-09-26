@@ -307,26 +307,6 @@ func TestGateT06_AllLifecyclePathsAuthorize(t *testing.T) {
 	t.Run("matcher grant on exact version satisfies with proof", func(t *testing.T) { pending(t, depW4+"; "+depW2) })
 }
 
-// TestGateT07_ProofsExpireWithSubject: the T07 repeat cases beyond
-// gate_t07_test.go's main trace (W1->W2 invalidation, TEST2 proof, other
-// directory and subset coverage).
-func TestGateT07_ProofsExpireWithSubject(t *testing.T) {
-	for _, step := range []string{
-		"wrong repo and environment never satisfy or supersede",
-		"partial, timeout and cancelled runs stay evidence only",
-		"out-of-order runs and resource revisions",
-		"missing baseline and revision gap become UNKNOWN",
-		"same-fingerprint FAIL rejects proof; proof refresh pair",
-		"revoked grant still invalidates through restricted cause",
-		"private evidence cannot publish task-wide proof",
-		"invalidation fan-out beyond one page, limit rollback",
-	} {
-		t.Run(step, func(t *testing.T) {
-			pending(t, "TOOL evidence boundary ruling (see TestGateT07_ProofsExpireThroughIngest); "+depW3Life+" grant issuance for GRANT/REVOKE operations")
-		})
-	}
-}
-
 // TestGateT16_CheckpointFrontier: explicit membership and closed X1–X12
 // frontier, agent/HARNESS forms, F1/F2 independent, size bounds, chains.
 func TestGateT16_CheckpointFrontier(t *testing.T) {
