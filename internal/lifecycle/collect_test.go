@@ -52,9 +52,23 @@ func seedCollection(t *testing.T, mem store.Store) *facets {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// A lease whose holder state is unknown counts as possibly live.
-	f.leases["leased"] = []domain.RetrievalLease{{SemanticMeta: domain.SemanticMeta{ID: "lease", SessionID: "s", Seq: 1}, Holder: storetest.NewPrincipal("s", domain.AuthorityAgent)}}
-	f.leases["leased"][0].Holder.TaskID = "ghost"
+	// A lease whose holder conversation is unknown counts as possibly live.
+	if err := mem.Update(context.Background(), "s", func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		it, err := tx.Item("leased")
+		if err != nil {
+			return err
+		}
+		holder := storetest.NewPrincipal("s", domain.AuthorityAgent)
+		return sem.InsertRetrievalLease(domain.RetrievalLease{SemanticMeta: domain.SemanticMeta{ID: "lease", SessionID: "s", SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+			Holder: holder, ConversationID: domain.ConversationIDFor(holder.TaskID, holder.AgentID), TurnID: "turn-2",
+			Source: domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash}, CallAllowance: 2, PolicyVersion: "lease/v1"})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	return f
 }
 
@@ -94,9 +108,13 @@ func TestCollectArchivesOnlyAuthorizedUnprotectedCandidates(t *testing.T) {
 			t.Fatalf("%s: %s, want %s", d.Target.ItemID, d.Code, want[d.Target.ItemID])
 		}
 	}
-	if len(r.ArchivedRefs) != 2 || f.collects[r.ID].RequestID != "c1" {
-		t.Fatalf("archived %+v, stored %+v", r.ArchivedRefs, f.collects[r.ID])
-	}
+	readSemantic(t, mem, func(sem store.SemanticReader) error {
+		stored, err := sem.CollectReceipt(r.ID)
+		if err != nil || len(r.ArchivedRefs) != 2 || stored.RequestID != "c1" || len(stored.Decisions) != len(r.Decisions) {
+			t.Fatalf("archived %+v, stored %+v %v", r.ArchivedRefs, stored, err)
+		}
+		return nil
+	})
 	if err := mem.View(ctx, "s", func(tx store.ReadTx) error {
 		for id, code := range want {
 			it, _ := tx.Item(id)
@@ -159,9 +177,12 @@ func TestCollectFailsClosedAtomically(t *testing.T) {
 			if _, err := collect(f, mem, s, storetest.NewPrincipal("s", tc.actor), tc.intent); !errors.Is(err, tc.want) {
 				t.Fatalf("got %v, want %v", err, tc.want)
 			}
-			if len(f.collects) != 0 {
-				t.Fatal("failed collection stored a receipt")
-			}
+			readSemantic(t, mem, func(sem store.SemanticReader) error {
+				if _, err := sem.CollectReceipt(collectReceiptID("s", "c")); !errors.Is(err, domain.ErrNotFound) {
+					t.Fatalf("failed collection stored a receipt: %v", err)
+				}
+				return nil
+			})
 			if err := mem.View(ctx, "s", func(tx store.ReadTx) error {
 				for _, id := range f.items {
 					if it, _ := tx.Item(id); it.Residency != domain.ResidencyResident || it.Version != 1 {

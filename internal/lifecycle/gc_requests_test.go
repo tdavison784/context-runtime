@@ -51,18 +51,25 @@ func TestCompletionGCRequestExecutesOnceAfterProducerCommit(t *testing.T) {
 			t.Fatalf("%s collected: %v", name, err)
 		}
 	}
-	if _, ok := f.results[id]; ok {
-		t.Fatal("failed attempt linked a result")
-	}
+	readSemantic(t, mem, func(sem store.SemanticReader) error {
+		if _, err := sem.GCResult(id); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("failed attempt linked a result: %v", err)
+		}
+		return nil
+	})
 	collector := storetest.NewPrincipal("s", domain.AuthorityHarness)
 	first, err := executeGC(f, mem, s, collector, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := first.Result.Collect
-	if r.GCRequestID != id || len(r.ArchivedRefs) != 1 || r.ArchivedRefs[0].ItemID != "scratch" || f.results[id].CollectReceiptID != r.ID {
-		t.Fatalf("collection: %+v link %+v", r, f.results[id])
-	}
+	readSemantic(t, mem, func(sem store.SemanticReader) error {
+		link, err := sem.GCResult(id)
+		if err != nil || r.GCRequestID != id || len(r.ArchivedRefs) != 1 || r.ArchivedRefs[0].ItemID != "scratch" || link.CollectReceiptID != r.ID {
+			t.Fatalf("collection: %+v link %+v %v", r, link, err)
+		}
+		return nil
+	})
 	if err := f.update(mem, func(tx store.Tx) error {
 		sem, _ := store.Semantic(tx)
 		page, err := sem.PendingGCRequests(store.Page{Limit: 4})
@@ -116,8 +123,8 @@ func TestEnqueueGCDeduplicatesTriggerIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if ids[0] != ids[1] || len(f.requests) != 1 {
-		t.Fatalf("duplicate trigger: %v %d", ids, len(f.requests))
+	if pending := pendingGC(t, mem); ids[0] != ids[1] || len(pending) != 1 {
+		t.Fatalf("duplicate trigger: %v %+v", ids, pending)
 	}
 	for name, enqueue := range map[string]func(store.Tx) (string, error){
 		"changed scope": func(tx store.Tx) (string, error) {
