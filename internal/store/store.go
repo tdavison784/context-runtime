@@ -24,6 +24,28 @@
 // takes the expected current Version or Revision (0 to create). On success the store itself writes
 // expected+1, ignoring the Version/Revision value in the argument, and
 // returns the stored record; a mismatch fails with domain.ErrVersionConflict.
+// A missing record reads as version 0, so updating one with expected > 0 is a
+// version conflict too.
+//
+// Errors (compared with errors.Is; implementations may wrap them):
+//
+//   - domain.ErrInvalidRecord: a record fails structural validation, names
+//     another session than the transaction's, breaks the sequence rule, or
+//     carries an audit event that does not target the record it describes.
+//   - domain.ErrNotFound: a single-record getter, or a write, names a record
+//     missing from this session (an item for SetCurrentDirective, an
+//     obligation version for a transition, a call for an attempt).
+//   - domain.ErrImmutable: an immutable record's ID is reused, or a write
+//     changes a field outside those its method may change (obligation fields
+//     other than Current/RetiredSeq/MaterializationDisabled, frozen call
+//     fields, closed call attempts).
+//   - domain.ErrInvalidTransition: a state change outside its table,
+//     including a transition whose From is not the current status, a
+//     transition on a retired obligation version, revoking a revoked grant,
+//     a new attempt that is not SENT or whose call is not PREPARED, and a
+//     call transition without its attempt evidence.
+//   - domain.ErrVersionConflict: compare-and-swap mismatch, and an obligation
+//     version that is not one more than the latest.
 //
 // Authorization is the caller's job (domain.AuthorizeMutation,
 // domain.AuthorizeGrantIssuance, domain.AuthorizeSupersession); stores do not
@@ -87,8 +109,11 @@ type CallFilter struct {
 	States         []domain.CallState
 }
 
-// ReadTx reads one session's state. Every getter returns domain.ErrNotFound
-// (possibly wrapped) when the record does not exist in this session.
+// ReadTx reads one session's state. Every single-record getter returns
+// domain.ErrNotFound (possibly wrapped) when the record does not exist in
+// this session. List methods return an empty result and a nil error when
+// nothing matches, including when their parent (an obligation or call) does
+// not exist.
 type ReadTx interface {
 	// SessionID is the session this transaction is bound to.
 	SessionID() string
@@ -160,7 +185,8 @@ type Tx interface {
 	InsertRelationship(r domain.Relationship) error
 
 	// SetCurrentDirective points (task, directive ID) at an item, which must
-	// exist in this session, belong to taskID, and carry that directive ID.
+	// exist in this session (domain.ErrNotFound), belong to taskID, and
+	// carry that directive ID (domain.ErrInvalidRecord).
 	SetCurrentDirective(taskID, directiveID, itemID string) error
 
 	// InsertBlob stores an immutable blob after verifying its hash.

@@ -198,6 +198,7 @@ func testItemBlobIntegrity(t *testing.T, s store.Store) {
 		want      error
 	}{
 		{"missing blob", false, size, domain.ErrIntegrity},
+		{"missing blob, declared empty", false, 0, domain.ErrIntegrity},
 		{"blob only in another session", false, size, domain.ErrIntegrity},
 		{"size too small", true, size - 1, domain.ErrIntegrity},
 		{"size too large", true, size + 1, domain.ErrIntegrity},

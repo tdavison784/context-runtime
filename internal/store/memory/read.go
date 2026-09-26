@@ -21,50 +21,52 @@ type readTx struct {
 	lastSeq   uint64
 	done      bool
 
-	items       table[string, domain.ContextItem]
-	rels        table[string, domain.Relationship]
-	supersedes  index[string] // SUPERSEDES successors: FromID -> ToIDs
-	relsFrom    index[string]
-	relsTo      index[string]
-	relsByType  index[domain.RelationshipType]
-	events      table[string, domain.EventRecord]
-	blobs       table[string, domain.Blob]
-	directives  table[directiveKey, string]
-	obligations table[obligationKey, domain.ObligationVersion]
-	latest      table[string, uint64]
-	transitions table[string, domain.ObligationTransition]
-	grants      table[string, domain.MutationGrant]
-	tasks       table[string, domain.TaskState]
-	lifecycle   table[string, domain.LifecycleEvent]
-	convs       table[string, domain.Conversation]
-	calls       table[string, domain.CallRecord]
-	attempts    table[attemptKey, domain.CallAttempt]
+	items        table[string, domain.ContextItem]
+	rels         table[string, domain.Relationship]
+	supersedes   index[string] // SUPERSEDES successors: FromID -> ToIDs
+	supersededBy index[string] // SUPERSEDES predecessors: ToID -> FromIDs
+	relsFrom     index[string]
+	relsTo       index[string]
+	relsByType   index[domain.RelationshipType]
+	events       table[string, domain.EventRecord]
+	blobs        table[string, domain.Blob]
+	directives   table[directiveKey, string]
+	obligations  table[obligationKey, domain.ObligationVersion]
+	latest       table[string, uint64]
+	transitions  table[string, domain.ObligationTransition]
+	grants       table[string, domain.MutationGrant]
+	tasks        table[string, domain.TaskState]
+	lifecycle    table[string, domain.LifecycleEvent]
+	convs        table[string, domain.Conversation]
+	calls        table[string, domain.CallRecord]
+	attempts     table[attemptKey, domain.CallAttempt]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
 
 func newReadTx(sessionID string, st *state, writable bool) *readTx {
 	return &readTx{
-		sessionID:   sessionID,
-		lastSeq:     st.lastSeq,
-		items:       newTable(st.items, writable, domain.ContextItem.Clone),
-		rels:        newTable(st.rels, writable, domain.Relationship.Clone),
-		supersedes:  newIndex(st.supersedes, writable),
-		relsFrom:    newIndex(st.relsFrom, writable),
-		relsTo:      newIndex(st.relsTo, writable),
-		relsByType:  newIndex(st.relsByType, writable),
-		events:      newTable(st.events, writable, domain.EventRecord.Clone),
-		blobs:       newTable(st.blobs, writable, cloneBlob),
-		directives:  newTable(st.directives, writable, same[string]),
-		obligations: newTable(st.obligations, writable, domain.ObligationVersion.Clone),
-		latest:      newTable(st.latest, writable, same[uint64]),
-		transitions: newTable(st.transitions, writable, domain.ObligationTransition.Clone),
-		grants:      newTable(st.grants, writable, domain.MutationGrant.Clone),
-		tasks:       newTable(st.tasks, writable, same[domain.TaskState]),
-		lifecycle:   newTable(st.lifecycle, writable, same[domain.LifecycleEvent]),
-		convs:       newTable(st.convs, writable, same[domain.Conversation]),
-		calls:       newTable(st.calls, writable, domain.CallRecord.Clone),
-		attempts:    newTable(st.attempts, writable, same[domain.CallAttempt]),
+		sessionID:    sessionID,
+		lastSeq:      st.lastSeq,
+		items:        newTable(st.items, writable, domain.ContextItem.Clone),
+		rels:         newTable(st.rels, writable, domain.Relationship.Clone),
+		supersedes:   newIndex(st.supersedes, writable),
+		supersededBy: newIndex(st.supersededBy, writable),
+		relsFrom:     newIndex(st.relsFrom, writable),
+		relsTo:       newIndex(st.relsTo, writable),
+		relsByType:   newIndex(st.relsByType, writable),
+		events:       newTable(st.events, writable, domain.EventRecord.Clone),
+		blobs:        newTable(st.blobs, writable, cloneBlob),
+		directives:   newTable(st.directives, writable, same[string]),
+		obligations:  newTable(st.obligations, writable, domain.ObligationVersion.Clone),
+		latest:       newTable(st.latest, writable, same[uint64]),
+		transitions:  newTable(st.transitions, writable, domain.ObligationTransition.Clone),
+		grants:       newTable(st.grants, writable, domain.MutationGrant.Clone),
+		tasks:        newTable(st.tasks, writable, same[domain.TaskState]),
+		lifecycle:    newTable(st.lifecycle, writable, same[domain.LifecycleEvent]),
+		convs:        newTable(st.convs, writable, same[domain.Conversation]),
+		calls:        newTable(st.calls, writable, domain.CallRecord.Clone),
+		attempts:     newTable(st.attempts, writable, same[domain.CallAttempt]),
 	}
 }
 
@@ -216,11 +218,8 @@ func (r *readTx) ObligationVersions(obligationID string) ([]domain.ObligationVer
 	if err := r.check(); err != nil {
 		return nil, err
 	}
-	n, ok := r.latest.peek(obligationID)
-	if !ok {
-		return nil, notFound("obligation", obligationID)
-	}
-	out := make([]domain.ObligationVersion, 0, n)
+	n, _ := r.latest.peek(obligationID)
+	var out []domain.ObligationVersion
 	for v := uint64(1); v <= n; v++ {
 		o, _ := r.obligations.get(obligationKey{obligationID, v})
 		out = append(out, o)
@@ -248,9 +247,6 @@ func (r *readTx) Obligations(taskID string) ([]domain.ObligationVersion, error) 
 func (r *readTx) ObligationTransitions(obligationID string) ([]domain.ObligationTransition, error) {
 	if err := r.check(); err != nil {
 		return nil, err
-	}
-	if !r.latest.has(obligationID) {
-		return nil, notFound("obligation", obligationID)
 	}
 	var out []domain.ObligationTransition
 	for _, t := range r.transitions.all() {
@@ -358,9 +354,6 @@ func (r *readTx) Calls(f store.CallFilter) ([]domain.CallRecord, error) {
 func (r *readTx) CallAttempts(callID string) ([]domain.CallAttempt, error) {
 	if err := r.check(); err != nil {
 		return nil, err
-	}
-	if !r.calls.has(callID) {
-		return nil, notFound("call", callID)
 	}
 	var out []domain.CallAttempt
 	for k, a := range r.attempts.all() {

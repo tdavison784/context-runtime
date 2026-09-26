@@ -23,6 +23,7 @@ func (t *tx) commit(st *state) {
 	t.items.commit()
 	t.rels.commit()
 	t.supersedes.commit()
+	t.supersededBy.commit()
 	t.relsFrom.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
@@ -168,16 +169,22 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 		return fmt.Errorf("relationship %s: %w", r.ID, domain.ErrDanglingRelationship)
 	}
 	if r.Type == domain.RelSupersedes {
-		cycle, err := domain.WouldCreateCycle(r.FromID, r.ToID, func(id string) ([]string, error) {
-			return slices.Collect(t.supersedes.lookup(id)), nil
-		})
-		if err != nil {
-			return err
-		}
-		if cycle {
-			return fmt.Errorf("relationship %s: %w", r.ID, domain.ErrSupersessionCycle)
+		// A cycle through the new edge needs an existing edge into FromID;
+		// a new version usually has none, so a long chain is not walked on
+		// every append.
+		if _, superseded := iterFirst(t.supersededBy.lookup(r.FromID)); superseded {
+			cycle, err := domain.WouldCreateCycle(r.FromID, r.ToID, func(id string) ([]string, error) {
+				return slices.Collect(t.supersedes.lookup(id)), nil
+			})
+			if err != nil {
+				return err
+			}
+			if cycle {
+				return fmt.Errorf("relationship %s: %w", r.ID, domain.ErrSupersessionCycle)
+			}
 		}
 		t.supersedes.add(r.FromID, r.ToID)
+		t.supersededBy.add(r.ToID, r.FromID)
 	}
 	t.rels.put(r.ID, r)
 	t.relsFrom.add(r.FromID, r.ID)
@@ -469,7 +476,7 @@ func (t *tx) InsertCall(c domain.CallRecord) error {
 	// Later states need attempt evidence that only UpdateCall checks, so a
 	// call enters the ledger PREPARED with no attempts.
 	if c.State != domain.CallPrepared || c.Attempts != 0 {
-		return invalid("call %s: new calls start PREPARED with no attempts", c.CallID)
+		return fmt.Errorf("call %s: new calls start PREPARED with no attempts: %w", c.CallID, domain.ErrInvalidTransition)
 	}
 	if err := t.fresh("call "+c.CallID, c.PreparedSeq); err != nil {
 		return err
