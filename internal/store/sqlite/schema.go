@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -254,13 +253,6 @@ func encodeField(v reflect.Value) (any, error) {
 		}
 		return t.Format(time.RFC3339Nano), nil
 	}
-	if v.Type() == partsType {
-		return encodeLosslessParts(v.Interface().([]domain.ContentPart))
-	}
-	if v.Type() == stringsType {
-		b, err := encodeLosslessStrings(v.Interface().([]string))
-		return string(b), err
-	}
 	switch v.Kind() {
 	case reflect.String:
 		return v.String(), nil
@@ -280,8 +272,11 @@ func encodeField(v reflect.Value) (any, error) {
 			}
 			return append([]byte{}, v.Bytes()...), nil
 		}
-		b, err := json.Marshal(v.Interface())
-		return string(b), err
+		b, err := encodeLossless(v)
+		if err != nil || v.Type() == partsType {
+			return b, err // parts occupy a BLOB column (migration 0002)
+		}
+		return string(b), nil
 	}
 	return nil, fmt.Errorf("unsupported field type %s", v.Type())
 }
@@ -389,22 +384,6 @@ func decodeField(f reflect.Value, x any, bytesNil bool) error {
 		f.Set(reflect.ValueOf(t))
 		return nil
 	}
-	if f.Type() == partsType {
-		parts, err := decodeLosslessParts([]byte(asString(x)))
-		if err != nil {
-			return err
-		}
-		f.Set(reflect.ValueOf(parts))
-		return nil
-	}
-	if f.Type() == stringsType {
-		ss, err := decodeLosslessStrings([]byte(asString(x)))
-		if err != nil {
-			return err
-		}
-		f.Set(reflect.ValueOf(ss))
-		return nil
-	}
 	switch f.Kind() {
 	case reflect.String:
 		f.SetString(asString(x))
@@ -424,11 +403,7 @@ func decodeField(f reflect.Value, x any, bytesNil bool) error {
 			}
 			return nil
 		}
-		p := reflect.New(f.Type())
-		if err := json.Unmarshal([]byte(asString(x)), p.Interface()); err != nil {
-			return err
-		}
-		f.Set(p.Elem())
+		return decodeLossless([]byte(asString(x)), f)
 	default:
 		return fmt.Errorf("unsupported field type %s", f.Type())
 	}

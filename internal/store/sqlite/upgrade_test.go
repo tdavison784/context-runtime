@@ -139,7 +139,7 @@ func legacyLists(t *testing.T, kind string, record any) map[string]any {
 	out := make(map[string]any)
 	v := reflect.ValueOf(record)
 	for _, c := range schemas[kind].columns {
-		if c.typ != stringsType {
+		if c.typ != reflect.TypeFor[[]string]() {
 			continue
 		}
 		f, ok := pathValue(v, c.path)
