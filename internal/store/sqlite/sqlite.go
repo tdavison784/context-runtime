@@ -348,6 +348,10 @@ var _ store.Tx = (*transaction)(nil)
 func (t *transaction) SessionID() string { return t.session }
 func (t *transaction) LastSeq() uint64   { return t.last }
 func (t *transaction) NextSeq() uint64   { t.last++; t.allocated[t.last] = true; return t.last }
+
+// Allocated implements store.Tx: it reports whether seq was allocated by
+// NextSeq in this transaction.
+func (t *transaction) Allocated(seq uint64) bool { return t.allocated[seq] }
 func (t *transaction) checkSession(s string) error {
 	if s != t.session {
 		return fmt.Errorf("%w: record belongs to another session", domain.ErrInvalidRecord)
