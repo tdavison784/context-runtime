@@ -47,13 +47,12 @@ type usageSum struct {
 
 // Recorder sends requests, writes sanitized fixtures and tracks spend.
 type Recorder struct {
-	client  anthropic.Client
-	dir     string
-	budget  float64
-	mu      sync.Mutex
-	spent   float64
-	obs     []Observation
-	fixture int
+	client anthropic.Client
+	dir    string
+	budget float64
+	mu     sync.Mutex
+	spent  float64
+	obs    []Observation
 }
 
 var errBudget = errors.New("probe budget exhausted")
@@ -86,8 +85,12 @@ func (r *Recorder) Send(ctx context.Context, id, question string, p anthropic.Be
 		o.Stop = string(msg.StopReason)
 		o.Usage = summarizeUsage(msg.Usage)
 		o.CostUSD = cost(string(p.Model), o.Usage)
-		for _, t := range msg.InputTransformations {
-			o.Transform = append(o.Transform, t.RawJSON())
+		// Absent vs [] matters: the array is present only under the
+		// thinking-binding-controls beta.
+		if raw := msg.JSON.InputTransformations.Raw(); raw != "" {
+			o.Transform = []string{raw}
+		} else {
+			o.Transform = []string{"<absent>"}
 		}
 		for _, b := range msg.Content {
 			o.Blocks = append(o.Blocks, describeBlock(b))
@@ -141,8 +144,7 @@ func (r *Recorder) writeJSON(id string, doc any) error {
 	if err != nil {
 		return err
 	}
-	r.fixture++
-	name := fmt.Sprintf("%03d_%s.json", r.fixture, strings.ReplaceAll(id, "/", "_"))
+	name := strings.ReplaceAll(id, "/", "__") + ".json"
 	return os.WriteFile(filepath.Join(r.dir, name), b, 0o644)
 }
 

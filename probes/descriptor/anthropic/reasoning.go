@@ -18,7 +18,9 @@ type session struct {
 
 var sessions = map[string]*session{}
 
-const u0Text = "Use the lookup tool to get the value of key 'alpha'. Afterwards compute (value * 17 + 3) mod 23, showing the arithmetic in one line."
+// u0Text needs reasoning before the tool call so adaptive thinking emits a
+// thinking block ahead of tool_use (the key is "theta": 8 primes below 20).
+const u0Text = "First work out the key: it is the lowercase English name of the Greek letter whose 1-based position in the Greek alphabet equals the number of primes below 20. Then call the lookup tool with that key. Afterwards compute (value * 17 + 3) mod 23, showing the arithmetic in one line."
 
 // probeReasoning answers R1-R5 and the FR-CAP-002 edit kinds for one model.
 func probeReasoning(ctx context.Context, rec *Recorder, model string, all []string, flagship bool) error {
@@ -27,11 +29,11 @@ func probeReasoning(ctx context.Context, rec *Recorder, model string, all []stri
 		return rec.Send(ctx, "reasoning/"+model+"/"+id, q(question), p)
 	}
 
-	// Turn A: a tool call preceded by thinking. Retry once at high effort if the
-	// model skipped thinking, since every later question needs a thinking block.
+	// Turn A: a tool call preceded by thinking. Retry at higher effort if the
+	// model skipped thinking (up to xhigh), since every later question needs a thinking block.
 	u0 := userText(u0Text)
 	var a1 *anthropic.BetaMessage
-	for attempt, effort := range []anthropic.BetaOutputConfigEffort{anthropic.BetaOutputConfigEffortMedium, anthropic.BetaOutputConfigEffortHigh} {
+	for attempt, effort := range []anthropic.BetaOutputConfigEffort{anthropic.BetaOutputConfigEffortMedium, anthropic.BetaOutputConfigEffortHigh, anthropic.BetaOutputConfigEffortXhigh} {
 		p := toolParams(model, []anthropic.BetaMessageParam{u0}, "")
 		p.OutputConfig.Effort = effort
 		m, apiErr, err := send(fmt.Sprintf("A-tool-call-%d", attempt), "setup: first tool round with thinking", p)
