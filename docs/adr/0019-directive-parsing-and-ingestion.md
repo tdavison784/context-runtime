@@ -767,7 +767,19 @@ Answers to `p2-contract`'s implementation questions, appended to
   with `=`/`-`) never closes or opens a section, because D6 already
   excludes it from being a directive heading at all — these are recorded
   as parser-v1's deliberate, narrower-than-CommonMark grammar, not gaps to
-  widen later without an explicit ADR change.
+  widen later without an explicit ADR change. **Two further deviations
+  from a literal reading of FR-DIR-006's ABNF, recorded here (SPEC-2.7,
+  previously only in `internal/directive/doc.go`):** trailing ASCII
+  SP/HTAB bytes after a heading's metadata are tolerated even though the
+  ABNF's heading production ends with `*(SP attr) EOL` and carries no
+  trailing-whitespace clause (`internal/directive/doc.go`'s "Headings"
+  section; locked by `TestIDAndAttributeLexing`); and D20's derived-ID
+  shape check (§6) applies only to the six content-section keywords that
+  actually derive IDs — `resolve-<64hex>`/`unpin-<64hex>` are ordinary
+  explicit IDs on a lifecycle command, not derived-ID-shaped rejections,
+  since Resolve/Unpin never derive an ID to collide with
+  (`internal/directive/items.go`'s `derivedShaped`, `d20-derived-shaped-ids`
+  golden).
 - **Fail-closed surprises kept (refines §4/§8, D7/M4/D12/R1).** Confirmed:
   two list items sharing one explicit ID within a section are *both*
   dropped (not "first wins, second diagnosed") — M4's "repeated directive
@@ -778,12 +790,22 @@ Answers to `p2-contract`'s implementation questions, appended to
   content; an out-of-range `ttl` (R1's 1..2147483647 bound) is fatal to
   the event, not a per-attribute diagnostic that leaves the item live with
   no TTL.
-- **Parser version pinning (new, refines §3/§12/§13).** The parser version
-  this ADR's records reference throughout (recorded with every item,
-  diagnostic, and receipt) is `directive/v1`, defined as exactly the
-  behavior this ADR and `internal/directive/doc.go` document; a future
-  grammar change is a new version string, never a silent reinterpretation
-  of `directive/v1`.
+- **Parser version pinning (new, refines §3/§12/§13; clarified, SPEC-2.7).**
+  The parser version this ADR's records reference throughout (recorded
+  with every item, diagnostic, and receipt) is `directive/v1`, defined as
+  exactly the behavior this ADR and `internal/directive/doc.go` document —
+  concretely, `directive/v1` is pinned to the grammar **as of the merged
+  integration head**, not as of this ADR's original text: the SPEC-1.1
+  fix (a column-0 fence/quote/comment line dropping every item and target
+  of its section, §26) and the SPEC-1.11 ruling (heading-shaped lines
+  close but never open a section, §27) both changed accepted grammar
+  behavior after `directive/v1` was first defined, without bumping the
+  version string. R17 says a grammar change is a new version string; this
+  is deliberately not one, because no `directive/v1`-versioned record has
+  ever been persisted outside this development branch — there is no V1
+  release yet whose replay guarantee a silent grammar change could break.
+  A future grammar change *after* release must bump the version string; a
+  pre-release fix to match this ADR's own intended grammar does not.
 
 **R18 (p2-store questions, all accepted):**
 
