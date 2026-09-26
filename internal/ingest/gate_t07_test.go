@@ -137,10 +137,6 @@ func TestGateT07_SetupThroughIngest(t *testing.T) {
 
 // TestGateT07_ProofsExpireThroughIngest is T07's state trace end to end.
 func TestGateT07_ProofsExpireThroughIngest(t *testing.T) {
-	// Verified: W4 requires observation evidence whose access equals the
-	// run's TASK boundary, while policy v1 makes every ingested TOOL result
-	// transcript TURN-scoped, so ingest can never supply the evidence.
-	pending(t, "ruling on TOOL evidence boundary: W4 observation requires evidence access == TASK run access, ingest TOOL transcripts are TURN (policy v1)")
 	semanticStores(t, func(t *testing.T, f *fixture) {
 		w := newT07(t, f)
 
