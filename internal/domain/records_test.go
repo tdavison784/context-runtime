@@ -402,6 +402,18 @@ func TestItemChangeApply_ResidencyPreservesGoalStatus(t *testing.T) {
 	}
 }
 
+func TestItemChangeApply_ValidGenerationChangeSucceeds(t *testing.T) {
+	it := validItem() // Generation = GenerationDurable
+	pinned := GenerationPinned
+	out, err := ItemChange{Generation: &pinned}.Apply(it)
+	if err != nil {
+		t.Fatalf("Apply() error = %v, want nil", err)
+	}
+	if out.Generation != GenerationPinned {
+		t.Errorf("Generation = %v, want PINNED", out.Generation)
+	}
+}
+
 func TestItemChangeApply_InvalidGenerationRejected(t *testing.T) {
 	it := validItem()
 	bogus := Generation("bogus")

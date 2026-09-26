@@ -177,6 +177,22 @@ func TestMutationGrantClone(t *testing.T) {
 	}
 }
 
+func TestMutationGrantClone_MatcherFormAndNilGrantee(t *testing.T) {
+	matcher := MatcherRef{Name: "tests_pass", Version: "1"}
+	g := validGrant()
+	g.Grantee = nil
+	g.Matcher = &matcher
+
+	clone := g.Clone()
+	if clone.Grantee != nil {
+		t.Error("Clone() populated Grantee that was nil on the original")
+	}
+	clone.Matcher.Version = "mutated"
+	if g.Matcher.Version != "1" {
+		t.Error("mutating clone.Matcher affected the original")
+	}
+}
+
 // --- AuthorizeMutation: T06 --------------------------------------------------
 
 // taskBoundary is the access boundary of everything created for task t1 in
@@ -350,6 +366,42 @@ func TestAuthorizeMutation_GrantExpiry(t *testing.T) {
 	})
 }
 
+// TestAuthorizeMutation_GrantNotYetIssuedIgnored checks activeAt's lower
+// bound: a grant is not yet in force before its IssuedSeq.
+func TestAuthorizeMutation_GrantNotYetIssuedIgnored(t *testing.T) {
+	grantee := userActor()
+	grant := MutationGrant{
+		ID: "grant_future", SessionID: "s1", Action: ActionResolve,
+		TargetIDs: []string{"G"}, Issuer: systemActor(), Grantee: &grantee, IssuedSeq: 10,
+	}
+	_, err := AuthorizeMutation(MutationRequest{
+		Actor: grantee, Action: ActionResolve, Targets: []MutationTarget{systemGoalTarget()},
+		Grants: []MutationGrant{grant}, Seq: 9,
+	})
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeMutation() error = %v, want ErrInvalidAuthorityPromotion (grant not yet issued)", err)
+	}
+}
+
+// TestAuthorizeMutation_MatcherMismatchIgnoresGrant checks a grant issued
+// for a different matcher name/version does not apply even when the actor
+// and target otherwise match.
+func TestAuthorizeMutation_MatcherMismatchIgnoresGrant(t *testing.T) {
+	granted := MatcherRef{Name: "tests_pass", Version: "1"}
+	requested := MatcherRef{Name: "tests_pass", Version: "2"}
+	grant := MutationGrant{
+		ID: "grant_matcher", SessionID: "s1", Action: ActionAssertObligation,
+		TargetIDs: []string{"O"}, Issuer: systemActor(), Matcher: &granted, IssuedSeq: 1,
+	}
+	_, err := AuthorizeMutation(MutationRequest{
+		Actor: harnessActor(), Action: ActionAssertObligation, Targets: []MutationTarget{systemObligationTarget()},
+		Matcher: &requested, Grants: []MutationGrant{grant}, Seq: 1,
+	})
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeMutation() error = %v, want ErrInvalidAuthorityPromotion (matcher version mismatch)", err)
+	}
+}
+
 func TestAuthorizeMutation_GrantRevocation(t *testing.T) {
 	grantee := userActor()
 	grant := MutationGrant{
@@ -470,18 +522,19 @@ func TestAuthorizeMutation_AllOrNothing(t *testing.T) {
 // picks the lowest-ID applicable grant, and does so consistently.
 func TestAuthorizeMutation_DeterministicGrantChoice(t *testing.T) {
 	grantee := userActor()
-	grantB := MutationGrant{
-		ID: "grant_b", SessionID: "s1", Action: ActionResolve,
-		TargetIDs: []string{"G"}, Issuer: systemActor(), Grantee: &grantee, IssuedSeq: 1,
+	mkGrant := func(id string) MutationGrant {
+		return MutationGrant{
+			ID: id, SessionID: "s1", Action: ActionResolve,
+			TargetIDs: []string{"G"}, Issuer: systemActor(), Grantee: &grantee, IssuedSeq: 1,
+		}
 	}
-	grantA := MutationGrant{
-		ID: "grant_a", SessionID: "s1", Action: ActionResolve,
-		TargetIDs: []string{"G"}, Issuer: systemActor(), Grantee: &grantee, IssuedSeq: 1,
-	}
+	// Three grants, deliberately out of order and including a tie, so the
+	// sort comparator's less-than, greater-than, and equal branches all run.
+	grants := []MutationGrant{mkGrant("grant_c"), mkGrant("grant_b"), mkGrant("grant_a"), mkGrant("grant_a")}
 	for i := 0; i < 5; i++ {
 		auth, err := AuthorizeMutation(MutationRequest{
 			Actor: grantee, Action: ActionResolve, Targets: []MutationTarget{systemGoalTarget()},
-			Grants: []MutationGrant{grantB, grantA}, Seq: 1,
+			Grants: grants, Seq: 1,
 		})
 		if err != nil {
 			t.Fatalf("AuthorizeMutation() error = %v, want nil", err)
@@ -489,6 +542,26 @@ func TestAuthorizeMutation_DeterministicGrantChoice(t *testing.T) {
 		if auth.GrantIDs["G"] != "grant_a" {
 			t.Fatalf("iteration %d: GrantIDs[G] = %q, want grant_a (lowest ID)", i, auth.GrantIDs["G"])
 		}
+	}
+}
+
+// TestAuthorizeMutation_GranteeIdentityMismatchIgnoresGrant checks a grant
+// that matches on session/action/target/authority is still not applied when
+// the actor's own identity (task, workflow, or agent) does not match the
+// grant's Grantee constraints.
+func TestAuthorizeMutation_GranteeIdentityMismatchIgnoresGrant(t *testing.T) {
+	granteeForOtherTask := Principal{SessionID: "s1", TaskID: "other-task", Authority: AuthorityUser}
+	grant := MutationGrant{
+		ID: "grant_scoped", SessionID: "s1", Action: ActionResolve,
+		TargetIDs: []string{"G"}, Issuer: systemActor(), Grantee: &granteeForOtherTask, IssuedSeq: 1,
+	}
+	_, err := AuthorizeMutation(MutationRequest{
+		Actor:  userActor(), // TaskID "t1", does not match the grant's "other-task"
+		Action: ActionResolve, Targets: []MutationTarget{systemGoalTarget()},
+		Grants: []MutationGrant{grant}, Seq: 1,
+	})
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeMutation() error = %v, want ErrInvalidAuthorityPromotion (grantee identity mismatch)", err)
 	}
 }
 

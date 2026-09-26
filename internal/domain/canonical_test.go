@@ -29,6 +29,30 @@ func TestValidHash(t *testing.T) {
 	}
 }
 
+// TestCanonicalEncoderBytesAndStrings exercises the Bytes and Strings
+// encoder helpers directly (ContentHash/SemanticBytes only exercise String,
+// Uint, and Int through encodeParts).
+func TestCanonicalEncoderBytesAndStrings(t *testing.T) {
+	e1 := NewCanonicalEncoder("tag").Bytes([]byte("hello"))
+	e2 := NewCanonicalEncoder("tag").String("hello")
+	if e1.Hash() != e2.Hash() {
+		t.Error("Bytes and String must encode identically for the same content (both length-prefixed)")
+	}
+
+	// Strings encodes a count followed by each string, preserving order:
+	// it must differ from a differently ordered or sized list.
+	a := NewCanonicalEncoder("tag").Strings([]string{"a", "b"}).Hash()
+	b := NewCanonicalEncoder("tag").Strings([]string{"b", "a"}).Hash()
+	if a == b {
+		t.Error("Strings must preserve order: [a,b] and [b,a] collided")
+	}
+	empty := NewCanonicalEncoder("tag").Strings(nil).Hash()
+	one := NewCanonicalEncoder("tag").Strings([]string{""}).Hash()
+	if empty == one {
+		t.Error("Strings(nil) and Strings([\"\"]) must differ (count is length-prefixed)")
+	}
+}
+
 func TestHashBytes(t *testing.T) {
 	h := HashBytes([]byte("hello"))
 	if !ValidHash(h) {

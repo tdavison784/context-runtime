@@ -303,6 +303,15 @@ func TestCallRecordClone(t *testing.T) {
 	}
 }
 
+func TestCallRecordClone_NilUsageStaysNil(t *testing.T) {
+	c := validCallRecord()
+	c.Outcome = &CallOutcome{State: CallCompleted} // Usage left nil
+	clone := c.Clone()
+	if clone.Outcome.Usage != nil {
+		t.Error("Clone() populated Outcome.Usage that was nil on the original")
+	}
+}
+
 func TestCallRecordClone_NilOutcomeStaysNil(t *testing.T) {
 	c := validCallRecord() // Outcome is nil
 	clone := c.Clone()
