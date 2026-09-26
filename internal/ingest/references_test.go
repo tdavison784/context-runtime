@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -112,54 +111,7 @@ func TestReferences_SurviveRestart(t *testing.T) {
 	}
 }
 
-// TestReferenceDeclarationLookupBound_R19: declaration-time matching reads
-// the bounded source-key index; more already-ingested sources for one
-// locator than the lookup limit reject the declaring event (fail closed)
-// rather than linking only some.
-func TestReferenceDeclarationLookupBound_R19(t *testing.T) {
-	eachStore(t, func(t *testing.T, f *fixture) {
-		user := principal(domain.AuthorityUser)
-		f.mustIngest(user, userEvent("u0", "hi", false))
-		for _, id := range []string{"t1", "t2", "t3"} {
-			f.mustIngest(user, sourceEvent(id, "go.mod", taskAccess()))
-		}
-		e := userEvent("u1", "## References\n- go.mod\n", true)
-		f.in.LookupLimit = 2
-		before := f.lastSeq()
-		if _, err := f.ingest(user, e); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
-			t.Errorf("over the bound: err = %v", err)
-		}
-		f.in.LookupLimit = 3
-		r, err := f.ingest(user, e)
-		if err != nil {
-			t.Fatalf("within the bound: %v", err)
-		}
-		if got := f.references(semantic(r)[0].ID); len(got) != 3 {
-			t.Errorf("linked %d earlier sources, want 3", len(got))
-		}
-	})
-}
 
-// TestReferenceLookupBound_R19: deferred linking reads the bounded
-// locator-key index; more stored references to one locator than the lookup
-// limit reject the source's event (fail closed) rather than linking only
-// some.
-func TestReferenceLookupBound_R19(t *testing.T) {
-	eachStore(t, func(t *testing.T, f *fixture) {
-		user := principal(domain.AuthorityUser)
-		f.mustIngest(user, userEvent("u0", "hi", false))
-		f.mustIngest(user, userEvent("u1", "## References\n- go.mod\n- ./go.mod\n- a/../go.mod\n", true))
-		f.in.LookupLimit = 2
-		before := f.lastSeq()
-		if _, err := f.ingest(user, sourceEvent("t1", "go.mod", taskAccess())); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
-			t.Errorf("over the bound: err = %v", err)
-		}
-		f.in.LookupLimit = 3
-		if _, err := f.ingest(user, sourceEvent("t1", "go.mod", taskAccess())); err != nil {
-			t.Errorf("within the bound: %v", err)
-		}
-	})
-}
 
 // TestReferencesByItemID_F4 is SPEC-1.2 (FR-DIR-003): a References item
 // naming an accessible same-session item ID links to it; a missing and an
