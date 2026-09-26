@@ -94,7 +94,10 @@ and injection resistance) is tracked in `internal/directive`,
   FR-DIR-005 named no closed vocabulary for "other lifecycle words" (M4);
   FR-DIR-006's `ttl` had no representation bound (D12, narrowed by R1 to
   1..2147483647). All five are applied as the exact sentences ADR 19
-  records.
+  records. A later, separate v0.9 edit (SPEC-1.13, then recorded as an
+  SDD amendment by SPEC-2.4): §11 item 2 and §15 gained ADR 19's listing
+  entry once Phase 2 code landed and the commander added ADR 19 by
+  ruling — no FR/INV text changed, only the two ADR index lists.
 
 Independent review: Codex gpt-6-sol xhigh reviewed all seven Phase 1 ADRs
 against the committed code and the SDD in two passes — the initial review

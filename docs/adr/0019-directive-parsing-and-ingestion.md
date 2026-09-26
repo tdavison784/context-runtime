@@ -1838,8 +1838,20 @@ Five clarifications, applied in SDD v0.9 (R4):
   validation with a representation-limit error rather than being ignored
   or treated as unlimited."
 
-These are the exact insertions applied to SDD.md; see that file's v0.9 diff
-for placement.
+These five are the exact insertions applied to SDD.md as v0.9; see that
+file's v0.9 diff for placement.
+
+**A sixth, later SDD.md edit (SPEC-1.13/SPEC-2.4), not part of the
+original v0.9 batch above and previously unrecorded here:** commit
+`18e1b69`, after Phase 2 code landed and this ADR's own Status was still
+`Proposed`, added "ADR 19." to §11 item 2's phase-2 ADR list and item 19
+("Directive parsing and ingestion …") to §15's ADR list — the listing
+fix this ADR's own Review section (below) and `docs/adr/README.md`
+already describe as a commander ruling, but that this subsection had not
+itself recorded as an SDD edit. No FR/INV text changed; only the two
+phase/ADR index lists gained ADR 19's entry, keeping SDD.md internally
+consistent with an ADR that otherwise existed but was absent from both
+lists.
 
 ## Review
 
