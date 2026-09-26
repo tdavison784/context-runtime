@@ -1,0 +1,9 @@
+{
+  "description": "Closing ATX hashes make a heading malformed; trailing SP/HTAB is tolerated (M4).",
+  "requirements": [
+    "FR-DIR-006",
+    "M4"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

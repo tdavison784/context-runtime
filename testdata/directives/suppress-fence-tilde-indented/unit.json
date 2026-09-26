@@ -1,0 +1,10 @@
+{
+  "description": "Tilde fences open with 0-3 spaces; a shorter closer does not close; a longer closer with SP/HTAB tail does.",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false
+}

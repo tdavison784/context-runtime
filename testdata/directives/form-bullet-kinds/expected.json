@@ -1,0 +1,160 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        64
+      ],
+      "heading_range": [
+        0,
+        12
+      ],
+      "body_range": [
+        12,
+        64
+      ],
+      "items": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-eabda6838f97f9f83185193b908e9712aedce564aa7041fd5c3c248a8170e73d",
+      "authority": "USER",
+      "text": "dash",
+      "content_hash": "sha256:eabda6838f97f9f83185193b908e9712aedce564aa7041fd5c3c248a8170e73d",
+      "range": [
+        12,
+        19
+      ],
+      "text_ranges": [
+        [
+          14,
+          18
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-4af07f2e1fb6d232efce928b03cbe63558ca14cd48c75a30ecfd14edd663318c",
+      "authority": "USER",
+      "text": "star",
+      "content_hash": "sha256:4af07f2e1fb6d232efce928b03cbe63558ca14cd48c75a30ecfd14edd663318c",
+      "range": [
+        19,
+        26
+      ],
+      "text_ranges": [
+        [
+          21,
+          25
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-e5c869fcfaf21e58fe52e6dfb3f2e17f9564dbbfc9950ce888e5d986a2b97e8d",
+      "authority": "USER",
+      "text": "one",
+      "content_hash": "sha256:e5c869fcfaf21e58fe52e6dfb3f2e17f9564dbbfc9950ce888e5d986a2b97e8d",
+      "range": [
+        26,
+        33
+      ],
+      "text_ranges": [
+        [
+          29,
+          32
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-6b833a7ba9aec74fecb2398aa0854dffa68a4bdb2711a7727841815f00e196e9",
+      "authority": "USER",
+      "text": "twenty-two",
+      "content_hash": "sha256:6b833a7ba9aec74fecb2398aa0854dffa68a4bdb2711a7727841815f00e196e9",
+      "range": [
+        33,
+        48
+      ],
+      "text_ranges": [
+        [
+          37,
+          47
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-eabda6838f97f9f83185193b908e9712aedce564aa7041fd5c3c248a8170e73d",
+      "range": [
+        12,
+        19
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-4af07f2e1fb6d232efce928b03cbe63558ca14cd48c75a30ecfd14edd663318c",
+      "range": [
+        19,
+        26
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-e5c869fcfaf21e58fe52e6dfb3f2e17f9564dbbfc9950ce888e5d986a2b97e8d",
+      "range": [
+        26,
+        33
+      ]
+    },
+    {
+      "index": 3,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-6b833a7ba9aec74fecb2398aa0854dffa68a4bdb2711a7727841815f00e196e9",
+      "range": [
+        33,
+        48
+      ]
+    },
+    {
+      "index": 4,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "REMEMBER",
+      "range": [
+        48,
+        63
+      ]
+    }
+  ]
+}

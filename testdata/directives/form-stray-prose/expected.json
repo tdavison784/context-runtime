@@ -1,0 +1,100 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "WORKING",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        50
+      ],
+      "heading_range": [
+        0,
+        11
+      ],
+      "body_range": [
+        11,
+        50
+      ],
+      "items": [
+        0,
+        1
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "working-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "authority": "USER",
+      "text": "a",
+      "content_hash": "sha256:7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "range": [
+        11,
+        15
+      ],
+      "text_ranges": [
+        [
+          13,
+          14
+        ]
+      ]
+    },
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "working-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "authority": "USER",
+      "text": "b",
+      "content_hash": "sha256:08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "range": [
+        46,
+        50
+      ],
+      "text_ranges": [
+        [
+          48,
+          49
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "range": [
+        11,
+        15
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        15,
+        45
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "range": [
+        46,
+        50
+      ]
+    }
+  ]
+}

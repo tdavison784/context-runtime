@@ -1,0 +1,129 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "WORKING",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        57
+      ],
+      "heading_range": [
+        0,
+        11
+      ],
+      "body_range": [
+        11,
+        57
+      ],
+      "items": [
+        0
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "WORKING",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        57,
+        80
+      ],
+      "heading_range": [
+        57,
+        68
+      ],
+      "body_range": [
+        68,
+        80
+      ],
+      "items": [
+        1
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "b",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "two",
+      "content_hash": "sha256:77e92f75f2a97c29300af1ec76b0f9bc6e748ae0060b1cc734e5198836b240e4",
+      "range": [
+        21,
+        31
+      ],
+      "text_ranges": [
+        [
+          27,
+          30
+        ]
+      ]
+    },
+    {
+      "section": "WORKING",
+      "section_index": 1,
+      "directive_id": "b",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "again",
+      "content_hash": "sha256:ab2bbcf13163c6b6e263e9cb1f01e16c8104903c525ab04bd521efbc90a899a7",
+      "range": [
+        68,
+        80
+      ],
+      "text_ranges": [
+        [
+          74,
+          79
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_id",
+      "section": "WORKING",
+      "range": [
+        11,
+        21
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_id",
+      "section": "WORKING",
+      "range": [
+        31,
+        43
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_id",
+      "section": "WORKING",
+      "range": [
+        43,
+        50
+      ]
+    },
+    {
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_id",
+      "section": "WORKING",
+      "range": [
+        50,
+        57
+      ]
+    }
+  ]
+}

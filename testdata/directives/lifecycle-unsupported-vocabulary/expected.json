@@ -1,0 +1,312 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "ARCHIVE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        0,
+        15
+      ],
+      "heading_range": [
+        0,
+        15
+      ],
+      "body_range": [
+        15,
+        15
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "UNARCHIVE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        15,
+        32
+      ],
+      "heading_range": [
+        15,
+        32
+      ],
+      "body_range": [
+        32,
+        32
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "PROMOTE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        32,
+        47
+      ],
+      "heading_range": [
+        32,
+        47
+      ],
+      "body_range": [
+        47,
+        47
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "DEMOTE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        47,
+        57
+      ],
+      "heading_range": [
+        47,
+        57
+      ],
+      "body_range": [
+        57,
+        57
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "BLOCK",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        57,
+        76
+      ],
+      "heading_range": [
+        57,
+        70
+      ],
+      "body_range": [
+        70,
+        76
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "UNBLOCK",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        76,
+        91
+      ],
+      "heading_range": [
+        76,
+        91
+      ],
+      "body_range": [
+        91,
+        91
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "WAIVE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        91,
+        128
+      ],
+      "heading_range": [
+        91,
+        108
+      ],
+      "body_range": [
+        108,
+        128
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "COMPLETETASK",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        128,
+        144
+      ],
+      "heading_range": [
+        128,
+        144
+      ],
+      "body_range": [
+        144,
+        144
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "REOPEN",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        144,
+        158
+      ],
+      "heading_range": [
+        144,
+        158
+      ],
+      "body_range": [
+        158,
+        158
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        187,
+        206
+      ],
+      "heading_range": [
+        187,
+        199
+      ],
+      "body_range": [
+        199,
+        206
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 9,
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "authority": "USER",
+      "text": "kept",
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        199,
+        206
+      ],
+      "text_ranges": [
+        [
+          201,
+          205
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        0,
+        14
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        15,
+        31
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        32,
+        46
+      ]
+    },
+    {
+      "index": 3,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        47,
+        56
+      ]
+    },
+    {
+      "index": 4,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        57,
+        69
+      ]
+    },
+    {
+      "index": 5,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        76,
+        90
+      ]
+    },
+    {
+      "index": 6,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        91,
+        107
+      ]
+    },
+    {
+      "index": 7,
+      "code": "DirectiveNotParsed",
+      "reason": "nested_heading",
+      "section": "PINNED",
+      "range": [
+        108,
+        118
+      ]
+    },
+    {
+      "index": 8,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        128,
+        143
+      ]
+    },
+    {
+      "index": 9,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        144,
+        157
+      ]
+    },
+    {
+      "index": 10,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        199,
+        206
+      ]
+    }
+  ]
+}

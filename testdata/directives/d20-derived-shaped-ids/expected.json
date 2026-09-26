@@ -1,0 +1,188 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "GOAL",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        87
+      ],
+      "heading_range": [
+        0,
+        80
+      ],
+      "body_range": [
+        80,
+        87
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        87,
+        612
+      ],
+      "heading_range": [
+        87,
+        99
+      ],
+      "body_range": [
+        99,
+        612
+      ],
+      "items": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 1,
+      "directive_id": "Goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "explicit",
+      "content_hash": "sha256:f81f16954486427d932f49f04aa10317c3414b4dbac9b49d9e928320d85718d8",
+      "range": [
+        268,
+        351
+      ],
+      "text_ranges": [
+        [
+          342,
+          350
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 1,
+      "directive_id": "goal-0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "explicit",
+      "content_hash": "sha256:f81f16954486427d932f49f04aa10317c3414b4dbac9b49d9e928320d85718d8",
+      "range": [
+        351,
+        434
+      ],
+      "text_ranges": [
+        [
+          425,
+          433
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 1,
+      "directive_id": "resolve-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "explicit",
+      "content_hash": "sha256:f81f16954486427d932f49f04aa10317c3414b4dbac9b49d9e928320d85718d8",
+      "range": [
+        434,
+        520
+      ],
+      "text_ranges": [
+        [
+          511,
+          519
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 1,
+      "directive_id": "goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "explicit",
+      "content_hash": "sha256:f81f16954486427d932f49f04aa10317c3414b4dbac9b49d9e928320d85718d8",
+      "range": [
+        520,
+        602
+      ],
+      "text_ranges": [
+        [
+          593,
+          601
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 1,
+      "directive_id": "remember-f3496b942711cc64094f508010648cf5808ff4f5adc9e1106eaa2655107bfb24",
+      "authority": "USER",
+      "text": "derived",
+      "content_hash": "sha256:f3496b942711cc64094f508010648cf5808ff4f5adc9e1106eaa2655107bfb24",
+      "range": [
+        602,
+        612
+      ],
+      "text_ranges": [
+        [
+          604,
+          611
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "derived_id",
+      "section": "GOAL",
+      "range": [
+        0,
+        87
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "range": [
+        99,
+        182
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "range": [
+        182,
+        268
+      ]
+    },
+    {
+      "index": 3,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-f3496b942711cc64094f508010648cf5808ff4f5adc9e1106eaa2655107bfb24",
+      "range": [
+        602,
+        612
+      ]
+    }
+  ]
+}

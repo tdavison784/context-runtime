@@ -1,0 +1,69 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        30
+      ],
+      "heading_range": [
+        0,
+        26
+      ],
+      "body_range": [
+        26,
+        30
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "pinned-b025b7a958943d33fad846c8fa76c5bdcff545bd53eacf9e24b7b0dcbe2f1be8",
+      "authority": "USER",
+      "text": "p",
+      "content_hash": "sha256:b025b7a958943d33fad846c8fa76c5bdcff545bd53eacf9e24b7b0dcbe2f1be8",
+      "range": [
+        26,
+        30
+      ],
+      "text_ranges": [
+        [
+          28,
+          29
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "disallowed_attribute",
+      "section": "PINNED",
+      "range": [
+        10,
+        25
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-b025b7a958943d33fad846c8fa76c5bdcff545bd53eacf9e24b7b0dcbe2f1be8",
+      "range": [
+        26,
+        30
+      ]
+    }
+  ]
+}

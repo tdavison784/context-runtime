@@ -1,0 +1,484 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "GOAL",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        70
+      ],
+      "heading_range": [
+        0,
+        8
+      ],
+      "body_range": [
+        8,
+        70
+      ],
+      "items": [
+        0
+      ]
+    },
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        70,
+        217
+      ],
+      "heading_range": [
+        70,
+        80
+      ],
+      "body_range": [
+        80,
+        217
+      ],
+      "items": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "keyword": "WORKING",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        217,
+        302
+      ],
+      "heading_range": [
+        217,
+        228
+      ],
+      "body_range": [
+        228,
+        302
+      ],
+      "items": [
+        4,
+        5
+      ]
+    },
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        302,
+        402
+      ],
+      "heading_range": [
+        302,
+        314
+      ],
+      "body_range": [
+        314,
+        402
+      ],
+      "items": [
+        6,
+        7
+      ]
+    },
+    {
+      "keyword": "REFERENCES",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        402,
+        449
+      ],
+      "heading_range": [
+        402,
+        416
+      ],
+      "body_range": [
+        416,
+        449
+      ],
+      "items": [
+        8,
+        9
+      ]
+    },
+    {
+      "keyword": "EPHEMERAL",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        449,
+        493
+      ],
+      "heading_range": [
+        449,
+        468
+      ],
+      "body_range": [
+        468,
+        493
+      ],
+      "attributes": [
+        {
+          "name": "ttl",
+          "value": "2",
+          "range": [
+            462,
+            467
+          ]
+        }
+      ],
+      "items": [
+        10
+      ]
+    },
+    {
+      "keyword": "UNPIN",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        493,
+        519
+      ],
+      "heading_range": [
+        493,
+        502
+      ],
+      "body_range": [
+        502,
+        519
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "GOAL",
+      "section_index": 0,
+      "directive_id": "goal-f9f9f156ca0cbd0a098410a67e3de28bf1065c5202a12a76ca079b6f8577c373",
+      "authority": "USER",
+      "text": "Upgrade Foo to v2 while maintaining backwards compatibility.",
+      "content_hash": "sha256:f9f9f156ca0cbd0a098410a67e3de28bf1065c5202a12a76ca079b6f8577c373",
+      "range": [
+        0,
+        70
+      ],
+      "text_ranges": [
+        [
+          8,
+          68
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 1,
+      "directive_id": "api",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "Do not modify exported APIs.",
+      "content_hash": "sha256:0d80e18aba70b0f64f7e3a9d63e8eab82cd91007377635098004c34eab090814",
+      "range": [
+        80,
+        117
+      ],
+      "text_ranges": [
+        [
+          88,
+          116
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 1,
+      "directive_id": "tests",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "All tests must pass.",
+      "content_hash": "sha256:7727a74aaaa8689c32dc38fc24275332ed5a053fcfaaaf2184ce461c49541945",
+      "obligation": "tests_pass",
+      "attributes": [
+        {
+          "name": "obligation",
+          "value": "tests_pass",
+          "range": [
+            128,
+            149
+          ]
+        }
+      ],
+      "range": [
+        117,
+        172
+      ],
+      "text_ranges": [
+        [
+          151,
+          171
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 1,
+      "directive_id": "architecture",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "Read docs/architecture.md.",
+      "content_hash": "sha256:1f3527b11a8add9f1a4d911a38e52c92777c02e3a9f67351256746fc47b1d674",
+      "range": [
+        172,
+        216
+      ],
+      "text_ranges": [
+        [
+          189,
+          215
+        ]
+      ]
+    },
+    {
+      "section": "WORKING",
+      "section_index": 2,
+      "directive_id": "working-e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "authority": "USER",
+      "text": "Investigating internal/client.go.",
+      "content_hash": "sha256:e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "range": [
+        228,
+        264
+      ],
+      "text_ranges": [
+        [
+          230,
+          263
+        ]
+      ]
+    },
+    {
+      "section": "WORKING",
+      "section_index": 2,
+      "directive_id": "working-0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "authority": "USER",
+      "text": "Current issue is TestLegacyClient.",
+      "content_hash": "sha256:0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "range": [
+        264,
+        301
+      ],
+      "text_ranges": [
+        [
+          266,
+          300
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 3,
+      "directive_id": "remember-f066e59a7473043cf54482efa4ba8a2f10f38db97faee175a98587ac62aad327",
+      "authority": "USER",
+      "text": "Foo v2 requires context.Context.",
+      "content_hash": "sha256:f066e59a7473043cf54482efa4ba8a2f10f38db97faee175a98587ac62aad327",
+      "range": [
+        314,
+        349
+      ],
+      "text_ranges": [
+        [
+          316,
+          348
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 3,
+      "directive_id": "retry",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "Keep the v1 retry policy.",
+      "content_hash": "sha256:7101d8da182af25cc762d9820023b66f48b05d154d11648789f13835bcaa06d4",
+      "kind": "decision",
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "decision",
+          "range": [
+            360,
+            373
+          ]
+        }
+      ],
+      "range": [
+        349,
+        401
+      ],
+      "text_ranges": [
+        [
+          375,
+          400
+        ]
+      ]
+    },
+    {
+      "section": "REFERENCES",
+      "section_index": 4,
+      "directive_id": "references-2660c2a4dbb93e17d967db903654f5362b200504a55e65ff5442619577a192b6",
+      "authority": "USER",
+      "text": "docs/architecture.md",
+      "content_hash": "sha256:2660c2a4dbb93e17d967db903654f5362b200504a55e65ff5442619577a192b6",
+      "range": [
+        416,
+        439
+      ],
+      "text_ranges": [
+        [
+          418,
+          438
+        ]
+      ]
+    },
+    {
+      "section": "REFERENCES",
+      "section_index": 4,
+      "directive_id": "references-263eeaec2318e774c2d2766d40e5fe93c875bdc7439dfa6876ab1abb29fe0f9f",
+      "authority": "USER",
+      "text": "go.mod",
+      "content_hash": "sha256:263eeaec2318e774c2d2766d40e5fe93c875bdc7439dfa6876ab1abb29fe0f9f",
+      "range": [
+        439,
+        448
+      ],
+      "text_ranges": [
+        [
+          441,
+          447
+        ]
+      ]
+    },
+    {
+      "section": "EPHEMERAL",
+      "section_index": 5,
+      "directive_id": "ephemeral-992fe4cf9d9f065fc3766c0da4dc381beb8fc6190531df994fe96ef78dde0e54",
+      "authority": "USER",
+      "text": "(pasted build output)",
+      "content_hash": "sha256:992fe4cf9d9f065fc3766c0da4dc381beb8fc6190531df994fe96ef78dde0e54",
+      "ttl_turns": 2,
+      "attributes": [
+        {
+          "name": "ttl",
+          "value": "2",
+          "range": [
+            462,
+            467
+          ]
+        }
+      ],
+      "range": [
+        468,
+        492
+      ],
+      "text_ranges": [
+        [
+          470,
+          491
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [
+    {
+      "action": "UNPIN",
+      "target_id": "architecture",
+      "authority": "USER",
+      "range": [
+        502,
+        519
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "GOAL",
+      "directive_id": "goal-f9f9f156ca0cbd0a098410a67e3de28bf1065c5202a12a76ca079b6f8577c373",
+      "range": [
+        0,
+        70
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "range": [
+        228,
+        264
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "range": [
+        264,
+        301
+      ]
+    },
+    {
+      "index": 3,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-f066e59a7473043cf54482efa4ba8a2f10f38db97faee175a98587ac62aad327",
+      "range": [
+        314,
+        349
+      ]
+    },
+    {
+      "index": 4,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REFERENCES",
+      "directive_id": "references-2660c2a4dbb93e17d967db903654f5362b200504a55e65ff5442619577a192b6",
+      "range": [
+        416,
+        439
+      ]
+    },
+    {
+      "index": 5,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REFERENCES",
+      "directive_id": "references-263eeaec2318e774c2d2766d40e5fe93c875bdc7439dfa6876ab1abb29fe0f9f",
+      "range": [
+        439,
+        448
+      ]
+    },
+    {
+      "index": 6,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "EPHEMERAL",
+      "directive_id": "ephemeral-992fe4cf9d9f065fc3766c0da4dc381beb8fc6190531df994fe96ef78dde0e54",
+      "range": [
+        468,
+        492
+      ]
+    }
+  ]
+}

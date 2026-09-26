@@ -1,0 +1,11 @@
+{
+  "description": "Role labels and delimiter text never grant parsing to ordinary USER chat (SDD section 9, M2).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "M2"
+  ],
+  "authority": "USER",
+  "directive_capable": false,
+  "no_directives": true
+}

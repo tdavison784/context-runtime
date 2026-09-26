@@ -1,0 +1,289 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_450b1d34ccf7ac50d232d80bb220f6b5",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Pinned\n- {kind=instruction}scope=SESSION} evil\n- {kind=instruction=x} evil\n- {kind=instruction\n  scope=SESSION} evil\n- x {scope=SESSION}\n- {kind=instruction} {scope=SESSION} y\n## Pinned kind=instruction\tscope=SESSION\n- evil\n## Pinned scope=SESSION\n- not widened\n"
+        }
+      ],
+      "content_hash": "sha256:143f844675eec1a239db98ca199a71bc11783dd87d0527138511c74061e8772c"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_63f131443a06eabd8ef98c8bc22f1475",
+      "kind": "constraint",
+      "section": "PINNED",
+      "directive_id": "pinned-4e0fa8cfb016ab5808846be582748c62ac64339d4fe274c1daa231a9fab7ce7c",
+      "generation": "PINNED",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "x {scope=SESSION}"
+        }
+      ],
+      "content_hash": "sha256:4e0fa8cfb016ab5808846be582748c62ac64339d4fe274c1daa231a9fab7ce7c",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            120,
+            140
+          ],
+          "slices": [
+            [
+              122,
+              139
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_e5d7c78889daefcfd880773ad12787c8",
+      "kind": "instruction",
+      "section": "PINNED",
+      "directive_id": "pinned-a9cd995280a38f8666e68bcd56736c67cf06efca78a6f6ffd5aa5de9674a5321",
+      "generation": "PINNED",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "{scope=SESSION} y"
+        }
+      ],
+      "content_hash": "sha256:a9cd995280a38f8666e68bcd56736c67cf06efca78a6f6ffd5aa5de9674a5321",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            140,
+            179
+          ],
+          "slices": [
+            [
+              161,
+              178
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#3",
+      "id": "itm_18003c93c8ef2e30396e2fcb8c0ace89",
+      "kind": "constraint",
+      "section": "PINNED",
+      "directive_id": "pinned-7dbeb41a7cec65ab5779c81abfe14846aefc22fc157dab34614d0c324f9f1e05",
+      "generation": "PINNED",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "not widened"
+        }
+      ],
+      "content_hash": "sha256:7dbeb41a7cec65ab5779c81abfe14846aefc22fc157dab34614d0c324f9f1e05",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            251,
+            265
+          ],
+          "slices": [
+            [
+              253,
+              264
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#3",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        10,
+        50
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        50,
+        78
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        78,
+        120
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-4e0fa8cfb016ab5808846be582748c62ac64339d4fe274c1daa231a9fab7ce7c",
+      "range": [
+        120,
+        140
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 4,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-a9cd995280a38f8666e68bcd56736c67cf06efca78a6f6ffd5aa5de9674a5321",
+      "range": [
+        140,
+        179
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 5,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        179,
+        219
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 6,
+      "code": "ErrMalformedDirective",
+      "reason": "scope_widening",
+      "section": "PINNED",
+      "range": [
+        237,
+        250
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 7,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-7dbeb41a7cec65ab5779c81abfe14846aefc22fc157dab34614d0c324f9f1e05",
+      "range": [
+        251,
+        265
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

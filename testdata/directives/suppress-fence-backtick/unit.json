@@ -1,0 +1,10 @@
+{
+  "description": "Headings inside a backtick fence are never parsed; parsing resumes after the closer.",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false
+}

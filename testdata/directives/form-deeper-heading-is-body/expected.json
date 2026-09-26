@@ -1,0 +1,69 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        47
+      ],
+      "heading_range": [
+        0,
+        12
+      ],
+      "body_range": [
+        12,
+        47
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-631f6a3667f8d2efb7e7362f7d51fe7ed79f9a2d968c6d9c9172815cbbe1634b",
+      "authority": "USER",
+      "text": "note\n### Pinned\n- x\n#### Details\ny",
+      "content_hash": "sha256:631f6a3667f8d2efb7e7362f7d51fe7ed79f9a2d968c6d9c9172815cbbe1634b",
+      "range": [
+        0,
+        47
+      ],
+      "text_ranges": [
+        [
+          12,
+          46
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-631f6a3667f8d2efb7e7362f7d51fe7ed79f9a2d968c6d9c9172815cbbe1634b",
+      "range": [
+        0,
+        47
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "nested_heading",
+      "section": "PINNED",
+      "range": [
+        17,
+        27
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "description": "Tab separators, seven '#', setext headings and keyword suffixes are ordinary content.",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

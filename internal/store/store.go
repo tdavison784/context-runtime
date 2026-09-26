@@ -36,7 +36,7 @@
 //     another session than the transaction's, breaks the sequence rule, or
 //     carries an audit event that does not target the record it describes.
 //   - domain.ErrNotFound: a single-record getter, or a write, names a record
-//     missing from this session (an item for SetCurrentDirective, an
+//     missing from this session (an item for SetCurrentVersion, an
 //     obligation version for a transition, a call for an attempt).
 //   - domain.ErrImmutable: an immutable record's ID is reused, or a write
 //     changes a field outside those its method may change (obligation fields
@@ -50,8 +50,10 @@
 //   - domain.ErrVersionConflict: compare-and-swap mismatch, and an obligation
 //     version that is not one more than the latest.
 //   - domain.ErrIntegrity: stored bytes or records fail verification (a blob
-//     whose bytes no longer match its hash, a row that cannot be decoded).
-//     It is never used for operational failures.
+//     whose bytes no longer match its hash, an item whose parts no longer
+//     match its ContentHash or SemanticBytes, a row that cannot be decoded).
+//     Such a record is never returned. It is never used for operational
+//     failures.
 //   - Context and I/O errors are returned as themselves (wrapped at most),
 //     so errors.Is(err, context.Canceled) and similar checks hold.
 //
@@ -62,9 +64,15 @@ package store
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
+
+// ErrLimitExceeded reports that a bounded read matched more records than
+// its limit. Bounded reads never return a truncated result.
+var ErrLimitExceeded = errors.New("store: result exceeds limit")
 
 // Store is a transactional, session-partitioned store.
 type Store interface {
@@ -79,8 +87,10 @@ type Store interface {
 	// write other than blobs, conversations, calls, call attempts, and
 	// TargetCall lifecycle events) must also write at least one record carrying a
 	// sequence number allocated in it (an item, relationship, event record,
-	// obligation version or transition, grant, or non-TargetCall lifecycle
-	// event); otherwise the commit fails with domain.ErrInvalidRecord. The
+	// ingestion receipt, unresolved reference, obligation version or
+	// transition, grant, or
+	// non-TargetCall lifecycle event); otherwise the commit fails with
+	// domain.ErrInvalidRecord. The
 	// call ledger's preview-staleness check depends on every semantic
 	// change being visible in the sequence (FR-CALL-001). Blobs are exempt
 	// because they are content-addressed and inert until a sequenced record
@@ -132,6 +142,62 @@ type LifecycleFilter struct {
 	MinSeq     uint64
 }
 
+// DiagnosticFilter selects persisted diagnostics (D16). Viewer is required:
+// a read returns only records whose source access boundary permits it
+// (domain.DiagnosticRecord.VisibleTo), so IDs, ranges, counts, and reasons
+// of spans the viewer cannot see never leave the store. An empty
+// OccurrenceID selects every event. Results are ordered by the event's
+// receipt Seq, then SpanIndex, then Index.
+type DiagnosticFilter struct {
+	Viewer       domain.Principal
+	OccurrenceID string
+}
+
+// CommandFilter selects recorded lifecycle commands (D1) the way
+// DiagnosticFilter selects diagnostics: only records whose source span
+// boundary permits Viewer, ordered by receipt Seq, then Ordinal.
+type CommandFilter struct {
+	Viewer       domain.Principal
+	OccurrenceID string
+}
+
+// DuplicateFilter selects duplicate candidates (R19, D10, FR-ING-005):
+// items of this session whose task, directive section (which fixes the
+// directive namespace), role, authority, exact access boundary, and content
+// hash all equal the filter's. Every field is compared exactly, including
+// empty ones, so a candidate never crosses task, section, role, authority,
+// or boundary. Limit is required as in ReferenceFilter.
+type DuplicateFilter struct {
+	TaskID      string
+	Section     domain.DirectiveSection
+	Role        domain.ItemRole
+	Authority   domain.Authority
+	Access      domain.AccessBoundary
+	ContentHash string
+	Limit       int
+}
+
+// Validate checks the filter's enums, boundary, hash, and limit.
+func (f DuplicateFilter) Validate() error {
+	if f.Limit <= 0 || !domain.ValidHash(f.ContentHash) || !f.Section.Valid() || !f.Role.Valid() || !f.Authority.Valid() {
+		return fmt.Errorf("%w: duplicate filter: positive limit and valid hash, section, role, and authority required", domain.ErrInvalidRecord)
+	}
+	return f.Access.Validate()
+}
+
+// ReferenceFilter selects unresolved references (M5, R2). Empty
+// LocatorKey or RuleVersion does not filter; both compare exact bytes.
+// Limit is required: it must be positive (domain.ErrInvalidRecord
+// otherwise), and more matches than Limit fail with ErrLimitExceeded.
+// Results are ordered by Seq, then ID. Records carry their ownership context
+// (Access, Authority) unfiltered: linking a reference must satisfy both it
+// and the later event's authorization, so callers apply access (R2).
+type ReferenceFilter struct {
+	LocatorKey  string
+	RuleVersion string
+	Limit       int
+}
+
 // CallFilter selects call records. Results are ordered by PreparedSeq
 // ascending, then CallID.
 type CallFilter struct {
@@ -153,29 +219,81 @@ type ReadTx interface {
 
 	Item(id string) (domain.ContextItem, error)
 	Items(f ItemFilter) ([]domain.ContextItem, error)
+	// ItemsByBlob returns every item in the session with a part referencing
+	// the blob hash, each once, ordered by Seq then ID (R19, R5). It is
+	// bounded like ObligationsBySource: limit must be positive and a
+	// malformed hash is domain.ErrInvalidRecord; more matches than limit
+	// fail with ErrLimitExceeded. Callers filter by access: possession of a
+	// hash authorizes nothing.
+	ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, error)
+	// ItemsBySourceKey returns every item whose source locator has the given
+	// key under domain.LocatorRuleVersion (domain.LocatorKey of its
+	// Source.Kind and Locator), ordered by Seq then ID (R19, M5, R2). Items
+	// without a source, or whose source is not a linkable locator, are never
+	// returned. Bounded like ItemsByBlob: an empty or over-long key or a
+	// non-positive limit is domain.ErrInvalidRecord; more matches than limit
+	// fail with ErrLimitExceeded. Callers apply access and authorization.
+	ItemsBySourceKey(locatorKey string, limit int) ([]domain.ContextItem, error)
+	// DuplicateCandidates returns the items f selects, ordered by Seq then
+	// ID; more than f.Limit fail with ErrLimitExceeded. Callers apply the
+	// remaining duplicate rules (directive ID, metadata, currentness, D10).
+	DuplicateCandidates(f DuplicateFilter) ([]domain.ContextItem, error)
 	Relationships(f RelationshipFilter) ([]domain.Relationship, error)
 	Event(eventID string) (domain.EventRecord, error)
 	// Blob returns the blob with the given hash after verifying its bytes;
 	// corrupt bytes fail with domain.ErrIntegrity.
 	Blob(hash string) (domain.Blob, error)
-	// CurrentDirective returns the item ID of the current version of a
-	// directive (FR-DIR-002). A directive's identity is (task, directive ID,
-	// access boundary): versions in different boundaries are independent
-	// directives, so a boundary a caller cannot see never blocks or reveals
-	// itself through a shared ID.
-	CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error)
-	// CurrentDirectives returns the item IDs of the current versions of a
-	// directive across every access boundary in a task, ordered by item ID;
-	// empty when none exist. Callers filter by access before acting, so a
-	// version a principal cannot see stays invisible (FR-DIR-002, FR-DIR-005).
-	CurrentDirectives(taskID, directiveID string) ([]string, error)
+	// CurrentVersion returns the item ID the current-version map holds for
+	// key (FR-DIR-002, FR-TOOL-002). The identity is (task, access boundary,
+	// namespace, ID): versions in different boundaries are independent, so a
+	// boundary a caller cannot see never blocks or reveals itself through a
+	// shared ID, and a parsed directive never collides with keyed agent state
+	// of the same ID (M6, R6). A key naming another session is ErrNotFound; a
+	// key that fails domain.CurrentKey.Validate is ErrInvalidRecord. The map
+	// records only what SetCurrentVersion wrote: callers still check that the
+	// named item is current (no incoming SUPERSEDES, not a duplicate).
+	CurrentVersion(key domain.CurrentKey) (string, error)
+	// CurrentVersions returns the item IDs the map holds for (namespace, id)
+	// across every access boundary in a task, ordered by item ID; empty when
+	// none exist. Callers filter by access before acting, so a version a
+	// principal cannot see stays invisible (FR-DIR-002, FR-DIR-005). An
+	// invalid namespace is ErrInvalidRecord.
+	CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error)
 	// Obligation returns the latest version of an obligation.
 	Obligation(obligationID string) (domain.ObligationVersion, error)
 	ObligationVersions(obligationID string) ([]domain.ObligationVersion, error)
 	// Obligations returns the latest version of every obligation in a task,
 	// ordered by ObligationID; an empty task ID returns all tasks.
 	Obligations(taskID string) ([]domain.ObligationVersion, error)
+	// ObligationsBySource returns every obligation version (current or
+	// retired) whose SourceItemID is sourceItemID, ordered by ObligationID
+	// then Version (D13, R9). It is bounded: limit must be positive
+	// (domain.ErrInvalidRecord otherwise), and more than limit matches fail
+	// with ErrLimitExceeded rather than returning a partial answer, so a
+	// caller retiring bound obligations never misses one.
+	ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error)
 	ObligationTransitions(obligationID string) ([]domain.ObligationTransition, error)
+	// Receipt returns the immutable receipt of an accepted event by its
+	// occurrence ID (D14): the original item values, diagnostics, commands,
+	// links, and execution versions exactly as InsertIngestion stored them,
+	// even after later lifecycle changes. A caller-keyed event's occurrence
+	// is domain.CallerOccurrenceID(session, EventID), so ingestion looks an
+	// EventID up before allocating any sequence number. The receipt is the
+	// submitting principal's (its PayloadHash covers the principal); callers
+	// compare the request before returning it and never expose it to
+	// another principal.
+	Receipt(occurrenceID string) (domain.IngestReceipt, error)
+	// Envelope returns the replayable request stored with a receipt.
+	Envelope(occurrenceID string) (domain.EventEnvelope, error)
+	// Diagnostics returns the persisted diagnostics f selects (D16). A
+	// viewer that fails validation is domain.ErrInvalidRecord.
+	Diagnostics(f DiagnosticFilter) ([]domain.DiagnosticRecord, error)
+	// LifecycleCommands returns the recorded commands f selects (D1).
+	LifecycleCommands(f CommandFilter) ([]domain.LifecycleCommandRecord, error)
+	// UnresolvedReference returns one unresolved reference by ID.
+	UnresolvedReference(id string) (domain.UnresolvedReference, error)
+	// UnresolvedReferences returns the references f selects.
+	UnresolvedReferences(f ReferenceFilter) ([]domain.UnresolvedReference, error)
 	Grant(id string) (domain.MutationGrant, error)
 	// Grants returns every grant in the session ordered by ID.
 	Grants() ([]domain.MutationGrant, error)
@@ -209,6 +327,28 @@ type Tx interface {
 	// domain.ErrEventIDConflict.
 	InsertEvent(e domain.EventRecord) (stored domain.EventRecord, existed bool, err error)
 
+	// InsertIngestion stores an accepted event's replayable envelope and
+	// immutable receipt, with the receipt's item snapshots, diagnostic
+	// records, and lifecycle command records, in one indivisible write
+	// (D14, D16, D1). Both must validate, name this session, and agree on
+	// occurrence, EventID, principal, and payload hash; receipt.Seq must be
+	// allocated in this transaction; every receipt item must be stored in
+	// this session, with its Seq allocated in this transaction and its
+	// stored value equal to the snapshot; every link target and resolved
+	// command target must be a stored item (domain.ErrInvalidRecord
+	// otherwise); every blob the envelope references must be stored in this
+	// session with the referenced size (domain.ErrIntegrity otherwise). Reusing an occurrence fails with domain.ErrEventIDConflict
+	// when the payload hash differs and domain.ErrImmutable otherwise. It
+	// is a sequenced semantic write.
+	InsertIngestion(env domain.EventEnvelope, receipt domain.IngestReceipt) error
+
+	// InsertUnresolvedReference stores an immutable unresolved reference
+	// (M5, R2). It must validate and name this session, its Seq must be
+	// allocated in this transaction, and its declaring ItemID must be a
+	// stored item (domain.ErrInvalidRecord otherwise); reusing an ID fails
+	// with domain.ErrImmutable. It is a sequenced semantic write.
+	InsertUnresolvedReference(r domain.UnresolvedReference) error
+
 	// InsertItem stores a new immutable item. Its Version must be 1 and its
 	// Seq must be allocated in this transaction. Every image or document part
 	// must reference a blob already stored in this session whose length
@@ -228,11 +368,12 @@ type Tx interface {
 	// Reusing an ID fails with domain.ErrImmutable.
 	InsertRelationship(r domain.Relationship) error
 
-	// SetCurrentDirective points (task, directive ID, the item's access
-	// boundary) at an item, which must exist in this session
-	// (domain.ErrNotFound), belong to taskID, and carry that directive ID
-	// (domain.ErrInvalidRecord).
-	SetCurrentDirective(taskID, directiveID, itemID string) error
+	// SetCurrentVersion points the item's current-version key
+	// (domain.ContextItem.CurrentKey: its task, access boundary, namespace,
+	// and directive ID) at the item. The item must exist in this session
+	// (domain.ErrNotFound) and have a valid key (domain.ErrInvalidRecord). It
+	// is a semantic write.
+	SetCurrentVersion(itemID string) error
 
 	// InsertBlob stores an immutable blob after verifying its hash.
 	// Inserting identical bytes again is a no-op.
@@ -248,6 +389,16 @@ type Tx interface {
 	// AppendObligationTransition; a differing Status fails with
 	// domain.ErrInvalidTransition.
 	UpdateObligationVersion(o domain.ObligationVersion, expectedRevision uint64) (domain.ObligationVersion, error)
+	// RetireObligationVersion marks a current obligation version noncurrent
+	// and appends its audit event atomically (D13, FR-OBL-006). The stored
+	// Revision must equal expectedRevision (domain.ErrVersionConflict
+	// otherwise); the event must target the obligation (TargetObligation,
+	// TargetID == obligationID) with a Seq allocated in this transaction,
+	// which becomes the version's RetiredSeq (domain.ErrInvalidRecord
+	// otherwise). A version that is already retired fails with
+	// domain.ErrInvalidTransition. Status, evidence, and transitions are
+	// kept. It returns the updated version.
+	RetireObligationVersion(obligationID string, version, expectedRevision uint64, event domain.LifecycleEvent) (domain.ObligationVersion, error)
 	// AppendObligationTransition records a transition and applies it to the
 	// version atomically. The version's Revision must equal
 	// expectedRevision (domain.ErrVersionConflict otherwise), so a matcher
@@ -279,8 +430,10 @@ type Tx interface {
 	// reserved for the call ledger (internal/invocation), and a TargetCall
 	// event's Seq is never shared with a semantic record: at commit, a
 	// sequence number used by a TargetCall event and by an item,
-	// relationship, event record, obligation version or transition, grant,
-	// or non-TargetCall lifecycle event fails with domain.ErrInvalidRecord,
+	// relationship, event record, ingestion receipt, unresolved reference,
+	// obligation version or transition, grant, or non-TargetCall lifecycle
+	// event fails with
+	// domain.ErrInvalidRecord,
 	// so a semantic write cannot hide behind a ledger sequence number
 	// (FR-CALL-001). Ledger records (calls, attempts) may share it.
 	AppendLifecycleEvent(e domain.LifecycleEvent) error

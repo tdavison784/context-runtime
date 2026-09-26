@@ -1,0 +1,94 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_2c8569e9dabccdb266fd103d0d8e365d",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "```a`\n## Pinned\n- hidden\n"
+        }
+      ],
+      "content_hash": "sha256:ee6f0919ee0394d4806d882f5dc2f3d8d7e83284f466c2e2204c0e45ac93073b"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_d54734109badd2111ef1bb96b045a08e",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "```a`\n## Pinned\n- hidden\n"
+        }
+      ],
+      "content_hash": "sha256:52746a15c098622839790789f32377919e53c8970327a85c2af42ec03d22e00e",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            25
+          ],
+          "slices": [
+            [
+              0,
+              25
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "PINNED",
+      "range": [
+        6,
+        15
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

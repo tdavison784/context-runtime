@@ -3,6 +3,7 @@ package domain
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -68,4 +69,119 @@ func AgentKeyID(key string) string { return "agent." + key }
 
 func shortHash(e *CanonicalEncoder) string {
 	return strings.TrimPrefix(e.Hash(), hashPrefix)[:32]
+}
+
+// Event occurrences (M3). Every accepted ingestion has one internal
+// occurrence ID that keys all of its artifacts. A caller-keyed occurrence
+// derives from (session, EventID), so a retry reproduces it; an anonymous
+// occurrence is generated once per Ingest attempt, outside any retried
+// transaction callback. The two use different prefixes, so a caller cannot
+// choose an EventID whose occurrence aliases an anonymous one.
+const (
+	callerOccurrencePrefix    = "evc_"
+	anonymousOccurrencePrefix = "eva"
+)
+
+// CallerOccurrenceID is the occurrence ID of a caller-keyed event.
+func CallerOccurrenceID(sessionID, eventID string) string {
+	return callerOccurrencePrefix + shortHash(NewCanonicalEncoder("context-runtime/event-occurrence/v1").
+		String(sessionID).String(eventID))
+}
+
+// NewAnonymousOccurrenceID returns a fresh occurrence ID for an event without
+// a caller EventID. It carries no retry guarantee.
+func NewAnonymousOccurrenceID(g IDGenerator) string { return g.NewID(anonymousOccurrencePrefix) }
+
+// ValidOccurrenceID reports whether id has either occurrence ID form.
+func ValidOccurrenceID(id string) bool {
+	if hexPart, ok := strings.CutPrefix(id, callerOccurrencePrefix); ok {
+		return len(hexPart) == 32 && isLowerHex(hexPart)
+	}
+	rest, ok := strings.CutPrefix(id, anonymousOccurrencePrefix+"_")
+	return ok && rest != ""
+}
+
+// OccurrenceMatchesEvent reports whether occurrenceID is the occurrence of
+// eventID in the session: the derived caller occurrence when eventID is set,
+// and an anonymous occurrence when it is empty.
+func OccurrenceMatchesEvent(sessionID, occurrenceID, eventID string) bool {
+	if eventID != "" {
+		return occurrenceID == CallerOccurrenceID(sessionID, eventID)
+	}
+	return ValidOccurrenceID(occurrenceID) && !strings.HasPrefix(occurrenceID, callerOccurrencePrefix)
+}
+
+// IDDomain separates the deterministic ID spaces of one occurrence's
+// artifacts (M3). Each domain has its own prefix and versioned hash tag, so
+// ordinals in different domains never collide. Item IDs keep DerivedItemID;
+// relationship and lifecycle-audit IDs belong to internal/graph.
+type IDDomain string
+
+const (
+	IDDomainDiagnostic IDDomain = "dgn"
+	IDDomainCommand    IDDomain = "cmd"
+	IDDomainSection    IDDomain = "sec"
+	IDDomainReference  IDDomain = "ref"
+)
+
+var idDomains = []IDDomain{IDDomainDiagnostic, IDDomainCommand, IDDomainSection, IDDomainReference}
+
+// Valid reports whether d is a known ID domain.
+func (d IDDomain) Valid() bool { return slices.Contains(idDomains, d) }
+
+// reservedIDPrefixes are the prefixes of every internally generated ID: the
+// occurrence forms, each artifact ID domain, and the item, call, turn, and
+// obligation IDs derived here. internal/graph derives relationship ("rel")
+// and lifecycle-audit ("evt") IDs; they are reserved here too because the
+// domain cannot import graph.
+var reservedIDPrefixes = func() []string {
+	out := []string{callerOccurrencePrefix, anonymousOccurrencePrefix + "_", "itm_", "call_", "turn_", "obl_", "rel_", "evt_"}
+	for _, d := range idDomains {
+		out = append(out, string(d)+"_")
+	}
+	return out
+}()
+
+// ReservedIDPrefix reports whether id begins with the prefix of an internally
+// generated ID. Caller-chosen identifiers (EventIDs) must not (R20.1), so no
+// caller value can pose as, or alias, a runtime-generated ID.
+func ReservedIDPrefix(id string) bool {
+	for _, p := range reservedIDPrefixes {
+		if strings.HasPrefix(id, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// DerivedArtifactID is the deterministic ID of an occurrence artifact at the
+// given ordinals (for example span index and diagnostic index). It panics on
+// an unknown domain: domains are compile-time constants, never input.
+func DerivedArtifactID(d IDDomain, sessionID, occurrenceID string, ordinals ...uint64) string {
+	if !d.Valid() {
+		panic("context-runtime: unknown ID domain " + string(d))
+	}
+	e := NewCanonicalEncoder("context-runtime/" + string(d) + "-id/v1").String(sessionID).String(occurrenceID)
+	e.Uint(uint64(len(ordinals)))
+	for _, o := range ordinals {
+		e.Uint(o)
+	}
+	return string(d) + "_" + shortHash(e)
+}
+
+// DerivedTurnID is the stable ID of a task's n-th turn (D18). A task never
+// reuses a turn number, so the ID is unique within the session.
+func DerivedTurnID(sessionID, taskID string, turn uint64) string {
+	return "turn_" + shortHash(NewCanonicalEncoder("context-runtime/turn-id/v1").
+		String(sessionID).String(taskID).Uint(turn))
+}
+
+func isLowerHex(s string) bool {
+	for i := range len(s) {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

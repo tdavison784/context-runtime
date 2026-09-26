@@ -1,0 +1,5 @@
+go test fuzz v1
+[]byte("## WorKing\ntext\n## Reſolve [g]\n## PINNED\ntext")
+uint8(5)
+bool(true)
+uint16(7)

@@ -1,0 +1,108 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        16
+      ],
+      "heading_range": [
+        0,
+        12
+      ],
+      "body_range": [
+        12,
+        16
+      ],
+      "items": [
+        0
+      ]
+    },
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 1,
+      "range": [
+        43,
+        56
+      ],
+      "heading_range": [
+        43,
+        52
+      ],
+      "body_range": [
+        52,
+        56
+      ],
+      "items": [
+        1
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "authority": "USER",
+      "text": "a",
+      "content_hash": "sha256:7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "range": [
+        12,
+        16
+      ],
+      "text_ranges": [
+        [
+          14,
+          15
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 1,
+      "directive_id": "pinned-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "authority": "USER",
+      "text": "b",
+      "content_hash": "sha256:08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "range": [
+        52,
+        56
+      ],
+      "text_ranges": [
+        [
+          54,
+          55
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "range": [
+        12,
+        16
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "range": [
+        52,
+        56
+      ]
+    }
+  ]
+}

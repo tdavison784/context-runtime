@@ -1,0 +1,131 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "status": "MALFORMED",
+      "level": 2,
+      "range": [
+        0,
+        99
+      ],
+      "heading_range": [
+        0,
+        94
+      ],
+      "body_range": [
+        94,
+        99
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        99,
+        1210
+      ],
+      "heading_range": [
+        99,
+        109
+      ],
+      "body_range": [
+        109,
+        1210
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "UNPIN",
+      "status": "MALFORMED",
+      "level": 2,
+      "range": [
+        1210,
+        1303
+      ],
+      "heading_range": [
+        1210,
+        1303
+      ],
+      "body_range": [
+        1303,
+        1303
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "RESOLVE",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        1303,
+        1400
+      ],
+      "heading_range": [
+        1303,
+        1314
+      ],
+      "body_range": [
+        1314,
+        1400
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_id",
+      "section": "PINNED",
+      "range": [
+        0,
+        93
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_id",
+      "section": "PINNED",
+      "range": [
+        109,
+        200
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_id",
+      "section": "PINNED",
+      "range": [
+        200,
+        1210
+      ]
+    },
+    {
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_id",
+      "section": "UNPIN",
+      "range": [
+        1210,
+        1302
+      ]
+    },
+    {
+      "index": 4,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_id",
+      "section": "RESOLVE",
+      "range": [
+        1314,
+        1400
+      ]
+    }
+  ]
+}

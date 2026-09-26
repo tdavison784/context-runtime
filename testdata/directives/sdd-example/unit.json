@@ -1,0 +1,11 @@
+{
+  "description": "The SDD v0.8 FR-DIR-006 example, verbatim, in a directive-capable USER unit.",
+  "requirements": [
+    "FR-DIR-006",
+    "FR-DIR-001",
+    "FR-DIR-002",
+    "FR-DIR-003"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

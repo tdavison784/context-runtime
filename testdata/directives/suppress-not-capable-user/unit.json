@@ -1,0 +1,11 @@
+{
+  "description": "Ordinary USER chat is not parsed; directive-looking headings get source_not_capable diagnostics (FR-ING-004).",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "USER",
+  "directive_capable": false,
+  "no_directives": true
+}

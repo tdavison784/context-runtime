@@ -1,0 +1,10 @@
+{
+  "description": "ttl is ASCII digits with a positive value in 1..2147483647, leading zeros allowed; other values are invalid and ignored (R1).",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

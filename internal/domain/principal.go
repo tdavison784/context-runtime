@@ -128,3 +128,20 @@ func merge(x, y string) (string, bool) {
 	}
 	return "", false
 }
+
+// SourceActor is the principal a span's content acts as (D15): the caller's
+// authenticated ownership IDs with authority reduced to the span's authority.
+// Directive commands and indirect mutations a span causes are authorized as
+// this actor, never as the stronger ingestion caller, so a USER span carried
+// by a SYSTEM caller cannot borrow SYSTEM authority (confused deputy). A span
+// that outranks the caller is ErrInvalidAuthorityPromotion.
+func SourceActor(p Principal, spanAuthority Authority) (Principal, error) {
+	if err := p.Validate(); err != nil {
+		return Principal{}, err
+	}
+	if !p.Authority.AtLeast(spanAuthority) {
+		return Principal{}, ErrInvalidAuthorityPromotion
+	}
+	p.Authority = spanAuthority
+	return p, nil
+}

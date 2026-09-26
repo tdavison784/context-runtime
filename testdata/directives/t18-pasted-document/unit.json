@@ -1,0 +1,10 @@
+{
+  "description": "T18 step 1: a document pasted into ordinary USER chat creates no goal, pin, obligation or command; diagnostics record the unparsed headings.",
+  "requirements": [
+    "T18",
+    "FR-ING-004"
+  ],
+  "authority": "USER",
+  "directive_capable": false,
+  "no_directives": true
+}

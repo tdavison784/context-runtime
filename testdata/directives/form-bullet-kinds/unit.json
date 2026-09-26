@@ -1,0 +1,9 @@
+{
+  "description": "Bullets are '-', '*' and 'N.'; other markers are stray list prose (M4).",
+  "requirements": [
+    "FR-DIR-006",
+    "M4"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

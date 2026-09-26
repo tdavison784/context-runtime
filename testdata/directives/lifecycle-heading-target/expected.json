@@ -1,0 +1,63 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "RESOLVE",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        22
+      ],
+      "heading_range": [
+        0,
+        21
+      ],
+      "body_range": [
+        21,
+        22
+      ],
+      "directive_id": "upgrade"
+    },
+    {
+      "keyword": "UNPIN",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        22,
+        41
+      ],
+      "heading_range": [
+        22,
+        37
+      ],
+      "body_range": [
+        37,
+        41
+      ],
+      "directive_id": "api"
+    }
+  ],
+  "items": [],
+  "lifecycle": [
+    {
+      "action": "RESOLVE",
+      "target_id": "upgrade",
+      "authority": "USER",
+      "range": [
+        0,
+        22
+      ]
+    },
+    {
+      "action": "UNPIN",
+      "target_id": "api",
+      "authority": "USER",
+      "range": [
+        22,
+        41
+      ]
+    }
+  ],
+  "diagnostics": []
+}

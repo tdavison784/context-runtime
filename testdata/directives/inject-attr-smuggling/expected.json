@@ -1,0 +1,218 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        179
+      ],
+      "heading_range": [
+        0,
+        10
+      ],
+      "body_range": [
+        10,
+        179
+      ],
+      "items": [
+        0,
+        1
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "PINNED",
+      "status": "MALFORMED",
+      "level": 2,
+      "range": [
+        179,
+        227
+      ],
+      "heading_range": [
+        179,
+        220
+      ],
+      "body_range": [
+        220,
+        227
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        227,
+        265
+      ],
+      "heading_range": [
+        227,
+        251
+      ],
+      "body_range": [
+        251,
+        265
+      ],
+      "items": [
+        2
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "pinned-4e0fa8cfb016ab5808846be582748c62ac64339d4fe274c1daa231a9fab7ce7c",
+      "authority": "USER",
+      "text": "x {scope=SESSION}",
+      "content_hash": "sha256:4e0fa8cfb016ab5808846be582748c62ac64339d4fe274c1daa231a9fab7ce7c",
+      "range": [
+        120,
+        140
+      ],
+      "text_ranges": [
+        [
+          122,
+          139
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "pinned-a9cd995280a38f8666e68bcd56736c67cf06efca78a6f6ffd5aa5de9674a5321",
+      "authority": "USER",
+      "text": "{scope=SESSION} y",
+      "content_hash": "sha256:a9cd995280a38f8666e68bcd56736c67cf06efca78a6f6ffd5aa5de9674a5321",
+      "kind": "instruction",
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "instruction",
+          "range": [
+            143,
+            159
+          ]
+        }
+      ],
+      "range": [
+        140,
+        179
+      ],
+      "text_ranges": [
+        [
+          161,
+          178
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 2,
+      "directive_id": "pinned-7dbeb41a7cec65ab5779c81abfe14846aefc22fc157dab34614d0c324f9f1e05",
+      "authority": "USER",
+      "text": "not widened",
+      "content_hash": "sha256:7dbeb41a7cec65ab5779c81abfe14846aefc22fc157dab34614d0c324f9f1e05",
+      "range": [
+        251,
+        265
+      ],
+      "text_ranges": [
+        [
+          253,
+          264
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        10,
+        50
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        50,
+        78
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        78,
+        120
+      ]
+    },
+    {
+      "index": 3,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-4e0fa8cfb016ab5808846be582748c62ac64339d4fe274c1daa231a9fab7ce7c",
+      "range": [
+        120,
+        140
+      ]
+    },
+    {
+      "index": 4,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-a9cd995280a38f8666e68bcd56736c67cf06efca78a6f6ffd5aa5de9674a5321",
+      "range": [
+        140,
+        179
+      ]
+    },
+    {
+      "index": 5,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        179,
+        219
+      ]
+    },
+    {
+      "index": 6,
+      "code": "ErrMalformedDirective",
+      "reason": "scope_widening",
+      "section": "PINNED",
+      "range": [
+        237,
+        250
+      ]
+    },
+    {
+      "index": 7,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-7dbeb41a7cec65ab5779c81abfe14846aefc22fc157dab34614d0c324f9f1e05",
+      "range": [
+        251,
+        265
+      ]
+    }
+  ]
+}

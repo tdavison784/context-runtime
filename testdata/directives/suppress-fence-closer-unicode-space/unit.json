@@ -1,0 +1,11 @@
+{
+  "description": "Only ASCII SP/HTAB may trail a closer; NBSP/NEL keep the fence open.",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

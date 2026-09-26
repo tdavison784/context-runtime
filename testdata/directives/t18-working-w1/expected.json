@@ -1,0 +1,89 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "WORKING",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        84
+      ],
+      "heading_range": [
+        0,
+        11
+      ],
+      "body_range": [
+        11,
+        84
+      ],
+      "items": [
+        0,
+        1
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "working-e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "authority": "USER",
+      "text": "Investigating internal/client.go.",
+      "content_hash": "sha256:e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "range": [
+        11,
+        47
+      ],
+      "text_ranges": [
+        [
+          13,
+          46
+        ]
+      ]
+    },
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "working-0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "authority": "USER",
+      "text": "Current issue is TestLegacyClient.",
+      "content_hash": "sha256:0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "range": [
+        47,
+        84
+      ],
+      "text_ranges": [
+        [
+          49,
+          83
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "range": [
+        11,
+        47
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "range": [
+        47,
+        84
+      ]
+    }
+  ]
+}

@@ -1,11 +1,13 @@
 // Package sqlite provides the durable, session-partitioned store.
 //
-// The embedded forward-only migration creates one rec_* table per record
-// type. Session and record identity form each table's key; other scalar and
-// nested fields occupy typed columns. Presence columns preserve nil pointers
-// and byte slices, while JSON is limited to leaf lists. The migration checksum
-// guards this layout against silent drift when a database is reopened. The
-// sessions table tracks the sequence cursor and whether any record committed;
+// Embedded forward-only migrations create one rec_* table per record type;
+// committed migrations are never edited, so every schema change is a new
+// numbered file. Session and record identity form each table's key; other
+// scalar and nested fields occupy typed columns. Presence columns preserve
+// nil pointers and byte slices, while JSON is limited to leaf lists (content
+// parts store every string byte for byte). The migration checksum guards this
+// layout against silent drift when a database is reopened. The sessions
+// table tracks the sequence cursor and whether any record committed;
 // directives use the item's full access boundary as part of their key.
 package sqlite
 
@@ -161,7 +163,10 @@ func (s *Store) applyMigrations(ctx context.Context, source fs.FS) error {
 					return fmt.Errorf("migration %d checksum mismatch", number)
 				}
 			case errors.Is(err, sql.ErrNoRows):
-				if _, err = conn.ExecContext(ctx, string(sqlBytes)); err == nil {
+				if _, err = conn.ExecContext(ctx, string(sqlBytes)); err == nil && migrationSteps[number] != nil {
+					err = migrationSteps[number](ctx, conn)
+				}
+				if err == nil {
 					_, err = conn.ExecContext(ctx, "INSERT INTO schema_migrations(version,name,checksum) VALUES(?,?,?)", number, base, checksum)
 				}
 				if err != nil {
@@ -459,6 +464,10 @@ func (t *transaction) noteSequence(value any) {
 		semantic(v.Seq)
 	case domain.MutationGrant:
 		semantic(v.IssuedSeq)
+	case receiptRow:
+		semantic(v.Seq)
+	case domain.UnresolvedReference:
+		semantic(v.Seq)
 	case domain.LifecycleEvent:
 		if v.TargetKind == domain.TargetCall {
 			if t.ledgerSeqs == nil {

@@ -1,0 +1,219 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_1ed3415ad67f48790cffd1cf0dfb7b8e",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Archive [a]\n## unarchive [a]\n## PROMOTE [a]\n## Demote\n## Block [a]\n- [b]\n## Unblock [a]\n## Waive [tests]\n### Pinned\n- hidden\n## CompleteTask\n## Reopen [g]\n## Archived\n## Complete Task\n## Remember\n- kept\n"
+        }
+      ],
+      "content_hash": "sha256:d8994dfbb36d4d84711b401bacca5bca10cfb2df048e32c743b52132ce8b8538"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_77386c04888fe4e296f7ab2093d8062f",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "kept"
+        }
+      ],
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            199,
+            206
+          ],
+          "slices": [
+            [
+              201,
+              205
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        0,
+        14
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        15,
+        31
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        32,
+        46
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        47,
+        56
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 4,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        57,
+        69
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 5,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        76,
+        90
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 6,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        91,
+        107
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 7,
+      "code": "DirectiveNotParsed",
+      "reason": "nested_heading",
+      "section": "PINNED",
+      "range": [
+        108,
+        118
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 8,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        128,
+        143
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 9,
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
+      "range": [
+        144,
+        157
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 10,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        199,
+        206
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

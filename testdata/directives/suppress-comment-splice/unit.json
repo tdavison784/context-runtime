@@ -1,0 +1,11 @@
+{
+  "description": "Comment removal never synthesizes a keyword (D5).",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

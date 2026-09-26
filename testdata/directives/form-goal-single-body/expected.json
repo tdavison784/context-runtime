@@ -1,0 +1,99 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "GOAL",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        51
+      ],
+      "heading_range": [
+        0,
+        18
+      ],
+      "body_range": [
+        18,
+        51
+      ],
+      "directive_id": "upgrade",
+      "items": [
+        0
+      ]
+    },
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        51,
+        68
+      ],
+      "heading_range": [
+        51,
+        63
+      ],
+      "body_range": [
+        63,
+        68
+      ],
+      "items": [
+        1
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "GOAL",
+      "section_index": 0,
+      "directive_id": "upgrade",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "  Upgrade Foo  \r\nkeep compat\t",
+      "content_hash": "sha256:8a05b72c2499445e866c34bf09e87c8567f469a115f076fdab320bd0c201e145",
+      "range": [
+        0,
+        51
+      ],
+      "text_ranges": [
+        [
+          19,
+          48
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 1,
+      "directive_id": "remember-31ae2c8c621469622d5a951183f1d264a0e3b71298b4589ff2e43e9ed0afc012",
+      "authority": "USER",
+      "text": "next",
+      "content_hash": "sha256:31ae2c8c621469622d5a951183f1d264a0e3b71298b4589ff2e43e9ed0afc012",
+      "range": [
+        51,
+        68
+      ],
+      "text_ranges": [
+        [
+          63,
+          67
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-31ae2c8c621469622d5a951183f1d264a0e3b71298b4589ff2e43e9ed0afc012",
+      "range": [
+        51,
+        68
+      ]
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "status": "MALFORMED",
+      "level": 2,
+      "range": [
+        0,
+        23
+      ],
+      "heading_range": [
+        0,
+        16
+      ],
+      "body_range": [
+        16,
+        23
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "WORKING",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        23,
+        189
+      ],
+      "heading_range": [
+        23,
+        34
+      ],
+      "body_range": [
+        34,
+        189
+      ],
+      "items": [
+        0
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [
+    {
+      "section": "WORKING",
+      "section_index": 1,
+      "directive_id": "working-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "authority": "USER",
+      "text": "kept",
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "kind": "task_state",
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "task_state",
+          "range": [
+            167,
+            182
+          ]
+        }
+      ],
+      "range": [
+        164,
+        189
+      ],
+      "text_ranges": [
+        [
+          184,
+          188
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        0,
+        15
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        34,
+        49
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        49,
+        56
+      ]
+    },
+    {
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        56,
+        79
+      ]
+    },
+    {
+      "index": 4,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        79,
+        108
+      ]
+    },
+    {
+      "index": 5,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        108,
+        129
+      ]
+    },
+    {
+      "index": 6,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        129,
+        150
+      ]
+    },
+    {
+      "index": 7,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        150,
+        164
+      ]
+    },
+    {
+      "index": 8,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        164,
+        189
+      ]
+    }
+  ]
+}

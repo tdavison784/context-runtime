@@ -1,0 +1,10 @@
+{
+  "description": "HARNESS units may request WORKFLOW/SESSION scope.",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1"
+  ],
+  "authority": "HARNESS",
+  "directive_capable": false
+}

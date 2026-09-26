@@ -3,16 +3,32 @@ package sqlite
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
+// verifyItemContent fails with domain.ErrIntegrity when a stored item's
+// parts no longer match its content hash, as for a row whose text 0001
+// altered before migration 0002 (R8). Such an item is never returned.
+func verifyItemContent(v domain.ContextItem) error {
+	if domain.ContentHash(v.Parts) != v.ContentHash || domain.SemanticBytes(v.Parts) != v.SemanticBytes {
+		return fmt.Errorf("%w: item %s content does not match its hash", domain.ErrIntegrity, v.ID)
+	}
+	return nil
+}
+
 func (t *transaction) Item(id string) (domain.ContextItem, error) {
 	var v domain.ContextItem
-	err := t.get("item", id, 0, &v)
-	return v, err
+	if err := t.get("item", id, 0, &v); err != nil {
+		return domain.ContextItem{}, err
+	}
+	if err := verifyItemContent(v); err != nil {
+		return domain.ContextItem{}, err
+	}
+	return v, nil
 }
 func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 	items, err := listRecords[domain.ContextItem](t, "item")
@@ -21,6 +37,9 @@ func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 	}
 	out := make([]domain.ContextItem, 0)
 	for _, v := range items {
+		if err := verifyItemContent(v); err != nil {
+			return nil, err
+		}
 		if f.TaskID != "" && f.TaskID != v.TaskID || f.AgentID != "" && f.AgentID != v.AgentID || f.Residency != "" && f.Residency != v.Residency || f.DirectiveID != "" && f.DirectiveID != v.DirectiveID || f.EventID != "" && f.EventID != v.EventID || v.Seq < f.MinSeq || f.MaxSeq != 0 && v.Seq > f.MaxSeq {
 			continue
 		}
@@ -94,39 +113,48 @@ func (t *transaction) Blob(hash string) (domain.Blob, error) {
 	}
 	return v, nil
 }
-func (t *transaction) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
-	if err := boundary.Validate(); err != nil {
+func (t *transaction) CurrentVersion(key domain.CurrentKey) (string, error) {
+	if err := key.Validate(); err != nil {
 		return "", err
 	}
-	// A boundary in another session names nothing here: reads report it as
-	// missing, never as invalid, so they cannot probe other sessions.
-	if boundary.SessionID != t.session {
-		return "", domain.ErrNotFound
-	}
-	var id string
-	err := t.conn.QueryRowContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND directive_id=? AND boundary_scope=? AND boundary_session_id=? AND boundary_workflow_id=? AND boundary_task_id=? AND boundary_agent_id=?", t.session, taskID, directiveID, boundary.Scope, boundary.SessionID, boundary.WorkflowID, boundary.TaskID, boundary.AgentID).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", domain.ErrNotFound
-	}
-	return id, err
+	return t.current(key.TaskID, key.ID, key.Access, key.Namespace)
 }
 
-func (t *transaction) CurrentDirectives(taskID, directiveID string) ([]string, error) {
-	rows, err := t.conn.QueryContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND directive_id=? ORDER BY item_id", t.session, taskID, directiveID)
+func (t *transaction) CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error) {
+	if !ns.Valid() {
+		return nil, fmt.Errorf("%w: invalid namespace %q", domain.ErrInvalidRecord, ns)
+	}
+	rows, err := t.conn.QueryContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND namespace=? AND directive_id=? ORDER BY item_id", t.session, taskID, ns, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var ids []string
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var itemID string
+		if err := rows.Scan(&itemID); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		ids = append(ids, itemID)
 	}
 	return ids, rows.Err()
 }
+
+// current looks up one pointer. A boundary in another session names nothing
+// here: reads report it as missing, never as invalid, so they cannot probe
+// other sessions.
+func (t *transaction) current(taskID, id string, boundary domain.AccessBoundary, ns domain.DirectiveNamespace) (string, error) {
+	if boundary.SessionID != t.session {
+		return "", domain.ErrNotFound
+	}
+	var itemID string
+	err := t.conn.QueryRowContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND namespace=? AND directive_id=? AND boundary_scope=? AND boundary_session_id=? AND boundary_workflow_id=? AND boundary_task_id=? AND boundary_agent_id=?", t.session, taskID, ns, id, boundary.Scope, boundary.SessionID, boundary.WorkflowID, boundary.TaskID, boundary.AgentID).Scan(&itemID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", domain.ErrNotFound
+	}
+	return itemID, err
+}
+
 func (t *transaction) Obligation(id string) (domain.ObligationVersion, error) {
 	vs, err := t.ObligationVersions(id)
 	if err != nil {
@@ -150,6 +178,29 @@ func (t *transaction) ObligationVersions(id string) ([]domain.ObligationVersion,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
 	return out, nil
+}
+func (t *transaction) ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("%w: obligations by source: limit must be positive", domain.ErrInvalidRecord)
+	}
+	s := schemas["obligation"]
+	rows, err := t.conn.QueryContext(t.ctx, s.selectSQL+" WHERE session_id=? AND f_source_item_id=? ORDER BY id, subkey LIMIT ?", t.session, sourceItemID, limit+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.ObligationVersion{}
+	for rows.Next() {
+		if len(out) == limit {
+			return nil, store.ErrLimitExceeded
+		}
+		v, err := s.scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("obligation: %w", err)
+		}
+		out = append(out, v.Interface().(domain.ObligationVersion))
+	}
+	return out, rows.Err()
 }
 func (t *transaction) Obligations(taskID string) ([]domain.ObligationVersion, error) {
 	records, err := listRecords[domain.ObligationVersion](t, "obligation")

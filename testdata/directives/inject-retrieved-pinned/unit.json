@@ -1,0 +1,10 @@
+{
+  "description": "SDD section 9: a web page containing a Pinned section is RETRIEVED_CONTENT and is not pinned.",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9"
+  ],
+  "authority": "RETRIEVED_CONTENT",
+  "directive_capable": false,
+  "no_directives": true
+}

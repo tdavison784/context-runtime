@@ -1,0 +1,11 @@
+{
+  "description": "Directive text claiming higher authority stays USER authority and cannot widen scope (FR-ING-003).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "FR-ING-003",
+    "D12"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

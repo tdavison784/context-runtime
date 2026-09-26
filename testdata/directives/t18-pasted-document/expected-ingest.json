@@ -1,0 +1,73 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_efe587bc92cac33d96d332ab0fc3f202",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "# Design: Foo v2\n\n## Goal\nShip Foo v2 by Q3.\n\n## Pinned\n- Document constraints apply to reviewers.\n\n## Resolve [launch]\n"
+        }
+      ],
+      "content_hash": "sha256:21d5674b27420e51326bf27cd9a19b1cb7a2baa7add0d8b45c09b2dba1dc2854"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "source_not_capable",
+      "section": "GOAL",
+      "range": [
+        18,
+        25
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "source_not_capable",
+      "section": "PINNED",
+      "range": [
+        46,
+        55
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "DirectiveNotParsed",
+      "reason": "source_not_capable",
+      "section": "RESOLVE",
+      "range": [
+        100,
+        119
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

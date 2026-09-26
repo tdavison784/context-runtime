@@ -1,0 +1,99 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "EPHEMERAL",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        72,
+        92
+      ],
+      "heading_range": [
+        72,
+        85
+      ],
+      "body_range": [
+        85,
+        92
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "EPHEMERAL",
+      "section_index": 0,
+      "directive_id": "ephemeral-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "authority": "SYSTEM",
+      "text": "kept",
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        85,
+        92
+      ],
+      "text_ranges": [
+        [
+          87,
+          91
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "block_quote",
+      "section": "PINNED",
+      "range": [
+        2,
+        11
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "block_quote",
+      "section": "GOAL",
+      "range": [
+        24,
+        31
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveNotParsed",
+      "reason": "block_quote",
+      "section": "WORKING",
+      "range": [
+        37,
+        47
+      ]
+    },
+    {
+      "index": 3,
+      "code": "DirectiveNotParsed",
+      "reason": "block_quote",
+      "section": "REMEMBER",
+      "range": [
+        52,
+        63
+      ]
+    },
+    {
+      "index": 4,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "EPHEMERAL",
+      "directive_id": "ephemeral-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        85,
+        92
+      ]
+    }
+  ]
+}

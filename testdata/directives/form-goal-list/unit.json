@@ -1,0 +1,9 @@
+{
+  "description": "A Goal body that is a top-level list yields one item per bullet.",
+  "requirements": [
+    "FR-DIR-006",
+    "FR-DIR-001"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

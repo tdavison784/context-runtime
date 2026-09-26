@@ -1,0 +1,11 @@
+{
+  "description": "One BOM is skipped only at byte 0 of a unit; CR is a line break for fences and quotes too, so it cannot end suppression early (D3).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "D3"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

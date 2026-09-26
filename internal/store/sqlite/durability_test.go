@@ -2,9 +2,13 @@ package sqlite
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -57,7 +61,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 		}
 		expected["items"] = []domain.ContextItem{item, second}
 		expected["blob"] = blob
-		if err := tx.SetCurrentDirective("task", "d1", "i1"); err != nil {
+		if err := tx.SetCurrentVersion("i1"); err != nil {
 			return err
 		}
 		expected["directive"] = "i1"
@@ -166,7 +170,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 			if m["blob"], err = tx.Blob(domain.HashBytes([]byte("blob"))); err != nil {
 				return err
 			}
-			if m["directive"], err = tx.CurrentDirective("task", "d1", item.Access); err != nil {
+			if m["directive"], err = tx.CurrentVersion(domain.CurrentKey{SessionID: "s", TaskID: "task", Access: item.Access, Namespace: domain.NamespaceDirective, ID: "d1"}); err != nil {
 				return err
 			}
 			if m["obligation"], err = tx.Obligation("o1"); err != nil {
@@ -254,13 +258,91 @@ func TestMigrationChecksumMismatch(t *testing.T) {
 	}
 }
 
-func TestEmbeddedSchemaMatchesTypes(t *testing.T) {
-	b, err := migrations.ReadFile("migrations/0001_init.sql")
+// committedMigrations pins the checksum of every committed migration.
+// Migrations are forward-only (ADR 3, R8): a committed file is never edited,
+// and a schema change always lands as a new numbered file added here.
+var committedMigrations = map[string]string{
+	"0001_init.sql":                       "b854c18a7c7573ef8346e39903fb8d2faed2336b02bd92f3f26862c676e7f3a6",
+	"0002_lossless_parts.sql":             "a897953dc55e11ebf150735f7456a8928602633deb4393f890344475d4c29140",
+	"0003_lossless_string_lists.sql":      "5a6ea923364592d6d5352e9d88f5a008c874cfa6e9fffc96d694b7cf974cb783",
+	"0004_item_provenance_and_claims.sql": "28fb42784d55451370936adeabad8a0c9324ac2eb0ab114c6a1bf652acb2682a",
+	"0005_current_version_namespace.sql":  "0527eefcced1a570d91ee412565b90e74d91e6d83bf12c629eaf18cee1063725",
+	"0006_obligation_source_index.sql":    "edf28088fa126863e097258a17f80b88ea7d30ff1bb6ce19a5f70d3f8ba0ee1b",
+	"0007_ingestion_records.sql":          "1ad74ed0a49f73a42cd56e6fd3dd517139af1c464146efeef76aaa72ba93e836",
+	"0008_unresolved_references.sql":      "ff8f0422c61ffc45996c7b4fcf95cd4437a66e2141d3353f7a139fabfe538fa7",
+	"0009_item_blob_index.sql":            "0d1792ff5e3b159224ae2692af3ced94f5c06ad83cc454f912573000461d8fe5",
+	"0010_item_duplicate_index.sql":       "0a181a80b748f5c8c6797e0f58e015935d21c1df68f85754f2e356ac052c8197",
+	"0011_item_source_index.sql":          "f0cb7508d575adaa12a20009e9860ab96478f9b8fc52424a62fc846f420a583c",
+}
+
+func TestCommittedMigrationsUnchanged(t *testing.T) {
+	names, err := fs.Glob(migrations, "migrations/*.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(b) != schemaDDL() {
-		t.Fatal("embedded migration differs from typed record schema")
+	if len(names) != len(committedMigrations) {
+		t.Fatalf("embedded migrations = %v, want exactly the %d pinned in committedMigrations", names, len(committedMigrations))
+	}
+	for _, name := range names {
+		b, err := migrations.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(b)
+		want, ok := committedMigrations[filepath.Base(name)]
+		if got := hex.EncodeToString(sum[:]); !ok || got != want {
+			t.Errorf("%s checksum = %s, want %q: committed migrations are never edited", name, got, want)
+		}
+	}
+}
+
+func TestMigratedSchemaMatchesTypes(t *testing.T) {
+	s, _ := openTemp(t)
+	want := typedColumns()
+	rows, err := s.db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rec\\_%' ESCAPE '\\'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(tables) != len(want) {
+		t.Errorf("record tables = %v, want %d", tables, len(want))
+	}
+	for table, cols := range want {
+		got := make(map[string]string)
+		rows, err := s.db.Query("SELECT name, type, \"notnull\", COALESCE(dflt_value, '') FROM pragma_table_info(?)", table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var name, typ, dflt string
+			var notNull bool
+			if err := rows.Scan(&name, &typ, &notNull, &dflt); err != nil {
+				t.Fatal(err)
+			}
+			if notNull {
+				typ += " NOT NULL"
+			}
+			if dflt != "" {
+				typ += " DEFAULT " + dflt
+			}
+			got[name] = typ
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if !maps.Equal(got, cols) {
+			t.Errorf("%s columns after migrations:\n got  %v\n want %v", table, got, cols)
+		}
 	}
 }
 

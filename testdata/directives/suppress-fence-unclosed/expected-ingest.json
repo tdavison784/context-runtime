@@ -1,0 +1,107 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_44c5b1e0cfe97f61f7d3086fa99ce46d",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "```go\n## Pinned\n- hidden\n## Goal\nhidden\n"
+        }
+      ],
+      "content_hash": "sha256:5e1275b2dd46484d7851e8a93f6c85d899891d175df3ebac4e040618931adcfd"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_a3fb4e57546092a46963022cf1f869f2",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "```go\n## Pinned\n- hidden\n## Goal\nhidden\n"
+        }
+      ],
+      "content_hash": "sha256:bfb47652a55f98b8621a86cbc3449c2c073fe5db5766b7df147868e39ea4088d",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            40
+          ],
+          "slices": [
+            [
+              0,
+              40
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "PINNED",
+      "range": [
+        6,
+        15
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "GOAL",
+      "range": [
+        25,
+        32
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

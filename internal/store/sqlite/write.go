@@ -62,7 +62,29 @@ func (t *transaction) InsertItem(v domain.ContextItem) error {
 			return domain.ErrIntegrity
 		}
 	}
-	return t.put("item", v.ID, 0, v, false)
+	return t.atomic(func() error {
+		if err := t.put("item", v.ID, 0, v, false); err != nil {
+			return err
+		}
+		// item_sources indexes the item's source locator key (R19).
+		if v.Source != nil {
+			if key, ok := domain.LocatorKey(v.Source.Kind, v.Source.Locator); ok {
+				if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO item_sources(session_id,rule_version,locator_key,item_id) VALUES(?,?,?,?)", t.session, domain.LocatorRuleVersion, key, v.ID); err != nil {
+					return err
+				}
+			}
+		}
+		// item_blobs indexes each referenced blob once per item (R19).
+		for _, part := range v.Parts {
+			if part.BlobHash == "" {
+				continue
+			}
+			if _, err := t.conn.ExecContext(t.ctx, "INSERT OR IGNORE INTO item_blobs(session_id,blob_hash,item_id) VALUES(?,?,?)", t.session, part.BlobHash, v.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error) {
 	old, err := t.Item(id)
@@ -166,15 +188,20 @@ func (t *transaction) loadSupersession() error {
 	t.supersessionLoaded = true
 	return nil
 }
-func (t *transaction) SetCurrentDirective(taskID, directiveID, itemID string) error {
+func (t *transaction) SetCurrentVersion(itemID string) error {
 	v, err := t.Item(itemID)
 	if err != nil {
 		return err
 	}
-	if v.TaskID != taskID || v.DirectiveID != directiveID {
-		return fmt.Errorf("%w: directive item mismatch", domain.ErrInvalidRecord)
+	key, ok := v.CurrentKey()
+	if !ok {
+		return fmt.Errorf("%w: item %s has no directive ID", domain.ErrInvalidRecord, itemID)
 	}
-	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO directives(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id) DO UPDATE SET item_id=excluded.item_id", t.session, taskID, directiveID, v.Access.Scope, v.Access.SessionID, v.Access.WorkflowID, v.Access.TaskID, v.Access.AgentID, itemID)
+	if err := key.Validate(); err != nil {
+		return fmt.Errorf("item %s: %w", itemID, err)
+	}
+	a := key.Access
+	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO directives(session_id,task_id,namespace,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,task_id,namespace,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id) DO UPDATE SET item_id=excluded.item_id", t.session, key.TaskID, key.Namespace, key.ID, a.Scope, a.SessionID, a.WorkflowID, a.TaskID, a.AgentID, itemID)
 	if err == nil {
 		t.semanticWrite, t.wrote = true, true
 	}
@@ -239,6 +266,42 @@ func (t *transaction) InsertObligationVersion(v domain.ObligationVersion) error 
 		return domain.ErrVersionConflict
 	}
 	return t.put("obligation", v.ObligationID, int(v.Version), v, false)
+}
+func (t *transaction) RetireObligationVersion(obligationID string, version, expected uint64, event domain.LifecycleEvent) (domain.ObligationVersion, error) {
+	var old domain.ObligationVersion
+	if err := t.get("obligation", obligationID, int(version), &old); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	if old.Revision != expected {
+		return domain.ObligationVersion{}, domain.ErrVersionConflict
+	}
+	if !old.Current {
+		return domain.ObligationVersion{}, fmt.Errorf("%w: obligation %s/%d is already retired", domain.ErrInvalidTransition, obligationID, version)
+	}
+	if event.TargetKind != domain.TargetObligation || event.TargetID != obligationID {
+		return domain.ObligationVersion{}, fmt.Errorf("%w: lifecycle target mismatch", domain.ErrInvalidRecord)
+	}
+	if err := event.Validate(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	if err := t.checkSession(event.SessionID); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	if err := t.checkSeq(event.Seq); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	v := old.Clone()
+	v.Current, v.RetiredSeq, v.Revision = false, event.Seq, expected+1
+	if err := v.Validate(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	err := t.atomic(func() error {
+		if err := t.put("obligation", obligationID, int(version), v, true); err != nil {
+			return err
+		}
+		return t.AppendLifecycleEvent(event)
+	})
+	return v, err
 }
 func (t *transaction) UpdateObligationVersion(v domain.ObligationVersion, expected uint64) (domain.ObligationVersion, error) {
 	var old domain.ObligationVersion

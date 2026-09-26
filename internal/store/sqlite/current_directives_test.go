@@ -26,7 +26,7 @@ func TestCurrentDirectivesAcrossBoundaries(t *testing.T) {
 			if err := tx.InsertItem(item); err != nil {
 				return err
 			}
-			if err := tx.SetCurrentDirective("task", "directive", spec.id); err != nil {
+			if err := tx.SetCurrentVersion(spec.id); err != nil {
 				return err
 			}
 		}
@@ -35,14 +35,14 @@ func TestCurrentDirectivesAcrossBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
-		ids, err := tx.CurrentDirectives("task", "directive")
+		ids, err := tx.CurrentVersions("task", domain.NamespaceDirective, "directive")
 		if err != nil {
 			return err
 		}
 		if !slices.Equal(ids, []string{"a", "z"}) {
 			t.Fatalf("CurrentDirectives = %v", ids)
 		}
-		ids, err = tx.CurrentDirectives("task", "absent")
+		ids, err = tx.CurrentVersions("task", domain.NamespaceDirective, "absent")
 		if err != nil || len(ids) != 0 {
 			t.Fatalf("absent = %v, %v", ids, err)
 		}

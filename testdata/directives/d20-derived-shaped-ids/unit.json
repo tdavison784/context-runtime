@@ -1,0 +1,10 @@
+{
+  "description": "An explicit ID in the derived-ID shape (lowercase content keyword, '-', 64 lowercase hex) drops the item; near misses are ordinary exact-case IDs (D20, FR-DIR-002).",
+  "requirements": [
+    "FR-DIR-006",
+    "D20",
+    "FR-DIR-002"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

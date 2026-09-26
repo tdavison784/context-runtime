@@ -1,0 +1,11 @@
+{
+  "description": "Tool output cannot pin itself, resolve goals, unpin or waive (SDD section 9).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "FR-AUTH-001"
+  ],
+  "authority": "TOOL",
+  "directive_capable": false,
+  "no_directives": true
+}

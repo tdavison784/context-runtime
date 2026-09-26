@@ -69,6 +69,12 @@ var suite = []testCase{
 
 	// Semantic state.
 	{"ItemRichRoundTrip", testItemRichRoundTrip},
+	{"ItemLosslessText", testItemLosslessText},
+	{"ByteExactStringLists", testByteExactStringLists},
+	{"ItemProvenance", testItemProvenance},
+	{"ItemsByBlob", testItemsByBlob},
+	{"DuplicateCandidates", testDuplicateCandidates},
+	{"ItemsBySourceKey", testItemsBySourceKey},
 	{"ItemInsertRules", testItemInsertRules},
 	{"ItemBlobIntegrity", testItemBlobIntegrity},
 	{"ItemsFilterOrder", testItemsFilterOrder},
@@ -81,10 +87,24 @@ var suite = []testCase{
 	{"Blobs", testBlobs},
 	{"DirectiveReplacement", testDirectiveReplacement},
 	{"DirectiveBoundaries", testDirectiveBoundaries},
-	{"CurrentDirectivesOrder", testCurrentDirectivesOrder},
+	{"CurrentVersions(DIRECTIVE)Order", testCurrentDirectivesOrder},
+	{"CurrentNamespaces", testCurrentNamespaces},
+
+	// Ingestion records.
+	{"IngestionRoundTrip", testIngestionRoundTrip},
+	{"ReceiptKeepsOriginalItems", testReceiptKeepsOriginalItems},
+	{"IngestionInsertRules", testIngestionInsertRules},
+	{"AnonymousIngestions", testAnonymousIngestions},
+	{"DiagnosticsAccess", testDiagnosticsAccess},
+	{"IngestionDeepCopies", testIngestionDeepCopies},
+	{"UnresolvedReferences", testUnresolvedReferences},
+	{"UnresolvedReferenceInsertRules", testUnresolvedReferenceInsertRules},
 
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
+	{"ObligationClaim", testObligationClaim},
+	{"ObligationsBySource", testObligationsBySource},
+	{"RetireObligationVersion", testRetireObligationVersion},
 	{"ObligationTransitions", testObligationTransitions},
 	{"MatcherTransition", testMatcherTransition},
 	{"Grants", testGrants},

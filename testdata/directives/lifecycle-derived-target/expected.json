@@ -1,0 +1,36 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "UNPIN",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        83
+      ],
+      "heading_range": [
+        0,
+        83
+      ],
+      "body_range": [
+        83,
+        83
+      ],
+      "directive_id": "pinned-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  ],
+  "items": [],
+  "lifecycle": [
+    {
+      "action": "UNPIN",
+      "target_id": "pinned-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "authority": "USER",
+      "range": [
+        0,
+        83
+      ]
+    }
+  ],
+  "diagnostics": []
+}

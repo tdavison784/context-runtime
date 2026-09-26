@@ -1,0 +1,16 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [],
+  "items": [],
+  "lifecycle": [],
+  "diagnostics": [],
+  "more_units": [
+    {
+      "parser_version": "directive/v1",
+      "sections": [],
+      "items": [],
+      "lifecycle": [],
+      "diagnostics": []
+    }
+  ]
+}

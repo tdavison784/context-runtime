@@ -1,0 +1,510 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "GOAL",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        58
+      ],
+      "heading_range": [
+        0,
+        48
+      ],
+      "body_range": [
+        48,
+        58
+      ],
+      "attributes": [
+        {
+          "name": "scope",
+          "value": "TASK",
+          "range": [
+            37,
+            47
+          ]
+        }
+      ],
+      "items": [
+        0
+      ]
+    },
+    {
+      "keyword": "REFERENCES",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        58,
+        105
+      ],
+      "heading_range": [
+        58,
+        93
+      ],
+      "body_range": [
+        93,
+        105
+      ],
+      "attributes": [
+        {
+          "name": "ttl",
+          "value": "3",
+          "range": [
+            87,
+            92
+          ]
+        }
+      ],
+      "items": [
+        1
+      ]
+    },
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        105,
+        147
+      ],
+      "heading_range": [
+        105,
+        143
+      ],
+      "body_range": [
+        143,
+        147
+      ],
+      "attributes": [
+        {
+          "name": "obligation",
+          "value": "tests_pass",
+          "range": [
+            121,
+            142
+          ]
+        }
+      ],
+      "items": [
+        2
+      ]
+    },
+    {
+      "keyword": "WORKING",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        147,
+        202
+      ],
+      "heading_range": [
+        147,
+        198
+      ],
+      "body_range": [
+        198,
+        202
+      ],
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "conversation",
+          "range": [
+            180,
+            197
+          ]
+        }
+      ],
+      "items": [
+        3
+      ]
+    },
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        202,
+        237
+      ],
+      "heading_range": [
+        202,
+        233
+      ],
+      "body_range": [
+        233,
+        237
+      ],
+      "attributes": [
+        {
+          "name": "ttl",
+          "value": "4",
+          "range": [
+            227,
+            232
+          ]
+        }
+      ],
+      "items": [
+        4
+      ]
+    },
+    {
+      "keyword": "EPHEMERAL",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        237,
+        281
+      ],
+      "heading_range": [
+        237,
+        277
+      ],
+      "body_range": [
+        277,
+        281
+      ],
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "evidence",
+          "range": [
+            263,
+            276
+          ]
+        }
+      ],
+      "items": [
+        5
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "GOAL",
+      "section_index": 0,
+      "directive_id": "goal-64229c8fa75aa2ebb53bb56bd442d7766b60bc47c5fc1fc3090edf2dfd74b951",
+      "authority": "USER",
+      "text": "goal text",
+      "content_hash": "sha256:64229c8fa75aa2ebb53bb56bd442d7766b60bc47c5fc1fc3090edf2dfd74b951",
+      "scope": "TASK",
+      "attributes": [
+        {
+          "name": "scope",
+          "value": "TASK",
+          "range": [
+            37,
+            47
+          ]
+        }
+      ],
+      "range": [
+        0,
+        58
+      ],
+      "text_ranges": [
+        [
+          48,
+          57
+        ]
+      ]
+    },
+    {
+      "section": "REFERENCES",
+      "section_index": 1,
+      "directive_id": "references-460c959c46635525bbfcc8229e2d9d7f4a871b41db5963ccf3f48c4942a2ce74",
+      "authority": "USER",
+      "text": "docs/a.md",
+      "content_hash": "sha256:460c959c46635525bbfcc8229e2d9d7f4a871b41db5963ccf3f48c4942a2ce74",
+      "ttl_turns": 3,
+      "attributes": [
+        {
+          "name": "ttl",
+          "value": "3",
+          "range": [
+            87,
+            92
+          ]
+        }
+      ],
+      "range": [
+        93,
+        105
+      ],
+      "text_ranges": [
+        [
+          95,
+          104
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 2,
+      "directive_id": "pinned-b025b7a958943d33fad846c8fa76c5bdcff545bd53eacf9e24b7b0dcbe2f1be8",
+      "authority": "USER",
+      "text": "p",
+      "content_hash": "sha256:b025b7a958943d33fad846c8fa76c5bdcff545bd53eacf9e24b7b0dcbe2f1be8",
+      "obligation": "tests_pass",
+      "attributes": [
+        {
+          "name": "obligation",
+          "value": "tests_pass",
+          "range": [
+            121,
+            142
+          ]
+        }
+      ],
+      "range": [
+        143,
+        147
+      ],
+      "text_ranges": [
+        [
+          145,
+          146
+        ]
+      ]
+    },
+    {
+      "section": "WORKING",
+      "section_index": 3,
+      "directive_id": "working-27464a9daa73ebc60d10fb1eb566fc30d25f12c52f6049d7c7b88186d4de59b9",
+      "authority": "USER",
+      "text": "w",
+      "content_hash": "sha256:27464a9daa73ebc60d10fb1eb566fc30d25f12c52f6049d7c7b88186d4de59b9",
+      "kind": "conversation",
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "conversation",
+          "range": [
+            180,
+            197
+          ]
+        }
+      ],
+      "range": [
+        198,
+        202
+      ],
+      "text_ranges": [
+        [
+          200,
+          201
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 4,
+      "directive_id": "remember-652dfddf7a858cf68757f513de754f2c09ae1016fb22aeb7b2ac45dbdba22369",
+      "authority": "USER",
+      "text": "r",
+      "content_hash": "sha256:652dfddf7a858cf68757f513de754f2c09ae1016fb22aeb7b2ac45dbdba22369",
+      "ttl_turns": 4,
+      "attributes": [
+        {
+          "name": "ttl",
+          "value": "4",
+          "range": [
+            227,
+            232
+          ]
+        }
+      ],
+      "range": [
+        233,
+        237
+      ],
+      "text_ranges": [
+        [
+          235,
+          236
+        ]
+      ]
+    },
+    {
+      "section": "EPHEMERAL",
+      "section_index": 5,
+      "directive_id": "ephemeral-2f58ba0afd44529bbac7267e2a1bd0fa875298abb0e50713498d1e11ce275cbf",
+      "authority": "USER",
+      "text": "e",
+      "content_hash": "sha256:2f58ba0afd44529bbac7267e2a1bd0fa875298abb0e50713498d1e11ce275cbf",
+      "kind": "evidence",
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "evidence",
+          "range": [
+            263,
+            276
+          ]
+        }
+      ],
+      "range": [
+        277,
+        281
+      ],
+      "text_ranges": [
+        [
+          279,
+          280
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "GOAL",
+      "directive_id": "goal-64229c8fa75aa2ebb53bb56bd442d7766b60bc47c5fc1fc3090edf2dfd74b951",
+      "range": [
+        0,
+        58
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "disallowed_attribute",
+      "section": "GOAL",
+      "range": [
+        8,
+        17
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "disallowed_attribute",
+      "section": "GOAL",
+      "range": [
+        18,
+        23
+      ]
+    },
+    {
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "disallowed_attribute",
+      "section": "GOAL",
+      "range": [
+        24,
+        36
+      ]
+    },
+    {
+      "index": 4,
+      "code": "ErrMalformedDirective",
+      "reason": "disallowed_attribute",
+      "section": "REFERENCES",
+      "range": [
+        72,
+        86
+      ]
+    },
+    {
+      "index": 5,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REFERENCES",
+      "directive_id": "references-460c959c46635525bbfcc8229e2d9d7f4a871b41db5963ccf3f48c4942a2ce74",
+      "range": [
+        93,
+        105
+      ]
+    },
+    {
+      "index": 6,
+      "code": "ErrMalformedDirective",
+      "reason": "disallowed_attribute",
+      "section": "PINNED",
+      "range": [
+        115,
+        120
+      ]
+    },
+    {
+      "index": 7,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-b025b7a958943d33fad846c8fa76c5bdcff545bd53eacf9e24b7b0dcbe2f1be8",
+      "range": [
+        143,
+        147
+      ]
+    },
+    {
+      "index": 8,
+      "code": "ErrMalformedDirective",
+      "reason": "disallowed_attribute",
+      "section": "WORKING",
+      "range": [
+        158,
+        179
+      ]
+    },
+    {
+      "index": 9,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-27464a9daa73ebc60d10fb1eb566fc30d25f12c52f6049d7c7b88186d4de59b9",
+      "range": [
+        198,
+        202
+      ]
+    },
+    {
+      "index": 10,
+      "code": "ErrMalformedDirective",
+      "reason": "disallowed_attribute",
+      "section": "REMEMBER",
+      "range": [
+        214,
+        226
+      ]
+    },
+    {
+      "index": 11,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-652dfddf7a858cf68757f513de754f2c09ae1016fb22aeb7b2ac45dbdba22369",
+      "range": [
+        233,
+        237
+      ]
+    },
+    {
+      "index": 12,
+      "code": "ErrMalformedDirective",
+      "reason": "disallowed_attribute",
+      "section": "EPHEMERAL",
+      "range": [
+        250,
+        262
+      ]
+    },
+    {
+      "index": 13,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "EPHEMERAL",
+      "directive_id": "ephemeral-2f58ba0afd44529bbac7267e2a1bd0fa875298abb0e50713498d1e11ce275cbf",
+      "range": [
+        277,
+        281
+      ]
+    }
+  ]
+}
