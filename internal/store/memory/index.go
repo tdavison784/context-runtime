@@ -48,3 +48,69 @@ func iterFirst[V any](seq iter.Seq[V]) (V, bool) {
 	var zero V
 	return zero, false
 }
+
+// liveIndex is a multimap from a key to the IDs of live items, seen through
+// a transaction. Unlike index it supports removal (an item stops being live
+// when it is superseded or classified a duplicate): the overlay records
+// additions and tombstones, and commit applies both.
+type liveIndex[K comparable] struct {
+	base map[K]map[string]bool
+	over map[K]map[string]bool // true adds, false removes; nil when read-only
+}
+
+func newLiveIndex[K comparable](base map[K]map[string]bool, writable bool) liveIndex[K] {
+	x := liveIndex[K]{base: base}
+	if writable {
+		x.over = map[K]map[string]bool{}
+	}
+	return x
+}
+
+func (x *liveIndex[K]) set(k K, id string, live bool) {
+	m := x.over[k]
+	if m == nil {
+		m = map[string]bool{}
+		x.over[k] = m
+	}
+	m[id] = live
+}
+
+func (x *liveIndex[K]) add(k K, id string)    { x.set(k, id, true) }
+func (x *liveIndex[K]) remove(k K, id string) { x.set(k, id, false) }
+
+// lookup yields the live IDs under k in no particular order.
+func (x *liveIndex[K]) lookup(k K) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		over := x.over[k]
+		for id := range x.base[k] {
+			if live, ok := over[id]; ok && !live {
+				continue
+			}
+			if !yield(id) {
+				return
+			}
+		}
+		for id, live := range over {
+			if live && !x.base[k][id] {
+				if !yield(id) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (x *liveIndex[K]) commit() {
+	for k, m := range x.over {
+		for id, live := range m {
+			if live {
+				if x.base[k] == nil {
+					x.base[k] = map[string]bool{}
+				}
+				x.base[k][id] = true
+			} else {
+				delete(x.base[k], id)
+			}
+		}
+	}
+}

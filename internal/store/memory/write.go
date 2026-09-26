@@ -43,6 +43,12 @@ func (t *tx) commit(st *state) bool {
 	t.duplicates.commit()
 	t.refsByKey.commit()
 	t.itemsByKey.commit()
+	t.blobOwners.commit()
+	t.canonical.commit()
+	t.working.commit()
+	t.sources.commit()
+	t.refOwners.commit()
+	t.itemsByTask.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
 	t.events.commit()
@@ -161,6 +167,8 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 		}
 	}
 	t.duplicates.add(itemDuplicateKey(it), it.ID)
+	t.indexLookups(it)
+	t.itemsByTask.add(it.TaskID, it.ID)
 	if it.Source != nil {
 		if key, ok := domain.LocatorKey(it.Source.Kind, it.Source.Locator); ok {
 			t.itemsByKey.add(key, it.ID)
@@ -233,6 +241,13 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	t.relsFrom.add(r.FromID, r.ID)
 	t.relsTo.add(r.ToID, r.ID)
 	t.relsByType.add(r.Type, r.ID)
+	// A superseded or duplicate item is no longer live (F1).
+	switch r.Type {
+	case domain.RelSupersedes:
+		t.retireLookups(r.ToID)
+	case domain.RelDuplicateOf:
+		t.retireLookups(r.FromID)
+	}
 	t.markSequenced()
 	return nil
 }
@@ -851,6 +866,7 @@ func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
 	}
 	t.references.put(r.ID, r)
 	t.refsByKey.add(r.LocatorKey, r.ID)
+	t.refOwners.add(sourceKey{r.LocatorKey, ownersOf(r.Access)}, r.ID)
 	t.markSequenced()
 	return nil
 }

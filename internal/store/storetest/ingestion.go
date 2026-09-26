@@ -31,7 +31,7 @@ func NewIngestion(sess, eventID, occurrenceID string, seq uint64, items ...domai
 				Parts: []domain.InputPart{{Type: domain.PartText, MediaType: "text/markdown", Text: "# Resolve goal-1\n\xff"}}},
 			{Authority: domain.AuthorityUser, Access: PrivateBoundary(sess),
 				Parts:  []domain.InputPart{{Type: domain.PartImage, MediaType: "image/png", Data: blob.Data}},
-				Source: &domain.SourceRef{Kind: domain.SourcePath, Locator: "/private\xfe.png"}},
+				Source: &domain.SourceRef{Kind: domain.SourcePath, Locator: "/privé.png"}},
 		},
 	}
 	env, err := domain.NewEventEnvelope(p, occurrenceID, event)

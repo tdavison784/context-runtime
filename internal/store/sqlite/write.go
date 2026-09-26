@@ -83,7 +83,7 @@ func (t *transaction) InsertItem(v domain.ContextItem) error {
 				return err
 			}
 		}
-		return nil
+		return t.indexLookups(v)
 	})
 }
 func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error) {
@@ -153,7 +153,20 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 			return domain.ErrSupersessionCycle
 		}
 	}
-	if err := t.put("relationship", v.ID, 0, v, false); err != nil {
+	err := t.atomic(func() error {
+		if err := t.put("relationship", v.ID, 0, v, false); err != nil {
+			return err
+		}
+		// A superseded or duplicate item is no longer live (F1).
+		switch v.Type {
+		case domain.RelSupersedes:
+			return t.retireLookups(v.ToID)
+		case domain.RelDuplicateOf:
+			return t.retireLookups(v.FromID)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	if v.Type == domain.RelSupersedes {

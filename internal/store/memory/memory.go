@@ -89,6 +89,15 @@ type state struct {
 	duplicates   map[duplicateKey][]string
 	refsByKey    map[string][]string // locator key -> unresolved reference IDs
 	itemsByKey   map[string][]string // source locator key (rule v1) -> item IDs
+
+	// Access-filtered lookup indexes (F1): keyed by owner columns, live-only
+	// where noted.
+	blobOwners  map[blobKey][]string
+	canonical   map[canonicalKey]map[string]bool // live
+	working     map[workingKey]map[string]bool   // live
+	sources     map[sourceKey]map[string]bool    // live
+	refOwners   map[sourceKey][]string
+	itemsByTask map[string][]string // task ID -> item IDs (SPEC-1.3)
 }
 
 // duplicateKey is the duplicate-candidate identity of an item (R19, D10).
@@ -133,6 +142,12 @@ func newState() *state {
 		duplicates:   map[duplicateKey][]string{},
 		refsByKey:    map[string][]string{},
 		itemsByKey:   map[string][]string{},
+		blobOwners:   map[blobKey][]string{},
+		canonical:    map[canonicalKey]map[string]bool{},
+		working:      map[workingKey]map[string]bool{},
+		sources:      map[sourceKey]map[string]bool{},
+		refOwners:    map[sourceKey][]string{},
+		itemsByTask:  map[string][]string{},
 	}
 }
 
