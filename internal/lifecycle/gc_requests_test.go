@@ -174,3 +174,60 @@ func TestCollectPendingExecutesDurableRequestsOnRealStore(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGCTriggerSetIsEnforced(t *testing.T) {
+	ctx := context.Background()
+	mem := memory.New()
+	t.Cleanup(func() { mem.Close() })
+	manualOnly := testPolicy()
+	manualOnly.GCTriggers = []domain.GCTrigger{domain.GCManual}
+	s, err := New(mem, manualOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCompletion(t, mem, nil, "", false)
+	// Completion always persists its durable request, even while disabled.
+	done, err := s.CompleteTaskStandalone(ctx, storetest.NewPrincipal("s", domain.AuthorityUser), domain.CompleteTaskIntent{RequestID: "r", TaskID: "task"})
+	if err != nil || done.GCRequestID == "" {
+		t.Fatalf("completion: %+v %v", done, err)
+	}
+	collector := storetest.NewPrincipal("s", domain.AuthorityHarness)
+	f := newFacets()
+	if _, err := executeGC(f, mem, s, collector, done.GCRequestID); !errors.Is(err, ErrGCTriggerDisabled) {
+		t.Fatalf("disabled trigger executed: %v", err)
+	}
+	pick := func(domain.GCRequest) (domain.Principal, bool) { return collector, true }
+	if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || err != nil {
+		t.Fatalf("disabled request not skipped: %d %v", n, err)
+	}
+	if pending := pendingGC(t, mem); len(pending) != 1 {
+		t.Fatalf("disabled request lost: %+v", pending)
+	}
+	// A disabled producer trigger persists nothing.
+	if err := f.update(mem, func(tx store.Tx) error {
+		id, err := s.EnqueueGC(tx, collector, domain.GCSupersession, domain.CollectSession, "", "event-1")
+		if id != "" {
+			t.Fatalf("disabled trigger enqueued %s", id)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if pending := pendingGC(t, mem); len(pending) != 1 {
+		t.Fatalf("disabled producer persisted: %+v", pending)
+	}
+	if _, err := collect(f, mem, s, collector, domain.CollectIntent{RequestID: "m", Scope: domain.CollectSession, Trigger: domain.GCManual}); err != nil {
+		t.Fatalf("enabled manual collection: %v", err)
+	}
+	// Re-enabling lets the same durable request run once.
+	all, _ := New(mem, testPolicy())
+	if n, err := all.CollectPending(ctx, "s", pick, 4); n != 1 || err != nil {
+		t.Fatalf("re-enabled request: %d %v", n, err)
+	}
+	completionOnly := testPolicy()
+	completionOnly.GCTriggers = []domain.GCTrigger{domain.GCTaskCompletion}
+	s2, _ := New(mem, completionOnly)
+	if _, err := collect(f, mem, s2, collector, domain.CollectIntent{RequestID: "m2", Scope: domain.CollectSession, Trigger: domain.GCManual}); !errors.Is(err, ErrGCTriggerDisabled) {
+		t.Fatalf("disabled manual collection: %v", err)
+	}
+}

@@ -47,6 +47,9 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	if p.Authority != domain.AuthoritySystem && p.Authority != domain.AuthorityHarness {
 		return out, domain.ErrInvalidAuthorityPromotion
 	}
+	if !s.policy.GCTriggerEnabled(i.Trigger) {
+		return out, ErrGCTriggerDisabled
+	}
 	if i.Scope == domain.CollectTask {
 		if _, err = tx.Task(i.TaskID); errors.Is(err, domain.ErrNotFound) {
 			return out, domain.ErrNotFound
