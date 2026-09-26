@@ -23,6 +23,7 @@ func richItem(sess, id string, seq uint64) domain.ContextItem {
 	}
 	it := NewGoal(sess, id, seq, "")
 	it.DirectiveID = "goal-1"
+	it.Section = domain.SectionGoal
 	it.Parts = parts
 	it.ContentHash = domain.ContentHash(parts)
 	it.SemanticBytes = domain.SemanticBytes(parts)
@@ -83,6 +84,8 @@ func testItemInsertRules(t *testing.T, s store.Store) {
 		{"wrong semantic bytes", func(it *domain.ContextItem) { it.SemanticBytes++ }, domain.ErrInvalidRecord},
 		{"invalid kind", func(it *domain.ContextItem) { it.Kind = "bogus" }, domain.ErrInvalidRecord},
 		{"goal without status", func(it *domain.ContextItem) { it.Kind = domain.KindGoal }, domain.ErrInvalidRecord},
+		{"invalid section", func(it *domain.ContextItem) { it.Section, it.DirectiveID = "TODO", "x" }, domain.ErrInvalidRecord},
+		{"section without directive ID", func(it *domain.ContextItem) { it.Section = domain.SectionWorking }, domain.ErrInvalidRecord},
 		{"reused ID", func(it *domain.ContextItem) { it.ID = "i1" }, domain.ErrImmutable},
 		{"reused ID, identical content", func(it *domain.ContextItem) { *it = NewItem(sessA, "i1", it.Seq, "one") }, domain.ErrImmutable},
 	}
@@ -611,6 +614,8 @@ func testBlobs(t *testing.T, s store.Store) {
 		malformed := NewBlob(sessA, []byte("x"))
 		malformed.Hash = "sha256:XYZ"
 		wantErr(t, tx.InsertBlob(malformed), domain.ErrInvalidRecord)
+		// Re-inserting identical bytes writes nothing, so this transaction
+		// needs no sequenced record.
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
@@ -667,7 +672,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
-		cur, err := tx.CurrentDirective("task", "dep")
+		cur, err := tx.CurrentDirective("task", "dep", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "p2" {
 			t.Errorf("CurrentDirective = %q, want p2", cur)
@@ -702,14 +707,14 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		wantErr(t, tx.SetCurrentDirective("task2", "dep", "p2"), domain.ErrInvalidRecord)
 		wantErr(t, tx.SetCurrentDirective("", "dep", "p2"), domain.ErrInvalidRecord)
 		wantErr(t, tx.SetCurrentDirective("task", "", "p2"), domain.ErrInvalidRecord)
-		_, err := tx.CurrentDirective("task", "other")
+		_, err := tx.CurrentDirective("task", "other", DirectiveBoundary(sessA))
 		wantErr(t, err, domain.ErrNotFound)
-		_, err = tx.CurrentDirective("task2", "dep")
+		_, err = tx.CurrentDirective("task2", "dep", DirectiveBoundary(sessA))
 		wantErr(t, err, domain.ErrNotFound)
 		// Moving the pointer back is permitted; the store does not judge
 		// which version is current.
 		noErr(t, tx.SetCurrentDirective("task", "dep", "p1"))
-		cur, err := tx.CurrentDirective("task", "dep")
+		cur, err := tx.CurrentDirective("task", "dep", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "p1" {
 			t.Errorf("CurrentDirective = %q, want p1", cur)
@@ -779,5 +784,58 @@ func testRelationshipFilters(t *testing.T, s store.Store) {
 	// The rolled-back SUPERSEDES edge b -> c must not count toward cycles.
 	update(t, s, sessA, func(tx store.Tx) error {
 		return tx.InsertRelationship(NewRelationship(sessA, "e8", domain.RelSupersedes, "c", "b", tx.NextSeq()))
+	})
+}
+
+// testDirectiveBoundaries checks that a directive's identity includes its
+// access boundary: versions with the same task and directive ID in
+// different boundaries are independent directives (FR-DIR-002).
+func testDirectiveBoundaries(t *testing.T, s store.Store) {
+	taskWide := DirectiveBoundary(sessA)
+	agentOnly := taskWide
+	agentOnly.AgentID = "agent"
+	update(t, s, sessA, func(tx store.Tx) error {
+		n := seqs(tx, 3)
+		shared := NewDirective(sessA, "shared", "dir", n[0], "for the task")
+		private := NewDirective(sessA, "private", "dir", n[1], "for one agent")
+		private.Access = agentOnly
+		private2 := NewDirective(sessA, "private2", "dir", n[2], "for one agent, v2")
+		private2.Access = agentOnly
+		for _, it := range []domain.ContextItem{shared, private, private2} {
+			noErr(t, tx.InsertItem(it))
+		}
+		noErr(t, tx.SetCurrentDirective("task", "dir", "shared"))
+		noErr(t, tx.SetCurrentDirective("task", "dir", "private"))
+		// Replacing the agent-only version leaves the task-wide one alone.
+		noErr(t, tx.SetCurrentDirective("task", "dir", "private2"))
+		return nil
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		for _, tc := range []struct {
+			boundary domain.AccessBoundary
+			want     string
+		}{{taskWide, "shared"}, {agentOnly, "private2"}} {
+			got, err := tx.CurrentDirective("task", "dir", tc.boundary)
+			noErr(t, err)
+			if got != tc.want {
+				t.Errorf("CurrentDirective(%+v) = %q, want %q", tc.boundary, got, tc.want)
+			}
+		}
+		// Every boundary field is part of the key.
+		for _, edit := range []func(b *domain.AccessBoundary){
+			func(b *domain.AccessBoundary) { b.AgentID = "other" },
+			func(b *domain.AccessBoundary) { b.WorkflowID = "wf" },
+			func(b *domain.AccessBoundary) { b.Scope = domain.ScopeTurn },
+			func(b *domain.AccessBoundary) { b.SessionID = sessB },
+			func(b *domain.AccessBoundary) { b.TaskID = "task2" },
+		} {
+			b := taskWide
+			edit(&b)
+			_, err := tx.CurrentDirective("task", "dir", b)
+			if !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("CurrentDirective(%+v): error = %v, want ErrNotFound", b, err)
+			}
+		}
+		return nil
 	})
 }

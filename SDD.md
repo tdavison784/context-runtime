@@ -2,7 +2,7 @@
 
 Status: proposed
 
-Version: 0.6
+Version: 0.7
 
 Date: 2026-09-25
 
@@ -122,7 +122,7 @@ Requirement IDs are stable and are part of the test contract. New requirements t
 Directives are parsed by the runtime. They are lifecycle instructions to the runtime, not text suggestions to the model.
 
 - FR-DIR-001: V1 recognizes the content sections Goal, Pinned, Working, Remember, References, and Ephemeral, and the lifecycle commands Resolve and Unpin.
-- FR-DIR-002: Directive IDs use [id] syntax and are stored independently from display text. Each (session, task, directive ID) has one current version. An item without an ID receives a derived ID (the lowercased keyword, a hyphen, and the 64 lowercase hex digits of its content hash), reported in diagnostics and inspection. Reusing an ID creates a new item and atomically SUPERSEDES the current version, subject to FR-AUTH-001 and FR-REL-006. Only the current version may impose requirements. Scope or access-boundary changes require an explicit authorized replacement policy; they cannot be smuggled through ID reuse.
+- FR-DIR-002: Directive IDs use [id] syntax and are stored independently from display text. Each (session, task, access boundary, directive ID) has one current version; versions in different boundaries are independent directives, so a boundary a principal cannot access never blocks or reveals itself through a shared ID. An item without an ID receives a derived ID (the lowercased keyword, a hyphen, and the 64 lowercase hex digits of its content hash), reported in diagnostics and inspection. Reusing an ID creates a new item and atomically SUPERSEDES the current version, subject to FR-AUTH-001 and FR-REL-006. Only the current version may impose requirements. Scope or access-boundary changes require an explicit authorized replacement policy; they cannot be smuggled through ID reuse.
 - FR-DIR-003: Defaults are:
   - Goal: goal kind, durable generation, task scope, GoalStatus=OPEN, PROTECTED retention and mandatory while current and eligible.
   - Pinned: constraint kind (instruction via kind=), pinned generation, task scope, PROTECTED retention, mandatory.
@@ -131,7 +131,7 @@ Directives are parsed by the runtime. They are lifecycle instructions to the run
   - References: reference kind, working generation, task scope, NORMAL retention. Each item names an item ID, a path, or a URL. A name that matches an item ID in scope, or the source path of an ingested item, gets a REFERENCES edge; a path not yet read is linked when an item with that source path is ingested later.
   - Ephemeral: evidence kind (tool_result via kind=), ephemeral generation, TURN scope, LOW retention.
   New content is RESIDENT by default; residency changes do not change semantic status.
-- FR-DIR-004: Parser output includes source spans, directive ID, source authority, parsed scope, parsed TTL, and diagnostics. Malformed directives do not discard unrelated content.
+- FR-DIR-004: Parser output includes source spans, the directive section, directive ID, source authority, parsed scope, parsed TTL, and diagnostics. Malformed directives do not discard unrelated content.
 - FR-DIR-005: Resolve sets the current goal's GoalStatus to RESOLVED, stops its mandatory status, and drops its retention to HIGH without changing residency. Unpin moves the current pinned version to DURABLE with HIGH retention; it does not waive an attached obligation. Both follow FR-AUTH-001, are audited, and produce a diagnostic for an unknown ID. Reopening a resolved goal requires an authorized replacement with a new OPEN version. Other lifecycle words produce ErrUnsupportedDirective diagnostics rather than ambiguous mutations.
 - FR-DIR-006: Directives follow this grammar (ABNF):
 
@@ -183,7 +183,7 @@ Directives are parsed by the runtime. They are lifecycle instructions to the run
       - [architecture]
 
   Phase 2 adds a canonical example set under testdata/directives/ that is part of the test contract.
-- FR-DIR-007: A Working section is a snapshot of current state. Ingesting one supersedes every current Working item of the same authority and access boundary in the same task (FR-REL-006), with SUPERSEDES edges from the new items to the old ones, under FR-AUTH-001 and FR-REL-006. Items with explicit IDs also supersede by ID (FR-DIR-002).
+- FR-DIR-007: A Working section is a snapshot of current state. Ingesting one supersedes every current Working-section item (identified by its recorded directive section, whatever its kind) of the same authority and access boundary in the same task (FR-REL-006), with SUPERSEDES edges from the new items to the old ones, under FR-AUTH-001 and FR-REL-006. Items with explicit IDs also supersede by ID (FR-DIR-002).
 
 ### Semantic state tools
 

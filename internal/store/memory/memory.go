@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 
@@ -36,9 +37,17 @@ func New() *Store { return &Store{sessions: map[string]*session{}} }
 type session struct {
 	mu sync.RWMutex
 	st *state
+	// committed is set once a transaction commits a record; Sessions lists
+	// only such sessions.
+	committed bool
 }
 
-type directiveKey struct{ taskID, directiveID string }
+// directiveKey is a directive's identity (FR-DIR-002): versions in
+// different access boundaries are independent directives.
+type directiveKey struct {
+	taskID, directiveID string
+	boundary            domain.AccessBoundary
+}
 
 type obligationKey struct {
 	id      string
@@ -117,8 +126,9 @@ func (s *Store) session(id string, create bool) (*session, error) {
 	return sess, nil
 }
 
-// Update implements store.Store. A canceled context before or during fn
-// rolls the transaction back and returns the context's error.
+// Update implements store.Store. A context canceled before commit rolls the
+// transaction back and returns the context's error; commit itself cannot be
+// interrupted.
 func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -137,7 +147,12 @@ func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	t.commit(sess.st)
+	if t.semantic && !t.sequenced {
+		return invalid("transaction changes semantic state without a sequenced record")
+	}
+	if t.commit(sess.st) {
+		sess.committed = true
+	}
 	return nil
 }
 
@@ -159,6 +174,31 @@ func (s *Store) View(ctx context.Context, sessionID string, fn func(store.ReadTx
 	r := newReadTx(sessionID, st, false)
 	defer r.finish()
 	return fn(r)
+}
+
+// Sessions implements store.Store.
+func (s *Store) Sessions(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, ErrClosed
+	}
+	all := make(map[string]*session, len(s.sessions))
+	maps.Copy(all, s.sessions)
+	s.mu.Unlock()
+	var out []string
+	for id, sess := range all {
+		sess.mu.RLock()
+		if sess.committed {
+			out = append(out, id)
+		}
+		sess.mu.RUnlock()
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // Close implements store.Store. Later calls fail with ErrClosed.

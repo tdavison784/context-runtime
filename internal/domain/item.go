@@ -81,7 +81,9 @@ type ContextItem struct {
 	ID          string
 	EventID     string
 	DirectiveID string
-	Seq         uint64
+	// Section is the directive section that created the item, if any.
+	Section DirectiveSection
+	Seq     uint64
 
 	SessionID  string
 	WorkflowID string
@@ -167,6 +169,12 @@ func (it ContextItem) Validate() error {
 	}
 	if !it.Residency.Valid() {
 		return invalid("item %s: invalid residency %q", it.ID, it.Residency)
+	}
+	if !it.Section.Valid() {
+		return invalid("item %s: invalid directive section %q", it.ID, it.Section)
+	}
+	if it.Section != SectionNone && it.DirectiveID == "" {
+		return invalid("item %s: a directive-section item requires a directive ID", it.ID)
 	}
 	if !it.Retention.Valid() {
 		return invalid("item %s: invalid retention %q", it.ID, it.Retention)

@@ -237,6 +237,31 @@ func (t RelationshipType) Valid() bool {
 	return false
 }
 
+// DirectiveSection is the directive section an item was parsed from
+// (FR-DIR-001). It is immutable provenance: FR-DIR-007 snapshots select
+// current Working-section items by it, whatever kind they were given.
+// Items not created by a directive section have an empty section.
+type DirectiveSection string
+
+const (
+	SectionNone       DirectiveSection = ""
+	SectionGoal       DirectiveSection = "GOAL"
+	SectionPinned     DirectiveSection = "PINNED"
+	SectionWorking    DirectiveSection = "WORKING"
+	SectionRemember   DirectiveSection = "REMEMBER"
+	SectionReferences DirectiveSection = "REFERENCES"
+	SectionEphemeral  DirectiveSection = "EPHEMERAL"
+)
+
+// Valid reports whether s is a known section or SectionNone.
+func (s DirectiveSection) Valid() bool {
+	switch s {
+	case SectionNone, SectionGoal, SectionPinned, SectionWorking, SectionRemember, SectionReferences, SectionEphemeral:
+		return true
+	}
+	return false
+}
+
 // TaskStatus is the lifecycle status of a task.
 type TaskStatus string
 

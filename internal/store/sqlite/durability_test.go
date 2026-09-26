@@ -24,7 +24,8 @@ func TestRestartPreservesRecords(t *testing.T) {
 	parts := []domain.ContentPart{{Type: domain.PartText, Text: "remember", MediaType: "text/plain"}}
 	item := domain.ContextItem{
 		ID: "i1", SessionID: "s", TaskID: "task", AgentID: "agent", DirectiveID: "d1",
-		Kind: domain.KindFact, Generation: domain.GenerationWorking, Authority: domain.AuthorityUser,
+		Section: domain.SectionPinned,
+		Kind:    domain.KindFact, Generation: domain.GenerationWorking, Authority: domain.AuthorityUser,
 		Scope: domain.ScopeSession, Access: domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: "s"},
 		Residency: domain.ResidencyResident, Retention: domain.RetentionNormal,
 		Parts: parts, ContentHash: domain.ContentHash(parts), SemanticBytes: domain.SemanticBytes(parts),
@@ -46,6 +47,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 		second := item.Clone()
 		second.ID = "i2"
 		second.DirectiveID = ""
+		second.Section = domain.SectionNone
 		second.Seq = tx.NextSeq()
 		second.Kind = domain.KindGoal
 		open := domain.GoalOpen
@@ -74,7 +76,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 		if err := tx.InsertObligationVersion(ob); err != nil {
 			return err
 		}
-		tr := domain.ObligationTransition{ID: "tr1", SessionID: "s", ObligationID: "o1", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Actor: harness, EvidenceIDs: []string{"i2"}}
+		tr := domain.ObligationTransition{ID: "tr1", SessionID: "s", ObligationID: "o1", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation, Actor: harness, EvidenceIDs: []string{"i2"}}
 		updated, err := tx.AppendObligationTransition(tr, 1)
 		if err != nil {
 			return err
@@ -87,7 +89,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 		}
 		expected["grant"] = grant
 		taskEvent := domain.LifecycleEvent{ID: "task-created", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "create", Actor: harness}
-		task, err := tx.PutTask(domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive, Version: 999}, 0, &taskEvent)
+		task, err := tx.PutTask(domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive, Version: 999}, 0, taskEvent)
 		if err != nil {
 			return err
 		}
@@ -164,7 +166,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 			if m["blob"], err = tx.Blob(domain.HashBytes([]byte("blob"))); err != nil {
 				return err
 			}
-			if m["directive"], err = tx.CurrentDirective("task", "d1"); err != nil {
+			if m["directive"], err = tx.CurrentDirective("task", "d1", item.Access); err != nil {
 				return err
 			}
 			if m["obligation"], err = tx.Obligation("o1"); err != nil {
@@ -486,21 +488,21 @@ func TestAuditedGrantAndTaskMutations(t *testing.T) {
 			t.Fatal("revocation did not use audit sequence")
 		}
 		task := domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive}
-		if _, err := tx.PutTask(task, 0, nil); !errors.Is(err, domain.ErrInvalidRecord) {
+		if _, err := tx.PutTask(task, 0, domain.LifecycleEvent{}); !errors.Is(err, domain.ErrInvalidRecord) {
 			t.Fatalf("unaudited task create = %v", err)
 		}
 		created := domain.LifecycleEvent{ID: "task-create", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "create", Actor: actor}
-		task, err = tx.PutTask(task, 0, &created)
+		task, err = tx.PutTask(task, 0, created)
 		if err != nil {
 			return err
 		}
 		task.Status = domain.TaskCompleted
 		task.CompletedSeq = tx.NextSeq()
-		if _, err := tx.PutTask(task, 1, nil); !errors.Is(err, domain.ErrInvalidRecord) {
+		if _, err := tx.PutTask(task, 1, domain.LifecycleEvent{}); !errors.Is(err, domain.ErrInvalidRecord) {
 			t.Fatalf("unaudited task completion = %v", err)
 		}
 		done := domain.LifecycleEvent{ID: "task-done", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "complete", Actor: actor}
-		_, err = tx.PutTask(task, 1, &done)
+		_, err = tx.PutTask(task, 1, done)
 		return err
 	})
 	if err != nil {
@@ -517,7 +519,7 @@ func TestObligationTransitionCAS(t *testing.T) {
 		if err := tx.InsertObligationVersion(ob); err != nil {
 			return err
 		}
-		tr := domain.ObligationTransition{ID: "tr", SessionID: "s", ObligationID: "o", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Actor: actor, EvidenceIDs: []string{"e"}}
+		tr := domain.ObligationTransition{ID: "tr", SessionID: "s", ObligationID: "o", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation, Actor: actor, EvidenceIDs: []string{"e"}}
 		if _, err := tx.AppendObligationTransition(tr, 2); !errors.Is(err, domain.ErrVersionConflict) {
 			t.Fatalf("stale transition = %v", err)
 		}

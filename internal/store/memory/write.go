@@ -15,11 +15,24 @@ import (
 type tx struct {
 	*readTx
 	baseSeq uint64 // last committed sequence number when the transaction began
+
+	// semantic records a write that changes semantic state; sequenced
+	// records a write of a record carrying a sequence number allocated in
+	// this transaction. Update enforces the semantic-write rule with them.
+	semantic, sequenced bool
 }
+
+func (t *tx) markSemantic()  { t.semantic = true }
+func (t *tx) markSequenced() { t.semantic, t.sequenced = true, true }
 
 var _ store.Tx = (*tx)(nil)
 
-func (t *tx) commit(st *state) {
+// commit folds the transaction into st and reports whether it wrote any
+// record.
+func (t *tx) commit(st *state) bool {
+	wrote := t.items.dirty() || t.rels.dirty() || t.events.dirty() || t.blobs.dirty() ||
+		t.directives.dirty() || t.obligations.dirty() || t.transitions.dirty() || t.grants.dirty() ||
+		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty()
 	t.items.commit()
 	t.rels.commit()
 	t.supersedes.commit()
@@ -40,6 +53,7 @@ func (t *tx) commit(st *state) {
 	t.calls.commit()
 	t.attempts.commit()
 	st.lastSeq = t.lastSeq
+	return wrote
 }
 
 // own checks that a record belongs to the transaction's session.
@@ -96,6 +110,7 @@ func (t *tx) InsertEvent(e domain.EventRecord) (domain.EventRecord, bool, error)
 		return domain.EventRecord{}, false, err
 	}
 	t.events.put(e.EventID, e)
+	t.markSequenced()
 	return e.Clone(), false, nil
 }
 
@@ -125,6 +140,7 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 		}
 	}
 	t.items.put(it.ID, it)
+	t.markSequenced()
 	return nil
 }
 
@@ -149,6 +165,7 @@ func (t *tx) UpdateItem(id string, expectedVersion uint64, change domain.ItemCha
 	}
 	t.items.put(id, next)
 	t.lifecycle.put(event.ID, event)
+	t.markSequenced()
 	return next, nil
 }
 
@@ -190,6 +207,7 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	t.relsFrom.add(r.FromID, r.ID)
 	t.relsTo.add(r.ToID, r.ID)
 	t.relsByType.add(r.Type, r.ID)
+	t.markSequenced()
 	return nil
 }
 
@@ -207,7 +225,8 @@ func (t *tx) SetCurrentDirective(taskID, directiveID, itemID string) error {
 	if it.DirectiveID != directiveID || it.TaskID != taskID {
 		return invalid("item %s is not directive %s of task %s", itemID, directiveID, taskID)
 	}
-	t.directives.put(directiveKey{taskID, directiveID}, itemID)
+	t.directives.put(directiveKey{taskID, directiveID, it.Access}, itemID)
+	t.markSemantic()
 	return nil
 }
 
@@ -221,6 +240,8 @@ func (t *tx) InsertBlob(b domain.Blob) error {
 	if t.blobs.has(b.Hash) {
 		return nil // identical bytes: the hash matched
 	}
+	// Blobs are exempt from the semantic-write rule: they are inert until a
+	// sequenced record references them.
 	t.blobs.put(b.Hash, b)
 	return nil
 }
@@ -245,6 +266,7 @@ func (t *tx) InsertObligationVersion(o domain.ObligationVersion) error {
 	}
 	t.obligations.put(obligationKey{o.ObligationID, o.Version}, o)
 	t.latest.put(o.ObligationID, o.Version)
+	t.markSequenced()
 	return nil
 }
 
@@ -283,6 +305,7 @@ func (t *tx) UpdateObligationVersion(o domain.ObligationVersion, expectedRevisio
 		return domain.ObligationVersion{}, err
 	}
 	t.obligations.put(key, next)
+	t.markSemantic()
 	return next, nil
 }
 
@@ -333,6 +356,7 @@ func (t *tx) AppendObligationTransition(tr domain.ObligationTransition, expected
 	next.Revision++
 	t.transitions.put(tr.ID, tr)
 	t.obligations.put(key, next)
+	t.markSequenced()
 	return next, nil
 }
 
@@ -353,6 +377,7 @@ func (t *tx) InsertGrant(g domain.MutationGrant) error {
 		return fmt.Errorf("grant %s: %w", g.ID, domain.ErrImmutable)
 	}
 	t.grants.put(g.ID, g)
+	t.markSequenced()
 	return nil
 }
 
@@ -373,14 +398,15 @@ func (t *tx) RevokeGrant(id string, event domain.LifecycleEvent) (domain.Mutatio
 	g.RevokedSeq = event.Seq
 	t.grants.put(id, g)
 	t.lifecycle.put(event.ID, event)
+	t.markSequenced()
 	return g, nil
 }
 
-func (t *tx) PutTask(ts domain.TaskState, expectedVersion uint64, event *domain.LifecycleEvent) (domain.TaskState, error) {
+func (t *tx) PutTask(ts domain.TaskState, expectedVersion uint64, event domain.LifecycleEvent) (domain.TaskState, error) {
 	if err := t.own(ts.SessionID); err != nil {
 		return domain.TaskState{}, err
 	}
-	cur, ok := t.tasks.peek(ts.TaskID) // absent reads as version 0
+	cur, _ := t.tasks.peek(ts.TaskID) // absent reads as version 0
 	if cur.Version != expectedVersion {
 		return domain.TaskState{}, fmt.Errorf("task %s: version %d, expected %d: %w",
 			ts.TaskID, cur.Version, expectedVersion, domain.ErrVersionConflict)
@@ -392,17 +418,12 @@ func (t *tx) PutTask(ts domain.TaskState, expectedVersion uint64, event *domain.
 	if err := t.freshIfChanged("task "+ts.TaskID, cur.CompletedSeq, ts.CompletedSeq); err != nil {
 		return domain.TaskState{}, err
 	}
-	// Creation and status changes are audited; other changes are not.
-	if audited := !ok || ts.Status != cur.Status; audited != (event != nil) {
-		return domain.TaskState{}, invalid("task %s: an audit event is required exactly for creation and status changes", ts.TaskID)
+	if err := t.checkTargetEvent(event, domain.TargetTask, ts.TaskID); err != nil {
+		return domain.TaskState{}, err
 	}
-	if event != nil {
-		if err := t.checkTargetEvent(*event, domain.TargetTask, ts.TaskID); err != nil {
-			return domain.TaskState{}, err
-		}
-		t.lifecycle.put(event.ID, *event)
-	}
+	t.lifecycle.put(event.ID, event)
 	t.tasks.put(ts.TaskID, ts)
+	t.markSequenced()
 	return ts, nil
 }
 
@@ -440,6 +461,11 @@ func (t *tx) AppendLifecycleEvent(e domain.LifecycleEvent) error {
 		return err
 	}
 	t.lifecycle.put(e.ID, e)
+	// TargetCall events belong to the call ledger, which is not semantic
+	// state.
+	if e.TargetKind != domain.TargetCall {
+		t.markSequenced()
+	}
 	return nil
 }
 
@@ -505,6 +531,9 @@ func (t *tx) UpdateCall(c domain.CallRecord, expectedRevision uint64) (domain.Ca
 		return domain.CallRecord{}, fmt.Errorf("call %s: revision %d, expected %d: %w",
 			c.CallID, cur.Revision, expectedRevision, domain.ErrVersionConflict)
 	}
+	if cur.State.Terminal() {
+		return domain.CallRecord{}, fmt.Errorf("call %s: terminal calls are immutable: %w", c.CallID, domain.ErrImmutable)
+	}
 	c = c.Clone()
 	c.Revision = expectedRevision + 1
 	if err := c.Validate(); err != nil {
@@ -512,6 +541,16 @@ func (t *tx) UpdateCall(c domain.CallRecord, expectedRevision uint64) (domain.Ca
 	}
 	if c.State != cur.State && !domain.ValidCallTransition(cur.State, c.State) {
 		return domain.CallRecord{}, fmt.Errorf("call %s: %s -> %s: %w", c.CallID, cur.State, c.State, domain.ErrInvalidTransition)
+	}
+	// Attempts advances only when an attempt is sent, so evidence is always
+	// judged against the stored current attempt.
+	wantAttempts := cur.Attempts
+	if cur.State == domain.CallPrepared && c.State == domain.CallSent {
+		wantAttempts++
+	}
+	if c.Attempts != wantAttempts {
+		return domain.CallRecord{}, fmt.Errorf("call %s: attempts %d, want %d: %w",
+			c.CallID, c.Attempts, wantAttempts, domain.ErrInvalidTransition)
 	}
 	if c.State != cur.State && !t.hasEvidence(cur.State, c) {
 		return domain.CallRecord{}, fmt.Errorf("call %s: %s -> %s without matching attempt %d: %w",

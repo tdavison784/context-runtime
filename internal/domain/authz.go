@@ -328,9 +328,9 @@ func authorizeOver(p Principal, targets []MutationTarget) error {
 // TOOL and RETRIEVED_CONTENT actors never create SUPERSEDES edges: tool
 // output cannot suppress state (section 9). Deterministic observation rules
 // (FR-REL-007) run under a trusted SYSTEM or HARNESS principal. An AGENT
-// actor may supersede only a keyed agent write with the same key
-// (FR-TOOL-002): both items AGENT authority with the same "agent." directive
-// ID. Access is checked before anything else, so an inaccessible endpoint
+// actor may supersede only a keyed agent write with the same key in the
+// same task (FR-TOOL-002): both items AGENT authority with the same
+// "agent." directive ID and task. Access is checked before anything else, so an inaccessible endpoint
 // always yields ErrNotFound and never reveals its authority.
 func AuthorizeSupersession(actor Principal, superseding, superseded ContextItem) error {
 	if err := actor.Validate(); err != nil {
@@ -344,7 +344,8 @@ func AuthorizeSupersession(actor Principal, superseding, superseded ContextItem)
 	case AuthorityAgent:
 		if superseding.Authority != AuthorityAgent || superseded.Authority != AuthorityAgent ||
 			!strings.HasPrefix(superseding.DirectiveID, AgentKeyID("")) ||
-			superseding.DirectiveID != superseded.DirectiveID {
+			superseding.DirectiveID != superseded.DirectiveID ||
+			superseding.TaskID != superseded.TaskID {
 			return ErrInvalidAuthorityPromotion
 		}
 	default:

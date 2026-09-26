@@ -41,7 +41,7 @@
 //   - domain.ErrImmutable: an immutable record's ID is reused, or a write
 //     changes a field outside those its method may change (obligation fields
 //     other than Current/RetiredSeq/MaterializationDisabled, frozen call
-//     fields, closed call attempts).
+//     fields, closed call attempts, terminal calls).
 //   - domain.ErrInvalidTransition: a state change outside its table,
 //     including a transition whose From is not the current status, a
 //     transition on a retired obligation version, revoking a revoked grant,
@@ -49,6 +49,11 @@
 //     call transition without its attempt evidence.
 //   - domain.ErrVersionConflict: compare-and-swap mismatch, and an obligation
 //     version that is not one more than the latest.
+//   - domain.ErrIntegrity: stored bytes or records fail verification (a blob
+//     whose bytes no longer match its hash, a row that cannot be decoded).
+//     It is never used for operational failures.
+//   - Context and I/O errors are returned as themselves (wrapped at most),
+//     so errors.Is(err, context.Canceled) and similar checks hold.
 //
 // Authorization is the caller's job (domain.AuthorizeMutation,
 // domain.AuthorizeGrantIssuance, domain.AuthorizeSupersession); stores do not
@@ -69,9 +74,31 @@ type Store interface {
 	// SQLite store has a single writer). If fn returns an error, nothing it
 	// wrote is committed and Update returns that error unchanged (so
 	// errors.Is works).
+	//
+	// Semantic-write rule: a transaction that changes semantic state (any
+	// write other than blobs, conversations, calls, call attempts, and
+	// TargetCall lifecycle events) must also write at least one record carrying a
+	// sequence number allocated in it (an item, relationship, event record,
+	// obligation version or transition, grant, or non-TargetCall lifecycle
+	// event); otherwise the commit fails with domain.ErrInvalidRecord. The
+	// call ledger's preview-staleness check depends on every semantic
+	// change being visible in the sequence (FR-CALL-001). Blobs are exempt
+	// because they are content-addressed and inert until a sequenced record
+	// references them.
+	//
+	// Cancellation: ctx may abort the transaction before commit, and then
+	// Update returns the context's error (errors.Is(err, context.Canceled)
+	// holds). Once commit begins it is not cancelled, so Update never
+	// reports failure for a transaction that committed.
+	//
+	// fn must not call the Store re-entrantly (Update or View, for any
+	// session); implementations may deadlock.
 	Update(ctx context.Context, sessionID string, fn func(Tx) error) error
 	// View runs fn against a consistent committed snapshot of one session.
 	View(ctx context.Context, sessionID string, fn func(ReadTx) error) error
+	// Sessions lists every session that has committed records, in
+	// ascending order, so startup recovery can visit each one.
+	Sessions(ctx context.Context) ([]string, error)
 	// Close releases resources. Close is idempotent.
 	Close() error
 }
@@ -132,8 +159,11 @@ type ReadTx interface {
 	// corrupt bytes fail with domain.ErrIntegrity.
 	Blob(hash string) (domain.Blob, error)
 	// CurrentDirective returns the item ID of the current version of a
-	// directive in a task (FR-DIR-002).
-	CurrentDirective(taskID, directiveID string) (string, error)
+	// directive (FR-DIR-002). A directive's identity is (task, directive ID,
+	// access boundary): versions in different boundaries are independent
+	// directives, so a boundary a caller cannot see never blocks or reveals
+	// itself through a shared ID.
+	CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error)
 	// Obligation returns the latest version of an obligation.
 	Obligation(obligationID string) (domain.ObligationVersion, error)
 	ObligationVersions(obligationID string) ([]domain.ObligationVersion, error)
@@ -187,9 +217,10 @@ type Tx interface {
 	// Reusing an ID fails with domain.ErrImmutable.
 	InsertRelationship(r domain.Relationship) error
 
-	// SetCurrentDirective points (task, directive ID) at an item, which must
-	// exist in this session (domain.ErrNotFound), belong to taskID, and
-	// carry that directive ID (domain.ErrInvalidRecord).
+	// SetCurrentDirective points (task, directive ID, the item's access
+	// boundary) at an item, which must exist in this session
+	// (domain.ErrNotFound), belong to taskID, and carry that directive ID
+	// (domain.ErrInvalidRecord).
 	SetCurrentDirective(taskID, directiveID, itemID string) error
 
 	// InsertBlob stores an immutable blob after verifying its hash.
@@ -227,10 +258,11 @@ type Tx interface {
 	RevokeGrant(id string, event domain.LifecycleEvent) (domain.MutationGrant, error)
 
 	// PutTask creates a task (expectedVersion 0) or replaces it under
-	// compare-and-swap on Version. A change of Status (and task creation)
-	// requires event, a TargetTask audit event with a Seq allocated in this
-	// transaction, appended atomically; otherwise event must be nil.
-	PutTask(t domain.TaskState, expectedVersion uint64, event *domain.LifecycleEvent) (domain.TaskState, error)
+	// compare-and-swap on Version, appending event atomically. Every task
+	// change is semantic (turns and status drive eligibility), so event is
+	// required: a TargetTask audit event for this task with a Seq allocated
+	// in this transaction.
+	PutTask(t domain.TaskState, expectedVersion uint64, event domain.LifecycleEvent) (domain.TaskState, error)
 
 	// AppendLifecycleEvent appends an audit event. TargetCall events are
 	// reserved for the call ledger (internal/invocation).
@@ -248,9 +280,14 @@ type Tx interface {
 	// UpdateCall replaces a call record under compare-and-swap on Revision.
 	// The state change must satisfy domain.ValidCallTransition (or leave the
 	// state unchanged), frozen proposal fields cannot change, and the
-	// one-reserving-call rule of InsertCall holds. Leaving SENT or UNKNOWN
-	// requires attempt number c.Attempts to be stored already in the
-	// matching closed state, so no transition can outrun its evidence:
+	// one-reserving-call rule of InsertCall holds. Terminal calls
+	// (COMPLETED, FAILED, ABANDONED) are immutable: any update fails with
+	// domain.ErrImmutable. Attempts may change only on PREPARED -> SENT
+	// (by exactly one); every other transition keeps the stored Attempts, so
+	// evidence is always judged against the stored current attempt, never
+	// an earlier one. Leaving SENT or UNKNOWN requires that current attempt
+	// to be stored already in the matching closed state, so no transition
+	// can outrun its evidence:
 	//
 	//	-> COMPLETED  attempt COMPLETED with OutcomeHash == c.OutcomeHash
 	//	-> FAILED     attempt FAILED with OutcomeHash == c.OutcomeHash

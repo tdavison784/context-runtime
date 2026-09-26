@@ -462,3 +462,40 @@ func TestCancelRecords(t *testing.T) {
 	_, err = l.RecordOutcome(ctx, harness, c.CallID, fail)
 	must(t, err)
 }
+
+// TestPrepareRejectsOutOfScopeServiceActor (SPEC-1.2): a service actor scoped
+// to another workflow, task, or agent cannot reserve the conversation, and a
+// rejected Prepare leaves no reservation behind.
+func TestPrepareRejectsOutOfScopeServiceActor(t *testing.T) {
+	l, s := newMemLedger(t)
+	for name, scope := range map[string]func(*domain.Principal){
+		"task":     func(a *domain.Principal) { a.TaskID = "task-2" },
+		"agent":    func(a *domain.Principal) { a.AgentID = "agent-b" },
+		"workflow": func(a *domain.Principal) { a.WorkflowID = "wf-2" },
+	} {
+		req := request(agentA, "r1", 1, 0, 0)
+		scope(&req.ServiceActor)
+		_, err := l.Prepare(ctx, req)
+		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Errorf("%s mismatch: error = %v, want ErrInvalidAuthorityPromotion", name, err)
+		}
+	}
+	if lastSeq(t, s) != 0 {
+		t.Fatal("rejected Prepare wrote")
+	}
+
+	// The correctly scoped actor can then reserve.
+	req := request(agentA, "r1", 1, 0, 0)
+	req.ServiceActor = domain.Principal{SessionID: sess, WorkflowID: "wf", TaskID: agentA.TaskID, AgentID: agentA.AgentID, Authority: domain.AuthorityHarness}
+	c, err := l.Prepare(ctx, req)
+	must(t, err)
+	if conv := conversation(t, s, agentA); conv.InFlightCallID != c.CallID {
+		t.Fatalf("conversation = %+v", conv)
+	}
+
+	// An out-of-scope repeat of the same request is rejected, not returned.
+	other := req
+	other.ServiceActor.TaskID = "task-2"
+	_, err = l.Prepare(ctx, other)
+	wantErr(t, err, domain.ErrInvalidAuthorityPromotion)
+}

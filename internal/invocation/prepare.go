@@ -148,8 +148,11 @@ func validatePrepare(req PrepareRequest) error {
 	if err := checkServiceActor(req.ServiceActor); err != nil {
 		return err
 	}
-	if req.ServiceActor.SessionID != p.SessionID {
-		return fmt.Errorf("prepare: service actor belongs to another session: %w", domain.ErrInvalidAuthorityPromotion)
+	// Checked before any reservation or idempotent return, so an actor
+	// scoped elsewhere can neither reserve nor observe this conversation
+	// (SPEC-1.2).
+	if !actorInScope(req.ServiceActor, p) {
+		return fmt.Errorf("prepare: service actor is not scoped to the inference principal: %w", domain.ErrInvalidAuthorityPromotion)
 	}
 	if !req.Operation.Valid() {
 		return fmt.Errorf("prepare: invalid operation %q: %w", req.Operation, domain.ErrInvalidRecord)
