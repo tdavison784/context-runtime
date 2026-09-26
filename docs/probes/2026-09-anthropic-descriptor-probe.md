@@ -258,3 +258,84 @@ Verdict: an exact counter backed by the endpoint is available (OBSERVED, error b
 n=4 per model). It is a network call, so FR-PROV-004 keeps it off the ingestion path. The
 docs also say it runs the preserved-thinking check and ignores the `compaction` parameter
 (DOCUMENTED, not exercised).
+
+## Compaction protocol (K1-K3)
+
+Anthropic offers three native context features. Docs: `build-with-claude/compaction`,
+`compaction-on-demand`, `compaction-threshold` and `context-editing`, read 2026-09-26.
+
+| Feature | Beta | Request | Who decides when |
+|---|---|---|---|
+| On-demand compaction | `compact-2026-09-04` | top-level `"compaction": {"type": "summarize", "instructions"?}` | the caller; a **standalone** request that returns only the block |
+| Threshold compaction | `compact-2026-01-12` | `context_management.edits: [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": N}, "pause_after_compaction"?, "instructions"?}]` | the API, inside an ordinary request once input reaches N |
+| Context editing | `context-management-2025-06-27` | `clear_tool_uses_20250919`, `clear_thinking_20251015` edits | the API, by rule; clears, does not summarize |
+
+### K1 - exercise and artifact shape
+
+**On-demand** (`H2`, custom `instructions`), fixture `compaction__<model>__K1-on-demand-summarize.json`:
+
+- 200, `stop_reason: "compaction"`, `content` = exactly one block
+  `{"type": "compaction", "content": "<readable summary>", "signature": "<opaque>"}`
+  (opus-5-5: 647-char summary, 1,736-char signature; sonnet-5: 533 / 636). No thinking, text
+  or tool_use blocks.
+- Usage: top-level `input_tokens: 0`, `output_tokens: 0`; the cost is only in
+  `usage.iterations: [{"type": "compaction", "input_tokens": 828, "output_tokens": 294, ...}]`.
+  An adapter that reads only the top-level fields under-reports compaction cost
+  (FR-PROV-006).
+- Custom instructions: accepted (up to 16,384 chars, replaces the default prompt; DOCUMENTED).
+  The summary followed them (kept key, value, result, open request).
+- Minimum trigger: none. The caller decides; it worked on an 828-token conversation.
+  Constraints (DOCUMENTED): no `stop_sequences`, `output_config.format` or forced
+  `tool_choice`; rejected while the last assistant turn has an unanswered `tool_use`; cannot
+  be combined with `context_management` in one request.
+
+**Threshold** (fixture `...T1`, `...T2`):
+
+- `trigger.value: 1000` -> 400 `context_management.edits.0.compact_20260112: trigger.value must
+  be at least 50000`. **Minimum trigger = 50,000 input tokens** (OBSERVED; docs default 150,000).
+- A 51,924-token request with `trigger: 50000`, `pause_after_compaction: true` and custom
+  instructions -> 200, `stop_reason: "compaction"`, one block `{"type": "compaction",
+  "content": "<942-char summary>"}` with **no signature and no `encrypted_content`**;
+  `iterations: [{"type": "compaction", "input_tokens": 51924, "output_tokens": 602}]`, top-level
+  zeros. Cost $0.22.
+
+### K2 - can the runtime restore mandatory context before the next inference?
+
+| Path | Observed | FR-MAT-005 fit |
+|---|---|---|
+| On-demand: adopt `[assistant{compaction block}, user(restoration + question)]` | 200, in=762, answer obeys the restored rule (values also in hex) | **Checkpoint protocol.** The compaction call generates no task actions, and the runtime chooses what goes after the block |
+| On-demand: adopt `[block, user(question), {"role":"system"}(restoration)]` | 200, in=762, rule obeyed | Restoration can use system authority (APPEND_SYSTEM) |
+| Threshold with `pause_after_compaction: true`, then `[assistant{block}, user(restoration + question)]` with the edit still configured | 200, in=919, rule obeyed | **Pause protocol.** The pausing response held only the summary (no task action), and restoration happened before the next inference |
+| Threshold without pause | not exercised (another $0.22) | Summary and continuation in one response: the runtime cannot restore in between, so under FR-MAT-005 this is "automatic in-request compaction" and stays disabled |
+
+Kept turns and thinking: after on-demand compaction of `H2`, the turns taken since
+(`u4, a5, u6` from `H3`) were sent after the block under `drop_block` + header: 200,
+`input_transformations: []` (fixture `...K-kept-turns-thinking-dropblock`). Reasoning in turns
+after the summarized range **stays valid** (OBSERVED on opus-5-5), provided `system` and
+`tools` do not change (DOCUMENTED). For threshold compaction the docs say the opposite: turns
+re-inserted after the block must have their thinking removed or dropped.
+
+### K3 - opaque or inspectable?
+
+| Artifact | Readable? | Integrity | Evidence |
+|---|---|---|---|
+| On-demand block | yes, `content` is plain text | **signed**: appending text to `content` -> 400 `` `compaction` block `content` does not match its `signature` ``, `error.details.error_code: "compaction_content_mismatch"` | `...K3-tamper-summary` |
+| Threshold block | yes | **unsigned and editable**: an edited summary (added "answer in words") was accepted and obeyed ("Sixty-two") | `...T4-threshold-block-edited` |
+| Either | - | a request carrying a compaction block with neither the on-demand beta nor a `compact_20260112` edit -> 400 ``compaction` blocks require a `compact_20260112` strategy in `context_management.edits`.`` | `...T4a-threshold-block-without-strategy` |
+
+Coverage: both blocks are readable summaries, so the runtime can store the text and
+record its source coverage (the message range sent). What the summary actually retained is
+not checkable: coverage is "declared by range, content unverified". Images, documents and
+fetched URLs in the summarized range are lost (DOCUMENTED). On-demand blocks are
+provider-bound opaque state for replay (FR-PROV-005): store `content` + `signature` verbatim.
+
+### Context editing (exercised once each, opus-5-5, on `H3`, `drop_block` + header)
+
+- `clear_thinking_20251015`, `keep: {type: "thinking_turns", value: 1}` -> `applied_edits:
+  [{"type": "clear_thinking_20251015", "cleared_thinking_turns": 2, "cleared_input_tokens": 44}]`,
+  `input_transformations: []`. Server-side clearing does **not** count as a history edit
+  (OBSERVED; DOCUMENTED for Opus 5.5 / Fable 5.1).
+- `clear_tool_uses_20250919`, `trigger: {input_tokens: 100}`, `keep: {tool_uses: 1}` ->
+  `applied_edits: []` on a 2-tool-use history. Not applied; the cause was not determined.
+- Docs: clearing invalidates the prompt cache from the cleared point; `clear_thinking` must be
+  first when edits are combined; tool-use trigger default 100,000 input tokens, keep 3.
