@@ -937,10 +937,18 @@ Answers to `p2-ingest`'s implementation questions, appended to
   original guard missed.** `tx.Grants()`, `ObligationTransitions`,
   `LifecycleEvents`, `Obligations(taskID)`, and
   `Diagnostics`/`LifecycleCommands` with no `OccurrenceID` remain
-  unfiltered whole-session reads, deliberately deferred — none on the
-  per-item ingest path (§13 records the full ruling: a grant can only be
+  unfiltered whole-session reads, deliberately deferred. **(SPEC-3.3,
+  corrected) `tx.Grants()` is not off the ingest path** — it runs once per
+  replaced item that carries an obligation
+  (`internal/ingest/directives.go:130` → `graph.go:222` →
+  `graph/obligation.go:43`) and once per lifecycle command
+  (`derive.go:356` → `graph/lifecycle.go:122`) — so it is deferred as a
+  performance-only item precisely *despite* running on that path, not
+  because it doesn't (§13 records the full ruling: a grant can only be
   created by an authorized issuer, so the read discloses nothing and only
-  costs time, never correctness).
+  costs time, never correctness). `ObligationTransitions`, `LifecycleEvents`,
+  `Obligations(taskID)`, and occurrence-less `Diagnostics`/`LifecycleCommands`
+  genuinely are off the ingest path.
 - **Locator identity has no repository namespace in V1 (resolves the §16
   open question, M5/R2).** Sharpens this ADR's earlier "References
   base-directory policy — resolved, deferred" open-question answer with
@@ -1130,19 +1138,32 @@ the code at this ADR's final-pass head.
   fail `ErrLimitExceeded` only on *visible* overflow, so
   `SupersedeSnapshot` now does one indexed `CurrentWorking` lookup per
   partition instead of a task scan (`internal/graph/snapshot.go:279`),
-  closing SEC-1.2. The lookup tables hold live items only (excluded by
-  subquery once superseded or classified `DUPLICATE_OF`), and the store
-  deletes an item's lookup rows in the same write that retires it, so
-  repeated identical content never grows them (DUR-1.1). Ingest call
+  closing SEC-1.2. `lookup_canonical`/`lookup_working`/`lookup_source` hold
+  live items only (excluded by subquery once superseded or classified
+  `DUPLICATE_OF`), and the store deletes an item's rows from these three in
+  the same write that retires it, so repeated identical content never
+  grows them (DUR-1.1). **(SPEC-3.3, corrected) `lookup_blob` is not the
+  same:** `retireLookups(itemID, duplicate bool)`
+  (`internal/store/sqlite/access_lookups.go:54-58`) removes its own rows
+  only when the retiring item is itself classified a duplicate
+  (`duplicate == true`) — a superseded (non-duplicate) item's `lookup_blob`
+  row is deliberately kept, since the canonical item's exact content and
+  boundary authorize the same blob references its superseded predecessor
+  did (the code's own comment); and migration 0012's `lookup_blob` backfill
+  has no `DUPLICATE_OF` exclusion at all (unlike the other three tables'
+  backfills), so a duplicate item's blob row that predates 0012 is never
+  removed retroactively. Ingest call
   sites: `internal/ingest/directives.go:269` (`CanonicalCandidates`),
-  `references.go:42,133` (`SourceItems`, `VisibleReferences`),
-  `run.go:304` (`BlobReferrer`). Separately, SPEC-1.3 found that
-  `internal/ingest`'s *other* per-item reads — `Relationships` filtered by
-  type/from/to, `Items` filtered by task — were not indexed even though
-  the three named R19 lookups were; migration 0012's key-only
-  `relationship_to`/item-task indexes did not close this on their own
-  (SPEC-2.1: no `(Seq, ID)` order, so SQLite still sorted a session-wide
-  index instead) — migration 0015's composite key-plus-order indexes do.
+  `references.go:42` (`SourceItems`), `references.go:137`
+  (`VisibleReferences`), `run.go:304` (`BlobReferrer`). Separately,
+  SPEC-1.3 found that `internal/ingest`'s *other* per-item reads —
+  `Relationships` filtered by type/from/to, `Items` filtered by task — were
+  not indexed even though the three named R19 lookups were; the key-only
+  indexes behind them — `relationship_to` (migration 0012) and
+  `relationship_from`/`item_task` (migration 0001, **not 0012 — SPEC-3.3
+  corrects the provenance**) — did not close this on their own (SPEC-2.1:
+  no `(Seq, ID)` order, so SQLite still sorted a session-wide index
+  instead) — migration 0015's composite key-plus-order indexes do.
   Tests:
   `TestAccessLookupsUseIndex`, `TestUpgradeAccessLookups`,
   `TestGraphReadsUseIndex`, `TestLegacyLookupsDropped`
@@ -1903,13 +1924,20 @@ isn't covered), that is called out explicitly rather than left silent.
   independent of session size and of the calling principal's visibility.
   **(SPEC-2.1/SPEC-2.2) This claim holds for every read on the per-item
   ingest path** — including `Relationships`/`Items` by type/task, fixed by
-  migration 0015's composite key-plus-order indexes after 0012's own
-  indexes turned out not to be enough on their own — **but not for the
-  five reads §13 records as deliberately deferred** (`tx.Grants()`,
-  `ObligationTransitions`, `LifecycleEvents`, `Obligations(taskID)`,
-  `Diagnostics`/`LifecycleCommands` with no `OccurrenceID`): none of those
-  run during ingestion, so "independent of session size" was never meant
-  to, and does not, cover them. See ADR 3.
+  migration 0015's composite key-plus-order indexes after `relationship_to`
+  (0012) and `relationship_from`/`item_task` (0001, not 0012 — SPEC-3.3
+  corrects the provenance) turned out not to be enough on their own —
+  **but not for the five reads §13 records as deliberately deferred**
+  (`tx.Grants()`, `ObligationTransitions`, `LifecycleEvents`,
+  `Obligations(taskID)`, `Diagnostics`/`LifecycleCommands` with no
+  `OccurrenceID`): four of the five never run during ingestion at all, so
+  "independent of session size" was never meant to, and does not, cover
+  them. `tx.Grants()` is the fifth and different case (SPEC-3.3
+  corrects an earlier claim here that grouped it with the other four): it
+  *does* run on the ingest path, once per replaced item with a bound
+  obligation and once per lifecycle command, and is deferred precisely
+  because it is *not* bounded there — a deliberate, recorded exception to
+  this claim, not an absence from the path. See ADR 3.
 - **§24 (round 6 ruling, R20 — all landed, SPEC-1.4):** `internal/domain
   /ingest_test.go:TestEventIDRejectsReservedPrefixes` — an `EventID` equal
   to or prefixed like `evc_`, `eva_`, any `IDDomain` prefix, or `lce_`
