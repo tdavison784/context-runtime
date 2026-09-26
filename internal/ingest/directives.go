@@ -223,7 +223,8 @@ func (r *run) declareObligation(it domain.ContextItem, claim string) error {
 }
 
 // linkDerived records that it was derived from its span's transcript, at
-// creation, with coverage naming the transcript (D8, FR-REL-008).
+// creation, with PROVENANCE coverage naming the transcript (D8, FR-REL-008,
+// P3-6).
 func (r *run) linkDerived(c unitCtx, it domain.ContextItem) error {
 	if r.rels >= r.limits.MaxRelationships {
 		return errLimit("MaxRelationships")
@@ -232,7 +233,15 @@ func (r *run) linkDerived(c unitCtx, it domain.ContextItem) error {
 	if r.derived[c.si]++; r.derived[c.si] > r.limits.MaxItemsPerSpan {
 		return errLimit("MaxItemsPerSpan")
 	}
-	_, err := graph.LinkDerived(r.tx, c.actor, it.ID, []string{c.transcript.ID}, &domain.Coverage{}, r.graphEventID())
+	sources := []string{c.transcript.ID}
+	var err error
+	if r.pol != nil {
+		// Transcript derivation is provenance, not evidence support or a
+		// replaceable exchange (P3-6), with the policy's finite bound.
+		_, err = graph.LinkDerivedCoverage(r.tx, c.actor, it.ID, sources, domain.CoverageProvenance, r.graphEventID(), r.pol.MaxCoverageMembers)
+	} else {
+		_, err = graph.LinkDerived(r.tx, c.actor, it.ID, sources, &domain.Coverage{}, r.graphEventID())
+	}
 	r.rels++
 	return err
 }
