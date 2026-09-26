@@ -135,3 +135,47 @@ func TestParseUnitEntryPoint(t *testing.T) {
 		t.Fatal("snapshot hash mismatch accepted")
 	}
 }
+
+// TestRefusedSectionExtents: every recognized or refused heading is a
+// Section whose Range is its exact extent under the parser's own fence,
+// comment and quote state, so ingestion never re-scans directive text.
+// Heading-looking lines inside a fence, comment or quote never end a
+// refused region; only a same-or-higher unsuppressed heading does.
+func TestRefusedSectionExtents(t *testing.T) {
+	type want struct {
+		keyword Keyword
+		status  SectionStatus
+		end     string // the section ends where this substring starts; "" = unit end
+	}
+	cases := []struct {
+		input    string
+		sections []want
+	}{
+		{"## Archive [x]\n```\n## Notes\n```\ntext\n## Remember\n- kept\n", []want{{Archive, SectionUnsupported, "## Remember"}, {Remember, SectionParsed, ""}}},
+		{"## Waive [t]\n~~~\n# Pinned\n- hidden\n~~~\n## Goal\ng\n", []want{{Waive, SectionUnsupported, "## Goal"}, {Goal, SectionParsed, ""}}},
+		{"## Block\n<!--\n## Pinned\n-->\n> # Goal\n### Remember\n- x\n## Remember\n- kept\n", []want{{Block, SectionUnsupported, "## Remember\n- kept"}, {Remember, SectionParsed, ""}}},
+		{"## completetask\n```\n## Notes\n", []want{{CompleteTask, SectionUnsupported, ""}}},
+		{"# Reopen [g]\n## Goal\nhidden\n# Notes\nafter\n", []want{{Reopen, SectionUnsupported, "# Notes"}}},
+		{"## Pinned [bad/id]\n```\n## Goal\n```\n# Notes\nafter\n", []want{{Pinned, SectionMalformed, "# Notes"}}},
+		{"## Unpin [a]\n- [b]\n```\n## x\n```\n## Remember\n- r\n", []want{{Unpin, SectionParsed, "## Remember"}, {Remember, SectionParsed, ""}}},
+	}
+	for _, tt := range cases {
+		r := Parse([]byte(tt.input), Options{Authority: domain.AuthoritySystem})
+		if r.Err != nil || len(r.Sections) != len(tt.sections) {
+			t.Fatalf("%q: %+v", tt.input, r.Sections)
+		}
+		for i, w := range tt.sections {
+			s := r.Sections[i]
+			end := len(tt.input)
+			if w.end != "" {
+				end = strings.Index(tt.input, w.end)
+			}
+			if s.Keyword != w.keyword || s.Status != w.status || s.Range.End != end || s.BodyRange.End != end {
+				t.Fatalf("%q section %d: %+v, want %+v ending at %d", tt.input, i, s, w, end)
+			}
+			if s.Status != SectionParsed && (!s.Malformed || len(s.ItemIndexes) != 0 || s.DirectiveID != "" || len(s.Attributes) != 0) {
+				t.Fatalf("%q: refused section carries semantics: %+v", tt.input, s)
+			}
+		}
+	}
+}

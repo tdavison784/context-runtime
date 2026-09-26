@@ -172,8 +172,24 @@ func assertResultRanges(t *testing.T, r Result, n int) {
 		}
 	}
 	var ranges []ByteRange
+	end := 0
 	for _, s := range r.Sections {
 		ranges = append(ranges, s.Range)
+		// Sections partition the recognized structure: disjoint, in source
+		// order, and refused ones carry no semantics.
+		if s.Range.Start < end {
+			t.Fatalf("overlapping sections at %d", s.Range.Start)
+		}
+		end = s.Range.End
+		switch s.Status {
+		case SectionParsed:
+		case SectionMalformed, SectionUnsupported:
+			if !s.Malformed || len(s.ItemIndexes) != 0 || s.DirectiveID != "" || len(s.Attributes) != 0 {
+				t.Fatalf("refused section carries semantics: %+v", s)
+			}
+		default:
+			t.Fatalf("unknown section status %q", s.Status)
+		}
 		if !s.HeadingRange.Within(n) || !s.BodyRange.Within(n) || s.Range.Start != s.HeadingRange.Start || s.HeadingRange.End != s.BodyRange.Start || s.Range.End != s.BodyRange.End {
 			t.Fatal(s)
 		}

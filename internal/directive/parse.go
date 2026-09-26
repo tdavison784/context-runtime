@@ -71,6 +71,14 @@ func Parse(input []byte, opts Options) Result {
 			bodyStart++
 		}
 		section := Section{Keyword: Keyword(strings.ToUpper(s.heading.section)), Level: s.heading.level, Range: ByteRange{Start: s.heading.start, End: s.end}, HeadingRange: ByteRange{Start: s.heading.start, End: bodyStart}, BodyRange: ByteRange{Start: bodyStart, End: s.end}, Malformed: s.malformed}
+		switch {
+		case s.unsupported:
+			section.Status = SectionUnsupported
+		case !s.heading.valid:
+			section.Status = SectionMalformed
+		default:
+			section.Status = SectionParsed
+		}
 		if s.heading.valid {
 			section.Attributes = exportAttributes(s.heading.attrs)
 			if applied[si] {

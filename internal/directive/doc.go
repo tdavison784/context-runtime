@@ -46,7 +46,11 @@
 // level, or at the unit end. Deeper headings, keyword or not, are body text
 // (with a nested_heading diagnostic for keywords). A malformed keyword
 // heading or an unsupported lifecycle word still opens a region that grants
-// no directive semantics until the next same-or-higher heading.
+// no directive semantics until the next same-or-higher heading. Every such
+// region is exported as a Section (status PARSED, MALFORMED, or UNSUPPORTED)
+// with its exact byte extent: the parser is the single source of structure,
+// and consumers derive residual text from Section ranges, never by
+// re-scanning directive text.
 //
 // # Items (D7, M4)
 //

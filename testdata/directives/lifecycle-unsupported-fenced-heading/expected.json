@@ -2,20 +2,38 @@
   "parser_version": "directive/v1",
   "sections": [
     {
+      "keyword": "ARCHIVE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        20,
+        91
+      ],
+      "heading_range": [
+        20,
+        37
+      ],
+      "body_range": [
+        37,
+        91
+      ],
+      "malformed": true
+    },
+    {
       "keyword": "REMEMBER",
       "status": "PARSED",
       "level": 2,
       "range": [
-        56,
-        75
+        91,
+        110
       ],
       "heading_range": [
-        56,
-        68
+        91,
+        103
       ],
       "body_range": [
-        68,
-        75
+        103,
+        110
       ],
       "items": [
         0
@@ -25,19 +43,19 @@
   "items": [
     {
       "section": "REMEMBER",
-      "section_index": 0,
+      "section_index": 1,
       "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
       "authority": "SYSTEM",
       "text": "kept",
       "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
       "range": [
-        68,
-        75
+        103,
+        110
       ],
       "text_ranges": [
         [
-          70,
-          74
+          105,
+          109
         ]
       ]
     }
@@ -46,22 +64,21 @@
   "diagnostics": [
     {
       "index": 0,
-      "code": "DirectiveNotParsed",
-      "reason": "fenced_code",
-      "section": "PINNED",
+      "code": "ErrUnsupportedDirective",
+      "reason": "unsupported_lifecycle",
       "range": [
-        8,
-        17
+        20,
+        36
       ]
     },
     {
       "index": 1,
       "code": "DirectiveNotParsed",
-      "reason": "fenced_code",
-      "section": "GOAL",
+      "reason": "html_comment",
+      "section": "PINNED",
       "range": [
-        31,
-        38
+        59,
+        67
       ]
     },
     {
@@ -71,8 +88,8 @@
       "section": "REMEMBER",
       "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
       "range": [
-        68,
-        75
+        103,
+        110
       ]
     }
   ]

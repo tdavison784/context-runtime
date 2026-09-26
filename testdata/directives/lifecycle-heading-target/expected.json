@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "RESOLVE",
+      "status": "PARSED",
       "level": 2,
       "range": [
         0,
@@ -20,6 +21,7 @@
     },
     {
       "keyword": "UNPIN",
+      "status": "PARSED",
       "level": 2,
       "range": [
         22,

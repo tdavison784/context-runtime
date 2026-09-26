@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "GOAL",
+      "status": "PARSED",
       "level": 2,
       "range": [
         0,
@@ -23,6 +24,7 @@
     },
     {
       "keyword": "REMEMBER",
+      "status": "PARSED",
       "level": 2,
       "range": [
         51,

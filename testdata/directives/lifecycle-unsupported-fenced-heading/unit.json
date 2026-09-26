@@ -1,0 +1,11 @@
+{
+  "description": "An unsupported-lifecycle region's extent follows the parser's fence and comment state: heading-looking lines inside them never end it, and none of its bytes become a trusted residual instruction (M4, R21).",
+  "requirements": [
+    "FR-DIR-006",
+    "M4",
+    "R21",
+    "D5"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false
+}

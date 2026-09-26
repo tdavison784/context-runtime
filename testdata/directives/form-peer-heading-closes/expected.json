@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "REMEMBER",
+      "status": "PARSED",
       "level": 2,
       "range": [
         0,
@@ -22,6 +23,7 @@
     },
     {
       "keyword": "PINNED",
+      "status": "PARSED",
       "level": 1,
       "range": [
         43,

@@ -18,6 +18,33 @@ const (
 	Ephemeral  Keyword = "EPHEMERAL"
 	Resolve    Keyword = "RESOLVE"
 	Unpin      Keyword = "UNPIN"
+
+	// Unsupported lifecycle words (M4). They appear only on sections with
+	// status SectionUnsupported and are never executed.
+	Archive      Keyword = "ARCHIVE"
+	Unarchive    Keyword = "UNARCHIVE"
+	Promote      Keyword = "PROMOTE"
+	Demote       Keyword = "DEMOTE"
+	Block        Keyword = "BLOCK"
+	Unblock      Keyword = "UNBLOCK"
+	Waive        Keyword = "WAIVE"
+	CompleteTask Keyword = "COMPLETETASK"
+	Reopen       Keyword = "REOPEN"
+)
+
+// SectionStatus records how the parser treated a recognized heading.
+type SectionStatus string
+
+const (
+	// SectionParsed: a valid directive heading whose body was interpreted.
+	// Malformed may still flag body content that yielded no directive.
+	SectionParsed SectionStatus = "PARSED"
+	// SectionMalformed: a keyword heading with malformed metadata. It grants
+	// no directive semantics to its extent (D6).
+	SectionMalformed SectionStatus = "MALFORMED"
+	// SectionUnsupported: an unsupported lifecycle word (M4). It grants no
+	// directive semantics to its extent and nothing is executed.
+	SectionUnsupported SectionStatus = "UNSUPPORTED"
 )
 
 // ByteRange aliases the shared half-open original-byte coordinate system.
@@ -45,13 +72,20 @@ type Attribute struct {
 	Range ByteRange
 }
 
-// Section records one recognized section, including empty/malformed sections
-// so ingestion can distinguish an empty Working snapshot from its absence.
-// Range includes heading and body; HeadingRange and BodyRange partition it.
-// Only a same-or-shallower heading (keyword or not) closes it; deeper headings
-// are body text (D6). ItemIndexes address Result.Items in input order.
+// Section records one heading the parser recognized or refused: every valid,
+// malformed, and unsupported-lifecycle section, in source order, including
+// empty ones so ingestion can distinguish an empty Working snapshot from its
+// absence. The parser is the single source of structure: Range is the
+// section's exact extent under the parser's own fence, quote, and comment
+// state, and consumers derive residual text from these ranges alone, never
+// by re-scanning directive text. Range includes heading and body;
+// HeadingRange and BodyRange partition it. Only a same-or-shallower
+// unsuppressed heading (keyword or not) closes it; deeper headings are body
+// text (D6). Text outside every Range is ordinary content. ItemIndexes
+// address Result.Items in input order.
 type Section struct {
 	Keyword      Keyword
+	Status       SectionStatus
 	Level        int
 	Range        ByteRange
 	HeadingRange ByteRange
@@ -59,8 +93,8 @@ type Section struct {
 	DirectiveID  string
 	Attributes   []Attribute
 	ItemIndexes  []int
-	// Malformed is true when the heading was malformed or any body content
-	// yielded no directive (dropped item, empty body, stray list prose).
+	// Malformed is true when Status is not SectionParsed, or when any body
+	// content yielded no directive (dropped item, empty body, stray prose).
 	// Ingestion must not apply a Working snapshot replacement from a
 	// malformed section, so a parse error cannot retire an omitted member (D11).
 	Malformed bool

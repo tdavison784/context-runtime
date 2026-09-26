@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "GOAL",
+      "status": "PARSED",
       "level": 2,
       "range": [
         0,
@@ -22,6 +23,7 @@
     },
     {
       "keyword": "PINNED",
+      "status": "PARSED",
       "level": 2,
       "range": [
         70,
@@ -43,6 +45,7 @@
     },
     {
       "keyword": "WORKING",
+      "status": "PARSED",
       "level": 2,
       "range": [
         217,
@@ -63,6 +66,7 @@
     },
     {
       "keyword": "REMEMBER",
+      "status": "PARSED",
       "level": 2,
       "range": [
         302,
@@ -83,6 +87,7 @@
     },
     {
       "keyword": "REFERENCES",
+      "status": "PARSED",
       "level": 2,
       "range": [
         402,
@@ -103,6 +108,7 @@
     },
     {
       "keyword": "EPHEMERAL",
+      "status": "PARSED",
       "level": 2,
       "range": [
         449,
@@ -132,6 +138,7 @@
     },
     {
       "keyword": "UNPIN",
+      "status": "PARSED",
       "level": 2,
       "range": [
         493,

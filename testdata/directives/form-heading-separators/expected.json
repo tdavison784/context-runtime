@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "GOAL",
+      "status": "MALFORMED",
       "level": 2,
       "range": [
         0,
@@ -20,6 +21,7 @@
     },
     {
       "keyword": "GOAL",
+      "status": "MALFORMED",
       "level": 2,
       "range": [
         15,
@@ -37,6 +39,7 @@
     },
     {
       "keyword": "GOAL",
+      "status": "MALFORMED",
       "level": 2,
       "range": [
         37,
@@ -54,6 +57,7 @@
     },
     {
       "keyword": "PINNED",
+      "status": "PARSED",
       "level": 2,
       "range": [
         51,

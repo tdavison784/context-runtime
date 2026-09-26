@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "PINNED",
+      "status": "PARSED",
       "level": 2,
       "range": [
         0,
@@ -24,6 +25,7 @@
     },
     {
       "keyword": "WORKING",
+      "status": "PARSED",
       "level": 2,
       "range": [
         71,
@@ -45,6 +47,7 @@
     },
     {
       "keyword": "REMEMBER",
+      "status": "PARSED",
       "level": 2,
       "range": [
         144,
@@ -67,6 +70,7 @@
     },
     {
       "keyword": "EPHEMERAL",
+      "status": "PARSED",
       "level": 2,
       "range": [
         231,

@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "UNPIN",
+      "status": "PARSED",
       "level": 2,
       "range": [
         0,
