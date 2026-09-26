@@ -28,19 +28,27 @@ func TestAccessLookupsUseIndex(t *testing.T) {
 		assertIndexed(t, s, keys, q, args...)
 	}
 	owners := []string{"workflow_id", "task_id", "agent_id"}
-	blob, _ := blobReferrerQuery("s", "h", planViewer, planViewer)
-	q, args := blob(mid, lookupBatch)
-	check(append([]string{"session_id", "blob_hash"}, owners...), q, args)
+	combos := ownerCombos(planViewer)
+	var q string
+	var args []any
+	for _, b := range blobReferrerQueries("s", "h", combos) {
+		q, args = b(mid, lookupBatch)
+		check(append([]string{"session_id", "blob_hash"}, owners...), q, args)
+	}
 	q, args = canonicalQuery("s", store.CanonicalFilter{TaskID: "task", Kind: domain.KindFact, Authority: domain.AuthorityUser,
 		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, ContentHash: "h"})(mid, lookupBatch)
 	check([]string{"session_id", "content_hash", "task_id", "section", "directive_id", "kind", "role", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, q, args)
 	q, args = workingQuery("s", store.WorkingFilter{TaskID: "task", Authority: domain.AuthorityUser,
 		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}})(mid, lookupBatch)
 	check([]string{"session_id", "task_id", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, q, args)
-	q, args = sourceItemsQuery("s", "k", planViewer)(mid, lookupBatch)
-	check(append([]string{"session_id", "rule_version", "locator_key"}, owners...), q, args)
-	q, args = visibleReferencesQuery("s", "k", planViewer, mid, 3)
-	check([]string{"session_id", "f_locator_key", "f_rule_version", "f_access_workflow_id", "f_access_task_id", "f_access_agent_id"}, q, args)
+	for _, b := range sourceItemsQueries("s", "k", combos) {
+		q, args = b(mid, lookupBatch)
+		check(append([]string{"session_id", "rule_version", "locator_key"}, owners...), q, args)
+	}
+	for _, b := range visibleReferencesQueries("s", "k", combos) {
+		q, args = b(mid, 3)
+		check([]string{"session_id", "f_locator_key", "f_rule_version", "f_access_workflow_id", "f_access_task_id", "f_access_agent_id"}, q, args)
+	}
 }
 
 // TestUpgradeAccessLookups checks migration 0012's backfill: live items are
