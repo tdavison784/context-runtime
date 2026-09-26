@@ -191,29 +191,56 @@ func (r *readTx) Blob(hash string) (domain.Blob, error) {
 	return b, nil
 }
 
-func (r *readTx) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
+func (r *readTx) CurrentVersion(key domain.CurrentKey) (string, error) {
 	if err := r.check(); err != nil {
 		return "", err
 	}
-	id, ok := r.directives.get(directiveKey{taskID, directiveID, boundary})
-	if !ok {
-		return "", notFound("directive", taskID+"/"+directiveID)
+	if err := key.Validate(); err != nil {
+		return "", err
 	}
-	return id, nil
+	return r.current(key.TaskID, key.ID, key.Access, key.Namespace)
 }
 
-func (r *readTx) CurrentDirectives(taskID, directiveID string) ([]string, error) {
+func (r *readTx) CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error) {
 	if err := r.check(); err != nil {
 		return nil, err
 	}
+	if !ns.Valid() {
+		return nil, invalid("current versions: invalid namespace %q", ns)
+	}
 	var out []string
-	for k, id := range r.directives.all() {
-		if k.taskID == taskID && k.directiveID == directiveID {
-			out = append(out, id)
+	for k, itemID := range r.directives.all() {
+		if k.taskID == taskID && k.directiveID == id && k.namespace == ns {
+			out = append(out, itemID)
 		}
 	}
 	slices.Sort(out)
 	return out, nil
+}
+
+func (r *readTx) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
+	if err := r.check(); err != nil {
+		return "", err
+	}
+	id, err := r.current(taskID, directiveID, boundary, domain.NamespaceDirective)
+	if errors.Is(err, domain.ErrNotFound) {
+		return r.current(taskID, directiveID, boundary, domain.NamespaceAgentKey)
+	}
+	return id, err
+}
+
+func (r *readTx) CurrentDirectives(taskID, directiveID string) ([]string, error) {
+	return currentDirectives(r, taskID, directiveID)
+}
+
+// current looks up one pointer. A boundary in another session names nothing
+// here.
+func (r *readTx) current(taskID, id string, boundary domain.AccessBoundary, ns domain.DirectiveNamespace) (string, error) {
+	itemID, ok := r.directives.get(directiveKey{taskID, id, boundary, ns})
+	if !ok || boundary.SessionID != r.sessionID {
+		return "", notFound("current version", taskID+"/"+id)
+	}
+	return itemID, nil
 }
 
 func (r *readTx) Obligation(obligationID string) (domain.ObligationVersion, error) {
@@ -376,5 +403,20 @@ func (r *readTx) CallAttempts(callID string) ([]domain.CallAttempt, error) {
 		}
 	}
 	slices.SortFunc(out, func(a, b domain.CallAttempt) int { return cmp.Compare(a.Attempt, b.Attempt) })
+	return out, nil
+}
+
+// currentDirectives is the deprecated namespace-agnostic view: the pointers
+// of both namespaces, ordered by item ID.
+func currentDirectives(r store.ReadTx, taskID, directiveID string) ([]string, error) {
+	var out []string
+	for _, ns := range []domain.DirectiveNamespace{domain.NamespaceDirective, domain.NamespaceAgentKey} {
+		ids, err := r.CurrentVersions(taskID, ns, directiveID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ids...)
+	}
+	slices.Sort(out)
 	return out, nil
 }

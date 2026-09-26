@@ -216,6 +216,26 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	return nil
 }
 
+func (t *tx) SetCurrentVersion(itemID string) error {
+	if err := t.check(); err != nil {
+		return err
+	}
+	it, ok := t.items.peek(itemID)
+	if !ok {
+		return notFound("item", itemID)
+	}
+	key, ok := it.CurrentKey()
+	if !ok {
+		return invalid("item %s has no directive ID", itemID)
+	}
+	if err := key.Validate(); err != nil {
+		return fmt.Errorf("item %s: %w", itemID, err)
+	}
+	t.directives.put(directiveKey{key.TaskID, key.ID, key.Access, key.Namespace}, itemID)
+	t.markSemantic()
+	return nil
+}
+
 func (t *tx) SetCurrentDirective(taskID, directiveID, itemID string) error {
 	if err := t.check(); err != nil {
 		return err
@@ -230,9 +250,7 @@ func (t *tx) SetCurrentDirective(taskID, directiveID, itemID string) error {
 	if it.DirectiveID != directiveID || it.TaskID != taskID {
 		return invalid("item %s is not directive %s of task %s", itemID, directiveID, taskID)
 	}
-	t.directives.put(directiveKey{taskID, directiveID, it.Access}, itemID)
-	t.markSemantic()
-	return nil
+	return t.SetCurrentVersion(itemID)
 }
 
 func (t *tx) InsertBlob(b domain.Blob) error {

@@ -160,16 +160,35 @@ type ReadTx interface {
 	// Blob returns the blob with the given hash after verifying its bytes;
 	// corrupt bytes fail with domain.ErrIntegrity.
 	Blob(hash string) (domain.Blob, error)
-	// CurrentDirective returns the item ID of the current version of a
-	// directive (FR-DIR-002). A directive's identity is (task, directive ID,
-	// access boundary): versions in different boundaries are independent
-	// directives, so a boundary a caller cannot see never blocks or reveals
-	// itself through a shared ID.
+	// CurrentVersion returns the item ID the current-version map holds for
+	// key (FR-DIR-002, FR-TOOL-002). The identity is (task, access boundary,
+	// namespace, ID): versions in different boundaries are independent, so a
+	// boundary a caller cannot see never blocks or reveals itself through a
+	// shared ID, and a parsed directive never collides with keyed agent state
+	// of the same ID (M6, R6). A key naming another session is ErrNotFound; a
+	// key that fails domain.CurrentKey.Validate is ErrInvalidRecord. The map
+	// records only what SetCurrentVersion wrote: callers still check that the
+	// named item is current (no incoming SUPERSEDES, not a duplicate).
+	CurrentVersion(key domain.CurrentKey) (string, error)
+	// CurrentVersions returns the item IDs the map holds for (namespace, id)
+	// across every access boundary in a task, ordered by item ID; empty when
+	// none exist. Callers filter by access before acting, so a version a
+	// principal cannot see stays invisible (FR-DIR-002, FR-DIR-005). An
+	// invalid namespace is ErrInvalidRecord.
+	CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error)
+	// CurrentDirective is the namespace-agnostic view that predates M6: the
+	// DIRECTIVE pointer for (task, directive ID, boundary) if there is one,
+	// else the AGENT_KEY pointer. Callers must check the returned item's
+	// namespace (domain.ContextItem.DirectiveNamespace).
+	//
+	// Deprecated: use CurrentVersion; lifecycle resolution must consider
+	// only the DIRECTIVE namespace (R6).
 	CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error)
-	// CurrentDirectives returns the item IDs of the current versions of a
-	// directive across every access boundary in a task, ordered by item ID;
-	// empty when none exist. Callers filter by access before acting, so a
-	// version a principal cannot see stays invisible (FR-DIR-002, FR-DIR-005).
+	// CurrentDirectives is the namespace-agnostic view that predates M6: the
+	// pointers of both namespaces for (task, directive ID), ordered by item
+	// ID. Callers must filter by the items' namespaces.
+	//
+	// Deprecated: use CurrentVersions.
 	CurrentDirectives(taskID, directiveID string) ([]string, error)
 	// Obligation returns the latest version of an obligation.
 	Obligation(obligationID string) (domain.ObligationVersion, error)
@@ -230,10 +249,17 @@ type Tx interface {
 	// Reusing an ID fails with domain.ErrImmutable.
 	InsertRelationship(r domain.Relationship) error
 
-	// SetCurrentDirective points (task, directive ID, the item's access
-	// boundary) at an item, which must exist in this session
-	// (domain.ErrNotFound), belong to taskID, and carry that directive ID
-	// (domain.ErrInvalidRecord).
+	// SetCurrentVersion points the item's current-version key
+	// (domain.ContextItem.CurrentKey: its task, access boundary, namespace,
+	// and directive ID) at the item. The item must exist in this session
+	// (domain.ErrNotFound) and have a valid key (domain.ErrInvalidRecord). It
+	// is a semantic write.
+	SetCurrentVersion(itemID string) error
+	// SetCurrentDirective is SetCurrentVersion for an item that belongs to
+	// taskID and carries directiveID (domain.ErrInvalidRecord otherwise); the
+	// namespace still comes from the item.
+	//
+	// Deprecated: use SetCurrentVersion.
 	SetCurrentDirective(taskID, directiveID, itemID string) error
 
 	// InsertBlob stores an immutable blob after verifying its hash.

@@ -166,19 +166,34 @@ func (t *transaction) loadSupersession() error {
 	t.supersessionLoaded = true
 	return nil
 }
+func (t *transaction) SetCurrentVersion(itemID string) error {
+	v, err := t.Item(itemID)
+	if err != nil {
+		return err
+	}
+	key, ok := v.CurrentKey()
+	if !ok {
+		return fmt.Errorf("%w: item %s has no directive ID", domain.ErrInvalidRecord, itemID)
+	}
+	if err := key.Validate(); err != nil {
+		return fmt.Errorf("item %s: %w", itemID, err)
+	}
+	a := key.Access
+	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO directives(session_id,task_id,namespace,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,task_id,namespace,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id) DO UPDATE SET item_id=excluded.item_id", t.session, key.TaskID, key.Namespace, key.ID, a.Scope, a.SessionID, a.WorkflowID, a.TaskID, a.AgentID, itemID)
+	if err == nil {
+		t.semanticWrite, t.wrote = true, true
+	}
+	return err
+}
 func (t *transaction) SetCurrentDirective(taskID, directiveID, itemID string) error {
 	v, err := t.Item(itemID)
 	if err != nil {
 		return err
 	}
-	if v.TaskID != taskID || v.DirectiveID != directiveID {
+	if taskID == "" || v.TaskID != taskID || v.DirectiveID != directiveID {
 		return fmt.Errorf("%w: directive item mismatch", domain.ErrInvalidRecord)
 	}
-	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO directives(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id) DO UPDATE SET item_id=excluded.item_id", t.session, taskID, directiveID, v.Access.Scope, v.Access.SessionID, v.Access.WorkflowID, v.Access.TaskID, v.Access.AgentID, itemID)
-	if err == nil {
-		t.semanticWrite, t.wrote = true, true
-	}
-	return err
+	return t.SetCurrentVersion(itemID)
 }
 func (t *transaction) InsertBlob(v domain.Blob) error {
 	if err := v.Validate(); err != nil {

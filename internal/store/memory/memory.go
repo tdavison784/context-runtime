@@ -42,11 +42,12 @@ type session struct {
 	committed bool
 }
 
-// directiveKey is a directive's identity (FR-DIR-002): versions in
-// different access boundaries are independent directives.
+// directiveKey is a current-version identity (FR-DIR-002, M6): versions in
+// different access boundaries or namespaces are independent.
 type directiveKey struct {
 	taskID, directiveID string
 	boundary            domain.AccessBoundary
+	namespace           domain.DirectiveNamespace
 }
 
 type obligationKey struct {

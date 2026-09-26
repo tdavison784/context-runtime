@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -113,39 +114,63 @@ func (t *transaction) Blob(hash string) (domain.Blob, error) {
 	}
 	return v, nil
 }
-func (t *transaction) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
-	if err := boundary.Validate(); err != nil {
+func (t *transaction) CurrentVersion(key domain.CurrentKey) (string, error) {
+	if err := key.Validate(); err != nil {
 		return "", err
 	}
-	// A boundary in another session names nothing here: reads report it as
-	// missing, never as invalid, so they cannot probe other sessions.
-	if boundary.SessionID != t.session {
-		return "", domain.ErrNotFound
-	}
-	var id string
-	err := t.conn.QueryRowContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND directive_id=? AND boundary_scope=? AND boundary_session_id=? AND boundary_workflow_id=? AND boundary_task_id=? AND boundary_agent_id=?", t.session, taskID, directiveID, boundary.Scope, boundary.SessionID, boundary.WorkflowID, boundary.TaskID, boundary.AgentID).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", domain.ErrNotFound
-	}
-	return id, err
+	return t.current(key.TaskID, key.ID, key.Access, key.Namespace)
 }
 
-func (t *transaction) CurrentDirectives(taskID, directiveID string) ([]string, error) {
-	rows, err := t.conn.QueryContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND directive_id=? ORDER BY item_id", t.session, taskID, directiveID)
+func (t *transaction) CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error) {
+	if !ns.Valid() {
+		return nil, fmt.Errorf("%w: invalid namespace %q", domain.ErrInvalidRecord, ns)
+	}
+	rows, err := t.conn.QueryContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND namespace=? AND directive_id=? ORDER BY item_id", t.session, taskID, ns, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var ids []string
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var itemID string
+		if err := rows.Scan(&itemID); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		ids = append(ids, itemID)
 	}
 	return ids, rows.Err()
 }
+
+func (t *transaction) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
+	if err := boundary.Validate(); err != nil {
+		return "", err
+	}
+	id, err := t.current(taskID, directiveID, boundary, domain.NamespaceDirective)
+	if errors.Is(err, domain.ErrNotFound) {
+		return t.current(taskID, directiveID, boundary, domain.NamespaceAgentKey)
+	}
+	return id, err
+}
+
+func (t *transaction) CurrentDirectives(taskID, directiveID string) ([]string, error) {
+	return currentDirectives(t, taskID, directiveID)
+}
+
+// current looks up one pointer. A boundary in another session names nothing
+// here: reads report it as missing, never as invalid, so they cannot probe
+// other sessions.
+func (t *transaction) current(taskID, id string, boundary domain.AccessBoundary, ns domain.DirectiveNamespace) (string, error) {
+	if boundary.SessionID != t.session {
+		return "", domain.ErrNotFound
+	}
+	var itemID string
+	err := t.conn.QueryRowContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND namespace=? AND directive_id=? AND boundary_scope=? AND boundary_session_id=? AND boundary_workflow_id=? AND boundary_task_id=? AND boundary_agent_id=?", t.session, taskID, ns, id, boundary.Scope, boundary.SessionID, boundary.WorkflowID, boundary.TaskID, boundary.AgentID).Scan(&itemID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", domain.ErrNotFound
+	}
+	return itemID, err
+}
+
 func (t *transaction) Obligation(id string) (domain.ObligationVersion, error) {
 	vs, err := t.ObligationVersions(id)
 	if err != nil {
@@ -302,5 +327,20 @@ func (t *transaction) CallAttempts(id string) ([]domain.CallAttempt, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Attempt < out[j].Attempt })
+	return out, nil
+}
+
+// currentDirectives is the deprecated namespace-agnostic view: the pointers
+// of both namespaces, ordered by item ID.
+func currentDirectives(r store.ReadTx, taskID, directiveID string) ([]string, error) {
+	var out []string
+	for _, ns := range []domain.DirectiveNamespace{domain.NamespaceDirective, domain.NamespaceAgentKey} {
+		ids, err := r.CurrentVersions(taskID, ns, directiveID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ids...)
+	}
+	slices.Sort(out)
 	return out, nil
 }
