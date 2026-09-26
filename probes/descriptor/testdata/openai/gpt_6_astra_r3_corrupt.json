@@ -1,6 +1,6 @@
 {
   "endpoint": "/responses",
-  "error": "POST \"https://api.openai.com/v1/responses\": 400 Bad Request {\n    \"message\": \"The encrypted content for item rs_0e1a837efed155ff016ab7c08642ec87d197604182ade7125e could not be verified. Reason: Encrypted content could not be decrypted or parsed.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": null,\n    \"code\": \"invalid_encrypted_content\"\n  }",
+  "error": "POST \"https://api.openai.com/v1/responses\": 400 Bad Request {\n    \"message\": \"The encrypted content for item <redacted id length=53 sha256=0cf21c8093302858565734fa819e9cb4a7d48e57a1dd4096135abc413bcecd77> could not be verified. Reason: Encrypted content could not be decrypted or parsed.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": null,\n    \"code\": \"invalid_encrypted_content\"\n  }",
   "name": "gpt_6_astra_r3_corrupt",
   "request": {
     "input": [

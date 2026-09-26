@@ -1,6 +1,6 @@
 {
   "endpoint": "/responses",
-  "error": "POST \"https://api.openai.com/v1/responses\": 400 Bad Request {\n    \"message\": \"The encrypted content for item rs_0aa3180c1d8c6aeb016ab7c0940f6c87d1b722de305a41d8f5 could not be verified. Reason: Encrypted content could not be decrypted or parsed.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": null,\n    \"code\": \"invalid_encrypted_content\"\n  }",
+  "error": "POST \"https://api.openai.com/v1/responses\": 400 Bad Request {\n    \"message\": \"The encrypted content for item <redacted id length=53 sha256=218afc53146762759827f50ab57dea58f2d7d1f2c7e3bad6ad5c921a19b6625e> could not be verified. Reason: Encrypted content could not be decrypted or parsed.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": null,\n    \"code\": \"invalid_encrypted_content\"\n  }",
   "name": "gpt_6_luna_r3_corrupt",
   "request": {
     "input": [

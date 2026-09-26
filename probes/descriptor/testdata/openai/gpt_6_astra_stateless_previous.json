@@ -1,6 +1,6 @@
 {
   "endpoint": "/responses",
-  "error": "POST \"https://api.openai.com/v1/responses\": 400 Bad Request {\n    \"message\": \"Previous response with id 'resp_0e1a837efed155ff016ab7c084a82887d1821f5984226b74ab' not found.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"previous_response_id\",\n    \"code\": \"previous_response_not_found\"\n  }",
+  "error": "POST \"https://api.openai.com/v1/responses\": 400 Bad Request {\n    \"message\": \"Previous response with id '<redacted id length=55 sha256=d7df68a91f0af60e7f0c63bb15ef226c5132b38ff784e8814fb82c060d9afc56>' not found.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"previous_response_id\",\n    \"code\": \"previous_response_not_found\"\n  }",
   "name": "gpt_6_astra_stateless_previous",
   "request": {
     "input": [

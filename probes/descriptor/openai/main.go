@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -330,11 +331,22 @@ func inputShape(v any) any {
 	}
 	return out
 }
+
+// rawIDPattern matches account-scoped OpenAI object IDs (response, reasoning-item,
+// message, tool-call, and compaction IDs) that can appear in error text, which bypasses
+// the JSON-shaped sanitize() below.
+var rawIDPattern = regexp.MustCompile(`\b(resp|rs|msg|call|fc|cmp)_[A-Za-z0-9]{8,}\b`)
+
 func scrubError(s string) string {
 	if i := strings.Index(s, "sk"+"-"); i >= 0 {
-		return s[:i] + "[redacted]"
+		s = s[:i] + "[redacted]"
 	}
-	return s
+	return rawIDPattern.ReplaceAllStringFunc(s, redactID)
+}
+
+func redactID(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return fmt.Sprintf("<redacted id length=%d sha256=%s>", len(id), hex.EncodeToString(sum[:]))
 }
 func write(name string, data any) error {
 	b, err := json.MarshalIndent(data, "", "  ")
