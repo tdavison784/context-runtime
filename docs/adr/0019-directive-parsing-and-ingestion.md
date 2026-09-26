@@ -490,6 +490,8 @@ see, and an unbounded grant count neither locks out a legitimate mutation
 authority check is skipped). It is indexed in Phase 3, alongside that
 phase's other obligation/grant work (ADR 8), rather than in this round.
 
+### 14. Turn advancement (D18)
+
 Terminology (§1 of the SDD), FR-DOM-003/007, FR-AUTH-001/003, FR-ING-006,
 §10, trace T03/T10.
 
