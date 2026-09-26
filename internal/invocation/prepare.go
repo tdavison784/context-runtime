@@ -36,8 +36,8 @@ type PrepareRequest struct {
 // The first Prepare for a (task, agent) pair creates its conversation at
 // Version 1.
 //
-// Repeating an identical Prepare while its call is still PREPARED returns
-// that call without writing. Otherwise a held reservation fails with
+// Repeating an identical Prepare (same ProposalHash) while its call is still
+// PREPARED returns that call without writing. Otherwise a held reservation fails with
 // domain.ErrCallInFlight, and a stale conversation version, stale semantic
 // sequence, or disallowed epoch fails with domain.ErrVersionConflict.
 func (l *Ledger) Prepare(ctx context.Context, req PrepareRequest) (domain.CallRecord, error) {
@@ -75,13 +75,14 @@ func (l *Ledger) Prepare(ctx context.Context, req PrepareRequest) (domain.CallRe
 			Request:                 req.Request,
 			ManifestHash:            req.ManifestHash,
 		}
+		call.ProposalHash = domain.CallProposalHash(call)
 
 		if conv.InFlightCallID != "" {
 			held, err := tx.Call(conv.InFlightCallID)
 			if err != nil {
 				return err
 			}
-			if held.State == domain.CallPrepared && sameRequest(held, call) {
+			if held.State == domain.CallPrepared && held.ProposalHash == call.ProposalHash {
 				out = held
 				return nil
 			}
@@ -103,9 +104,10 @@ func (l *Ledger) Prepare(ctx context.Context, req PrepareRequest) (domain.CallRe
 				convID, req.Epoch, conv.Epoch, conv.RequireNewEpoch, domain.ErrVersionConflict)
 		}
 
-		if call.CallID, err = nextCallID(tx, call); err != nil {
-			return err
-		}
+		// The pre-reservation revision is unique per reservation, so an
+		// identical proposal prepared again after a cancellation or failure
+		// is a new logical call.
+		call.CallID = domain.DerivedCallID(p.SessionID, convID, conv.Revision, call.ProposalHash)
 		seq := tx.NextSeq()
 		call.PreparedSeq = seq
 		call.Revision = 1
@@ -114,8 +116,7 @@ func (l *Ledger) Prepare(ctx context.Context, req PrepareRequest) (domain.CallRe
 		}
 		next := conv
 		next.InFlightCallID = call.CallID
-		next.Revision = conv.Revision + 1
-		if err := tx.PutConversation(next, conv.Revision); err != nil {
+		if _, err := tx.PutConversation(next, conv.Revision); err != nil {
 			return err
 		}
 		if err := l.appendEvent(tx, call, seq, domain.LifecycleEvent{
@@ -153,37 +154,4 @@ func validatePrepare(req PrepareRequest) error {
 		return fmt.Errorf("prepare: malformed manifest hash: %w", domain.ErrInvalidRecord)
 	}
 	return nil
-}
-
-// sameRequest reports whether two calls freeze the same logical request.
-func sameRequest(a, b domain.CallRecord) bool {
-	return a.ConversationID == b.ConversationID && a.Operation == b.Operation &&
-		a.Principal == b.Principal && a.ServiceActor == b.ServiceActor &&
-		a.BaseConversationVersion == b.BaseConversationVersion && a.SemanticSeq == b.SemanticSeq &&
-		a.Epoch == b.Epoch && a.PolicyVersion == b.PolicyVersion &&
-		a.DescriptorVersion == b.DescriptorVersion && a.RequestHash == b.RequestHash &&
-		a.ManifestHash == b.ManifestHash
-}
-
-// nextCallID derives the call's stable ID (FR-CALL-001). DerivedCallID keys
-// on (session, conversation, base version, request hash), but a cancelled or
-// failed call does not advance the conversation, so an identical request may
-// legitimately be prepared again as a new logical call. Generation g > 0
-// derives from the request hash extended with g; the first unused generation
-// is chosen, so replay reproduces the same IDs.
-func nextCallID(tx store.ReadTx, c domain.CallRecord) (string, error) {
-	for g := uint64(0); ; g++ {
-		h := c.RequestHash
-		if g > 0 {
-			h = domain.NewCanonicalEncoder("context-runtime/call-generation/v1").String(h).Uint(g).Hash()
-		}
-		id := domain.DerivedCallID(c.SessionID, c.ConversationID, c.BaseConversationVersion, h)
-		_, err := tx.Call(id)
-		if errors.Is(err, domain.ErrNotFound) {
-			return id, nil
-		}
-		if err != nil {
-			return "", err
-		}
-	}
 }

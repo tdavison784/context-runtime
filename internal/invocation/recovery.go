@@ -95,6 +95,7 @@ func (l *Ledger) Abandon(ctx context.Context, actor domain.Principal, callID, re
 			return err
 		}
 		seq := tx.NextSeq()
+		c.Reason = reason
 		next, err := l.transition(tx, c, domain.CallAbandoned, seq, domain.LifecycleEvent{
 			Action: ActionAbandon, Actor: actor, Reason: reason, PayloadHash: auditHash,
 		})
