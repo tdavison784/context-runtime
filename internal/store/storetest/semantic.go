@@ -866,3 +866,39 @@ func testDirectiveBoundaries(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// testCurrentDirectivesOrder checks that CurrentDirectives orders by item
+// ID regardless of insertion order: six boundaries are set in reverse
+// item-ID order, so neither insertion order nor hash order can pass.
+func testCurrentDirectivesOrder(t *testing.T, s store.Store) {
+	const n = 6
+	var want []string
+	update(t, s, sessA, func(tx store.Tx) error {
+		for i := n - 1; i >= 0; i-- {
+			it := NewDirective(sessA, fmt.Sprintf("v%d", i), "dir", tx.NextSeq(), fmt.Sprintf("version %d", i))
+			it.AgentID = fmt.Sprintf("agent-%d", i)
+			it.Access.AgentID = it.AgentID
+			noErr(t, tx.InsertItem(it))
+			noErr(t, tx.SetCurrentDirective("task", "dir", it.ID))
+		}
+		for i := range n {
+			want = append(want, fmt.Sprintf("v%d", i))
+		}
+		got, err := tx.CurrentDirectives("task", "dir")
+		noErr(t, err)
+		if !slices.Equal(got, want) {
+			t.Errorf("CurrentDirectives inside Update = %v, want %v", got, want)
+		}
+		return nil
+	})
+	for range 3 {
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			got, err := tx.CurrentDirectives("task", "dir")
+			noErr(t, err)
+			if !slices.Equal(got, want) {
+				t.Errorf("CurrentDirectives = %v, want %v", got, want)
+			}
+			return nil
+		})
+	}
+}
