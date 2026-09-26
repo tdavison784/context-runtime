@@ -211,6 +211,17 @@ preserve valid state.
     migrated-layout parity fixture: a relationship and items stored before
     0015 read back correctly through the new indexes after upgrade, and
     the three superseded indexes are confirmed gone.
+  - `0016_command_detail_access.sql` (SEC-3.2, recorded in ADR 19 §31) adds
+    five `f_detail_access_*` columns to `rec_command`
+    (`scope`/`session_id`/`workflow_id`/`task_id`/`agent_id`), the boundary
+    that narrows who may read a lifecycle command record's resolution
+    while the record itself stays readable at its transcript boundary.
+    **Compatibility rule (M8):** a record written before 0016 reads all
+    five columns as NULL, decoded as the zero `domain.AccessBoundary`,
+    which the record's `Redacted` method treats as "no narrowing beyond
+    `Access`" — a pre-existing record's resolution stays exactly as
+    visible as it was when recorded, never retroactively hidden or
+    exposed by the migration itself.
   - `0017_lookup_item_indexes.sql` (SPEC-3.1 item 1) adds a `(session_id,
     item_id)` index to each of `lookup_canonical`/`lookup_working`/
     `lookup_source`/`lookup_blob`. Every `SUPERSEDES`/`DUPLICATE_OF` edge
@@ -275,16 +286,20 @@ preserve valid state.
   every `SUPERSEDES` edge in the session either: a cycle through `from ->
   to` needs an existing edge into `from` (one indexed read, or none), and
   otherwise the check walks only the chain reachable from `to`.
-  **Still an unfiltered whole-session read, deliberately deferred (not on
-  the per-item ingest path):** `tx.Grants()` (obligation retirement,
-  lifecycle command authorization — a `MutationGrant` can only be created
-  by an authorized issuer, so the read discloses nothing and only costs
-  time), `ObligationTransitions`, `LifecycleEvents`, `Obligations(taskID)`
-  (the whole-task listing, distinct from the now-keyed per-ID/per-source
-  reads above), and `Diagnostics`/`LifecycleCommands` when called with no
-  `OccurrenceID` (`visibleReceipts` then lists every receipt) — none of
-  these run during ingestion itself (ADR 19 §13 records the ruling in
-  full).
+  **Still an unfiltered whole-session read, deliberately deferred**
+  (SPEC-4.2: corrected — `tx.Grants()` is the one exception that *does*
+  run on the per-item ingest path, deferred anyway; the other four
+  genuinely don't): `tx.Grants()` (obligation retirement, lifecycle
+  command authorization — runs once per replaced item with a bound
+  obligation and once per lifecycle command; a `MutationGrant` can only be
+  created by an authorized issuer, so the read discloses nothing and only
+  costs time), `ObligationTransitions`, `LifecycleEvents`,
+  `Obligations(taskID)` (the whole-task listing, distinct from the
+  now-keyed per-ID/per-source reads above), and
+  `Diagnostics`/`LifecycleCommands` when called with no `OccurrenceID`
+  (`visibleReceipts` then lists every receipt) — these last four, unlike
+  `Grants()`, never run during ingestion itself (ADR 19 §13 records the
+  ruling in full).
 
   "Migrations are forward-only; no down migrations ship" (above) is now a
   literal test, not only documented policy: `committedMigrations`
