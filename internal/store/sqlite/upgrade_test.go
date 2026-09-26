@@ -390,3 +390,41 @@ func TestUpgradeReceiptLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeOrderedGraphIndexes checks migration 0015 on a database
+// migrated through 0014: relationships and items stored before it read
+// back through the new ordered indexes, and the replaced indexes are gone
+// (SPEC-3.2).
+func TestUpgradeOrderedGraphIndexes(t *testing.T) {
+	l := openLegacy(t, 14)
+	for i, id := range []string{"b", "a"} {
+		l.insert("item", storetest.NewItem("s", id, uint64(i+1), id), nil)
+	}
+	l.insert("relationship", storetest.NewRelationship("s", "r", domain.RelSupersedes, "b", "a", 3), nil)
+	s := l.upgrade()
+	for _, name := range []string{"relationship_from_seq", "relationship_to_seq", "item_task_seq"} {
+		var n int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", name).Scan(&n); err != nil || n != 1 {
+			t.Errorf("index %s after upgrade: %d, %v", name, n, err)
+		}
+	}
+	for _, name := range []string{"relationship_from", "relationship_to", "item_task"} {
+		var n int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", name).Scan(&n); err != nil || n != 0 {
+			t.Errorf("replaced index %s still present: %d, %v", name, n, err)
+		}
+	}
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: "a"})
+		if err != nil || len(rels) != 1 || rels[0].FromID != "b" {
+			t.Errorf("relationships after upgrade = %+v, %v", rels, err)
+		}
+		items, err := tx.Items(store.ItemFilter{TaskID: "task"})
+		if err != nil || len(items) != 2 || items[0].ID != "b" {
+			t.Errorf("items after upgrade = %d, %v", len(items), err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

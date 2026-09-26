@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -96,6 +97,7 @@ func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemC
 	if err = t.checkSeq(event.Seq); err != nil {
 		return domain.ContextItem{}, err
 	}
+	delete(t.itemCache, id) // the next read decodes the updated row
 	err = t.atomic(func() error {
 		if err := t.put("item", id, 0, v, true); err != nil {
 			return err
@@ -114,11 +116,15 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 	if err := t.checkSeq(v.Seq); err != nil {
 		return err
 	}
+	// Endpoints need only exist (SPEC-3.1 item 2): a primary-key probe,
+	// never a decode of what may be a large transcript.
 	for _, id := range []string{v.FromID, v.ToID} {
-		if _, err := t.Item(id); err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				return domain.ErrDanglingRelationship
-			}
+		var one int
+		err := t.conn.QueryRowContext(t.ctx, "SELECT 1 FROM rec_item WHERE session_id=? AND id=? AND subkey=0", t.session, id).Scan(&one)
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrDanglingRelationship
+		}
+		if err != nil {
 			return err
 		}
 	}
