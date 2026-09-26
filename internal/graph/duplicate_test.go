@@ -2,6 +2,7 @@ package graph
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -32,7 +33,7 @@ func TestLinkDuplicate_DirectiveDuplicate(t *testing.T) {
 		update(t, s, sess, func(tx store.Tx) error {
 			dup := goalLike(sess, "g2", dirID, tx.NextSeq(), "Ship it")
 			mustInsert(t, tx, dup)
-			rel, err := LinkDuplicate(tx, actor, dup.ID, canonical.ID, "evt-g2", "dedup/v1")
+			rel, err := LinkDuplicate(tx, actor, dup.ID, canonical.ID, "evt-g2", "dedup/v1", "")
 			if err != nil {
 				return err
 			}
@@ -130,7 +131,7 @@ func TestLinkDuplicate_RejectsNonDuplicates(t *testing.T) {
 						tc.mutate(&c, &dup)
 					}
 					mustInsert(t, tx, dup)
-					_, err := LinkDuplicate(tx, actor, dup.ID, canonical.ID, "evt-g2", "")
+					_, err := LinkDuplicate(tx, actor, dup.ID, canonical.ID, "evt-g2", "", "")
 					return err
 				})
 				if !errors.Is(err, ErrNotDuplicate) {
@@ -162,7 +163,7 @@ func TestLinkDuplicate_CannotRetireExistingItems(t *testing.T) {
 		})
 		// Not the creation transaction of b.
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			_, err := LinkDuplicate(tx, actor, b.ID, a.ID, "evt-late", "")
+			_, err := LinkDuplicate(tx, actor, b.ID, a.ID, "evt-late", "", "")
 			return err
 		})
 		if !errors.Is(err, ErrDuplicateNotAtCreation) {
@@ -178,7 +179,7 @@ func TestLinkDuplicate_CannotRetireExistingItems(t *testing.T) {
 			if _, err := ReplaceDirective(tx, actor, "task", "dc", c2.ID, "evt-c"); err != nil {
 				return err
 			}
-			_, err := LinkDuplicate(tx, actor, c2.ID, c.ID, "evt-c", "")
+			_, err := LinkDuplicate(tx, actor, c2.ID, c.ID, "evt-c", "", "")
 			return err
 		})
 		if !errors.Is(err, ErrNotDuplicate) {
@@ -195,7 +196,7 @@ func TestLinkDuplicate_CannotRetireExistingItems(t *testing.T) {
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
 			d := goalLike(sess, "d", "da", tx.NextSeq(), "Same text")
 			mustInsert(t, tx, d)
-			_, err := LinkDuplicate(tx, actor, d.ID, a.ID, "evt-d", "")
+			_, err := LinkDuplicate(tx, actor, d.ID, a.ID, "evt-d", "", "")
 			return err
 		})
 		if !errors.Is(err, ErrNotDuplicate) {
@@ -207,11 +208,11 @@ func TestLinkDuplicate_CannotRetireExistingItems(t *testing.T) {
 			hidden := agentScopedItem(sess, "hidden", tx.NextSeq(), "agent-b")
 			d := agentScopedItem(sess, "mine", tx.NextSeq(), "agent")
 			mustInsert(t, tx, hidden, d)
-			_, err := LinkDuplicate(tx, actor, d.ID, hidden.ID, "evt-h", "")
+			_, err := LinkDuplicate(tx, actor, d.ID, hidden.ID, "evt-h", "", "")
 			if err != domain.ErrNotFound {
 				t.Errorf("hidden canonical: err = %v, want bare ErrNotFound", err)
 			}
-			_, err = LinkDuplicate(tx, actor, d.ID, "missing", "evt-h", "")
+			_, err = LinkDuplicate(tx, actor, d.ID, "missing", "evt-h", "", "")
 			if err != domain.ErrNotFound {
 				t.Errorf("missing canonical: err = %v, want bare ErrNotFound", err)
 			}
@@ -244,7 +245,7 @@ func TestLinkDuplicate_NonDirectiveIsDetectionOnly(t *testing.T) {
 		update(t, s, sess, func(tx store.Tx) error {
 			m2 := msg("m2", "turn-2", tx.NextSeq())
 			mustInsert(t, tx, m2)
-			_, err := LinkDuplicate(tx, actor, m2.ID, "m1", "evt-m2", "")
+			_, err := LinkDuplicate(tx, actor, m2.ID, "m1", "evt-m2", "", "")
 			return err
 		})
 		view(t, s, sess, func(tx store.ReadTx) error {
@@ -259,7 +260,7 @@ func TestLinkDuplicate_NonDirectiveIsDetectionOnly(t *testing.T) {
 			m3.Authority = domain.AuthorityAgent
 			m3.Kind = domain.KindAssistantMessage
 			mustInsert(t, tx, m3)
-			_, err := LinkDuplicate(tx, principal(sess, domain.AuthorityAgent), m3.ID, "m1", "evt-m3", "")
+			_, err := LinkDuplicate(tx, principal(sess, domain.AuthorityAgent), m3.ID, "m1", "evt-m3", "", "")
 			return err
 		})
 		if !errors.Is(err, ErrNotDuplicate) {
@@ -295,8 +296,42 @@ func TestLinkDuplicate_RestatedAcrossTurns(t *testing.T) {
 			g := goalLike(sess, "g2", "ship", tx.NextSeq(), "Ship it")
 			g.TurnID, g.CreatedTurn = "turn-5", 5
 			mustInsert(t, tx, g)
-			_, err := LinkDuplicate(tx, actor, g.ID, "g1", "evt-5", "")
+			_, err := LinkDuplicate(tx, actor, g.ID, "g1", "evt-5", "", "")
 			return err
 		})
+	})
+}
+
+// TestLinkDuplicate_ComparesObligationClaim is SPEC-1.12 (R11): the one
+// duplicate comparison includes the obligation declaration, so a Pinned
+// item is never DUPLICATE_OF a canonical whose declared claim differs.
+func TestLinkDuplicate_ComparesObligationClaim(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess = "sess-dup-claim"
+		actor := principal(sess, domain.AuthorityUser)
+		update(t, s, sess, func(tx store.Tx) error {
+			p := storetest.NewDirective(sess, "p1", "tests", tx.NextSeq(), "All tests pass")
+			mustInsert(t, tx, p)
+			if _, err := ReplaceDirective(tx, actor, "task", "tests", p.ID, "evt-p1"); err != nil {
+				return err
+			}
+			o := storetest.NewObligation(sess, "o1", 1, tx.NextSeq(), p.ID)
+			o.Claim = "tests_pass"
+			return tx.InsertObligationVersion(o)
+		})
+		for i, c := range []struct {
+			claim string
+			want  error
+		}{{"other_claim", ErrNotDuplicate}, {"", ErrNotDuplicate}, {"tests_pass", nil}} {
+			err := s.Update(ctx, sess, func(tx store.Tx) error {
+				d := storetest.NewDirective(sess, fmt.Sprintf("d%d", i), "tests", tx.NextSeq(), "All tests pass")
+				mustInsert(t, tx, d)
+				_, err := LinkDuplicate(tx, actor, d.ID, "p1", "evt-d", "", c.claim)
+				return err
+			})
+			if !errors.Is(err, c.want) {
+				t.Errorf("claim %q: err = %v, want %v", c.claim, err, c.want)
+			}
+		}
 	})
 }
