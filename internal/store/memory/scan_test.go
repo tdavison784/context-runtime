@@ -134,3 +134,50 @@ func TestRelationshipsReadTheirTypedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUntypedEndpointReadsAllRelationshipTypes_SPEC31 ranges over the domain
+// set, so adding a valid type without probing its endpoint key fails here.
+func TestUntypedEndpointReadsAllRelationshipTypes_SPEC31(t *testing.T) {
+	s := New()
+	defer s.Close()
+	ctx := context.Background()
+	types := domain.RelationshipTypes()
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		for _, id := range []string{"from", "to"} {
+			if err := tx.InsertItem(storetest.NewItem("s", id, tx.NextSeq(), id)); err != nil {
+				return err
+			}
+		}
+		for _, typ := range types {
+			if err := tx.InsertRelationship(storetest.NewRelationship("s", string(typ), typ, "from", "to", tx.NextSeq())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+		for _, f := range []store.RelationshipFilter{{FromID: "from"}, {ToID: "to"}} {
+			rels, err := tx.Relationships(f)
+			if err != nil {
+				return err
+			}
+			seen := map[domain.RelationshipType]bool{}
+			for _, rel := range rels {
+				seen[rel.Type] = true
+			}
+			if len(rels) != len(types) {
+				t.Errorf("Relationships(%+v) returned %d edges, want %d", f, len(rels), len(types))
+			}
+			for _, typ := range types {
+				if !seen[typ] {
+					t.Errorf("Relationships(%+v) missed %s", f, typ)
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

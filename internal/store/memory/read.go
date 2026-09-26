@@ -168,7 +168,7 @@ func (r *readTx) Relationships(f store.RelationshipFilter) ([]domain.Relationshi
 	// Scan the narrowest index the filter allows.
 	var ids iter.Seq[string]
 	endpoint := func(x *index[relKey], id string) iter.Seq[string] {
-		types := relationshipTypes
+		types := domain.RelationshipTypes()
 		if f.Type != "" {
 			types = []domain.RelationshipType{f.Type}
 		}

@@ -64,10 +64,6 @@ type relKey struct {
 	id  string
 }
 
-// relationshipTypes lists every type, for endpoint reads without a type.
-var relationshipTypes = []domain.RelationshipType{domain.RelDerivedFrom, domain.RelSupersedes, domain.RelDependsOn,
-	domain.RelReferences, domain.RelSatisfies, domain.RelDuplicateOf}
-
 type obligationKey struct {
 	id      string
 	version uint64
