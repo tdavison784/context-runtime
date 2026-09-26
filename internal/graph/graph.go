@@ -28,6 +28,9 @@ var (
 	// ErrDirectiveMismatch reports a directive replacement whose new item
 	// does not carry the task and directive ID it is being filed under.
 	ErrDirectiveMismatch = errors.New("graph: item does not carry the given task and directive ID")
+	// ErrSnapshotTaskMismatch reports a Working-snapshot item that does not
+	// belong to the task its snapshot is being superseded within.
+	ErrSnapshotTaskMismatch = errors.New("graph: snapshot item does not belong to the given task")
 )
 
 // Supersede records that newID supersedes oldID (FR-REL-003, FR-REL-004,
@@ -128,6 +131,69 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 		return "", err
 	}
 	return previousID, nil
+}
+
+// SupersedeSnapshot ingests a Working section (FR-DIR-007 v0.6): for each new
+// item in newIDs, it finds every other current task_state item in taskID
+// that shares that new item's authority and access boundary exactly, and
+// Supersedes it. Boundary equality, not mere task membership, decides what a
+// snapshot replaces, so an item scoped more narrowly than the snapshot (for
+// example an AGENT-scoped Working item belonging to a different agent) is
+// left untouched even though it lives in the same task. Items in newIDs are
+// never candidates to supersede each other. It returns every SUPERSEDES
+// relationship created, or nothing if none matched.
+func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, taskID, eventID string) ([]domain.Relationship, error) {
+	if len(newIDs) == 0 {
+		return nil, nil
+	}
+
+	newItems := make([]domain.ContextItem, 0, len(newIDs))
+	newSet := make(map[string]bool, len(newIDs))
+	for _, id := range newIDs {
+		it, err := tx.Item(id)
+		if err != nil {
+			return nil, err
+		}
+		if !it.Access.Permits(actor) {
+			return nil, domain.ErrNotFound
+		}
+		if it.TaskID != taskID {
+			return nil, ErrSnapshotTaskMismatch
+		}
+		newItems = append(newItems, it)
+		newSet[id] = true
+	}
+
+	candidates, err := tx.Items(store.ItemFilter{TaskID: taskID, Kinds: []domain.Kind{domain.KindTaskState}})
+	if err != nil {
+		return nil, err
+	}
+
+	var rels []domain.Relationship
+	for _, cand := range candidates {
+		if newSet[cand.ID] {
+			continue
+		}
+		cur, err := IsCurrent(tx, cand.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !cur {
+			continue
+		}
+		for _, ni := range newItems {
+			if ni.Authority != cand.Authority || ni.Access != cand.Access {
+				continue
+			}
+			rel, err := Supersede(tx, actor, ni.ID, cand.ID, eventID, "")
+			if err != nil {
+				return nil, err
+			}
+			rels = append(rels, rel)
+			break // one superseder per candidate is enough
+		}
+	}
+	return rels, nil
 }
 
 // IsCurrent reports whether itemID is not the target of any SUPERSEDES edge,
