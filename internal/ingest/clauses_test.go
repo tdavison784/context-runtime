@@ -153,3 +153,35 @@ func TestTruncationPersistedAndReplayed(t *testing.T) {
 		})
 	}
 }
+
+// TestAmbiguousLifecycleTarget (FR-DIR-005, SPEC-1.10): when a directive ID
+// has two current versions the resolving source actor can access (written
+// by principals who could not see each other), an Unpin names no target:
+// the command record is AMBIGUOUS with an ErrAmbiguousDirective diagnostic,
+// and neither version is resolved or changed.
+func TestAmbiguousLifecycleTarget(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		agent := principal(domain.AuthorityUser) // agent A
+		f.mustIngest(agent, userEvent("a1", "## Pinned\n- [p] {scope=AGENT} private rule\n", true))
+		harness := principal(domain.AuthorityHarness)
+		harness.AgentID = "" // task-wide: cannot see agent A's private version
+		f.mustIngest(harness, domain.Event{EventID: "h1", Kind: domain.EventHarness, Spans: []domain.Span{textSpan(domain.AuthorityHarness, false, "## Pinned\n- [p] task-wide rule\n")}})
+		if pins := currentIDs(t, f.s, domain.KindConstraint); len(pins) != 2 {
+			t.Fatalf("setup: current pins = %v, want both versions", pins)
+		}
+		r := f.mustIngest(agent, userEvent("a2", "## Unpin [p]\n", true))
+		if len(r.Lifecycle) != 1 || r.Lifecycle[0].Resolution != domain.TargetAmbiguous || r.Lifecycle[0].ResolvedItemID != "" || r.Lifecycle[0].Status != domain.CommandParsedNotExecuted {
+			t.Fatalf("command = %+v", r.Lifecycle)
+		}
+		found := false
+		for _, d := range r.Diagnostics {
+			found = found || d.Code == domain.ErrAmbiguousDirective
+		}
+		if !found {
+			t.Fatalf("no ErrAmbiguousDirective diagnostic: %+v", r.Diagnostics)
+		}
+		if pins := currentIDs(t, f.s, domain.KindConstraint); len(pins) != 2 {
+			t.Fatalf("an ambiguous Unpin changed the pins: %v", pins)
+		}
+	})
+}
