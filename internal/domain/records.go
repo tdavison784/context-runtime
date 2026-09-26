@@ -7,11 +7,16 @@ import (
 
 // Coverage is the source coverage of derived content or opaque provider
 // state (FR-REL-008): the contiguous range of committed sequence numbers in a
-// conversation that the content summarizes or was derived from.
+// conversation that the content summarizes or was derived from, and the
+// explicit IDs of the covered items. Dispatch rechecks every covered item's
+// access, turn/task/TTL eligibility, and lease before inherited content is
+// transmitted (ADR 6), so the IDs must be complete; a range alone cannot
+// show which items lost eligibility.
 type Coverage struct {
 	ConversationID string
 	FromSeq        uint64
 	ToSeq          uint64
+	ItemIDs        []string // sorted, unique
 }
 
 // Relationship is a directed edge. FromID relates to ToID by Type: a new
@@ -29,6 +34,16 @@ type Relationship struct {
 	EventID     string
 	RuleVersion string // deterministic rule that produced the edge, if any
 	Coverage    *Coverage
+}
+
+// Clone returns a deep copy.
+func (r Relationship) Clone() Relationship {
+	if r.Coverage != nil {
+		c := *r.Coverage
+		c.ItemIDs = slices.Clone(c.ItemIDs)
+		r.Coverage = &c
+	}
+	return r
 }
 
 // Validate checks structural rules; stores additionally check endpoints.
@@ -54,8 +69,13 @@ func (r Relationship) Validate() error {
 	if !r.Authority.Valid() {
 		return invalid("relationship %s: invalid authority %q", r.ID, r.Authority)
 	}
-	if r.Coverage != nil && r.Coverage.FromSeq > r.Coverage.ToSeq {
-		return invalid("relationship %s: inverted coverage range", r.ID)
+	if r.Coverage != nil {
+		if r.Coverage.FromSeq > r.Coverage.ToSeq {
+			return invalid("relationship %s: inverted coverage range", r.ID)
+		}
+		if !slices.IsSorted(r.Coverage.ItemIDs) || len(slices.Compact(slices.Clone(r.Coverage.ItemIDs))) != len(r.Coverage.ItemIDs) {
+			return invalid("relationship %s: coverage item IDs must be sorted and unique", r.ID)
+		}
 	}
 	return nil
 }
