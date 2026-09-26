@@ -1,0 +1,22 @@
+{
+  "endpoint": "/responses/input_tokens",
+  "name": "gpt_6_astra_c1_85_count",
+  "request": {
+    "input": [
+      {
+        "content_length": 5610,
+        "role": "developer"
+      },
+      {
+        "content": "Reply OK.",
+        "content_length": 9,
+        "role": "user"
+      }
+    ],
+    "model": "gpt-6-astra"
+  },
+  "response": {
+    "input_tokens": 1034,
+    "object": "response.input_tokens"
+  }
+}
