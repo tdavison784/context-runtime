@@ -79,6 +79,7 @@ var suite = []testCase{
 	{"Events", testEvents},
 	{"Blobs", testBlobs},
 	{"DirectiveReplacement", testDirectiveReplacement},
+	{"DirectiveBoundaries", testDirectiveBoundaries},
 
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
@@ -90,6 +91,12 @@ var suite = []testCase{
 	{"Calls", testCalls},
 	{"CallReservation", testCallReservation},
 	{"CallEvidence", testCallEvidence},
+	{"CallAttemptBinding", testCallAttemptBinding},
+
+	// Store-wide rules.
+	{"SemanticWriteRule", testSemanticWriteRule},
+	{"Sessions", testSessions},
+	{"Cancellation", testCancellation},
 	{"CallAttempts", testCallAttempts},
 }
 

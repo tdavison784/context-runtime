@@ -236,6 +236,26 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 		{"missing version", func(seq uint64) domain.ObligationTransition {
 			return NewTransition(sessA, "x", "o", 2, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
 		}, domain.ErrNotFound},
+		{"action other than the transition's", func(seq uint64) domain.ObligationTransition {
+			tr := NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
+			tr.Action = domain.ActionWaiveObligation
+			return tr
+		}, domain.ErrInvalidRecord},
+		{"AGENT actor", func(seq uint64) domain.ObligationTransition {
+			tr := NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
+			tr.Actor.Authority = domain.AuthorityAgent
+			return tr
+		}, domain.ErrInvalidAuthorityPromotion},
+		{"actor in another session", func(seq uint64) domain.ObligationTransition {
+			tr := NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
+			tr.Actor.SessionID = sessB
+			return tr
+		}, domain.ErrInvalidRecord},
+		{"matcher on a block", func(seq uint64) domain.ObligationTransition {
+			tr := NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
+			tr.Matcher = &domain.MatcherRef{Name: "m", Version: "1"}
+			return tr
+		}, domain.ErrInvalidRecord},
 		{"missing obligation", func(seq uint64) domain.ObligationTransition {
 			return NewTransition(sessA, "x", "nope", 1, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
 		}, domain.ErrNotFound},
