@@ -80,6 +80,32 @@ func (h grantHandler) Execute(tx store.Tx, actor domain.Principal, op domain.Sem
 	return res, nil
 }
 
+// ReplaceExecutor executes the explicit typed directive replacement
+// (C-1, P3-4): CAS on the expected current occurrence and version, which
+// may reuse identical content and starts a new version from the prior's
+// creation defaults. *lifecycle.Service implements it.
+type ReplaceExecutor interface {
+	ReplaceDirective(tx store.Tx, actor domain.Principal, intent domain.ReplaceDirectiveIntent, seq uint64) (lifecycle.MutationOutcome, error)
+}
+
+var _ ReplaceExecutor = (*lifecycle.Service)(nil)
+
+// replaceHandler adapts a ReplaceExecutor; an alias of it names the new
+// occurrence (the result's first record) at version 1.
+type replaceHandler struct{ x ReplaceExecutor }
+
+func (h replaceHandler) Execute(tx store.Tx, actor domain.Principal, op domain.SemanticOperation, seq uint64) (OperationOutcome, error) {
+	out, err := h.x.ReplaceDirective(tx, actor, *op.Replace, seq)
+	if err != nil {
+		return OperationOutcome{}, err
+	}
+	if out.Result.Records == nil || len(out.Result.Records.IDs) == 0 {
+		return OperationOutcome{}, domain.ErrInvalidRecord
+	}
+	return OperationOutcome{MutationReceiptID: out.MutationReceiptID, Result: out.Result, Access: ownBoundary(actor),
+		Created: Created{Items: []ItemVersion{{ID: out.Result.Records.IDs[0], Version: 1}}}}, nil
+}
+
 // ItemVersion is an exact item occurrence at a version.
 type ItemVersion struct {
 	ID      string
@@ -145,11 +171,19 @@ func (r *run) typedOperation(oi int, op domain.SemanticOperation) error {
 }
 
 // handler is the executor of kind: a configured Ingester.Operations entry,
-// else W3's grant executor for GRANT/REVOKE_GRANT or the obligation
+// else W3's replacement executor for REPLACE, its grant executor for
+// GRANT/REVOKE_GRANT, or the obligation
 // service's adapter for a W4 kind; anything else fails closed.
 func (r *run) handler(kind domain.SemanticOperationKind) (OperationHandler, error) {
 	if h, ok := r.g.Operations[kind]; ok && h != nil {
 		return h, nil
+	}
+	if kind == domain.OperationReplace {
+		x, ok := r.g.Lifecycle.(ReplaceExecutor)
+		if !ok {
+			return nil, domain.ErrUnsupportedSchema
+		}
+		return replaceHandler{x}, nil
 	}
 	if kind == domain.OperationGrant || kind == domain.OperationRevokeGrant {
 		g, ok := r.g.Lifecycle.(GrantExecutor)
