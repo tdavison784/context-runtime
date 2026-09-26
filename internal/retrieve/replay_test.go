@@ -45,6 +45,12 @@ func TestRetrievalReceiptReplayPrecedesCurrentState(t *testing.T) {
 	if err != nil || !ok || got.ID != "result" {
 		t.Fatalf("replay = %+v, %t, %v", got, ok, err)
 	}
+	smaller := leasePolicy()
+	smaller.MaxReceiptBytes = 1
+	got, ok, err = replayRetrieval(replayReader{receipt: r, result: domain.RetrievalResult{SemanticMeta: domain.SemanticMeta{ID: "result"}, RequestID: "req", Origin: i.Origin}}, p, i, smaller)
+	if err != nil || !ok || got.ID != "result" {
+		t.Fatalf("policy limit changed replay = %+v, %t, %v", got, ok, err)
+	}
 	i.Rehydrate.ItemID = "different"
 	_, _, err = replayRetrieval(replayReader{receipt: r}, p, i, leasePolicy())
 	if !errors.Is(err, domain.ErrEventIDConflict) {
