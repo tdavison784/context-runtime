@@ -128,6 +128,12 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 			return err
 		}
 	}
+	// Normalized coverage is referenced, never copied: it must be stored (P3-6).
+	if v.CoverageID != "" {
+		if ok, err := t.exists("coverage", v.CoverageID); err != nil || !ok {
+			return errors.Join(err, invalidIf(!ok, "relationship %s: coverage %s is not stored", v.ID, v.CoverageID))
+		}
+	}
 	if v.Type == domain.RelSupersedes {
 		cycle, _, err := t.closesSupersessionCycle(v.FromID, v.ToID)
 		if err != nil {

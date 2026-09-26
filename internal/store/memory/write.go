@@ -212,6 +212,10 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	if !t.items.has(r.FromID) || !t.items.has(r.ToID) {
 		return fmt.Errorf("relationship %s: %w", r.ID, domain.ErrDanglingRelationship)
 	}
+	// Normalized coverage is referenced, never copied: it must be stored (P3-6).
+	if r.CoverageID != "" && !t.sem.coverages.has(r.CoverageID) {
+		return invalid("relationship %s: coverage %s is not stored", r.ID, r.CoverageID)
+	}
 	if r.Type == domain.RelSupersedes {
 		// A cycle through the new edge needs an existing edge into FromID;
 		// a new version usually has none, so a long chain is not walked on
