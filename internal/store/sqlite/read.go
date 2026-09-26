@@ -110,6 +110,23 @@ func (t *transaction) CurrentDirective(taskID, directiveID string, boundary doma
 	}
 	return id, err
 }
+
+func (t *transaction) CurrentDirectives(taskID, directiveID string) ([]string, error) {
+	rows, err := t.conn.QueryContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND directive_id=? ORDER BY item_id", t.session, taskID, directiveID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
 func (t *transaction) Obligation(id string) (domain.ObligationVersion, error) {
 	vs, err := t.ObligationVersions(id)
 	if err != nil {
