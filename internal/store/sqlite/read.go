@@ -195,42 +195,37 @@ func (t *transaction) Obligation(id string) (domain.ObligationVersion, error) {
 	return vs[len(vs)-1], nil
 }
 func (t *transaction) ObligationVersions(id string) ([]domain.ObligationVersion, error) {
-	records, err := listRecords[domain.ObligationVersion](t, "obligation")
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.ObligationVersion, 0)
-	for _, v := range records {
-		if v.ObligationID == id {
-			out = append(out, v)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
-	return out, nil
+	q, args := obligationVersionsQuery(t.session, id)
+	return queryRecords[domain.ObligationVersion](t, "obligation", q, args...)
 }
+
+// obligationVersionsQuery reads one obligation's versions by primary key,
+// in version order (SPEC-2.1).
+func obligationVersionsQuery(session, id string) (string, []any) {
+	return schemas["obligation"].selectSQL + " WHERE session_id=? AND id=? ORDER BY subkey", []any{session, id}
+}
+
 func (t *transaction) ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("%w: obligations by source: limit must be positive", domain.ErrInvalidRecord)
 	}
-	s := schemas["obligation"]
-	rows, err := t.conn.QueryContext(t.ctx, s.selectSQL+" WHERE session_id=? AND f_source_item_id=? ORDER BY id, subkey LIMIT ?", t.session, sourceItemID, limit+1)
+	q, args := obligationsBySourceQuery(t.session, sourceItemID, limit)
+	out, err := queryRecords[domain.ObligationVersion](t, "obligation", q, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []domain.ObligationVersion{}
-	for rows.Next() {
-		if len(out) == limit {
-			return nil, store.ErrLimitExceeded
-		}
-		v, err := s.scan(rows)
-		if err != nil {
-			return nil, fmt.Errorf("obligation: %w", err)
-		}
-		out = append(out, v.Interface().(domain.ObligationVersion))
+	if len(out) > limit {
+		return nil, store.ErrLimitExceeded
 	}
-	return out, rows.Err()
+	return out, nil
 }
+
+// obligationsBySourceQuery reads at most limit+1 versions bound to a
+// source through the obligation_source index (0006).
+func obligationsBySourceQuery(session, sourceItemID string, limit int) (string, []any) {
+	return schemas["obligation"].selectSQL + " WHERE session_id=? AND f_source_item_id=? ORDER BY id, subkey LIMIT ?", []any{session, sourceItemID, limit + 1}
+}
+
 func (t *transaction) Obligations(taskID string) ([]domain.ObligationVersion, error) {
 	records, err := listRecords[domain.ObligationVersion](t, "obligation")
 	if err != nil {
