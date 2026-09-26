@@ -22,13 +22,24 @@ func verifyItemContent(v domain.ContextItem) error {
 }
 
 func (t *transaction) Item(id string) (domain.ContextItem, error) {
+	if v, ok := t.itemCache[id]; ok {
+		return v.Clone(), nil
+	}
 	var v domain.ContextItem
 	if err := t.get("item", id, 0, &v); err != nil {
 		return domain.ContextItem{}, err
 	}
+	t.itemBytesLoaded += v.SemanticBytes
 	if err := verifyItemContent(v); err != nil {
 		return domain.ContextItem{}, err
 	}
+	// Decoding and verifying an item costs its size; ingest reads a span's
+	// transcript once per derived item, so each transaction keeps the items
+	// it has verified (SPEC-3.1 item 2). Returned values are clones.
+	if t.itemCache == nil {
+		t.itemCache = map[string]domain.ContextItem{}
+	}
+	t.itemCache[id] = v.Clone()
 	return v, nil
 }
 func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {

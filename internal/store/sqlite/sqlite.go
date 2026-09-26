@@ -354,6 +354,12 @@ type transaction struct {
 	// lastQuery is the SQL the latest record read ran, so tests can assert
 	// that hot reads use their plan-guarded builders (SPEC-2.1).
 	lastQuery string
+	// itemCache holds items this transaction has decoded and verified;
+	// UpdateItem refreshes an entry and a rolled-back store method clears
+	// it (SPEC-3.1 item 2). itemBytesLoaded counts the bytes decoded, so
+	// tests can assert a transcript is not reloaded per derived item.
+	itemCache       map[string]domain.ContextItem
+	itemBytesLoaded uint64
 }
 
 var _ store.TxBase = (*transaction)(nil)
@@ -387,6 +393,7 @@ func (t *transaction) atomic(fn func() error) error {
 		return err
 	}
 	if err := fn(); err != nil {
+		t.itemCache = nil // a rolled-back write may have refreshed an entry
 		_, _ = t.conn.ExecContext(t.ctx, "ROLLBACK TO SAVEPOINT store_method")
 		_, _ = t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
 		t.semanticWrite, t.semanticSeqRecord, t.wrote = wasWrite, wasSeq, wasWrote
@@ -395,6 +402,7 @@ func (t *transaction) atomic(fn func() error) error {
 	}
 	_, err := t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
 	if err != nil {
+		t.itemCache = nil
 		t.semanticWrite, t.semanticSeqRecord, t.wrote = wasWrite, wasSeq, wasWrote
 		t.ledgerSeqs, t.semanticSeqs = wasLedger, wasSemanticSeqs
 	}

@@ -27,7 +27,7 @@ func derivedLoadBytes(t *testing.T, n int) uint64 {
 			fmt.Fprintf(&b, "- pinned requirement number %d\n", i)
 		}
 		tr := storetest.NewTranscript("s", "tr", tx.NextSeq(), b.String())
-		tr.Authority, tr.Kind = domain.AuthoritySystem, domain.KindInstruction
+		tr.Authority = domain.AuthoritySystem
 		if err := tx.InsertItem(tr); err != nil {
 			return err
 		}
