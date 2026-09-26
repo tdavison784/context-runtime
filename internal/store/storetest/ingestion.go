@@ -259,7 +259,13 @@ func testIngestionInsertRules(t *testing.T, s store.Store) {
 				}
 				return errRollback
 			})
-			wantErr(t, err, errRollback)
+			// A rejected ingestion follows the fixture's item writes, so it
+			// poisons the transaction and Update returns the rejection (P3-1).
+			if c.want != nil {
+				wantErr(t, err, c.want)
+			} else {
+				wantErr(t, err, errRollback)
+			}
 		})
 	}
 	// Rolled back: nothing of evt-2 remains.

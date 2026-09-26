@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -87,26 +88,46 @@ func testCalls(t *testing.T, s store.Store) {
 		c2.Operation = domain.OperationCompaction
 		c2 = Reseal(c2)
 		noErr(t, tx.InsertCall(c2))
-		noErr(t, tx.InsertCall(c1))
-		wantErr(t, tx.InsertCall(NewCall(sessA, "call-a", "conv9", n[2])), domain.ErrImmutable)
-		wantErr(t, tx.InsertCall(NewCall(sessA, "call-x", "conv1", n[2])), domain.ErrCallInFlight)
-		badHash := NewCall(sessA, "call-d", "conv9", n[2])
-		badHash.Request = []byte("tampered")
-		wantErr(t, tx.InsertCall(badHash), domain.ErrInvalidRecord)
-		badProposal := NewCall(sessA, "call-d", "conv9", n[2])
-		badProposal.Epoch = 5 // not resealed
-		wantErr(t, tx.InsertCall(badProposal), domain.ErrInvalidRecord)
+		return tx.InsertCall(c1)
+	})
+	for _, tc := range []struct {
+		name string
+		c    func(seq uint64) domain.CallRecord
+		want error
+	}{
+		{"ID reused", func(seq uint64) domain.CallRecord { return NewCall(sessA, "call-a", "conv9", seq) }, domain.ErrImmutable},
+		{"conversation reserved", func(seq uint64) domain.CallRecord { return NewCall(sessA, "call-x", "conv1", seq) }, domain.ErrCallInFlight},
+		{"request hash tampered", func(seq uint64) domain.CallRecord {
+			c := NewCall(sessA, "call-d", "conv9", seq)
+			c.Request = []byte("tampered")
+			return c
+		}, domain.ErrInvalidRecord},
+		{"proposal not resealed", func(seq uint64) domain.CallRecord {
+			c := NewCall(sessA, "call-d", "conv9", seq)
+			c.Epoch = 5
+			return c
+		}, domain.ErrInvalidRecord},
 		// A call enters the ledger PREPARED with no attempts, so it cannot
 		// skip UpdateCall's evidence gates.
-		sent := NewCall(sessA, "call-d", "conv9", n[2])
-		sent.State, sent.Attempts = domain.CallSent, 1
-		wantErr(t, tx.InsertCall(sent), domain.ErrInvalidTransition)
-		retried := NewCall(sessA, "call-d", "conv9", n[2])
-		retried.Attempts = 1
-		wantErr(t, tx.InsertCall(retried), domain.ErrInvalidTransition)
-		wantErr(t, tx.InsertCall(Finish(NewCall(sessA, "call-d", "conv9", n[2]), domain.CallFailed, n[2])), domain.ErrInvalidTransition)
-		return nil
-	})
+		{"created SENT", func(seq uint64) domain.CallRecord {
+			c := NewCall(sessA, "call-d", "conv9", seq)
+			c.State, c.Attempts = domain.CallSent, 1
+			return c
+		}, domain.ErrInvalidTransition},
+		{"created with attempts", func(seq uint64) domain.CallRecord {
+			c := NewCall(sessA, "call-d", "conv9", seq)
+			c.Attempts = 1
+			return c
+		}, domain.ErrInvalidTransition},
+		{"created FAILED", func(seq uint64) domain.CallRecord {
+			return Finish(NewCall(sessA, "call-d", "conv9", seq), domain.CallFailed, seq)
+		}, domain.ErrInvalidTransition},
+	} {
+		err := s.Update(ctx, sessA, func(tx store.Tx) error { return tx.InsertCall(tc.c(tx.NextSeq())) })
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: error = %v, want %v", tc.name, err, tc.want)
+		}
+	}
 	// A new call's PreparedSeq must be allocated in its transaction.
 	err := s.Update(ctx, sessA, func(tx store.Tx) error {
 		tx.NextSeq()
@@ -118,11 +139,13 @@ func testCalls(t *testing.T, s store.Store) {
 	// UNKNOWN -> COMPLETED, one transaction per step, checking CAS.
 	cur := c1
 	for _, to := range []domain.CallState{domain.CallSent, domain.CallPrepared, domain.CallSent, domain.CallUnknown, domain.CallCompleted} {
+		stale := cur
 		update(t, s, sessA, func(tx store.Tx) error {
-			stale := cur
 			cur = step(t, tx, cur, to)
-			wantErr(t, errOf(tx.UpdateCall(cur, stale.Revision)), domain.ErrVersionConflict)
 			return nil
+		})
+		rejected(t, s, sessA, domain.ErrVersionConflict, func(tx store.Tx) error {
+			return errOf(tx.UpdateCall(cur, stale.Revision))
 		})
 	}
 	view(t, s, sessA, func(tx store.ReadTx) error {
@@ -306,117 +329,167 @@ func testCalls(t *testing.T, s store.Store) {
 // justifies it: leaving SENT or UNKNOWN, and PREPARED -> SENT, need attempt
 // c.Attempts stored in the matching state.
 func testCallEvidence(t *testing.T, s store.Store) {
-	update(t, s, sessA, func(tx store.Tx) error {
-		c := walk(t, tx, "c", "conv")
+	// Rejected transitions are probed one per transaction against the
+	// committed call: a rejected write after a successful one would poison
+	// the setup (P3-1).
+	update(t, s, sessA, func(tx store.Tx) error { walk(t, tx, "c", "conv"); return nil })
+	callProbe(t, s, "c", domain.ErrInvalidTransition, "PREPARED -> SENT without an attempt", func(_ store.Tx, c domain.CallRecord) domain.CallRecord {
 		sent := c.Clone()
 		sent.State, sent.Attempts = domain.CallSent, 1
-		wantErr(t, errOf(tx.UpdateCall(sent, c.Revision)), domain.ErrInvalidTransition)
-		c = step(t, tx, c, domain.CallSent)
-
-		a := latestAttempt(t, tx, c)
-		completed := Finish(c, domain.CallCompleted, tx.NextSeq())
-		failed := Finish(c, domain.CallFailed, completed.FinishedSeq)
-		retry := c.Clone()
-		retry.State = domain.CallPrepared
-		unknown := c.Clone()
-		unknown.State = domain.CallUnknown
-		for name, next := range map[string]domain.CallRecord{"COMPLETED": completed, "FAILED": failed, "PREPARED": retry, "UNKNOWN": unknown} {
-			if err := errOf(tx.UpdateCall(next, c.Revision)); !errors.Is(err, domain.ErrInvalidTransition) {
-				t.Errorf("SENT -> %s with an open attempt: error = %v, want ErrInvalidTransition", name, err)
-			}
-		}
-		// A non-retryable failure closes the attempt: COMPLETED, a retry,
-		// and a FAILED outcome other than the attempt's are all rejected.
-		noErr(t, tx.PutCallAttempt(CloseAttempt(a, domain.AttemptFailed, failed.OutcomeHash, failed.FinishedSeq)))
-		other := failed.Clone()
-		o := NewOutcome(c, domain.CallFailed, true)
-		other.Outcome, other.OutcomeHash = &o, o.OutcomeHash()
-		for name, next := range map[string]domain.CallRecord{"COMPLETED": completed, "PREPARED": retry, "FAILED with another outcome": other} {
-			if err := errOf(tx.UpdateCall(next, c.Revision)); !errors.Is(err, domain.ErrInvalidTransition) {
-				t.Errorf("SENT -> %s after a failed attempt: error = %v, want ErrInvalidTransition", name, err)
-			}
-		}
-		_, err := tx.UpdateCall(failed, c.Revision)
-		noErr(t, err)
-		return nil
+		return sent
 	})
+	update(t, s, sessA, func(tx store.Tx) error { step(t, tx, loadCall(t, tx, "c"), domain.CallSent); return nil })
+	completed := func(tx store.Tx, c domain.CallRecord) domain.CallRecord {
+		return Finish(c, domain.CallCompleted, tx.NextSeq())
+	}
+	failed := func(tx store.Tx, c domain.CallRecord) domain.CallRecord {
+		return Finish(c, domain.CallFailed, tx.NextSeq())
+	}
+	retry := func(_ store.Tx, c domain.CallRecord) domain.CallRecord {
+		r := c.Clone()
+		r.State = domain.CallPrepared
+		return r
+	}
+	unknown := func(_ store.Tx, c domain.CallRecord) domain.CallRecord {
+		u := c.Clone()
+		u.State = domain.CallUnknown
+		return u
+	}
+	for name, next := range map[string]func(store.Tx, domain.CallRecord) domain.CallRecord{"COMPLETED": completed, "FAILED": failed, "PREPARED": retry, "UNKNOWN": unknown} {
+		callProbe(t, s, "c", domain.ErrInvalidTransition, "SENT -> "+name+" with an open attempt", next)
+	}
+	// A non-retryable failure closes the attempt: COMPLETED, a retry,
+	// and a FAILED outcome other than the attempt's are all rejected.
 	update(t, s, sessA, func(tx store.Tx) error {
-		c := walk(t, tx, "u", "conv2", domain.CallSent)
-		unknown := c.Clone()
-		unknown.State = domain.CallUnknown
-		wantErr(t, errOf(tx.UpdateCall(unknown, c.Revision)), domain.ErrInvalidTransition)
-		c = step(t, tx, c, domain.CallUnknown)
-		abandoned := Finish(c, domain.CallAbandoned, tx.NextSeq())
-		wantErr(t, errOf(tx.UpdateCall(abandoned, c.Revision)), domain.ErrInvalidTransition)
-		completed := Finish(c, domain.CallCompleted, abandoned.FinishedSeq)
-		wantErr(t, errOf(tx.UpdateCall(completed, c.Revision)), domain.ErrInvalidTransition)
-		step(t, tx, c, domain.CallAbandoned)
-		return nil
-	}) // A completed attempt justifies only the outcome it recorded.
+		c := loadCall(t, tx, "c")
+		f := failed(tx, c)
+		return tx.PutCallAttempt(CloseAttempt(latestAttempt(t, tx, c), domain.AttemptFailed, f.OutcomeHash, f.FinishedSeq))
+	})
+	other := func(tx store.Tx, c domain.CallRecord) domain.CallRecord {
+		f := failed(tx, c)
+		o := NewOutcome(c, domain.CallFailed, true)
+		f.Outcome, f.OutcomeHash = &o, o.OutcomeHash()
+		return f
+	}
+	for name, next := range map[string]func(store.Tx, domain.CallRecord) domain.CallRecord{"COMPLETED": completed, "PREPARED": retry, "FAILED with another outcome": other} {
+		callProbe(t, s, "c", domain.ErrInvalidTransition, "SENT -> "+name+" after a failed attempt", next)
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		c := loadCall(t, tx, "c")
+		return errOf(tx.UpdateCall(failed(tx, c), c.Revision))
+	})
+
+	update(t, s, sessA, func(tx store.Tx) error { walk(t, tx, "u", "conv2", domain.CallSent); return nil })
+	callProbe(t, s, "u", domain.ErrInvalidTransition, "SENT -> UNKNOWN without an UNKNOWN attempt", unknown)
+	update(t, s, sessA, func(tx store.Tx) error { step(t, tx, loadCall(t, tx, "u"), domain.CallUnknown); return nil })
+	callProbe(t, s, "u", domain.ErrInvalidTransition, "UNKNOWN -> ABANDONED without an abandoned attempt", func(tx store.Tx, c domain.CallRecord) domain.CallRecord {
+		return Finish(c, domain.CallAbandoned, tx.NextSeq())
+	})
+	callProbe(t, s, "u", domain.ErrInvalidTransition, "UNKNOWN -> COMPLETED without a completed attempt", completed)
+	update(t, s, sessA, func(tx store.Tx) error { step(t, tx, loadCall(t, tx, "u"), domain.CallAbandoned); return nil })
+
+	// A completed attempt justifies only the outcome it recorded.
+	var recorded domain.CallOutcome
 	update(t, s, sessA, func(tx store.Tx) error {
 		c := walk(t, tx, "h", "conv3", domain.CallSent)
-		completed := Finish(c, domain.CallCompleted, tx.NextSeq())
-		recorded := *completed.Outcome
+		done := completed(tx, c)
+		recorded = *done.Outcome
 		recorded.Response = []byte("a different response")
 		recorded.ResponseHash = domain.HashBytes(recorded.Response)
-		noErr(t, tx.PutCallAttempt(CloseAttempt(latestAttempt(t, tx, c), domain.AttemptCompleted, recorded.OutcomeHash(), completed.FinishedSeq)))
-		wantErr(t, errOf(tx.UpdateCall(completed, c.Revision)), domain.ErrInvalidTransition)
-		completed.Outcome, completed.OutcomeHash = &recorded, recorded.OutcomeHash()
-		_, err := tx.UpdateCall(completed, c.Revision)
-		noErr(t, err)
-		return nil
+		return tx.PutCallAttempt(CloseAttempt(latestAttempt(t, tx, c), domain.AttemptCompleted, recorded.OutcomeHash(), done.FinishedSeq))
 	})
+	callProbe(t, s, "h", domain.ErrInvalidTransition, "COMPLETED with another outcome than the attempt's", completed)
+	update(t, s, sessA, func(tx store.Tx) error {
+		c := loadCall(t, tx, "h")
+		done := completed(tx, c)
+		done.Outcome, done.OutcomeHash = &recorded, recorded.OutcomeHash()
+		return errOf(tx.UpdateCall(done, c.Revision))
+	})
+}
+
+// loadCall reads a stored call or fails the test.
+func loadCall(t *testing.T, tx store.ReadTx, callID string) domain.CallRecord {
+	t.Helper()
+	c, err := tx.Call(callID)
+	noErr(t, err)
+	return c
+}
+
+// callProbe attempts UpdateCall(next(c), c.Revision) on the committed call
+// in its own transaction and fails the test unless it is rejected with want.
+func callProbe(t *testing.T, s store.Store, callID string, want error, name string, next func(store.Tx, domain.CallRecord) domain.CallRecord) {
+	t.Helper()
+	err := s.Update(ctx, sessA, func(tx store.Tx) error {
+		c := loadCall(t, tx, callID)
+		return errOf(tx.UpdateCall(next(tx, c), c.Revision))
+	})
+	if !errors.Is(err, want) {
+		t.Errorf("%s: error = %v, want %v", name, err, want)
+	}
 }
 
 // testCallReservation checks FR-CALL-005 as enforced by the store: at most
 // one PREPARED, SENT, or UNKNOWN call per conversation.
 func testCallReservation(t *testing.T, s store.Store) {
-	update(t, s, sessA, func(tx store.Tx) error {
-		c1 := walk(t, tx, "c1", "conv")
-		// Every reserving state blocks a second reservation.
-		for _, st := range []domain.CallState{domain.CallPrepared, domain.CallSent, domain.CallUnknown} {
-			if st != domain.CallPrepared {
-				c1 = step(t, tx, c1, st)
-			}
-			wantErr(t, tx.InsertCall(NewCall(sessA, "c2", "conv", tx.NextSeq())), domain.ErrCallInFlight)
+	blocked := func(state domain.CallState) {
+		t.Helper()
+		err := s.Update(ctx, sessA, func(tx store.Tx) error { return tx.InsertCall(NewCall(sessA, "c2", "conv", tx.NextSeq())) })
+		if !errors.Is(err, domain.ErrCallInFlight) {
+			t.Errorf("second reservation while %s: error = %v, want ErrCallInFlight", state, err)
 		}
+	}
+	update(t, s, sessA, func(tx store.Tx) error { walk(t, tx, "c1", "conv"); return nil })
+	// Every reserving state blocks a second reservation.
+	blocked(domain.CallPrepared)
+	for _, st := range []domain.CallState{domain.CallSent, domain.CallUnknown} {
+		update(t, s, sessA, func(tx store.Tx) error { step(t, tx, loadCall(t, tx, "c1"), st); return nil })
+		blocked(st)
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
 		// Other conversations are unaffected.
 		noErr(t, tx.InsertCall(NewCall(sessA, "c3", "other", tx.NextSeq())))
 		// A same-state update of the reserving call does not conflict with
 		// itself.
-		c1 = step(t, tx, c1, domain.CallUnknown)
+		c1 := step(t, tx, loadCall(t, tx, "c1"), domain.CallUnknown)
 		// Releasing the reservation frees the conversation.
 		step(t, tx, c1, domain.CallAbandoned)
-		noErr(t, tx.InsertCall(NewCall(sessA, "c2", "conv", tx.NextSeq())))
-		return nil
+		return tx.InsertCall(NewCall(sessA, "c2", "conv", tx.NextSeq()))
 	})
 	// The rule holds across transactions too.
-	err := s.Update(ctx, sessA, func(tx store.Tx) error {
+	rejected(t, s, sessA, domain.ErrCallInFlight, func(tx store.Tx) error {
 		return tx.InsertCall(NewCall(sessA, "c5", "conv", tx.NextSeq()))
 	})
-	wantErr(t, err, domain.ErrCallInFlight)
 }
 
 // testCallAttempts checks attempt numbering, the attempt transition table,
 // and immutability of closed attempts (FR-CALL-002, INV-09).
 func testCallAttempts(t *testing.T, s store.Store) {
 	var a1 domain.CallAttempt
+	update(t, s, sessA, func(tx store.Tx) error { return tx.InsertCall(NewCall(sessA, "call1", "conv", tx.NextSeq())) })
+	attemptProbe := func(name string, want error, a func(seq uint64) domain.CallAttempt) {
+		t.Helper()
+		err := s.Update(ctx, sessA, func(tx store.Tx) error { return tx.PutCallAttempt(a(tx.NextSeq())) })
+		if !errors.Is(err, want) {
+			t.Errorf("%s: error = %v, want %v", name, err, want)
+		}
+	}
+	attemptProbe("missing call", domain.ErrNotFound, func(seq uint64) domain.CallAttempt { return NewAttempt(sessA, "missing", 1, seq) })
+	// Attempts are dense from 1 and start SENT.
+	attemptProbe("attempt 2 first", domain.ErrInvalidRecord, func(seq uint64) domain.CallAttempt { return NewAttempt(sessA, "call1", 2, seq) })
+	attemptProbe("attempt 0", domain.ErrInvalidRecord, func(seq uint64) domain.CallAttempt { return NewAttempt(sessA, "call1", 0, seq) })
+	attemptProbe("new attempt UNKNOWN", domain.ErrInvalidTransition, func(seq uint64) domain.CallAttempt {
+		a := NewAttempt(sessA, "call1", 1, seq)
+		a.State = domain.AttemptUnknown
+		return a
+	})
+	attemptProbe("invalid state", domain.ErrInvalidRecord, func(seq uint64) domain.CallAttempt {
+		a := NewAttempt(sessA, "call1", 1, seq)
+		a.State = "LOST"
+		return a
+	})
 	update(t, s, sessA, func(tx store.Tx) error {
-		n := seqs(tx, 3)
-		noErr(t, tx.InsertCall(NewCall(sessA, "call1", "conv", n[0])))
-		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "missing", 1, n[1])), domain.ErrNotFound)
-		// Attempts are dense from 1 and start SENT.
-		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call1", 2, n[1])), domain.ErrInvalidRecord)
-		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call1", 0, n[1])), domain.ErrInvalidRecord)
-		unknown := NewAttempt(sessA, "call1", 1, n[1])
-		unknown.State = domain.AttemptUnknown
-		wantErr(t, tx.PutCallAttempt(unknown), domain.ErrInvalidTransition)
-		bad := NewAttempt(sessA, "call1", 1, n[1])
-		bad.State = "LOST"
-		wantErr(t, tx.PutCallAttempt(bad), domain.ErrInvalidRecord)
-		a1 = NewAttempt(sessA, "call1", 1, n[1])
-		noErr(t, tx.PutCallAttempt(a1))
-		return nil
+		a1 = NewAttempt(sessA, "call1", 1, tx.NextSeq())
+		return tx.PutCallAttempt(a1)
 	})
 	// A new attempt's SentSeq must be allocated in its transaction.
 	err := s.Update(ctx, sessA, func(tx store.Tx) error {
@@ -426,35 +499,38 @@ func testCallAttempts(t *testing.T, s store.Store) {
 	wantErr(t, err, domain.ErrInvalidRecord)
 
 	update(t, s, sessA, func(tx store.Tx) error {
-		c, err := tx.Call("call1")
-		noErr(t, err)
-		c = c.Clone()
+		c := loadCall(t, tx, "call1").Clone()
 		c.State, c.Attempts = domain.CallSent, 1
-		c, err = tx.UpdateCall(c, c.Revision)
-		noErr(t, err)
-		// No new attempt while the call is not PREPARED.
-		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call1", 2, tx.NextSeq())), domain.ErrInvalidTransition)
-
-		// Open attempts move only along the attempt table, and only the
-		// state, outcome, and finish fields change.
-		abandoned := CloseAttempt(a1, domain.AttemptAbandoned, "", tx.NextSeq())
-		wantErr(t, tx.PutCallAttempt(abandoned), domain.ErrInvalidTransition)
+		return errOf(tx.UpdateCall(c, c.Revision))
+	})
+	// No new attempt while the call is not PREPARED.
+	attemptProbe("attempt while SENT", domain.ErrInvalidTransition, func(seq uint64) domain.CallAttempt { return NewAttempt(sessA, "call1", 2, seq) })
+	// Open attempts move only along the attempt table, and only the state,
+	// outcome, and finish fields change.
+	attemptProbe("SENT -> ABANDONED", domain.ErrInvalidTransition, func(seq uint64) domain.CallAttempt {
+		return CloseAttempt(a1, domain.AttemptAbandoned, "", seq)
+	})
+	attemptProbe("provider request renamed", domain.ErrImmutable, func(uint64) domain.CallAttempt {
 		renamed := a1
 		renamed.ProviderRequestID = "other"
 		renamed.State = domain.AttemptUnknown
-		wantErr(t, tx.PutCallAttempt(renamed), domain.ErrImmutable)
+		return renamed
+	})
+	update(t, s, sessA, func(tx store.Tx) error {
 		a1.State = domain.AttemptUnknown
-		noErr(t, tx.PutCallAttempt(a1))
+		return tx.PutCallAttempt(a1)
+	})
+	attemptProbe("UNKNOWN -> SENT", domain.ErrInvalidTransition, func(uint64) domain.CallAttempt {
 		sent := a1
 		sent.State = domain.AttemptSent
-		wantErr(t, tx.PutCallAttempt(sent), domain.ErrInvalidTransition)
-
-		// Reconcile as a retryable failure.
-		o := NewOutcome(c, domain.CallFailed, true)
+		return sent
+	})
+	// Reconcile as a retryable failure.
+	update(t, s, sessA, func(tx store.Tx) error {
+		o := NewOutcome(loadCall(t, tx, "call1"), domain.CallFailed, true)
 		a1 = CloseAttempt(a1, domain.AttemptFailed, o.OutcomeHash(), tx.NextSeq())
 		a1.Retryable = true
-		noErr(t, tx.PutCallAttempt(a1))
-		return nil
+		return tx.PutCallAttempt(a1)
 	})
 	// Closed attempts are immutable.
 	other := domain.CallOutcome{Attempt: 1, State: domain.CallFailed, FailureReason: "reset"}
@@ -510,45 +586,53 @@ func testCallAttempts(t *testing.T, s store.Store) {
 // current attempt and an earlier attempt's evidence can never close the
 // call.
 func testCallAttemptBinding(t *testing.T, s store.Store) {
+	var first domain.CallAttempt
 	update(t, s, sessA, func(tx store.Tx) error {
 		// Attempt 1 fails retryably; attempt 2 is in flight.
 		c := walk(t, tx, "c", "conv", domain.CallSent, domain.CallPrepared)
-		first := latestAttempt(t, tx, c)
-
-		// Sending must advance Attempts by exactly one.
-		noErr(t, tx.PutCallAttempt(NewAttempt(sessA, "c", 2, tx.NextSeq())))
-		for _, n := range []int{1, 3} {
+		first = latestAttempt(t, tx, c)
+		return tx.PutCallAttempt(NewAttempt(sessA, "c", 2, tx.NextSeq()))
+	})
+	// Sending must advance Attempts by exactly one.
+	for _, n := range []int{1, 3} {
+		callProbe(t, s, "c", domain.ErrInvalidTransition, fmt.Sprintf("PREPARED -> SENT with Attempts %d", n), func(_ store.Tx, c domain.CallRecord) domain.CallRecord {
 			sent := c.Clone()
 			sent.State, sent.Attempts = domain.CallSent, n
-			if err := errOf(tx.UpdateCall(sent, c.Revision)); !errors.Is(err, domain.ErrInvalidTransition) {
-				t.Errorf("PREPARED -> SENT with Attempts %d: error = %v, want ErrInvalidTransition", n, err)
-			}
-		}
+			return sent
+		})
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		c := loadCall(t, tx, "c")
 		sent := c.Clone()
 		sent.State, sent.Attempts = domain.CallSent, 2
-		c, err := tx.UpdateCall(sent, c.Revision)
-		noErr(t, err)
-
-		// Attempt 1's closed FAILED evidence cannot fail or retry the call
-		// now that attempt 2 is current.
-		stale := c.Clone()
-		stale.Attempts = 1
-		o := NewOutcome(stale, domain.CallFailed, true)
+		return errOf(tx.UpdateCall(sent, c.Revision))
+	})
+	// Attempt 1's closed FAILED evidence cannot fail or retry the call now
+	// that attempt 2 is current.
+	stale := func(c domain.CallRecord) domain.CallRecord {
+		st := c.Clone()
+		st.Attempts = 1
+		return st
+	}
+	failed := func(tx store.Tx, c domain.CallRecord) domain.CallRecord {
+		st := stale(c)
+		o := NewOutcome(st, domain.CallFailed, true)
 		if o.OutcomeHash() != first.OutcomeHash {
 			t.Fatalf("test setup: attempt 1 outcome hash mismatch")
 		}
-		failed := Finish(stale, domain.CallFailed, tx.NextSeq())
-		failed.Outcome, failed.OutcomeHash = &o, o.OutcomeHash()
-		retry := stale.Clone()
-		retry.State = domain.CallPrepared
-		sameState := stale.Clone()
-		for name, next := range map[string]domain.CallRecord{"FAILED": failed, "PREPARED": retry, "SENT": sameState} {
-			if err := errOf(tx.UpdateCall(next, c.Revision)); !errors.Is(err, domain.ErrInvalidTransition) {
-				t.Errorf("SENT -> %s on attempt 1's evidence: error = %v, want ErrInvalidTransition", name, err)
-			}
-		}
-		// Attempt 2's own evidence does.
-		step(t, tx, c, domain.CallCompleted)
-		return nil
-	})
+		f := Finish(st, domain.CallFailed, tx.NextSeq())
+		f.Outcome, f.OutcomeHash = &o, o.OutcomeHash()
+		return f
+	}
+	retry := func(_ store.Tx, c domain.CallRecord) domain.CallRecord {
+		r := stale(c)
+		r.State = domain.CallPrepared
+		return r
+	}
+	sameState := func(_ store.Tx, c domain.CallRecord) domain.CallRecord { return stale(c) }
+	for name, next := range map[string]func(store.Tx, domain.CallRecord) domain.CallRecord{"FAILED": failed, "PREPARED": retry, "SENT": sameState} {
+		callProbe(t, s, "c", domain.ErrInvalidTransition, "SENT -> "+name+" on attempt 1's evidence", next)
+	}
+	// Attempt 2's own evidence does.
+	update(t, s, sessA, func(tx store.Tx) error { step(t, tx, loadCall(t, tx, "c"), domain.CallCompleted); return nil })
 }

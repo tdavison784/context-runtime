@@ -1,0 +1,92 @@
+package sqlite
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
+)
+
+// TestSemanticReadsUseIndex checks that every Phase 3 facet read searches an
+// index constraining all of its key columns, never a table scan or a
+// session-prefix-only search (P3-39, gate: EXPLAIN searches the full
+// filter/order keys).
+func TestSemanticReadsUseIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	page := store.Page{Limit: 5}
+	viewer := domain.Principal{SessionID: "s", Authority: domain.AuthorityHarness}
+	reads := []struct {
+		name string
+		keys []string
+		read func(r store.SemanticReader) error
+	}{
+		{"CoverageMembers", []string{"session_id", "id"}, func(r store.SemanticReader) error { _, err := r.CoverageMembers("c", page); return err }},
+		{"CoveragesBySource", []string{"session_id", "item_id", "purpose"}, func(r store.SemanticReader) error {
+			_, err := r.CoveragesBySource("i", domain.CoverageProvenance, page)
+			return err
+		}},
+		{"ExchangesByConversation", []string{"session_id", "f_conversation_id"}, func(r store.SemanticReader) error {
+			_, err := r.ExchangesByConversation("conv", page)
+			return err
+		}},
+		{"ExchangeMembers", []string{"session_id", "f_exchange_id"}, func(r store.SemanticReader) error { _, err := r.ExchangeMembers("x", page); return err }},
+		{"MembershipsByItem", []string{"session_id", "f_source_item_id"}, func(r store.SemanticReader) error { _, err := r.MembershipsByItem("i", page); return err }},
+		{"AdmissionsByExchange", []string{"session_id", "f_exchange_id"}, func(r store.SemanticReader) error {
+			_, err := r.AdmissionsByExchange("x", page)
+			return err
+		}},
+		{"OpenExchangesByTask", []string{"session_id", "f_principal_task_id"}, func(r store.SemanticReader) error {
+			_, err := r.OpenExchangesByTask("task", page)
+			return err
+		}},
+		{"ReservingCallsByTask", []string{"session_id", "f_principal_task_id"}, func(r store.SemanticReader) error {
+			_, err := r.ReservingCallsByTask("task", page)
+			return err
+		}},
+		{"CheckpointsByConversation", []string{"session_id", "f_conversation_id"}, func(r store.SemanticReader) error {
+			_, err := r.CheckpointsByConversation(viewer, "conv", page)
+			return err
+		}},
+	}
+	for _, rd := range reads {
+		var q string
+		if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+			r, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			if err := rd.read(r); err != nil {
+				return err
+			}
+			q = tx.(*transaction).lastQuery
+			return nil
+		}); err != nil {
+			t.Fatalf("%s: %v", rd.name, err)
+		}
+		args := make([]any, strings.Count(q, "?"))
+		for i := range args {
+			args[i] = "x"
+		}
+		assertIndexed(t, s, rd.keys, q, args...)
+	}
+	// Single-record lookups by a secondary key.
+	for _, c := range []struct {
+		keys []string
+		q    string
+	}{
+		{[]string{"session_id", "f_kind", "f_owner_id"}, "SELECT id FROM rec_owner WHERE session_id=? AND f_kind=? AND f_owner_id=?"},
+		{[]string{"session_id", "f_exchange_id", "f_position"}, "SELECT id FROM rec_exchange_member WHERE session_id=? AND f_exchange_id=? AND f_position=?"},
+		{[]string{"session_id", "f_exchange_id"}, "SELECT id FROM rec_exchange_ack WHERE session_id=? AND f_exchange_id=?"},
+		{[]string{"session_id", "f_item_id"}, "SELECT id FROM rec_checkpoint WHERE session_id=? AND f_item_id=?"},
+		{[]string{"session_id", "f_family", "f_request_id"}, "SELECT id FROM rec_mutation_receipt WHERE session_id=? AND f_family=? AND f_request_id=?"},
+		{[]string{"session_id", "f_conversation_id"}, "SELECT COALESCE(MAX(f_ordinal),0) FROM rec_exchange WHERE session_id=? AND f_conversation_id=?"},
+	} {
+		args := make([]any, strings.Count(c.q, "?"))
+		for i := range args {
+			args[i] = "x"
+		}
+		assertIndexed(t, s, c.keys, c.q, args...)
+	}
+}

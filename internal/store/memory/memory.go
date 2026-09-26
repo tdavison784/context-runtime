@@ -113,6 +113,9 @@ type state struct {
 	// versions bound to each source item.
 	currentIDs   map[currentIDKey]map[domain.AccessBoundary]bool
 	oblsBySource map[string]map[obligationKey]bool
+
+	// sem holds the Phase 3 companion records (semantic.go).
+	sem *semState
 }
 
 func newState() *state {
@@ -147,6 +150,7 @@ func newState() *state {
 		oblsBySource: map[string]map[obligationKey]bool{},
 		refOwners:    map[sourceKey][]seqRef{},
 		itemsByTask:  map[string][]string{},
+		sem:          newSemState(),
 	}
 }
 
@@ -190,6 +194,9 @@ func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) 
 		return p // the overlay is discarded: nothing commits (DUR-1.3)
 	}
 	if err != nil {
+		return err
+	}
+	if err := t.runDeferred(); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
