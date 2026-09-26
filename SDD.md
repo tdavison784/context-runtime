@@ -2,7 +2,7 @@
 
 Status: proposed
 
-Version: 0.5
+Version: 0.6
 
 Date: 2026-09-25
 
@@ -122,7 +122,7 @@ Requirement IDs are stable and are part of the test contract. New requirements t
 Directives are parsed by the runtime. They are lifecycle instructions to the runtime, not text suggestions to the model.
 
 - FR-DIR-001: V1 recognizes the content sections Goal, Pinned, Working, Remember, References, and Ephemeral, and the lifecycle commands Resolve and Unpin.
-- FR-DIR-002: Directive IDs use [id] syntax and are stored independently from display text. Each (session, task, directive ID) has one current version. An item without an ID receives a derived ID (the lowercased keyword, a hyphen, and its full content hash), reported in diagnostics and inspection. Reusing an ID creates a new item and atomically SUPERSEDES the current version, subject to FR-AUTH-001 and FR-REL-006. Only the current version may impose requirements. Scope or access-boundary changes require an explicit authorized replacement policy; they cannot be smuggled through ID reuse.
+- FR-DIR-002: Directive IDs use [id] syntax and are stored independently from display text. Each (session, task, directive ID) has one current version. An item without an ID receives a derived ID (the lowercased keyword, a hyphen, and the 64 lowercase hex digits of its content hash), reported in diagnostics and inspection. Reusing an ID creates a new item and atomically SUPERSEDES the current version, subject to FR-AUTH-001 and FR-REL-006. Only the current version may impose requirements. Scope or access-boundary changes require an explicit authorized replacement policy; they cannot be smuggled through ID reuse.
 - FR-DIR-003: Defaults are:
   - Goal: goal kind, durable generation, task scope, GoalStatus=OPEN, PROTECTED retention and mandatory while current and eligible.
   - Pinned: constraint kind (instruction via kind=), pinned generation, task scope, PROTECTED retention, mandatory.
@@ -143,7 +143,7 @@ Directives are parsed by the runtime. They are lifecycle instructions to the run
       item-list  = 1*item
       item       = bullet SP ["[" id "]" SP] ["{" attr *(SP attr) "}" SP] text *continuation
       bullet     = "-" / "*" / 1*DIGIT "."
-      id         = 1*64(ALPHA / DIGIT / "-" / "_" / ".")
+      id         = 1*80(ALPHA / DIGIT / "-" / "_" / ".")   ; fits derived IDs (FR-DIR-002)
       attr       = attr-name "=" value
       attr-name  = "kind" / "scope" / "ttl" / "obligation"
       value      = 1*(ALPHA / DIGIT / "-" / "_" / ".")
@@ -183,7 +183,7 @@ Directives are parsed by the runtime. They are lifecycle instructions to the run
       - [architecture]
 
   Phase 2 adds a canonical example set under testdata/directives/ that is part of the test contract.
-- FR-DIR-007: A Working section is a snapshot of current state. Ingesting one supersedes every current Working item of the same authority in the same task, with SUPERSEDES edges from the new items to the old ones, under FR-AUTH-001 and FR-REL-006. Items with explicit IDs also supersede by ID (FR-DIR-002).
+- FR-DIR-007: A Working section is a snapshot of current state. Ingesting one supersedes every current Working item of the same authority and access boundary in the same task (FR-REL-006), with SUPERSEDES edges from the new items to the old ones, under FR-AUTH-001 and FR-REL-006. Items with explicit IDs also supersede by ID (FR-DIR-002).
 
 ### Semantic state tools
 
@@ -191,7 +191,7 @@ The runtime provides provider-neutral tool definitions and handlers that the har
 
 - FR-TOOL-001: The V1 tool set is context_search(query), context_get(id), context_rehydrate(id), context_remember(key, kind, text, evidence_ids), context_update_state(key, text, evidence_ids), context_resolve(id, evidence_ids), and context_checkpoint(summary). Names, schemas, and result formats are fixed by ADR 18 and are identical across providers. The retrieval tools follow FR-RET-001 and FR-RET-006.
 - FR-TOOL-002: context_remember creates a fact or decision; context_update_state creates a task_state item. Both are keyed: the item ID is "agent." followed by the key, within task scope, so agent keys never collide with directive IDs. A write to an existing key creates a new item that SUPERSEDES the previous one at the same authority. Cited evidence IDs must be accessible to the principal and become DERIVED_FROM edges with coverage under FR-REL-008; an inaccessible ID is a tool error and nothing is written. Items written without evidence are allowed and are marked unsupported in decision traces, which lowers their dependency value.
-- FR-TOOL-003: context_resolve resolves only items the agent has authority over (FR-AUTH-001). On a higher-authority goal it records a completion claim instead: an evidence item DERIVED_FROM the cited evidence, linked to the goal with REFERENCES, and the tool result states that the goal stays OPEN until an authorized Resolve or CompleteTask. Obligations are satisfied only through matchers or authorized assertions (FR-OBL-004), never through this tool.
+- FR-TOOL-003: context_resolve never resolves in V1, because Resolve requires a SYSTEM, HARNESS, or USER principal (FR-AUTH-001) and the tools cannot create goals. For an accessible goal it records a completion claim: an evidence item DERIVED_FROM the cited evidence, linked to the goal with REFERENCES, and the tool result states that the goal stays OPEN until an authorized Resolve or CompleteTask. An unknown or inaccessible ID is a tool error. Obligations are satisfied only through matchers or authorized assertions (FR-OBL-004), never through this tool.
 - FR-TOOL-004: context_checkpoint creates a summary item covering every exchange group before it in its conversation; its provenance is that coverage range (FR-REL-008), and its access boundary is the conversation's. A checkpoint larger than a policy fraction of the usable budget (ADR 5) is rejected with a tool error asking for a shorter summary. The harness may also ingest a checkpoint from its own model call, with HARNESS authority and an explicit coverage range. Because Plan and Assemble are previews that report the proposed mode, the harness can request a checkpoint before preparing a call that would rebase.
 - FR-TOOL-005: The runtime ships a reference instruction block: provider-neutral text that tells the agent when to record facts, decisions, and state, when to cite evidence, when to resolve, and to checkpoint before and after long tool sequences. The harness ingests it as a HARNESS-authority instruction. Its wording is versioned with the policy because it changes results, and the benchmark fixture uses it (section 12).
 
