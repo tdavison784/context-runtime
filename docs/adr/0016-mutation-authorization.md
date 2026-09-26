@@ -43,7 +43,7 @@ changed in Phase 2, most visibly here:**
   ADR's `TestSupersedeSnapshot_*` citations below describe.
 
 Only the store call site's name, its added namespace argument, and the
-five points above differ from the authorization/ambiguity/stale-pointer
+four points above differ from the authorization/ambiguity/stale-pointer
 text below; the rest of this ADR's decisions (grant issuance/revocation,
 the AGENT-same-key supersession exception, obligation-transition
 authorization, `LinkDerived`'s actor-authority gate) are unaffected by
