@@ -122,3 +122,20 @@ func TestDiagnosticCap(t *testing.T) {
 		t.Fatal(len(p.diagnostics))
 	}
 }
+
+// TestBareAndTabATXLines locks the parser-v1 behavior listed in doc.go's
+// deviations (SPEC-1.11): a bare or tab-separated ATX line is not a heading,
+// so it neither opens nor closes a section. In a list body it is stray prose
+// and marks the section Malformed; in a single body it is text.
+func TestBareAndTabATXLines(t *testing.T) {
+	for _, line := range []string{"#", "######", "#\tOther", "##\tPinned"} {
+		r := Parse([]byte("## Pinned\n- a\n"+line+"\n- b\n"), Options{Authority: domain.AuthoritySystem})
+		if len(r.Sections) != 1 || !r.Sections[0].Malformed || len(r.Items) != 2 || r.Items[1].Text != "b" {
+			t.Fatalf("%q in list: %+v", line, r)
+		}
+		r = Parse([]byte("## Goal\nx\n"+line+"\ny\n"), Options{Authority: domain.AuthoritySystem})
+		if len(r.Sections) != 1 || len(r.Items) != 1 || r.Items[0].Text != "x\n"+line+"\ny" {
+			t.Fatalf("%q in single body: %+v", line, r)
+		}
+	}
+}
