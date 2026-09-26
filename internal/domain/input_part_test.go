@@ -50,7 +50,22 @@ func TestLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, l := range []Limits{{MaxSpanBytes: -1}, {MaxItemsPerSpan: -1}, {MaxDiagnosticsPerSpan: -1}, {MaxIDBytes: 81}, {MaxHeadingLevel: 7}} {
+	if got := (Limits{MaxDiagnosticsPerSpan: 300}).Effective().MaxDiagnosticsPerSpan; got != MaxDiagnosticsPerSpanCap {
+		t.Fatalf("diagnostic cap not clamped: %d", got)
+	}
+	d := DefaultLimits()
+	for _, f := range d.fields() {
+		l := Limits{}
+		for i, g := range l.fields() {
+			if d.fields()[i] == f {
+				*g = -1
+			}
+		}
+		if !errors.Is(l.Validate(), ErrInvalidRecord) {
+			t.Errorf("negative limit accepted: %+v", l)
+		}
+	}
+	for _, l := range []Limits{{MaxIDBytes: 81}, {MaxHeadingLevel: 7}} {
 		if !errors.Is(l.Validate(), ErrInvalidRecord) {
 			t.Errorf("accepted %+v", l)
 		}

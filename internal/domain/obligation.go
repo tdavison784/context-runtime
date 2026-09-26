@@ -59,12 +59,17 @@ type ObligationVersion struct {
 	SourceAuthority Authority
 	Access          AccessBoundary
 	Description     string
-	Matcher         *MatcherRef
-	Status          ObligationStatus
-	Current         bool
-	EvidenceIDs     []string
-	CreatedSeq      uint64
-	RetiredSeq      uint64
+	// Claim is the declared claim name from a Pinned obligation=<claim>
+	// attribute (D13). It is only a name: it is not a registry lookup, a
+	// matcher binding, or a grant. Matcher stays nil until a registered
+	// matcher version is bound by an authorized, audited step (ADR 8).
+	Claim       string
+	Matcher     *MatcherRef
+	Status      ObligationStatus
+	Current     bool
+	EvidenceIDs []string
+	CreatedSeq  uint64
+	RetiredSeq  uint64
 	// MaterializationDisabled records an authorized FR-OBL-003 exception.
 	// It never satisfies, waives, or permits completion.
 	MaterializationDisabled bool
@@ -101,6 +106,9 @@ func (o ObligationVersion) Validate() error {
 	}
 	if o.Access.SessionID != o.SessionID {
 		return invalid("obligation %s: access boundary belongs to another session", o.ObligationID)
+	}
+	if o.Claim != "" && !ValidAttributeValue(o.Claim) {
+		return invalid("obligation %s: malformed claim name", o.ObligationID)
 	}
 	if o.Current == (o.RetiredSeq != 0) {
 		return invalid("obligation %s: retired sequence disagrees with currentness", o.ObligationID)
@@ -193,4 +201,32 @@ func (t ObligationTransition) Validate() error {
 		return invalid("obligation transition %s: matcher satisfaction requires evidence", t.ID)
 	}
 	return nil
+}
+
+// DerivedObligationID is the stable identity of the obligation declared in
+// the given slot of a directive (D13): it derives from the directive's full
+// current-version key, never from the claim name, so the same claim declared
+// by two directives are two obligations and a replacement of the directive
+// versions the same obligation. Slot is 0 for a Pinned obligation= attribute.
+func DerivedObligationID(k CurrentKey, slot int) string {
+	e := NewCanonicalEncoder("context-runtime/obligation-id/v1").String(k.SessionID).String(k.TaskID)
+	e.String(string(k.Access.Scope)).String(k.Access.SessionID).String(k.Access.WorkflowID).String(k.Access.TaskID).String(k.Access.AgentID)
+	e.String(string(k.Namespace)).String(k.ID).Int(int64(slot))
+	return "obl_" + shortHash(e)
+}
+
+// ValidAttributeValue implements FR-DIR-006's exact value production:
+// 1*(ALPHA / DIGIT / "-" / "_" / "."), ASCII only. Length is bounded by
+// ingestion limits, not the grammar.
+func ValidAttributeValue(v string) bool {
+	if v == "" {
+		return false
+	}
+	for i := range len(v) {
+		c := v[i]
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
 }
