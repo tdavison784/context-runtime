@@ -1,0 +1,60 @@
+{
+  "betas": [],
+  "model": "claude-sonnet-5",
+  "probe": "cache/claude-sonnet-5/C3-1-write",
+  "question": "C3 first request writes the conversation prefix (auto caching)",
+  "request": {
+    "cache_control": {
+      "type": "ephemeral"
+    },
+    "max_tokens": 64,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Garden notebook 20260926T130313-C3.\nGarden note 0000: row 0 has 0 tulips and 0 daisies in bed A.\nGarden note 0001: row 3…[len=4065 sha256=206eb9093269ac1d]",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "effort": "low"
+    }
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "text": "I've reviewed and stored the details of Garden notebook 20260926T130313-C3, containing 63 entries (notes 0000–0062) recording tulip and daisy counts across various rows and beds",
+        "type": "text"
+      }
+    ],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "model": "claude-sonnet-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "max_tokens",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 2052
+      },
+      "cache_creation_input_tokens": 2052,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 2,
+      "output_tokens": 64,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}

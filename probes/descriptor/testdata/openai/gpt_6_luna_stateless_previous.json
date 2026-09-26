@@ -1,0 +1,16 @@
+{
+  "endpoint": "/responses",
+  "error": "POST \"https://api.openai.com/v1/responses\": 400 Bad Request {\n    \"message\": \"Previous response with id '<redacted id length=55 sha256=4aeffdecf2796bdbdf7fd4fdd1e2ec956e7c16b9e61f94e8a35e6f0ac7cebcd9>' not found.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"previous_response_id\",\n    \"code\": \"previous_response_not_found\"\n  }",
+  "name": "gpt_6_luna_stateless_previous",
+  "request": {
+    "input": [
+      {
+        "type": "function_call_output"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-luna",
+    "previous_response_id": "[response id]",
+    "store": false
+  }
+}

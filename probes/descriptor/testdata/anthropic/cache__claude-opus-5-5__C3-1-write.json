@@ -1,0 +1,65 @@
+{
+  "betas": [],
+  "model": "claude-opus-5-5",
+  "probe": "cache/claude-opus-5-5/C3-1-write",
+  "question": "C3 first request writes the conversation prefix (auto caching)",
+  "request": {
+    "cache_control": {
+      "type": "ephemeral"
+    },
+    "max_tokens": 64,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Garden notebook 20260926T130130-C3.\nGarden note 0000: row 0 has 0 tulips and 0 daisies in bed A.\nGarden note 0001: row 3…[len=2030 sha256=81b2fa1d255d360c]",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-opus-5-5",
+    "output_config": {
+      "effort": "low"
+    }
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "signature": "CAQSiwUKEAgSGAI4…[len=880 sha256=9aa9ab5e9ff4c8ae]",
+        "thinking": "",
+        "type": "thinking"
+      },
+      {
+        "text": "I've got it. Notebook **20260926T130130-",
+        "type": "text"
+      }
+    ],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "model": "claude-opus-5-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "max_tokens",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 1025
+      },
+      "cache_creation_input_tokens": 1025,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 4,
+      "output_tokens": 64,
+      "output_tokens_details": {
+        "thinking_tokens": 47
+      },
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}

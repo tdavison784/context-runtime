@@ -1,0 +1,68 @@
+{
+  "endpoint": "/responses/compact",
+  "name": "gpt_6_luna_k1_compact",
+  "request": {
+    "input": [
+      {
+        "content": "Remember the marker cobalt. Say ready.",
+        "content_length": 38,
+        "role": "user"
+      },
+      {
+        "content": "Ready.",
+        "content_length": 6,
+        "role": "assistant"
+      }
+    ],
+    "instructions": "Preserve the marker word for the next turn.",
+    "model": "gpt-6-luna"
+  },
+  "response": {
+    "created_at": 1790427095,
+    "id": {
+      "length": 55,
+      "sha256": "b45b4207d1b80e6254b2474cb9386caba7d827a690aac283f0cc7ab80bd39b90"
+    },
+    "object": "response.compaction",
+    "output": [
+      {
+        "content": [
+          {
+            "text": "Remember the marker cobalt. Say ready.",
+            "type": "input_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "2807e769058d6b7c612b10b74e6e0510c49e95c2fb1e5f999f93fbf22278b480"
+        },
+        "role": "user",
+        "status": "completed",
+        "type": "message"
+      },
+      {
+        "encrypted_content": {
+          "length": 1144,
+          "sha256": "526b0c805ce70e46c3dd379b53c81b68f1b4f6d252f1cbbe155b9fbba72b371c"
+        },
+        "id": {
+          "length": 54,
+          "sha256": "0b4bf2582d89a9dcc6ab3ab1626e1e55b5e00469311ce7df154528dc4bb643ee"
+        },
+        "type": "compaction"
+      }
+    ],
+    "usage": {
+      "input_tokens": 54,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 43,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 97
+    }
+  }
+}

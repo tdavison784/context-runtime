@@ -1,0 +1,62 @@
+{
+  "betas": [],
+  "model": "claude-opus-5-5",
+  "probe": "cache/claude-opus-5-5/C2-identical-repeat",
+  "question": "C2 identical prefix sent twice",
+  "request": {
+    "max_tokens": 64,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Reply with the single word OK.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-opus-5-5",
+    "output_config": {
+      "effort": "low"
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "Probe ledger 20260926T125546-560.\nLedger line 0000: account 0000 moved 0 units to bucket A.\nLedger line 0001: account 0037 moved 13 units to bucket B.\nLedger line 0002: account 0074 moved 26 units to bucket C.\nLedger line 0003: account 0111 moved 39 units to bucket D.\nLedger line 0004: account 0148 moved 52 units to bucket E.\nLedger line 0005: account 0185 moved 65 units to bucket F.\nLedger line 0006: account 0222 moved 78 units to bucket G.\nLedger line 0007: account 0259 moved 91 units to bucket H.\nLedger line 0008: account 0296 moved 7 units to bucket I.\nLedger line 0009: account 0333 moved 20 units to bucket J.\nLedger line 0010: account 0370 moved 33 units to bucket K.\nLedger line 0011: account 0407 moved 46 units to bucket L.\nLedger line 0012: account 0444 moved 59 units to bucket M.\nLedger line 0013: account 0481 moved 72 units to bucket N.\nLedger line 0014: account 0518 moved 85 units to bucket O.\nLedger line 0015: account 0555 moved 1 units to bucket P.\nLedger line 0016: account 0592 moved 14 units to bucket Q.\nLedger line 0017: account 0629 moved 27 units to bucket R.\nLedger line 0018: account 0666 moved 40 units to bucket S.\nLedger line 0019: account 0703 moved 53 units to bucket T.\n",
+        "type": "text"
+      }
+    ]
+  },
+  "response": {
+    "container": null,
+    "content": [],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "model": "claude-opus-5-5",
+    "role": "assistant",
+    "stop_details": {
+      "category": "cyber",
+      "explanation": "This request triggered restrictions on violative cyber content and was blocked under Anthropic's Usage Policy. To learn more, see https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback. API integrators: you can reduce refusals for your users by configuring a fallback model — see https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback",
+      "type": "refusal"
+    },
+    "stop_reason": "refusal",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 560
+      },
+      "cache_creation_input_tokens": 560,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 16,
+      "output_tokens": 0,
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}

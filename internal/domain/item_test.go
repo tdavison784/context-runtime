@@ -75,11 +75,25 @@ func TestContextItemValidate_ValidItemPasses(t *testing.T) {
 	}
 }
 
+func TestContextItemValidate_TTLWithOriginatingTaskPasses(t *testing.T) {
+	// A wider-scoped item may carry a TTL as long as it names the task whose
+	// turns count it down (ADR 6, SEC-1.3).
+	it := validItem()
+	it.Scope = ScopeSession
+	it.Access = AccessBoundary{Scope: ScopeSession, SessionID: "s1"}
+	ttl := 2
+	it.TTLTurns = &ttl
+	if err := it.Validate(); err != nil {
+		t.Fatalf("session-scoped TTL item with originating task failed Validate: %v", err)
+	}
+}
+
 func TestContextItemValidate_FailureBranches(t *testing.T) {
 	goalStatusOpen := GoalOpen
 	bogusGoalStatus := GoalStatus("bogus")
 	zero := 0
 	neg := -1
+	one := 1
 
 	cases := []struct {
 		name    string
@@ -212,6 +226,19 @@ func TestContextItemValidate_FailureBranches(t *testing.T) {
 		{
 			"negative TTL rejected",
 			func(it ContextItem) ContextItem { it.TTLTurns = &neg; return it },
+			ErrInvalidRecord,
+		},
+		{
+			// ADR 6: TTL counts turns of the originating task, so a TTL item
+			// without one could never expire (SEC-1.3).
+			"TTL without originating task rejected",
+			func(it ContextItem) ContextItem {
+				it.TaskID = ""
+				it.Scope = ScopeSession
+				it.Access = AccessBoundary{Scope: ScopeSession, SessionID: "s1"}
+				it.TTLTurns = &one
+				return it
+			},
 			ErrInvalidRecord,
 		},
 		{

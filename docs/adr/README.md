@@ -33,24 +33,27 @@ Codex) has scrutinized it, noting which findings changed the decision.
 
 | # | Title | Gates phase (§11) | Status |
 |---|-------|--------------------|--------|
-| 1 | Go module path and minimum Go version | Phase 1 | [Written](0001-module-and-go-version.md) |
+| 1 | Go module path and minimum Go version | Phase 1 | [Accepted](0001-module-and-go-version.md) |
 | 2 | Strict submitted-input accounting, reservations, verified counter bounds, safety margins, unsupported profiles | Phase 5 | pending — gates Phase 5 |
-| 3 | SQLite driver and migration mechanism | Phase 1 | [Written](0003-sqlite-driver-and-migrations.md) |
-| 4 | Stable IDs, event/call idempotency keys, conflict detection, canonical hashes | Phase 1 | [Written](0004-ids-idempotency-and-hashes.md) |
+| 3 | SQLite driver and migration mechanism | Phase 1 | [Accepted](0003-sqlite-driver-and-migrations.md) |
+| 4 | Stable IDs, event/call idempotency keys, conflict detection, canonical hashes | Phase 1 | [Accepted](0004-ids-idempotency-and-hashes.md) |
 | 5 | Semantic scoring weights, SemanticBytes encoding, fixed-point scale, relevance threshold, resident-byte limits, soft-pressure fraction, retrieval-call windows, stub budget, checkpoint size limit, decision-trace retention | Phase 4 | pending — gates Phase 4 |
-| 6 | Access-boundary and context-eligibility matrix, historical leases, expiry, epoch validation | Phase 1 | [Written](0006-access-and-eligibility.md) |
+| 6 | Access-boundary and context-eligibility matrix, historical leases, expiry, epoch validation | Phase 1 | [Accepted](0006-access-and-eligibility.md) |
 | 7 | Lexical index and normalization rules | Phase 4 | pending — gates Phase 4 |
 | 8 | Observation identities, obligation matcher/claim versions, evidence applicability fingerprints, mutation grants, invalidation rules | Phase 3 | pending — gates Phase 3 |
 | 9 | Provider transport libraries, retry policy, OpenAI API surface, verified reasoning replay rules | Phase 5 | pending — gates Phase 5 |
 | 10 | Benchmark fixture/oracle, comparative statistics and run counts, baseline profiles, shared resource limits/projections, reproducible hardware/data profile | Phase 5 (initial fixture/profile); finalized Phase 8 | pending — gates Phase 5 |
 | 11 | Render templates and delimiters per provider | Phase 5 | pending — gates Phase 5 |
 | 12 | Capability profiles/verification, three-valued edit safety, canonical provider blocks and source coverage, REQUIRE/ALLOW_RESET policies, checkpoint compaction protocols | Phase 5 | pending — gates Phase 5 |
-| 13 | Deployment model: embedded library, sidecar, or both | Phase 1 | [Written](0013-deployment-model.md) |
+| 13 | Deployment model: embedded library, sidecar, or both | Phase 1 | [Accepted](0013-deployment-model.md) |
 | 14 | Content redaction and retention after V1 | Phase 11 | pending — gates Phase 11 |
 | 15 | Forecast horizon/growth/output/compaction assumptions, recorded cache/timing inputs, uncertainty/savings margins, local resource pricing, simulator validation limits | Phase 9 | pending — gates Phase 9 |
-| 16 | Common mutation authorization, directive/obligation version replacement, independent residency/goal status, immutable source snapshots | Phase 1 | [Written](0016-mutation-authorization.md) |
-| 17 | Provider call/attempt state machine, conversation reservation, outcome reconciliation, streaming completion, crash/retry tests | Phase 1 | [Written](0017-call-ledger.md) |
+| 16 | Common mutation authorization, directive/obligation version replacement, independent residency/goal status, immutable source snapshots | Phase 1 | [Accepted](0016-mutation-authorization.md) |
+| 17 | Provider call/attempt state machine, conversation reservation, outcome reconciliation, streaming completion, crash/retry tests | Phase 1 | [Accepted](0017-call-ledger.md) |
 | 18 | Semantic state tool schemas, result formats, reference instruction block | Phase 5 | pending — gates Phase 5 |
+
+**Additional ADRs:** ADR 19 (directive parsing and ingestion, Phase 2) is
+being written, beyond the 18 required by SDD §15.
 
 Phase 1 (Contracts, domain, and stores) requires ADRs 1, 3, 4, 6, 13, 16, 17,
 all written here. Phase 1's exit gate (state-transition, restart, graph, and

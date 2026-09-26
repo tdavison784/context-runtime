@@ -1,0 +1,68 @@
+{
+  "endpoint": "/responses/compact",
+  "name": "gpt_6_astra_k1_compact",
+  "request": {
+    "input": [
+      {
+        "content": "Remember the marker cobalt. Say ready.",
+        "content_length": 38,
+        "role": "user"
+      },
+      {
+        "content": "Ready.",
+        "content_length": 6,
+        "role": "assistant"
+      }
+    ],
+    "instructions": "Preserve the marker word for the next turn.",
+    "model": "gpt-6-astra"
+  },
+  "response": {
+    "created_at": 1790427089,
+    "id": {
+      "length": 55,
+      "sha256": "9f39f48d66f56205cf48ffb9d78160dcf2dbe63366d3bfe0692263e716e656d5"
+    },
+    "object": "response.compaction",
+    "output": [
+      {
+        "content": [
+          {
+            "text": "Remember the marker cobalt. Say ready.",
+            "type": "input_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "8fce44fb2ac621731232f6a6f00e2192f1c1fddf869e8d096d41a6f677d81b24"
+        },
+        "role": "user",
+        "status": "completed",
+        "type": "message"
+      },
+      {
+        "encrypted_content": {
+          "length": 1188,
+          "sha256": "217019c998277947aee187078f447f0e757f1d6a82342ec90f9868473404450f"
+        },
+        "id": {
+          "length": 54,
+          "sha256": "34fc86e7afe9316369be252d1127394dbdefa29c0ec377159061d377c0e9c2a5"
+        },
+        "type": "compaction"
+      }
+    ],
+    "usage": {
+      "input_tokens": 54,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 48,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 102
+    }
+  }
+}

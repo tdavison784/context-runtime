@@ -1,6 +1,6 @@
 # 16. Common mutation authorization, version replacement, residency/goal status, immutable snapshots
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
 ## Context
@@ -656,10 +656,17 @@ and tests are all merged and passing (`go test -race ./... ` green):
 
 ## Open questions
 
+### Resolved at acceptance (2026-09-26)
+
 - Whether `granteeMatches`'s exact-ID matching is expressive enough once
   Phase 3 needs grants scoped to "any task the grantee currently owns."
+  **Decision:** exact-ID grantee matching stays for V1; ADR 8 (Phase 3)
+  revisits if task-scoped grants are required, as an additive grant form.
 - Whether CompleteTask's same-task-ownership filter (FR-AUTH-003) needs its
   own function distinct from `AuthorizeMutation`.
+  **Decision:** CompleteTask gets its own authorization function in Phase 3
+  built on `AuthorizeMutation` for each affected goal; recorded in this ADR
+  by amendment then.
 
 ## Review
 
