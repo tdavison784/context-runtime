@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("```\n## Goal\nx\n```\n> ## Pinned\n<!--\n## Working\n-->")
+uint8(0)
+bool(true)
