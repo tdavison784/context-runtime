@@ -155,6 +155,9 @@ type ReadTx interface {
 	Items(f ItemFilter) ([]domain.ContextItem, error)
 	Relationships(f RelationshipFilter) ([]domain.Relationship, error)
 	Event(eventID string) (domain.EventRecord, error)
+	// Diagnostics returns an event's immutable diagnostics ordered by span,
+	// then index (across parts). Missing events return an empty list.
+	Diagnostics(eventID string) ([]domain.Diagnostic, error)
 	// Blob returns the blob with the given hash after verifying its bytes;
 	// corrupt bytes fail with domain.ErrIntegrity.
 	Blob(hash string) (domain.Blob, error)
@@ -208,6 +211,13 @@ type Tx interface {
 	// existed=true without writing; with a different request it fails with
 	// domain.ErrEventIDConflict.
 	InsertEvent(e domain.EventRecord) (stored domain.EventRecord, existed bool, err error)
+
+	// InsertDiagnostic appends a content-free diagnostic keyed by event/span/index.
+	// Its event must already exist and have a sequence allocated in this
+	// transaction; diagnostics cannot be backfilled after event commit.
+	// Duplicate keys fail ErrImmutable, missing events ErrNotFound, and
+	// invalid records, foreign sessions, or old events ErrInvalidRecord.
+	InsertDiagnostic(d domain.Diagnostic) error
 
 	// InsertItem stores a new immutable item. Its Version must be 1 and its
 	// Seq must be allocated in this transaction. Every image or document part

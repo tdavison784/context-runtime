@@ -30,9 +30,10 @@ var _ store.Tx = (*tx)(nil)
 // commit folds the transaction into st and reports whether it wrote any
 // record.
 func (t *tx) commit(st *state) bool {
-	wrote := t.items.dirty() || t.rels.dirty() || t.events.dirty() || t.blobs.dirty() ||
+	wrote := t.diagnostics.dirty() || t.items.dirty() || t.rels.dirty() || t.events.dirty() || t.blobs.dirty() ||
 		t.directives.dirty() || t.obligations.dirty() || t.transitions.dirty() || t.grants.dirty() ||
 		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty()
+	t.diagnostics.commit()
 	t.items.commit()
 	t.rels.commit()
 	t.supersedes.commit()

@@ -59,8 +59,14 @@ type attemptKey struct {
 	attempt int
 }
 
+type diagnosticKey struct {
+	eventID     string
+	span, index int
+}
+
 // state is one session's committed records.
 type state struct {
+	diagnostics  map[diagnosticKey]domain.Diagnostic
 	lastSeq      uint64
 	items        map[string]domain.ContextItem
 	rels         map[string]domain.Relationship
@@ -85,6 +91,7 @@ type state struct {
 
 func newState() *state {
 	return &state{
+		diagnostics:  map[diagnosticKey]domain.Diagnostic{},
 		items:        map[string]domain.ContextItem{},
 		rels:         map[string]domain.Relationship{},
 		supersedes:   map[string][]string{},
