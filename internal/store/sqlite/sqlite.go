@@ -1,11 +1,13 @@
 // Package sqlite provides the durable, session-partitioned store.
 //
-// The embedded forward-only migration creates one rec_* table per record
-// type. Session and record identity form each table's key; other scalar and
-// nested fields occupy typed columns. Presence columns preserve nil pointers
-// and byte slices, while JSON is limited to leaf lists. The migration checksum
-// guards this layout against silent drift when a database is reopened. The
-// sessions table tracks the sequence cursor and whether any record committed;
+// Embedded forward-only migrations create one rec_* table per record type;
+// committed migrations are never edited, so every schema change is a new
+// numbered file. Session and record identity form each table's key; other
+// scalar and nested fields occupy typed columns. Presence columns preserve
+// nil pointers and byte slices, while JSON is limited to leaf lists (content
+// parts store every string byte for byte). The migration checksum guards this
+// layout against silent drift when a database is reopened. The sessions
+// table tracks the sequence cursor and whether any record committed;
 // directives use the item's full access boundary as part of their key.
 package sqlite
 

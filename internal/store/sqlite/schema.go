@@ -17,8 +17,9 @@ import (
 // every other scalar or nested field occupies one typed column. A presence
 // column distinguishes nil pointers from zero-valued nested records, and a
 // nil column distinguishes nil byte slices from empty BLOBs. JSON is used
-// only for leaf lists (parts, tags, IDs, fingerprints, and usage iterations).
-// No complete record is stored as a second, opaque copy.
+// only for leaf lists (tags, IDs, fingerprints, and usage iterations); content
+// parts use the lossless hex form in parts.go. No complete record is stored
+// as a second, opaque copy.
 type columnRole uint8
 
 const (
@@ -137,6 +138,9 @@ func (c recordColumn) sqlType() string {
 	if t == timeType {
 		return "TEXT"
 	}
+	if t == partsType {
+		return "BLOB" // lossless parts (parts.go)
+	}
 	switch t.Kind() {
 	case reflect.String:
 		return "TEXT"
@@ -152,30 +156,25 @@ func (c recordColumn) sqlType() string {
 	panic("unsupported schema field " + t.String())
 }
 
-// schemaDDL is the single schema specification used to check the embedded
-// pre-release migration against the Go record layout.
-func schemaDDL() string {
-	var b strings.Builder
-	b.WriteString("-- Pre-release initial schema. Edit in place until Phase 1 is deployed.\n")
-	b.WriteString("CREATE TABLE sessions (session_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL DEFAULT 0, committed INTEGER NOT NULL DEFAULT 0);\n")
-	for _, kind := range []string{"item", "relationship", "event", "obligation", "obligation_transition", "grant", "task", "lifecycle", "conversation", "call", "attempt"} {
+// recordTables lists every record table in creation order.
+var recordTables = []string{"item", "relationship", "event", "obligation", "obligation_transition", "grant", "task", "lifecycle", "conversation", "call", "attempt"}
+
+// typedColumns is the column layout (name -> declared type) the Go record
+// types require of each rec_* table. Migrations are forward-only and never
+// edited once committed, so a new or changed record field needs a new
+// migration; TestMigratedSchemaMatchesTypes checks that 0001 plus every later
+// migration produces exactly this layout.
+func typedColumns() map[string]map[string]string {
+	out := make(map[string]map[string]string, len(recordTables))
+	for _, kind := range recordTables {
 		s := schemas[kind]
-		fmt.Fprintf(&b, "CREATE TABLE %s (\n  session_id TEXT NOT NULL,\n  id TEXT NOT NULL,\n  subkey INTEGER NOT NULL DEFAULT 0", s.table)
+		cols := map[string]string{"session_id": "TEXT NOT NULL", "id": "TEXT NOT NULL", "subkey": "INTEGER NOT NULL DEFAULT 0"}
 		for _, c := range s.columns {
-			fmt.Fprintf(&b, ",\n  %s %s", c.name, c.sqlType())
+			cols[c.name] = c.sqlType()
 		}
-		b.WriteString(",\n  PRIMARY KEY (session_id,id,subkey),\n  FOREIGN KEY (session_id) REFERENCES sessions(session_id)\n);\n")
+		out[s.table] = cols
 	}
-	b.WriteString("CREATE INDEX item_order ON rec_item(session_id,f_seq,id);\n")
-	b.WriteString("CREATE INDEX item_task ON rec_item(session_id,f_task_id);\n")
-	b.WriteString("CREATE INDEX relationship_order ON rec_relationship(session_id,f_seq,id);\n")
-	b.WriteString("CREATE INDEX relationship_from ON rec_relationship(session_id,f_type,f_from_id);\n")
-	b.WriteString("CREATE INDEX lifecycle_order ON rec_lifecycle(session_id,f_seq,id);\n")
-	b.WriteString("CREATE INDEX call_order ON rec_call(session_id,f_prepared_seq,id);\n")
-	b.WriteString("CREATE UNIQUE INDEX one_reserving_call ON rec_call(session_id,f_conversation_id) WHERE f_state IN ('PREPARED','SENT','UNKNOWN');\n")
-	b.WriteString("CREATE TABLE blobs (session_id TEXT NOT NULL, hash TEXT NOT NULL, media_type TEXT NOT NULL, data BLOB NOT NULL, data_nil INTEGER NOT NULL CHECK(data_nil IN (0,1)), PRIMARY KEY(session_id,hash), FOREIGN KEY(session_id) REFERENCES sessions(session_id));\n")
-	b.WriteString("CREATE TABLE directives (session_id TEXT NOT NULL, task_id TEXT NOT NULL, directive_id TEXT NOT NULL, boundary_scope TEXT NOT NULL, boundary_session_id TEXT NOT NULL, boundary_workflow_id TEXT NOT NULL, boundary_task_id TEXT NOT NULL, boundary_agent_id TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id), FOREIGN KEY(session_id) REFERENCES sessions(session_id));\n")
-	return b.String()
+	return out
 }
 
 func (s *recordSchema) recordValues(record any) ([]any, error) {
@@ -254,6 +253,9 @@ func encodeField(v reflect.Value) (any, error) {
 			return "", nil
 		}
 		return t.Format(time.RFC3339Nano), nil
+	}
+	if v.Type() == partsType {
+		return encodeLosslessParts(v.Interface().([]domain.ContentPart))
 	}
 	switch v.Kind() {
 	case reflect.String:
@@ -381,6 +383,14 @@ func decodeField(f reflect.Value, x any, bytesNil bool) error {
 			return err
 		}
 		f.Set(reflect.ValueOf(t))
+		return nil
+	}
+	if f.Type() == partsType {
+		parts, err := decodeLosslessParts([]byte(asString(x)))
+		if err != nil {
+			return err
+		}
+		f.Set(reflect.ValueOf(parts))
 		return nil
 	}
 	switch f.Kind() {
