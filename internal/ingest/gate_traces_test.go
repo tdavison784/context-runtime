@@ -93,7 +93,8 @@ const (
 	depW1Dedup = "W1 declaration dedup + graph.DeclareCreation"
 )
 
-// TestGateT02_ReplacementRetiresOldRequirement: pin and goal replacement,
+// TestGateT02_ReplacementRetiresOldRequirement (see also
+// TestGateT02_GrantBindsExactVersion): pin and goal replacement,
 // atomic currentness and obligation retirement, new UNRESOLVED version, no
 // grant/proof inheritance, separately authorized revalidation.
 func TestGateT02_ReplacementRetiresOldRequirement(t *testing.T) {
@@ -150,7 +151,6 @@ func TestGateT02_ReplacementRetiresOldRequirement(t *testing.T) {
 			})
 		})
 	})
-	t.Run("v1 grant does not authorize v2", func(t *testing.T) { pending(t, depW3Life+" (grant issuance)") })
 	t.Run("v2 satisfied only by separately authorized reevaluation", func(t *testing.T) { pending(t, depW4+" (C-4 REEVALUATE)") })
 	t.Run("explicit same-content ReplaceDirective starts a new OPEN version", func(t *testing.T) { pending(t, depW1Dedup+"; "+depW3Life+" (C-1 REPLACE)") })
 }
@@ -228,7 +228,8 @@ func TestGateT05_ResolvedGoalStaysResolved(t *testing.T) {
 	})
 }
 
-// TestGateT06_AllLifecyclePathsAuthorize: every lifecycle, assertion,
+// TestGateT06_AllLifecyclePathsAuthorize (see also gate_lifecycle_test.go
+// for grant expiry and completion): every lifecycle, assertion,
 // block, waive and completion path rejects insufficient authority
 // atomically; exact-version matcher grants; Unpin/materialization cannot
 // bypass completion; hidden goal/obligation and grant-sequence boundaries.
@@ -256,7 +257,6 @@ func TestGateT06_AllLifecyclePathsAuthorize(t *testing.T) {
 			}
 		})
 	})
-	t.Run("USER CompleteTask denied atomically", func(t *testing.T) { pending(t, depW3Life+" (CompleteTask)") })
 	t.Run("HARNESS assertion without SYSTEM grant denied", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
 			needsObligations(t, f)
@@ -268,9 +268,6 @@ func TestGateT06_AllLifecyclePathsAuthorize(t *testing.T) {
 		})
 	})
 	t.Run("matcher grant on exact version satisfies with proof", func(t *testing.T) { pending(t, depW4+"; "+depW2) })
-	t.Run("completion needs Resolve authority for hidden goals", func(t *testing.T) { pending(t, depW3Life) })
-	t.Run("Unpin or materialization disable cannot bypass completion", func(t *testing.T) { pending(t, depW3Life+"; "+depW4) })
-	t.Run("grant expiring at the allocated sequence", func(t *testing.T) { pending(t, depW3Life+"; "+depW2) })
 }
 
 // TestGateT07_ProofsExpireWithSubject: the T07 repeat cases beyond

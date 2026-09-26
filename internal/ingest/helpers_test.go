@@ -69,6 +69,18 @@ func hasObligations(s store.Store) bool {
 	})
 }
 
+// hasCompletion reports whether s also implements the owner-goal and GC
+// request records W3's CompleteTask writes.
+func hasCompletion(s store.Store) bool {
+	return hasObligations(s) && probeSemantic(s, func(r store.SemanticReader) error {
+		if _, err := r.OpenGoalsByTaskOwner("probe", store.Page{Limit: 1}); err != nil {
+			return err
+		}
+		_, err := r.PendingGCRequests(store.Page{Limit: 1})
+		return err
+	})
+}
+
 // probeSemantic reports whether read returns anything but
 // ErrUnsupportedSchema, in a transaction it rolls back.
 func probeSemantic(s store.Store, read func(store.SemanticReader) error) bool {
