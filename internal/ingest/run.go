@@ -188,6 +188,9 @@ func (r *run) ingestSpan(si int) error {
 	if err != nil {
 		return err
 	}
+	if err := r.detectDuplicate(actor, transcript); err != nil {
+		return err
+	}
 	if err := r.linkPendingReferences(actor, transcript); err != nil {
 		return err
 	}

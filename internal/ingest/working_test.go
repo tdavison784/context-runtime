@@ -42,7 +42,7 @@ func TestWorking_T18(t *testing.T) {
 		user := principal(domain.AuthorityUser)
 		f.mustIngest(user, userEvent("w1", "## Working\n- Investigating internal/client.go.\n- Current issue is TestLegacyClient.\n", true))
 		r := f.mustIngest(user, userEvent("w2", "## Working\n- Investigating internal/client.go.\n", true))
-		if got := f.currentWorking(); !slices.Equal(got, []string{"Investigating internal/client.go."}) || len(r.Replacements) != 2 || len(r.Duplicates) != 0 {
+		if got := f.currentWorking(); !slices.Equal(got, []string{"Investigating internal/client.go."}) || len(r.Replacements) != 2 || len(semanticDups(r)) != 0 {
 			t.Errorf("current = %v, repls %v, dups %v", got, r.Replacements, r.Duplicates)
 		}
 		if sem := semantic(r); len(sem) != 1 || sem[0].Kind != domain.KindTaskState || sem[0].Authority != domain.AuthorityUser {
@@ -59,8 +59,8 @@ func TestWorking_DuplicateAndMalformed(t *testing.T) {
 		sys := principal(domain.AuthoritySystem)
 		f.mustIngest(sys, sysEvent("w1", "## Working\n- a\n- b\n"))
 		r := f.mustIngest(sys, sysEvent("w2", "## Working\n- a\n- b\n"))
-		if len(r.Duplicates) != 2 || len(r.Replacements) != 0 || !slices.Equal(f.currentWorking(), []string{"a", "b"}) {
-			t.Errorf("identical snapshot: dups %v repls %v current %v", r.Duplicates, r.Replacements, f.currentWorking())
+		if len(semanticDups(r)) != 2 || len(r.Replacements) != 0 || !slices.Equal(f.currentWorking(), []string{"a", "b"}) {
+			t.Errorf("identical snapshot: dups %v repls %v current %v", semanticDups(r), r.Replacements, f.currentWorking())
 		}
 
 		r = f.mustIngest(sys, sysEvent("w3", "## Working\n- c\n- [bad id!] d\n"))

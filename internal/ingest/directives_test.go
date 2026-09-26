@@ -26,6 +26,20 @@ func semantic(r domain.IngestReceipt) []domain.ContextItem {
 	return out
 }
 
+// semanticDups returns the receipt's duplicate links from semantic items,
+// leaving out transcript-level duplicate detection.
+func semanticDups(r domain.IngestReceipt) []domain.IngestLink {
+	var out []domain.IngestLink
+	for _, l := range r.Duplicates {
+		for _, it := range r.Items {
+			if it.ID == l.ItemID && it.Role != domain.RoleTranscript {
+				out = append(out, l)
+			}
+		}
+	}
+	return out
+}
+
 func byDirective(r domain.IngestReceipt, id string) (domain.ContextItem, bool) {
 	for _, it := range r.Items {
 		if it.DirectiveID == id {
@@ -107,8 +121,8 @@ func TestDirectives_ReplacementAndObligations_T02(t *testing.T) {
 
 		r2 := f.mustIngest(sys, sysEvent("s2", "## Pinned\n- [dep] {obligation=tests_pass} Use dependency v2.\n"))
 		p1dup, _ := byDirective(r2, "dep")
-		if len(r2.Duplicates) != 1 || r2.Duplicates[0] != (domain.IngestLink{ItemID: p1dup.ID, TargetID: p1.ID}) || len(r2.Replacements) != 0 {
-			t.Errorf("restatement: dups %v repls %v", r2.Duplicates, r2.Replacements)
+		if d := semanticDups(r2); len(d) != 1 || d[0] != (domain.IngestLink{ItemID: p1dup.ID, TargetID: p1.ID}) || len(r2.Replacements) != 0 {
+			t.Errorf("restatement: dups %v repls %v", d, r2.Replacements)
 		}
 
 		r3 := f.mustIngest(sys, sysEvent("s3", "## Pinned\n- [dep] {obligation=tests_pass} Use dependency v3.\n"))
@@ -231,6 +245,37 @@ func TestDirectives_ScopeFallback(t *testing.T) {
 		}
 		if !slices.ContainsFunc(sem, func(it domain.ContextItem) bool { return it.Access.AgentID == "" }) {
 			t.Errorf("unexpected owner")
+		}
+	})
+}
+
+// TestNonDirectiveDuplicates_D10: a repeated message is linked DUPLICATE_OF
+// its first occurrence for detection but stays current with its own turn;
+// the same text at another authority or boundary is never a duplicate.
+func TestNonDirectiveDuplicates_D10(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		first := f.mustIngest(user, userEvent("u1", "yes", false))
+		second := f.mustIngest(user, userEvent("u2", "yes", false))
+		if len(second.Duplicates) != 1 || second.Duplicates[0].TargetID != first.Items[0].ID {
+			t.Errorf("duplicates = %v", second.Duplicates)
+		}
+		third := f.mustIngest(user, userEvent("u3", "yes", false))
+		if len(third.Duplicates) != 1 || third.Duplicates[0].TargetID != first.Items[0].ID {
+			t.Errorf("third duplicates = %v, want the first occurrence", third.Duplicates)
+		}
+		f.view(func(tx store.ReadTx) error {
+			if ok, _ := graph.IsCurrent(tx, second.Items[0].ID); !ok {
+				t.Errorf("a non-directive duplicate stopped being current")
+			}
+			return nil
+		})
+		if second.Items[0].CreatedTurn != 2 {
+			t.Errorf("duplicate turn = %d, want its own turn 2", second.Items[0].CreatedTurn)
+		}
+		agent := f.mustIngest(user, domain.Event{EventID: "a1", Kind: domain.EventAgent, Spans: []domain.Span{textSpan(domain.AuthorityAgent, false, "yes")}})
+		if len(agent.Duplicates) != 0 {
+			t.Errorf("cross-authority duplicate: %v", agent.Duplicates)
 		}
 	})
 }

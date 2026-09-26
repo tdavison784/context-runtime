@@ -8,6 +8,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/policy"
+	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 // maxClaimsPerSource bounds the obligation lookup when comparing a
@@ -255,5 +256,44 @@ func (r *run) residualInstruction(c unitCtx, slices []domain.ByteRange) error {
 	if err != nil {
 		return err
 	}
-	return r.linkDerived(c, it)
+	if err := r.linkDerived(c, it); err != nil {
+		return err
+	}
+	return r.detectDuplicate(c.actor, it)
+}
+
+// detectDuplicate links a new non-directive item (a transcript or residual
+// instruction) DUPLICATE_OF the earliest (Seq, ID) earlier item with the
+// same content, role, kind, authority, scope, and exact boundary in the
+// same session and task (FR-ING-005, D10). It is detection only: the new
+// occurrence stays current pending input with its own turn and metadata,
+// and nothing crosses an authority, boundary, or task.
+func (r *run) detectDuplicate(actor domain.Principal, it domain.ContextItem) error {
+	if !it.Access.Permits(actor) {
+		return nil
+	}
+	items, err := r.tx.Items(store.ItemFilter{TaskID: it.TaskID})
+	if err != nil {
+		return err
+	}
+	for _, c := range items {
+		if c.ID == it.ID || c.Seq >= it.Seq || c.DirectiveID != "" || c.ContentHash != it.ContentHash || c.Role != it.Role ||
+			c.Kind != it.Kind || c.Authority != it.Authority || c.Scope != it.Scope || c.Access != it.Access {
+			continue
+		}
+		if r.rels >= r.limits.MaxRelationships {
+			return errLimit("MaxRelationships")
+		}
+		_, err := graph.LinkDuplicate(r.tx, actor, it.ID, c.ID, r.graphEventID(), dedupRule)
+		switch {
+		case errors.Is(err, graph.ErrNotDuplicate):
+			continue // c is itself a duplicate; a later candidate may be canonical
+		case err != nil:
+			return err
+		}
+		r.rels++
+		r.dups = append(r.dups, domain.IngestLink{ItemID: it.ID, TargetID: c.ID})
+		return nil
+	}
+	return nil
 }
