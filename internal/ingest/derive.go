@@ -111,16 +111,33 @@ func (r *run) applyUnit(c unitCtx) error {
 // (valid and not refused by ingestion) or by an item that was written, so
 // text inside a malformed or refused trusted section becomes instruction
 // text rather than silently vanishing, while written items are never
-// duplicated into it. The bytes are kept exactly; a residue of only ASCII
-// whitespace and a leading BOM creates no item.
+// duplicated into it. Lifecycle commands (Resolve, Unpin, valid or
+// malformed, and unsupported lifecycle words) and the bare heading of an
+// empty malformed section are never residue (R21): they stay transcript-only
+// with their diagnostics. The bytes are kept exactly; a residue of only
+// ASCII whitespace and a leading BOM creates no item.
 func (r *run) residue(c unitCtx) error {
 	if c.span.Authority != domain.AuthoritySystem && c.span.Authority != domain.AuthorityHarness {
 		return nil
 	}
 	var claimed []domain.ByteRange
 	for i, s := range c.res.Sections {
-		if !s.Malformed && !r.refused[i] {
+		switch {
+		case s.Keyword == directive.Resolve || s.Keyword == directive.Unpin:
+			// Lifecycle commands, valid or malformed, are never shown to
+			// the model as trusted instructions (R21).
 			claimed = append(claimed, s.Range)
+		case !s.Malformed && !r.refused[i]:
+			claimed = append(claimed, s.Range)
+		case blankBytes(c.text, s.BodyRange):
+			// An empty malformed section's heading alone carries no
+			// requirement (R21).
+			claimed = append(claimed, s.Range)
+		}
+	}
+	for _, d := range c.res.Diagnostics {
+		if d.Reason == domain.ReasonUnsupportedLifecycle {
+			claimed = append(claimed, lifecycleRegion(c.text, d.Range))
 		}
 	}
 	for rng := range r.written {
@@ -131,6 +148,55 @@ func (r *run) residue(c unitCtx) error {
 		return nil
 	}
 	return r.residualInstruction(c, rs)
+}
+
+// blankBytes reports whether text's bytes in rg are all ASCII whitespace.
+func blankBytes(text string, rg domain.ByteRange) bool {
+	for i := rg.Start; i < rg.End; i++ {
+		if b := text[i]; b != ' ' && b != '\t' && b != '\r' && b != '\n' {
+			return false
+		}
+	}
+	return true
+}
+
+// lifecycleRegion returns the extent of an unsupported lifecycle command
+// whose heading the parser diagnosed at heading (R21): from the heading to
+// the next column-zero ATX heading of the same or a higher level, or the
+// unit's end. Lines break at LF, CRLF, and lone CR (D3). This mirrors the
+// parser's inert region conservatively: a heading-looking line inside a
+// fence may end it early, which only returns inert text to the residue.
+func lifecycleRegion(text string, heading domain.ByteRange) domain.ByteRange {
+	level := 0
+	for heading.Start+level < len(text) && text[heading.Start+level] == '#' {
+		level++
+	}
+	for p := nextLine(text, heading.End); p < len(text); p = nextLine(text, p) {
+		n := 0
+		for p+n < len(text) && text[p+n] == '#' && n < 7 {
+			n++
+		}
+		if n >= 1 && n <= level && (p+n == len(text) || strings.IndexByte(" \t\r\n", text[p+n]) >= 0) {
+			return domain.ByteRange{Start: heading.Start, End: p}
+		}
+	}
+	return domain.ByteRange{Start: heading.Start, End: len(text)}
+}
+
+// nextLine returns the start of the line after position p.
+func nextLine(text string, p int) int {
+	for ; p < len(text); p++ {
+		switch text[p] {
+		case '\n':
+			return p + 1
+		case '\r':
+			if p+1 < len(text) && text[p+1] == '\n' {
+				return p + 2
+			}
+			return p + 1
+		}
+	}
+	return len(text)
 }
 
 // complement returns the non-empty ranges of [0, n) outside every range in
