@@ -1408,25 +1408,34 @@ each with its own fix and test.
   written entirely or not at all). The rest of the *event* still applies
   (other sections/items commit normally): this is a section-level
   refusal, not an event abort, and never `ErrInvalidAuthorityPromotion`.
-  **Why this is a recorded deviation, and why it is still safe under
-  FR-DIR-007 and FR-AUTH-001 (SPEC-3.5):** FR-DIR-007 scopes a Working
-  snapshot's supersession to the *same* authority, with by-ID supersession
-  additionally available only for *explicit* IDs — it does not itself
-  describe a derived-ID collision *across* authorities at all, so
-  same-or-higher-authority derived-ID supersession is new ground this ADR
-  covers, not a reading of FR-DIR-007's existing text; it is deliberately
-  symmetric with explicit-ID behavior (a higher authority may always
-  supersede a lower one's directive) rather than inventing a different
-  rule for the derived-ID case. The lower-authority case is a refusal, not
-  a supersession, so it does not touch FR-DIR-007's supersession rule at
-  all. Refusing the whole section (rather than only the colliding member,
-  or aborting the event) is consistent with FR-AUTH-001 because **this is
-  an identity/boundary conflict refusal, not an executed unauthorized
-  mutation**: FR-AUTH-001 requires atomicity for a mutation that actually
-  runs — nothing is partially written here, either for the section (all
-  its members are refused together) or for the event (every other
-  section/item still commits), so there is no partial-authorization state
-  for FR-AUTH-001 to guard against in the first place. Explicit-ID members
+  **Why this is a recorded deviation from FR-DIR-007 *and* FR-AUTH-001,
+  and why the deviation is safe (SPEC-3.5, reworded per SPEC-4.5 —
+  "consistent with FR-AUTH-001" was wrong: the rule below departs from its
+  literal text, deliberately, not merely from an unaddressed gap):**
+  FR-DIR-007 scopes a Working snapshot's supersession to the *same*
+  authority, with by-ID supersession additionally available only for
+  *explicit* IDs — it does not itself describe a derived-ID collision
+  *across* authorities at all, so same-or-higher-authority derived-ID
+  supersession is new ground this ADR covers, not a reading of
+  FR-DIR-007's existing text; it is deliberately symmetric with
+  explicit-ID behavior (a higher authority may always supersede a lower
+  one's directive) rather than inventing a different rule for the
+  derived-ID case. The lower-authority case is a refusal, not a
+  supersession, so it does not touch FR-DIR-007's supersession rule at
+  all. **FR-AUTH-001 is the literal deviation:** it requires "unauthorized
+  operations fail atomically with `ErrInvalidAuthorityPromotion`," and
+  FR-DIR-002 makes ID reuse (which a derived-ID collision is) explicitly
+  "subject to FR-AUTH-001" — but the code returns
+  `ErrMalformedDirective`/`ReasonBoundaryConflict`, refusing only the
+  Working section, never `ErrInvalidAuthorityPromotion`, and never the
+  whole event. The deviation is deliberate and safe because **this is an
+  identity/boundary conflict refusal, not an executed unauthorized
+  mutation**: nothing is partially written here, either for the section
+  (all its members are refused together) or for the event (every other
+  section/item still commits) — there is no partial-authorization state
+  for FR-AUTH-001's atomicity guarantee to protect, because no
+  authorization decision was actually acted on for the refused member.
+  Explicit-ID members
   are unaffected by any of this (they still go through only the ordinary
   boundary-conflict check). Test:
   `TestWorking_DerivedIDAcrossAuthorities_DUR15`
