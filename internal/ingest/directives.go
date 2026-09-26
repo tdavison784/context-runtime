@@ -44,7 +44,7 @@ func (r *run) buildDirective(c unitCtx, item directive.Item) (domain.ContextItem
 
 	access, ok := r.boundary(d.Scope, c.transcript.Access)
 	if !ok && item.Scope != "" {
-		r.diagnose(c, item, domain.ErrMalformedDirective, domain.ReasonInvalidAttribute)
+		r.diagnose(c, item, c.transcript.Access, domain.ErrMalformedDirective, domain.ReasonInvalidAttribute)
 		def, err := policy.ForSection(item.Section)
 		if err != nil {
 			return domain.ContextItem{}, err
@@ -74,9 +74,11 @@ func (r *run) buildDirective(c unitCtx, item directive.Item) (domain.ContextItem
 }
 
 // diagnose records an ingestion diagnostic for a parser item.
-func (r *run) diagnose(c unitCtx, item directive.Item, code domain.DiagnosticCode, reason domain.DiagnosticReason) {
-	r.unitDiags = append(r.unitDiags, domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason,
-		Section: string(item.Section), DirectiveID: item.DirectiveID, Range: item.Range})
+// It is readable at access: the narrower of the transcript's boundary and
+// the item's (F6, SEC-1.3).
+func (r *run) diagnose(c unitCtx, item directive.Item, access domain.AccessBoundary, code domain.DiagnosticCode, reason domain.DiagnosticReason) {
+	r.unitDiags = append(r.unitDiags, scopedDiag{domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason,
+		Section: string(item.Section), DirectiveID: item.DirectiveID, Range: item.Range}, access})
 }
 
 // directiveItem applies one non-Working directive item (FR-DIR-002, D10,
@@ -94,7 +96,7 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	}
 	if err := graph.CheckBoundaryConflict(r.tx, c.actor, it); err != nil {
 		if errors.Is(err, graph.ErrBoundaryConflict) {
-			r.diagnose(c, item, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
+			r.diagnose(c, item, it.Access, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
 			return nil
 		}
 		return err
@@ -108,7 +110,7 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	if err != nil {
 		return err
 	}
-	r.written[item.Range] = true
+	r.written[item.Range] = it.Access
 	if err := r.linkDerived(c, it); err != nil {
 		return err
 	}

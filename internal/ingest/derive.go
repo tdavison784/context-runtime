@@ -42,20 +42,29 @@ func (r *run) deriveSpan(si int, span domain.Span, transcript domain.ContextItem
 			return domain.ErrInvalidRecord // parser gate defect: fail closed
 		}
 		c := unitCtx{si: si, pi: pi, span: span, actor: actor, transcript: transcript, res: res, text: part.Text}
-		r.unitDiags, r.written, r.refused = nil, map[domain.ByteRange]bool{}, map[int]bool{}
+		r.unitDiags, r.written, r.refused = nil, map[domain.ByteRange]domain.AccessBoundary{}, map[int]bool{}
+		r.diags.spanAccess[si] = transcript.Access
 		if err := r.applyUnit(c); err != nil {
 			return err
 		}
 		for _, d := range res.Diagnostics {
 			// A derived-ID notice describes an item; ingestion reports it
 			// only for items it actually wrote (R20.2).
-			if d.Code == domain.DirectiveIDDerived && !r.written[d.Range] {
-				continue
+			// A diagnostic is readable at the transcript's boundary, never
+			// the raw span's; a notice about a written item only at that
+			// item's own boundary (F6, SEC-1.3).
+			access := transcript.Access
+			if d.Code == domain.DirectiveIDDerived {
+				item, ok := r.written[d.Range]
+				if !ok {
+					continue
+				}
+				access = item
 			}
-			r.diags.add(d)
+			r.diags.add(d, access)
 		}
-		for _, d := range r.unitDiags {
-			r.diags.add(d)
+		for _, sd := range r.unitDiags {
+			r.diags.add(sd.d, sd.access)
 		}
 	}
 	return nil
@@ -218,7 +227,7 @@ func (r *run) workingSection(c unitCtx, si int) error {
 			if !errors.Is(err, graph.ErrBoundaryConflict) {
 				return err
 			}
-			r.diagnose(c, item, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
+			r.diagnose(c, item, it.Access, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
 			conflict = true
 		}
 		members = append(members, it)
@@ -242,8 +251,8 @@ func (r *run) workingSection(c unitCtx, si int) error {
 	if err != nil {
 		return err
 	}
-	for _, ii := range sec.ItemIndexes {
-		r.written[c.res.Items[ii].Range] = true
+	for i, ii := range sec.ItemIndexes {
+		r.written[c.res.Items[ii].Range] = members[i].Access
 	}
 	for _, rel := range res.Supersedes {
 		r.repls = append(r.repls, domain.IngestLink{ItemID: rel.FromID, TargetID: rel.ToID})
@@ -280,12 +289,26 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 		Status:           domain.CommandParsedNotExecuted,
 		LifecycleCommand: cmd,
 	}
+	// The record, and its diagnostic, are readable only where both the
+	// command's transcript and any resolved target are (F6, SEC-1.3).
+	rec.Access = c.transcript.Access
 	diag := func(code domain.DiagnosticCode, reason domain.DiagnosticReason) {
-		r.unitDiags = append(r.unitDiags, domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range})
+		r.unitDiags = append(r.unitDiags, scopedDiag{domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range}, rec.Access})
+	}
+	narrow := func(target domain.AccessBoundary) error {
+		acc, ok := domain.Intersect(rec.Access.Scope, rec.Access, target)
+		if !ok {
+			return domain.ErrInvalidAuthorityPromotion
+		}
+		rec.Access = acc
+		return nil
 	}
 	auth, err := graph.AuthorizeLifecycleCommand(r.tx, r.p, r.p.TaskID, cmd)
 	switch {
 	case err == nil:
+		if err := narrow(auth.TargetAccess); err != nil {
+			return err
+		}
 		rec.Resolution, rec.ResolvedItemID, rec.ResolvedVersion = domain.TargetResolved, auth.ResolvedItemID, auth.TargetVersion
 	case isNotFound(err):
 		rec.Resolution = domain.TargetNotFound
@@ -294,6 +317,9 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 		rec.Resolution = domain.TargetAmbiguous
 		diag(domain.ErrAmbiguousDirective, domain.ReasonAmbiguousTarget)
 	case errors.Is(err, graph.ErrLifecycleTargetMismatch):
+		if err := narrow(auth.TargetAccess); err != nil {
+			return err
+		}
 		rec.Resolution, rec.ResolvedItemID, rec.ResolvedVersion = domain.TargetMismatch, auth.ResolvedItemID, auth.TargetVersion
 		diag(domain.DiagnosticNotFound, domain.ReasonTargetMismatch)
 	default:

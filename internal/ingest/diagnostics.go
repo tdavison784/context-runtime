@@ -13,16 +13,27 @@ import (
 // changes only what is reported, never a parse or ingestion decision.
 type diagnostics struct {
 	perSpan, perEvent int
-	bySpan            map[int][]domain.Diagnostic
+	bySpan            map[int][]scopedDiag
 	truncated         map[int]bool
+	spanAccess        map[int]domain.AccessBoundary // transcript access per span
 	total             int
 }
 
-func newDiagnostics(l domain.Limits) diagnostics {
-	return diagnostics{perSpan: l.MaxDiagnosticsPerSpan, perEvent: l.MaxEventDiagnostics, bySpan: map[int][]domain.Diagnostic{}, truncated: map[int]bool{}}
+// scopedDiag is a diagnostic with the boundary its record is readable at:
+// the narrower of its span's boundary and that of the content or target it
+// describes (F6, SEC-1.3).
+type scopedDiag struct {
+	d      domain.Diagnostic
+	access domain.AccessBoundary
 }
 
-func (d *diagnostics) add(dg domain.Diagnostic) {
+func newDiagnostics(l domain.Limits) diagnostics {
+	return diagnostics{perSpan: l.MaxDiagnosticsPerSpan, perEvent: l.MaxEventDiagnostics, bySpan: map[int][]scopedDiag{},
+		truncated: map[int]bool{}, spanAccess: map[int]domain.AccessBoundary{}}
+}
+
+// add records dg, readable at access.
+func (d *diagnostics) add(dg domain.Diagnostic, access domain.AccessBoundary) {
 	si := dg.SpanIndex
 	if dg.Code == domain.DiagnosticsTruncated || len(d.bySpan[si]) >= d.perSpan || d.total >= d.perEvent {
 		d.truncated[si] = true
@@ -32,12 +43,13 @@ func (d *diagnostics) add(dg domain.Diagnostic) {
 	if dg.ParserVersion == "" {
 		dg.ParserVersion = directive.ParserVersion
 	}
-	d.bySpan[si] = append(d.bySpan[si], dg)
+	d.bySpan[si] = append(d.bySpan[si], scopedDiag{dg, access})
 	d.total++
 }
 
 // records returns the persisted records in (span, index) order, each bound
-// to its source span's access boundary.
+// to its narrowed boundary; a truncation marker is readable at its span's
+// transcript boundary.
 func (d *diagnostics) records(sessionID, occurrence, eventID string, spans []domain.Span) []domain.DiagnosticRecord {
 	var out []domain.DiagnosticRecord
 	for si, span := range spans {
@@ -45,18 +57,22 @@ func (d *diagnostics) records(sessionID, occurrence, eventID string, spans []dom
 		if d.truncated[si] {
 			last := len(span.Parts) - 1
 			end := len(span.Parts[last].Text)
-			list = append(list, domain.Diagnostic{SpanIndex: si, PartIndex: last, Index: len(list), Code: domain.DiagnosticsTruncated,
-				Reason: domain.ReasonLimit, Range: domain.ByteRange{Start: end, End: end}, ParserVersion: directive.ParserVersion})
+			access, ok := d.spanAccess[si]
+			if !ok {
+				access = span.Access
+			}
+			list = append(list, scopedDiag{domain.Diagnostic{SpanIndex: si, PartIndex: last, Index: len(list), Code: domain.DiagnosticsTruncated,
+				Reason: domain.ReasonLimit, Range: domain.ByteRange{Start: end, End: end}, ParserVersion: directive.ParserVersion}, access})
 		}
-		for _, dg := range list {
+		for _, sd := range list {
 			out = append(out, domain.DiagnosticRecord{
-				ID:            domain.DiagnosticRecordID(sessionID, occurrence, si, dg.Index),
+				ID:            domain.DiagnosticRecordID(sessionID, occurrence, si, sd.d.Index),
 				SessionID:     sessionID,
 				OccurrenceID:  occurrence,
 				EventID:       eventID,
-				Access:        span.Access,
+				Access:        sd.access,
 				SchemaVersion: domain.DiagnosticSchemaVersion,
-				Diagnostic:    dg,
+				Diagnostic:    sd.d,
 			})
 		}
 	}
