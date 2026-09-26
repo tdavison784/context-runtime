@@ -1,8 +1,10 @@
 package obligation
 
 // TEMPORARY test harness: a strict in-memory implementation of the Phase 3
-// store.SemanticTxBase facet layered over the Phase 2 memory store, used only
-// until W2 publishes the real memory/SQLite semantic backends. It enforces
+// store.SemanticTxBase families W2 has not yet published (obligation proofs,
+// resources, runs, observations, subject state), layered over W2's memory
+// store. Published families (receipts, coverage, grants, current pointers)
+// delegate to W2's real facet. It enforces
 // the manifest rules W4's services rely on (session, allocated sequence,
 // append-only IDs, CAS, reference existence, transaction rollback) so service
 // tests do not depend on a lax double. Replace newTestStore with the real
@@ -23,7 +25,6 @@ import (
 type proofCache struct{ proof, assertion string }
 
 type semState struct {
-	receipts     map[string]domain.MutationReceipt
 	decls        map[domain.ObligationRef]domain.ObligationDeclaration
 	caches       map[domain.ObligationRef]proofCache
 	proofs       map[string]domain.ApplicabilityProof
@@ -38,33 +39,29 @@ type semState struct {
 	runs         map[string]domain.ObservationRun
 	observations map[string]domain.ObservationRecord
 	subjects     map[string]domain.SubjectState
-	coverages    map[string]domain.CoverageRecord
-	members      map[string][]domain.CoverageMember
 }
 
 func newSemState() *semState {
 	return &semState{
-		receipts: map[string]domain.MutationReceipt{}, decls: map[domain.ObligationRef]domain.ObligationDeclaration{},
+		decls:  map[domain.ObligationRef]domain.ObligationDeclaration{},
 		caches: map[domain.ObligationRef]proofCache{}, proofs: map[string]domain.ApplicabilityProof{},
 		deps: map[string][]domain.ProofDependency{}, assertions: map[string]domain.AssertionRecord{},
 		details: map[string]domain.TransitionDetail{}, resBindings: map[string]domain.ResourceBinding{},
 		resStates: map[string]domain.ResourceState{}, resUpdates: map[string]domain.ResourceUpdate{},
 		pathStates: map[string]domain.ResourcePathState{}, wsBindings: map[domain.WorkspaceBindingRef]domain.WorkspaceBinding{},
 		runs: map[string]domain.ObservationRun{}, observations: map[string]domain.ObservationRecord{},
-		subjects: map[string]domain.SubjectState{}, coverages: map[string]domain.CoverageRecord{},
-		members: map[string][]domain.CoverageMember{},
+		subjects: map[string]domain.SubjectState{},
 	}
 }
 
 // clone copies every map; stored values are never mutated in place.
 func (s *semState) clone() *semState {
 	return &semState{
-		receipts: cloneMap(s.receipts), decls: cloneMap(s.decls), caches: cloneMap(s.caches),
+		decls: cloneMap(s.decls), caches: cloneMap(s.caches),
 		proofs: cloneMap(s.proofs), deps: cloneMap(s.deps), assertions: cloneMap(s.assertions),
 		details: cloneMap(s.details), resBindings: cloneMap(s.resBindings), resStates: cloneMap(s.resStates),
 		resUpdates: cloneMap(s.resUpdates), pathStates: cloneMap(s.pathStates), wsBindings: cloneMap(s.wsBindings),
 		runs: cloneMap(s.runs), observations: cloneMap(s.observations), subjects: cloneMap(s.subjects),
-		coverages: cloneMap(s.coverages), members: cloneMap(s.members),
 	}
 }
 
@@ -82,11 +79,6 @@ func (s *semState) checkCommit() error {
 	for _, p := range s.proofs {
 		if _, ok := s.details[p.TransitionID]; !ok {
 			return domain.ErrDanglingRelationship
-		}
-		if p.EvidenceCoverageID != "" {
-			if c, ok := s.coverages[p.EvidenceCoverageID]; !ok || c.Purpose != domain.CoverageEvidenceSupport {
-				return domain.ErrDanglingRelationship
-			}
 		}
 	}
 	return nil
@@ -150,7 +142,8 @@ type semReadTx struct {
 }
 
 func (r *semReadTx) SemanticReadBackend() store.SemanticReader {
-	return &semBackend{rtx: r.ReadTx, st: r.st}
+	real, _ := store.ReadSemantic(r.ReadTx)
+	return &semBackend{rtx: r.ReadTx, st: r.st, real: real}
 }
 
 type semTx struct {
@@ -168,11 +161,20 @@ func (t *semTx) Poison(err error) {
 	t.Tx.Poison(err)
 }
 
+func (t *semTx) backend() semBackend {
+	realW, err := store.Semantic(t.Tx)
+	if err != nil {
+		panic(err) // W2's memory facet is required
+	}
+	return semBackend{rtx: t.Tx, tx: t, st: t.st, real: realW, realW: realW}
+}
+
 func (t *semTx) SemanticTransaction() (store.SemanticTx, error) {
-	return &semGuarded{semBackend: semBackend{rtx: t.Tx, tx: t, st: t.st}}, nil
+	return &semGuarded{semBackend: t.backend()}, nil
 }
 func (t *semTx) SemanticBackend() store.SemanticTxBase {
-	return &semBackend{rtx: t.Tx, tx: t, st: t.st}
+	b := t.backend()
+	return &b
 }
 
 // semGuarded poisons the transaction on any write failure, like store.Guard.
@@ -187,6 +189,11 @@ type semBackend struct {
 	rtx store.ReadTx
 	tx  *semTx
 	st  *semState
+	// real is W2's backend facet, used for the families it has published
+	// (receipts, coverage, grants, current pointers); realW is its guarded
+	// writer, nil on read snapshots.
+	real  store.SemanticReader
+	realW store.SemanticTx
 }
 
 var errFakeRead = errors.New("semstore: write on read snapshot")
@@ -244,30 +251,14 @@ func page[T any](all []T, key func(T) store.Cursor, p store.Page) (store.ResultP
 	return out, nil
 }
 
-func receiptKey(f domain.MutationFamily, id string) string { return string(f) + "\x00" + id }
-
 // --- receipts ---
 
 func (b *semBackend) MutationReceipt(f domain.MutationFamily, id string) (domain.MutationReceipt, error) {
-	r, ok := b.st.receipts[receiptKey(f, id)]
-	if !ok {
-		return domain.MutationReceipt{}, domain.ErrNotFound
-	}
-	return r.Clone(), nil
+	return b.real.MutationReceipt(f, id)
 }
 
 func (b *semBackend) InsertMutationReceipt(r domain.MutationReceipt) error {
-	return b.write(&r.SemanticMeta, func() error {
-		if err := r.Validate(); err != nil {
-			return err
-		}
-		k := receiptKey(r.Family, r.RequestID)
-		if _, ok := b.st.receipts[k]; ok {
-			return domain.ErrImmutable
-		}
-		b.st.receipts[k] = r.Clone()
-		return nil
-	})
+	return b.write(nil, func() error { return b.realW.InsertMutationReceipt(r) })
 }
 
 // --- obligations ---
@@ -347,31 +338,8 @@ func (b *semBackend) CurrentBoundObligationsBySubject(key string, p store.Page) 
 	}, p)
 }
 
-// GrantsFor scans legacy grants; the real backends use an index.
 func (b *semBackend) GrantsFor(action domain.Action, target domain.GrantTarget, limit int) ([]domain.MutationGrant, error) {
-	if limit <= 0 {
-		return nil, domain.ErrInvalidRecord
-	}
-	all, err := b.rtx.Grants()
-	if err != nil {
-		return nil, err
-	}
-	var out []domain.MutationGrant
-	for _, g := range all {
-		if g.Action != action {
-			continue
-		}
-		for _, t := range g.Targets {
-			if t.AuthorizationKey == target.AuthorizationKey {
-				out = append(out, g.Clone())
-				break
-			}
-		}
-	}
-	if len(out) > limit {
-		return nil, store.ErrLimitExceeded
-	}
-	return out, nil
+	return b.real.GrantsFor(action, target, limit)
 }
 
 // --- workspace and resources ---
@@ -584,6 +552,11 @@ func (b *semBackend) InsertApplicabilityProof(p domain.ApplicabilityProof, deps 
 		if _, err := b.ExactObligation(p.Target); err != nil {
 			return domain.ErrInvalidRecord
 		}
+		if p.EvidenceCoverageID != "" {
+			if c, err := b.Coverage(p.EvidenceCoverageID); err != nil || c.Purpose != domain.CoverageEvidenceSupport || c.Access != p.Access {
+				return domain.ErrDanglingRelationship
+			}
+		}
 		if len(deps) != len(p.DependencyIDs) {
 			return domain.ErrInvalidRecord
 		}
@@ -712,27 +685,7 @@ func (b *semBackend) AppendSemanticObligationTransition(t domain.ObligationTrans
 // --- current pointers ---
 
 func (b *semBackend) SetCurrentVersion(itemID, expectedPrior string) error {
-	return b.write(nil, func() error {
-		it, err := b.rtx.Item(itemID)
-		if err != nil {
-			return err
-		}
-		key, ok := it.CurrentKey()
-		if !ok {
-			return domain.ErrInvalidRecord
-		}
-		prior, err := b.rtx.CurrentVersion(key)
-		if errors.Is(err, domain.ErrNotFound) {
-			prior, err = "", nil
-		}
-		if err != nil {
-			return err
-		}
-		if prior != expectedPrior {
-			return domain.ErrVersionConflict
-		}
-		return b.tx.Tx.SetCurrentVersion(itemID)
-	})
+	return b.write(nil, func() error { return b.realW.SetCurrentVersion(itemID, expectedPrior) })
 }
 
 // --- resource fan-out and subjects ---
@@ -907,53 +860,14 @@ func (b *semBackend) InsertObservation(o domain.ObservationRecord) error {
 
 // --- coverage ---
 
-func (b *semBackend) Coverage(id string) (domain.CoverageRecord, error) {
-	c, ok := b.st.coverages[id]
-	if !ok {
-		return domain.CoverageRecord{}, domain.ErrNotFound
-	}
-	return c, nil
-}
+func (b *semBackend) Coverage(id string) (domain.CoverageRecord, error) { return b.real.Coverage(id) }
 
 func (b *semBackend) CoverageMembers(id string, p store.Page) (store.ResultPage[domain.CoverageMember], error) {
-	var out []domain.CoverageMember
-	for _, m := range b.st.members[id] {
-		out = append(out, m.Clone())
-	}
-	return page(out, func(m domain.CoverageMember) store.Cursor { return store.Cursor{Seq: m.Seq, ID: m.ID} }, p)
+	return b.real.CoverageMembers(id, p)
 }
 
 func (b *semBackend) InsertCoverage(c domain.CoverageRecord, members []domain.CoverageMember) error {
-	return b.write(&c.SemanticMeta, func() error {
-		if err := c.Validate(); err != nil {
-			return err
-		}
-		if _, ok := b.st.coverages[c.ID]; ok {
-			return domain.ErrImmutable
-		}
-		sig, err := domain.CoverageSignature(c, members)
-		if err != nil || sig != c.Signature {
-			return domain.ErrInvalidRecord
-		}
-		for _, m := range members {
-			if k, _ := m.Key(); m.ID != k {
-				return domain.ErrInvalidRecord
-			}
-			if m.Source != nil {
-				it, err := b.rtx.Item(m.Source.ItemID)
-				if err != nil || it.ContentHash != m.Source.ContentHash {
-					return domain.ErrDanglingRelationship
-				}
-			}
-		}
-		b.st.coverages[c.ID] = c
-		cp := make([]domain.CoverageMember, len(members))
-		for i, m := range members {
-			cp[i] = m.Clone()
-		}
-		b.st.members[c.ID] = cp
-		return nil
-	})
+	return b.write(nil, func() error { return b.realW.InsertCoverage(c, members) })
 }
 
 func (b *semBackend) ObligationsByTaskOwner(taskID string, p store.Page) (store.ResultPage[domain.ObligationVersion], error) {

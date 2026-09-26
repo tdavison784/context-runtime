@@ -10,7 +10,7 @@ import (
 
 type snapshot struct {
 	lastSeq uint64
-	sizes   [17]int
+	sizes   [14]int
 }
 
 func (f fixture) snap(t *testing.T) snapshot {
@@ -22,9 +22,9 @@ func (f fixture) snap(t *testing.T) snapshot {
 	})
 	f.st.mu.Lock()
 	st := f.st.state(testSession)
-	s.sizes = [17]int{len(st.receipts), len(st.decls), len(st.caches), len(st.proofs), len(st.deps), len(st.assertions),
+	s.sizes = [14]int{len(st.decls), len(st.caches), len(st.proofs), len(st.deps), len(st.assertions),
 		len(st.details), len(st.resBindings), len(st.resStates), len(st.resUpdates), len(st.pathStates), len(st.wsBindings),
-		len(st.runs), len(st.observations), len(st.subjects), len(st.coverages), len(st.members)}
+		len(st.runs), len(st.observations), len(st.subjects)}
 	f.st.mu.Unlock()
 	return s
 }
