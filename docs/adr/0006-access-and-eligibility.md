@@ -180,25 +180,34 @@ affects inherited content.
 
 ## Tests that lock the behavior
 
-- Required: `internal/domain/principal_test.go` — `Permits` matrix covering
-  same-session/cross-session, and each scope's minimum-constraint
-  enforcement (`Validate` failing when a required owner field is empty);
-  `Within`/`Intersect` covering: equal boundaries, a strict subset, two
-  boundaries differing only in task (expect `ok=false`), and the
-  checkpoint-style task+agent conjunction case from FR-TOOL-004.
-- Required: `internal/domain/authz_test.go` — `AuthorizeMutation` returns
-  `ErrNotFound` (not `ErrInvalidAuthorityPromotion`) when the actor lacks
-  access to a target, verified by asserting the error via `errors.Is` before
-  any authority check runs, so a probe cannot distinguish the two failure
-  modes.
-- Required: `internal/store/storetest` — every `ReadTx` getter returns
-  `ErrNotFound` for an ID that exists in a different session, not a
-  different error type.
-- Trace T04 (cross-agent access) and trace T05 (resolved-goal archival not
-  reopening) in `docs/sdd-event-traces.md` are the fixtures Phase 3/4 must
-  turn into `internal/store/storetest` and `internal/domain` cases once
-  eligibility/leases exist; they are the acceptance tests for this ADR's
-  eligibility table.
+- `internal/domain/principal_test.go`: `TestAccessBoundaryPermits` (same-
+  session/cross-session, every scope's minimum-constraint enforcement),
+  `TestBoundaryFor`, `TestAccessBoundaryValidate`, `TestAccessBoundaryWithin`
+  (equal boundaries, a strict subset, two boundaries differing only in
+  task), `TestIntersect`/`TestIntersectCommutative`/
+  `TestIntersectResultWithinBoth` (including the checkpoint-style task+agent
+  conjunction case from FR-TOOL-004), and `TestAccessBoundaryProperty`
+  (property-based).
+- `internal/domain/authz_test.go`:
+  `TestAuthorizeMutation_InaccessibleTargetReturnsNotFoundBeforeAuthority`
+  is the exact regression this ADR calls for — `ErrNotFound`, not
+  `ErrInvalidAuthorityPromotion`, when access fails, checked before any
+  authority branch runs.
+- `internal/store/storetest` (`storetest.Run`): `TestConformance
+  /ForeignSessionRecords` asserts every `ReadTx` getter returns
+  `ErrNotFound` for an ID that exists only in a different session, and every
+  `Tx` write against a foreign-session record fails `ErrInvalidRecord`;
+  `TestConformance/SessionIsolation` covers the same boundary from the
+  writing side.
+- Trace T05 (resolved-goal archival not reopening) is directly locked by
+  `TestConformance/GoalLifecycle`: resolve, archive, retrieve (residency
+  back to RESIDENT without touching `GoalStatus`), then two distinct
+  rejected reopen attempts (`ErrInvalidTransition`), then a same-status
+  resolve as a no-op. Trace T04 (cross-agent/cross-session access) has a
+  provenance-side counterpart already in `internal/graph/graph_test.go`:
+  `TestProvenance_Truncation_T04` and `TestProvenance_RootMustBeAccessible`;
+  the planner-side "B's assembly never includes A's private history" half
+  of T04 remains a Phase 4/5 fixture once the planner exists.
 
 ## Open questions
 
@@ -227,3 +236,8 @@ section — `Coverage.ItemIDs`, the pre-dispatch recheck, forced rebase on
 failure, and the evidence-vs-fact expiry distinction — with only its
 *implementation* (Phases 3/5) still pending, matching how `domain.Coverage`
 already carries `ItemIDs` after the phase1/contract merge.
+
+Test citations verified against the integrated `phase-1-foundation`
+codebase (tip `ddbb53e`): every citation above is a real, passing test;
+none of this ADR's originally "Required" test placeholders remained
+genuinely missing except the Phase 4/5 planner-side fixtures noted above.
