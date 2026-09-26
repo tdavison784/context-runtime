@@ -528,7 +528,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			h := taskItem(sess, "h", tx.NextSeq(), domain.AuthorityHarness)
-			h.DirectiveID = dirID
+			h.DirectiveID, h.Section, h.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 			mustInsert(t, tx, h)
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityHarness), taskID, dirID, h.ID, "evt-h")
 			return err
@@ -541,7 +541,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 			// Same session and task, but TURN-scoped instead of TASK-scoped:
 			// a different boundary, visible to the same USER principal.
 			u := taskItem(sess, "u", tx.NextSeq(), domain.AuthorityUser)
-			u.DirectiveID = dirID
+			u.DirectiveID, u.Section, u.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 			u.Scope = domain.ScopeTurn
 			u.Access = domain.AccessBoundary{Scope: domain.ScopeTurn, SessionID: sess, TaskID: u.TaskID}
 			mustInsert(t, tx, u)
@@ -557,7 +557,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 		// h must remain the only current version; the rejected write left
 		// nothing behind.
 		err = s.View(ctx, sess, func(tx store.ReadTx) error {
-			versions, err := tx.CurrentVersions(taskID, domain.NamespaceAgentKey, dirID)
+			versions, err := tx.CurrentVersions(taskID, domain.NamespaceDirective, dirID)
 			if err != nil {
 				return err
 			}
@@ -581,7 +581,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			hidden := agentScopedItem(sess, "hidden-v", tx.NextSeq(), "agent-b")
-			hidden.DirectiveID = dirID
+			hidden.DirectiveID, hidden.Section, hidden.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 			mustInsert(t, tx, hidden)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-b"), taskID, dirID, hidden.ID, "evt-hidden")
 			return err
@@ -592,7 +592,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
 			visible := agentScopedItem(sess, "visible-v", tx.NextSeq(), "agent-a")
-			visible.DirectiveID = dirID
+			visible.DirectiveID, visible.Section, visible.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 			mustInsert(t, tx, visible)
 			prev, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID, visible.ID, "evt-visible")
 			if err != nil {
