@@ -1,0 +1,5 @@
+go test fuzz v1
+[]byte("## Remember\x0a- a\x0a### Pinned\x0a- b\x0a## Waive [t]\x0a### Goal\x0aevil\x0a## Unpin [a]\x0a- [b]")
+uint8(1)
+bool(false)
+uint16(12)

@@ -11,10 +11,12 @@ import (
 )
 
 func FuzzParse(f *testing.F) {
-	f.Add([]byte(canonicalExample), uint8(2), true)
-	f.Add([]byte("\xef\xbb\xbf## Goal [g]\r\nbody\r## Resolve [g]"), uint8(0), false)
-	f.Add([]byte("<!--\n## Pinned\n-->\n~~~\n## Goal\n~~~"), uint8(4), true)
-	f.Fuzz(func(t *testing.T, input []byte, source uint8, capable bool) {
+	f.Add([]byte(canonicalExample), uint8(2), true, uint16(40))
+	f.Add([]byte("\xef\xbb\xbf## Goal [g]\r\nbody\r## Resolve [g]"), uint8(0), false, uint16(3))
+	f.Add([]byte("<!--\n## Pinned\n-->\n~~~\n## Goal\n~~~"), uint8(4), true, uint16(9))
+	f.Add([]byte("```\n``` x\n## Pinned\n- a\n## Pi<!--x-->nned\n- b"), uint8(0), false, uint16(5))
+	f.Add([]byte("## Remember ttl=0003\n- {kind=decision ttl=2 ttl=9} a  \r\n  b\t\nprose\n- [a] c\n- [a] d"), uint8(2), true, uint16(20))
+	f.Fuzz(func(t *testing.T, input []byte, source uint8, capable bool, split uint16) {
 		if len(input) > 64<<10 {
 			t.Skip()
 		}
@@ -29,20 +31,56 @@ func FuzzParse(f *testing.F) {
 			t.Fatal("nondeterministic output")
 		}
 		assertResultRanges(t, result, len(input))
+		assertReconstruction(t, result, input)
+		assertContentFree(t, result)
+		if result.Err != nil && (len(result.Items) != 0 || len(result.Lifecycle) != 0 || len(result.Sections) != 0 || len(result.Diagnostics) != 0) {
+			t.Fatal("partial result with error")
+		}
 		if !opts.Authority.CanHoldLifecycleAuthority() || opts.Authority == domain.AuthorityUser && !capable {
 			if len(result.Items) != 0 || len(result.Lifecycle) != 0 || len(result.Sections) != 0 {
 				t.Fatal("source gate bypass")
 			}
 		}
 		for _, item := range result.Items {
-			if !domain.ValidDirectiveID(item.DirectiveID) || item.Authority != opts.Authority {
+			if !domain.ValidDirectiveID(item.DirectiveID) || item.Authority != opts.Authority || item.ExplicitID && derivedShaped(item.DirectiveID) {
 				t.Fatal(item)
 			}
 			hash := domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: item.Text}})
 			if hash != item.ContentHash || !item.ExplicitID && item.DirectiveID != domain.DerivedDirectiveID(string(item.Section), hash) {
 				t.Fatal("canonical identity mismatch")
 			}
+			if item.TTLTurns < 0 || item.TTLTurns > MaxTTLTurns {
+				t.Fatal(item)
+			}
 		}
+		// D17: the diagnostics cap never changes parse decisions, and the
+		// capped list is a prefix of the full source-ordered list.
+		capped := Parse(input, Options{Authority: opts.Authority, DirectiveCapable: capable, Limits: domain.Limits{MaxDiagnosticsPerSpan: 1}})
+		if !reflect.DeepEqual(capped.Items, result.Items) || !reflect.DeepEqual(capped.Sections, result.Sections) || !reflect.DeepEqual(capped.Lifecycle, result.Lifecycle) || (capped.Err == nil) != (result.Err == nil) {
+			t.Fatal("diagnostics cap changed parse decisions")
+		}
+		if len(result.Diagnostics) > 0 && len(capped.Diagnostics) > 0 && !reflect.DeepEqual(capped.Diagnostics[0], result.Diagnostics[0]) {
+			t.Fatal("capped diagnostics are not a source-order prefix")
+		}
+		// M1: each unit is parsed in isolation. Parsing a state-poisoning unit
+		// (open fence, comment, section) or the other half of a split never
+		// changes another unit's result, and ranges stay within each unit.
+		k := int(split) % (len(input) + 1)
+		a, b := input[:k], input[k:]
+		ra := Parse(a, opts)
+		for _, poison := range []string{"```\n", "<!--\n", "## Working\n- x\n", "> "} {
+			Parse([]byte(poison), opts)
+		}
+		rb := Parse(b, opts)
+		if !reflect.DeepEqual(ra, Parse(a, opts)) || !reflect.DeepEqual(rb, Parse(b, opts)) {
+			t.Fatal("parser state leaked across units")
+		}
+		assertResultRanges(t, ra, len(a))
+		assertResultRanges(t, rb, len(b))
+		assertReconstruction(t, ra, a)
+		assertReconstruction(t, rb, b)
+		// Suppression never yields a directive: the same bytes inside an
+		// unclosed-until-end fence, a comment, or explicit quote lines.
 		// Pick a fence longer than any possible closing run in the input.
 		longest, run := 0, 0
 		for _, b := range input {
@@ -68,11 +106,45 @@ func FuzzParse(f *testing.F) {
 		// during parallel fuzzing; benchmark scaling separately measures wall time.
 		p := scanner(string(input), true)
 		p.extract()
-		p.finish()
 		if p.work > 3*len(input)+1 {
 			t.Fatalf("nonlinear work: %d for %d bytes", p.work, len(input))
 		}
 	})
+}
+
+// assertReconstruction checks D7's lossless contract: each item's text is
+// exactly its ordered, disjoint source slices, all inside the item's range.
+func assertReconstruction(t *testing.T, r Result, input []byte) {
+	t.Helper()
+	for _, it := range r.Items {
+		var text []byte
+		previous := it.Range.Start
+		for _, s := range it.TextRanges {
+			if s.Start < previous || s.End <= s.Start || s.End > it.Range.End {
+				t.Fatalf("text range %+v outside item %+v", s, it.Range)
+			}
+			text = append(text, input[s.Start:s.End]...)
+			previous = s.End
+		}
+		if string(text) != it.Text {
+			t.Fatalf("offsets do not reconstruct item text: %q vs %q", text, it.Text)
+		}
+		section := r.Sections[it.SectionIndex]
+		if it.Range.Start < section.Range.Start || it.Range.End > section.Range.End || section.Malformed && len(section.ItemIndexes) == 0 && section.DirectiveID != "" {
+			t.Fatalf("item %+v outside section %+v", it.Range, section)
+		}
+	}
+}
+
+// assertContentFree checks that diagnostics carry no source-derived strings
+// beyond validated derived IDs (D5, D16).
+func assertContentFree(t *testing.T, r Result) {
+	t.Helper()
+	for _, d := range r.Diagnostics {
+		if d.DirectiveID != "" && (d.Code != domain.DirectiveIDDerived || !derivedShaped(d.DirectiveID)) {
+			t.Fatalf("diagnostic echoes an ID: %+v", d)
+		}
+	}
 }
 func assertResultRanges(t *testing.T, r Result, n int) {
 	t.Helper()
