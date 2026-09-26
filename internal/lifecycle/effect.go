@@ -19,8 +19,12 @@ func (e itemEffect) result(current domain.ItemCurrentness) domain.ItemMutationRe
 
 func recordEffect(tx store.Tx, sem store.SemanticTx, e itemEffect, current domain.ItemCurrentness) error {
 	return sem.InsertSemanticChange(domain.SemanticChange{
-		SemanticMeta: domain.SemanticMeta{ID: "change_" + domain.NewCanonicalEncoder("context-runtime/lifecycle-change/v1").String(e.audit.ID).Hash(), SessionID: e.before.SessionID, Seq: tx.NextSeq(), SchemaVersion: domain.SemanticSchemaV1},
+		SemanticMeta: domain.SemanticMeta{ID: changeID(e.audit.ID), SessionID: e.before.SessionID, Seq: tx.NextSeq(), SchemaVersion: domain.SemanticSchemaV1},
 		Target:       domain.ItemGrantTarget(e.before.SessionID, e.before.ID), SourceAuthority: e.before.Authority, Actor: e.audit.Actor,
 		Access: e.before.Access, Action: domain.Action(e.audit.Action), BeforeRevision: e.before.Version, AfterRevision: e.after.Version,
 		BeforeStatus: e.audit.From, AfterStatus: e.audit.To, BeforeCurrentness: current, AfterCurrentness: current, AuditID: e.audit.ID, GrantID: e.audit.GrantID})
+}
+
+func changeID(auditID string) string {
+	return "change_" + domain.NewCanonicalEncoder("context-runtime/lifecycle-change/v1").String(auditID).Hash()
 }
