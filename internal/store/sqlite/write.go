@@ -123,12 +123,7 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 		}
 	}
 	if v.Type == domain.RelSupersedes {
-		if err := t.loadSupersession(); err != nil {
-			return err
-		}
-		cycle, err := domain.WouldCreateCycle(v.FromID, v.ToID, func(id string) ([]string, error) {
-			return t.supersession[id], nil
-		})
+		cycle, _, err := t.closesSupersessionCycle(v.FromID, v.ToID)
 		if err != nil {
 			return err
 		}
@@ -143,46 +138,43 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 		// A superseded or duplicate item is no longer live (F1).
 		switch v.Type {
 		case domain.RelSupersedes:
-			return t.retireLookups(v.ToID)
+			return t.retireLookups(v.ToID, false)
 		case domain.RelDuplicateOf:
-			return t.retireLookups(v.FromID)
+			return t.retireLookups(v.FromID, true)
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if v.Type == domain.RelSupersedes {
-		t.supersession[v.FromID] = append(t.supersession[v.FromID], v.ToID)
-	}
-	return nil
+	return err
 }
 
-// The graph is loaded once per transaction. Cycle walks then use the
-// transaction's own edges without issuing a SQL query for every visited node.
-func (t *transaction) loadSupersession() error {
-	if t.supersessionLoaded {
-		return nil
+// closesSupersessionCycle reports whether a new edge from SUPERSEDES to
+// would close a cycle, i.e. whether from is reachable from to along
+// existing SUPERSEDES edges, and how many nodes it expanded (SPEC-2.1). A
+// cycle through the new edge needs an existing edge into from; a new
+// version has none, so the usual case reads one indexed row and walks
+// nothing. Otherwise it walks only the chain reachable from to, one
+// indexed (type, source) read per node, never the session's whole graph.
+func (t *transaction) closesSupersessionCycle(from, to string) (cycle bool, visited int, err error) {
+	if from == to {
+		return true, 0, nil
 	}
-	rows, err := t.conn.QueryContext(t.ctx, "SELECT f_from_id,f_to_id FROM rec_relationship WHERE session_id=? AND f_type=?", t.session, string(domain.RelSupersedes))
-	if err != nil {
-		return err
+	into, err := t.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: from})
+	if err != nil || len(into) == 0 {
+		return false, 0, err
 	}
-	defer rows.Close()
-	graph := make(map[string][]string)
-	for rows.Next() {
-		var from, to string
-		if err := rows.Scan(&from, &to); err != nil {
-			return err
+	cycle, err = domain.WouldCreateCycle(from, to, func(id string) ([]string, error) {
+		visited++
+		rels, err := t.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: id})
+		if err != nil {
+			return nil, err
 		}
-		graph[from] = append(graph[from], to)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	t.supersession = graph
-	t.supersessionLoaded = true
-	return nil
+		next := make([]string, len(rels))
+		for i, r := range rels {
+			next[i] = r.ToID
+		}
+		return next, nil
+	})
+	return cycle, visited, err
 }
 func (t *transaction) SetCurrentVersion(itemID string) error {
 	v, err := t.Item(itemID)
