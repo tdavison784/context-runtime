@@ -69,6 +69,7 @@ type semState struct {
 	decls        map[string]domain.CreationDeclaration // by item ID
 	declIDs      map[string]string                     // declaration ID -> item ID
 	snapshots    map[string]domain.SnapshotDeclaration
+	grantIdx     map[grantKey][]seqRef // (action, target) -> grants by (IssuedSeq, ID)
 }
 
 func newSemState() *semState {
@@ -101,6 +102,7 @@ func newSemState() *semState {
 		decls:        map[string]domain.CreationDeclaration{},
 		declIDs:      map[string]string{},
 		snapshots:    map[string]domain.SnapshotDeclaration{},
+		grantIdx:     map[grantKey][]seqRef{},
 	}
 }
 
@@ -142,6 +144,7 @@ type semView struct {
 	decls        table[string, domain.CreationDeclaration]
 	declIDs      table[string, string]
 	snapshots    table[string, domain.SnapshotDeclaration]
+	grantIdx     orderedIndex[grantKey]
 }
 
 func newSemView(st *semState, w bool) semView {
@@ -174,6 +177,7 @@ func newSemView(st *semState, w bool) semView {
 		decls:        newTable(st.decls, w, domain.CreationDeclaration.Clone),
 		declIDs:      newTable(st.declIDs, w, same[string]),
 		snapshots:    newTable(st.snapshots, w, domain.SnapshotDeclaration.Clone),
+		grantIdx:     newOrderedIndex(st.grantIdx, w),
 	}
 }
 
@@ -214,6 +218,7 @@ func (v *semView) commit() {
 	v.decls.commit()
 	v.declIDs.commit()
 	v.snapshots.commit()
+	v.grantIdx.commit()
 }
 
 // semRead implements store.SemanticReader over a transaction's view.

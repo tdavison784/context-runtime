@@ -442,6 +442,7 @@ func (t *tx) InsertGrant(g domain.MutationGrant) error {
 		return fmt.Errorf("grant %s: %w", g.ID, domain.ErrImmutable)
 	}
 	t.grants.put(g.ID, g)
+	t.indexGrant(g)
 	t.markSequenced()
 	return nil
 }

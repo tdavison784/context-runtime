@@ -17,9 +17,6 @@ var errUnsupported = domain.ErrUnsupportedSchema
 func (r semRead) LifecycleByTarget(domain.TargetKind, string, store.Page) (store.ResultPage[domain.LifecycleEvent], error) {
 	return store.ResultPage[domain.LifecycleEvent]{}, errUnsupported
 }
-func (r semRead) GrantsFor(domain.Action, domain.GrantTarget, int) ([]domain.MutationGrant, error) {
-	return nil, errUnsupported
-}
 func (r semRead) OpenGoalsByTaskOwner(string, store.Page) (store.ResultPage[domain.ContextItem], error) {
 	return store.ResultPage[domain.ContextItem]{}, errUnsupported
 }
