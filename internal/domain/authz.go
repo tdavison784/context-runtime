@@ -27,7 +27,8 @@ func (a Action) Valid() bool {
 	switch a {
 	case ActionResolve, ActionUnpin, ActionReplaceDirective, ActionChangeScope,
 		ActionAssertObligation, ActionBlockObligation, ActionUnblockObligation,
-		ActionWaiveObligation, ActionCompleteTask:
+		ActionWaiveObligation, ActionCompleteTask, ActionPromote, ActionDemote,
+		ActionArchive, ActionUnarchive, ActionDeclareObligation, ActionSetObligationMaterialization:
 		return true
 	}
 	return false
