@@ -59,6 +59,11 @@ func makeSchemas() map[string]*recordSchema {
 		{"conversation", domain.Conversation{}, "ConversationID", ""},
 		{"call", domain.CallRecord{}, "CallID", ""},
 		{"attempt", domain.CallAttempt{}, "CallID", "Attempt"},
+		{"envelope", domain.EventEnvelope{}, "OccurrenceID", ""},
+		{"receipt", receiptRow{}, "OccurrenceID", ""},
+		{"receipt_item", receiptItem{}, "OccurrenceID", "Ordinal"},
+		{"diagnostic", domain.DiagnosticRecord{}, "ID", ""},
+		{"command", domain.LifecycleCommandRecord{}, "ID", ""},
 	}
 	out := make(map[string]*recordSchema, len(definitions))
 	for _, d := range definitions {
@@ -156,7 +161,8 @@ func (c recordColumn) sqlType() string {
 }
 
 // recordTables lists every record table in creation order.
-var recordTables = []string{"item", "relationship", "event", "obligation", "obligation_transition", "grant", "task", "lifecycle", "conversation", "call", "attempt"}
+var recordTables = []string{"item", "relationship", "event", "obligation", "obligation_transition", "grant", "task", "lifecycle", "conversation", "call", "attempt",
+	"envelope", "receipt", "receipt_item", "diagnostic", "command"}
 
 // typedColumns is the column layout (name -> declared type) the Go record
 // types require of each rec_* table. Migrations are forward-only and never
@@ -174,6 +180,19 @@ func typedColumns() map[string]map[string]string {
 		out[s.table] = cols
 	}
 	return out
+}
+
+// tableDDL is the CREATE TABLE statement for a record kind's typed columns,
+// used to write the forward migration that introduces a new record kind.
+func tableDDL(kind string) string {
+	s := schemas[kind]
+	var b strings.Builder
+	fmt.Fprintf(&b, "CREATE TABLE %s (\n  session_id TEXT NOT NULL,\n  id TEXT NOT NULL,\n  subkey INTEGER NOT NULL DEFAULT 0", s.table)
+	for _, c := range s.columns {
+		fmt.Fprintf(&b, ",\n  %s %s", c.name, c.sqlType())
+	}
+	b.WriteString(",\n  PRIMARY KEY (session_id,id,subkey),\n  FOREIGN KEY (session_id) REFERENCES sessions(session_id)\n);\n")
+	return b.String()
 }
 
 func (s *recordSchema) recordValues(record any) ([]any, error) {
