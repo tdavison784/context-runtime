@@ -57,11 +57,17 @@ func (t *transaction) retireLookups(itemID string, duplicate bool) error {
 		tables = append(tables, "lookup_blob")
 	}
 	for _, table := range tables {
-		if _, err := t.conn.ExecContext(t.ctx, "DELETE FROM "+table+" WHERE session_id=? AND item_id=?", t.session, itemID); err != nil {
+		if _, err := t.conn.ExecContext(t.ctx, retireLookupSQL(table), t.session, itemID); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// retireLookupSQL deletes one item's rows from a lookup table through its
+// (session_id, item_id) index (migration 0016, SPEC-3.1).
+func retireLookupSQL(table string) string {
+	return "DELETE FROM " + table + " WHERE session_id=? AND item_id=?"
 }
 
 // ownerClause restricts the given owner columns to values whose boundary
