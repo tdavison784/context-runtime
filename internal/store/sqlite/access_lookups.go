@@ -132,7 +132,7 @@ func (t *transaction) nextRows(qs []query, after store.Cursor, n int) ([]store.C
 	exhausted := true
 	for _, build := range qs {
 		q, args := build(after, n)
-		rows, err := t.conn.QueryContext(t.ctx, q, args...)
+		rows, err := t.query(q, args...)
 		if err != nil {
 			return nil, false, err
 		}

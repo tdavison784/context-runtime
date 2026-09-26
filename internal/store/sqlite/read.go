@@ -111,8 +111,7 @@ func queryRecords[T any](t *transaction, kind, q string, args ...any) ([]T, erro
 	if err != nil {
 		return nil, err
 	}
-	t.lastQuery = q
-	rows, err := t.conn.QueryContext(t.ctx, q, args...)
+	rows, err := t.query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +164,8 @@ func (t *transaction) CurrentVersions(taskID string, ns domain.DirectiveNamespac
 	if !ns.Valid() {
 		return nil, fmt.Errorf("%w: invalid namespace %q", domain.ErrInvalidRecord, ns)
 	}
-	rows, err := t.conn.QueryContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND namespace=? AND directive_id=? ORDER BY item_id", t.session, taskID, ns, id)
+	q, args := currentVersionsQuery(t.session, taskID, ns, id)
+	rows, err := t.query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +179,13 @@ func (t *transaction) CurrentVersions(taskID string, ns domain.DirectiveNamespac
 		ids = append(ids, itemID)
 	}
 	return ids, rows.Err()
+}
+
+// currentVersionsQuery reads the pointers of one (task, namespace, ID)
+// across boundaries through the directives primary key (SPEC-2.1).
+func currentVersionsQuery(session, taskID string, ns domain.DirectiveNamespace, id string) (string, []any) {
+	return "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND namespace=? AND directive_id=? ORDER BY item_id",
+		[]any{session, taskID, ns, id}
 }
 
 // current looks up one pointer. A boundary in another session names nothing

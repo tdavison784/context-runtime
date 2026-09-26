@@ -354,6 +354,9 @@ type transaction struct {
 	// lastQuery is the SQL the latest record read ran, so tests can assert
 	// that hot reads use their plan-guarded builders (SPEC-2.1).
 	lastQuery string
+	// rowsRead counts the rows every multi-row query of the transaction
+	// read, so tests can bound a write's reads from outside (SPEC-3.2).
+	rowsRead int
 	// itemCache holds items this transaction has decoded and verified;
 	// UpdateItem refreshes an entry and a rolled-back store method clears
 	// it (SPEC-3.1 item 2). itemBytesLoaded counts the bytes decoded, so
@@ -515,8 +518,7 @@ func listRecords[T any](t *transaction, kind string) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
-	t.lastQuery = s.selectSQL + " WHERE session_id=?"
-	rows, err := t.conn.QueryContext(t.ctx, s.selectSQL+" WHERE session_id=?", t.session)
+	rows, err := t.query(s.selectSQL+" WHERE session_id=?", t.session)
 	if err != nil {
 		return nil, err
 	}
@@ -530,4 +532,31 @@ func listRecords[T any](t *transaction, kind string) ([]T, error) {
 		out = append(out, v.Interface().(T))
 	}
 	return out, rows.Err()
+}
+
+// countedRows counts the rows a transaction query reads (SPEC-3.2).
+type countedRows struct {
+	*sql.Rows
+	n *int
+}
+
+func (r *countedRows) Next() bool {
+	if r.Rows.Next() {
+		*r.n++
+		return true
+	}
+	return false
+}
+
+// query runs every multi-row SELECT of a transaction: it records the SQL
+// (lastQuery) and counts the rows read (rowsRead), so tests can assert
+// that hot reads use their builders and that writes read a bounded
+// number of rows.
+func (t *transaction) query(q string, args ...any) (*countedRows, error) {
+	t.lastQuery = q
+	rows, err := t.conn.QueryContext(t.ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	return &countedRows{Rows: rows, n: &t.rowsRead}, nil
 }
