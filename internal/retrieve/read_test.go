@@ -112,6 +112,33 @@ func TestGetUnkeyedDuplicateIsNotCurrent(t *testing.T) {
 	}
 }
 
+func TestGetCompletedOriginRemainsHistoricalRead(t *testing.T) {
+	s := memory.New()
+	p := storetest.NewPrincipal("s", domain.AuthorityHarness)
+	item := storetest.NewItem("s", "completed-source", 1, "prior answer")
+	item.Scope = domain.ScopeTask
+	item.Access = domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: p.TaskID}
+	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		completedSeq := tx.NextSeq()
+		task := domain.TaskState{SessionID: "s", TaskID: p.TaskID, WorkflowID: p.WorkflowID,
+			Status: domain.TaskCompleted, Turn: 1, TurnID: "old-turn", CompletedSeq: completedSeq, Version: 1}
+		event := domain.LifecycleEvent{ID: "task-complete", SessionID: "s", Seq: completedSeq,
+			TargetKind: domain.TargetTask, TargetID: p.TaskID, Action: "complete", Actor: p}
+		if _, err := tx.PutTask(task, 0, event); err != nil {
+			return err
+		}
+		item.Seq = tx.NextSeq()
+		return tx.InsertItem(item)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before := lastSeq(t, s)
+	got, err := New(s).Get(context.Background(), p, item.ID)
+	if err != nil || got.Item.Parts[0].Text != "prior answer" || got.Observed.Expiry != domain.ExpiryExpired || lastSeq(t, s) != before {
+		t.Fatalf("completed origin read = %+v, %v", got, err)
+	}
+}
+
 func lastSeq(t *testing.T, s store.Store) uint64 {
 	t.Helper()
 	var seq uint64
