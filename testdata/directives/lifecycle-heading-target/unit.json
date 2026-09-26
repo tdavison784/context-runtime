@@ -1,0 +1,9 @@
+{
+  "description": "Resolve/Unpin take a heading target with an otherwise blank body (FR-DIR-005).",
+  "requirements": [
+    "FR-DIR-006",
+    "FR-DIR-005"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

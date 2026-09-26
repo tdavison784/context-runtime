@@ -1,0 +1,95 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "level": 2,
+      "range": [
+        0,
+        44
+      ],
+      "heading_range": [
+        0,
+        19
+      ],
+      "body_range": [
+        19,
+        44
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "REMEMBER",
+      "level": 2,
+      "range": [
+        44,
+        63
+      ],
+      "heading_range": [
+        44,
+        56
+      ],
+      "body_range": [
+        56,
+        63
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 1,
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "authority": "USER",
+      "text": "kept",
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        56,
+        63
+      ],
+      "text_ranges": [
+        [
+          58,
+          62
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_id",
+      "section": "PINNED",
+      "range": [
+        0,
+        18
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "nested_heading",
+      "section": "GOAL",
+      "range": [
+        28,
+        36
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        56,
+        63
+      ]
+    }
+  ]
+}

@@ -1,0 +1,184 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "UNPIN",
+      "level": 2,
+      "range": [
+        0,
+        19
+      ],
+      "heading_range": [
+        0,
+        13
+      ],
+      "body_range": [
+        13,
+        19
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "RESOLVE",
+      "level": 2,
+      "range": [
+        19,
+        31
+      ],
+      "heading_range": [
+        19,
+        30
+      ],
+      "body_range": [
+        30,
+        31
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "RESOLVE",
+      "level": 2,
+      "range": [
+        31,
+        51
+      ],
+      "heading_range": [
+        31,
+        51
+      ],
+      "body_range": [
+        51,
+        51
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "RESOLVE",
+      "level": 2,
+      "range": [
+        51,
+        77
+      ],
+      "heading_range": [
+        51,
+        77
+      ],
+      "body_range": [
+        77,
+        77
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "UNPIN",
+      "level": 2,
+      "range": [
+        77,
+        143
+      ],
+      "heading_range": [
+        77,
+        86
+      ],
+      "body_range": [
+        86,
+        143
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [],
+  "lifecycle": [
+    {
+      "action": "UNPIN",
+      "target_id": "ok",
+      "authority": "USER",
+      "range": [
+        136,
+        143
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        0,
+        12
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "RESOLVE",
+      "range": [
+        19,
+        31
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "RESOLVE",
+      "range": [
+        31,
+        50
+      ]
+    },
+    {
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "RESOLVE",
+      "range": [
+        51,
+        76
+      ]
+    },
+    {
+      "index": 4,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        86,
+        105
+      ]
+    },
+    {
+      "index": 5,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        105,
+        119
+      ]
+    },
+    {
+      "index": 6,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        119,
+        123
+      ]
+    },
+    {
+      "index": 7,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        123,
+        136
+      ]
+    }
+  ]
+}

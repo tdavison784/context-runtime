@@ -1,0 +1,9 @@
+{
+  "description": "A heading ID on a list section is diagnosed and ignored, never copied onto members (D7).",
+  "requirements": [
+    "FR-DIR-006",
+    "D7"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

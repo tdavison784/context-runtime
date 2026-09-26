@@ -1,0 +1,9 @@
+{
+  "description": "Lone CR is a line break; payload keeps the CR bytes (D3).",
+  "requirements": [
+    "FR-DIR-006",
+    "D3"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

@@ -1,0 +1,9 @@
+{
+  "description": "Deeper headings, keyword or not, stay in the open section's body (D6).",
+  "requirements": [
+    "FR-DIR-006",
+    "D6"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

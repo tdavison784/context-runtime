@@ -1,0 +1,10 @@
+{
+  "description": "A lifecycle target may name a derived ID; it is a reference, not a declaration (D20).",
+  "requirements": [
+    "FR-DIR-006",
+    "D20",
+    "FR-DIR-002"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}
