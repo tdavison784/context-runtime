@@ -240,8 +240,9 @@ func (t *tx) InsertBlob(b domain.Blob) error {
 	if t.blobs.has(b.Hash) {
 		return nil // identical bytes: the hash matched
 	}
+	// Blobs are exempt from the semantic-write rule: they are inert until a
+	// sequenced record references them.
 	t.blobs.put(b.Hash, b)
-	t.markSemantic()
 	return nil
 }
 
