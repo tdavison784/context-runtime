@@ -36,10 +36,11 @@ type PrepareRequest struct {
 // The first Prepare for a (task, agent) pair creates its conversation at
 // Version 1.
 //
-// Repeating an identical Prepare (same ProposalHash) while its call is still
-// PREPARED returns that call without writing. Otherwise a held reservation fails with
-// domain.ErrCallInFlight, and a stale conversation version, stale semantic
-// sequence, or disallowed epoch fails with domain.ErrVersionConflict.
+// Checks run in order: a stale conversation version, stale semantic
+// sequence, or disallowed epoch fails with domain.ErrVersionConflict; then a
+// held reservation fails with domain.ErrCallInFlight, unless it is a still
+// PREPARED call with the identical ProposalHash, which is returned without
+// writing (idempotent repeat).
 func (l *Ledger) Prepare(ctx context.Context, req PrepareRequest) (domain.CallRecord, error) {
 	if err := validatePrepare(req); err != nil {
 		return domain.CallRecord{}, err
@@ -77,17 +78,6 @@ func (l *Ledger) Prepare(ctx context.Context, req PrepareRequest) (domain.CallRe
 		}
 		call.ProposalHash = domain.CallProposalHash(call)
 
-		if conv.InFlightCallID != "" {
-			held, err := tx.Call(conv.InFlightCallID)
-			if err != nil {
-				return err
-			}
-			if held.State == domain.CallPrepared && held.ProposalHash == call.ProposalHash {
-				out = held
-				return nil
-			}
-			return fmt.Errorf("conversation %s: call %s holds the reservation: %w", convID, held.CallID, domain.ErrCallInFlight)
-		}
 		if req.BaseConversationVersion != conv.Version {
 			return fmt.Errorf("conversation %s: preview base version %d, committed %d: %w",
 				convID, req.BaseConversationVersion, conv.Version, domain.ErrVersionConflict)
@@ -104,6 +94,20 @@ func (l *Ledger) Prepare(ctx context.Context, req PrepareRequest) (domain.CallRe
 				convID, req.Epoch, conv.Epoch, conv.RequireNewEpoch, domain.ErrVersionConflict)
 		}
 
+		// Only a preview that is still current may match the reservation, so a
+		// repeated preview after a semantic change fails as stale rather than
+		// returning the held call.
+		if conv.InFlightCallID != "" {
+			held, err := tx.Call(conv.InFlightCallID)
+			if err != nil {
+				return err
+			}
+			if held.State == domain.CallPrepared && held.ProposalHash == call.ProposalHash {
+				out = held
+				return nil
+			}
+			return fmt.Errorf("conversation %s: call %s holds the reservation: %w", convID, held.CallID, domain.ErrCallInFlight)
+		}
 		// The pre-reservation revision is unique per reservation, so an
 		// identical proposal prepared again after a cancellation or failure
 		// is a new logical call.
