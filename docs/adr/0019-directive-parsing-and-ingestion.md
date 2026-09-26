@@ -603,3 +603,120 @@ explicit handling rather than an invented executable default.
 
 Owner: `internal/domain`/root package (alias scope), `internal/store`
 (forward migrations + parity fixtures).
+
+## Alternatives considered
+
+- **D1:** the brief's read-only resolution without an explicit
+  `PARSED_NOT_EXECUTED` marker and without an authorization check was
+  rejected by the review: an apparently successful Unpin that changed
+  nothing is a dangerous API lie, and read-only resolution is not itself
+  an authorization check — a SYSTEM caller carrying a USER span could
+  otherwise execute that span's Resolve as SYSTEM (confused deputy). The
+  review's own proposal deferred authorization failure to a diagnostic;
+  R7 overrides that and makes it abort the event atomically instead,
+  matching FR-AUTH-001's atomicity for every other mutation.
+- **D3:** silently substituting U+FFFD for invalid UTF-8 (the shipped
+  Phase 1 SQLite behavior) was rejected — it breaks hash identity, audit
+  integrity, and store parity, and a raw hash was never meant to be
+  interchangeable with `ContentHash`.
+- **D5/D6:** the brief's "any KEYWORD heading at any level closes the
+  section" was rejected as a direct contradiction of FR-DIR-006, which
+  specifies same-or-higher-level closure; nested-directive semantics, if
+  ever wanted, need an explicit grammar amendment, not an ADR override.
+  The brief also omitted fence-closer suffix rules and comment/fence state
+  precedence, which the review's state-machine formulation supplies; the
+  added HTML-comment exclusion is recorded as a conservative parser-v1
+  choice, not a re-derivation of full CommonMark.
+- **D7:** trimming trailing whitespace from item text (the brief's implied
+  behavior) was rejected — trailing whitespace can be meaningful content,
+  and trimming it can silently make two distinguishable directives hash
+  identically; salvaging an invalid `[id]` with a fallback derived ID was
+  also rejected, since that turns a malformed line into a new, powerful
+  directive.
+- **D8:** treating every SYSTEM/HARNESS transcript as an independently
+  mandatory instruction merely because of its authority (a natural reading
+  of the brief's "one transcript item, kind by authority") was rejected —
+  it would keep a replaced pin mandatory forever through its unsuperseded
+  transcript copy; separately identified semantic instruction items are
+  required instead.
+- **D10:** the brief's implicit reliance on `graph.IsCurrent`'s existing
+  incoming-supersession-edge check as sufficient for "never becomes
+  current" was rejected — the review reproduced a duplicate resolving as
+  current by literal ID lookup, since that check never also excludes a
+  stale current-map pointer or a `DUPLICATE_OF` classification.
+- **D11:** the brief's two-helper-call composition (mark duplicates, then
+  supersede) was rejected — marking a duplicate member first makes it
+  unusable as a superseder for the member it should retire, reproducing
+  `W1={a,b}→W2={a}`'s failure to retire `b`. A single planned edge set per
+  snapshot section replaces the two-step composition.
+- **D12:** ASCII-case-insensitive scope/attribute values (the brief's
+  stated rule) directly conflicts with FR-DIR-006's "everything else is
+  exact" and was rejected. An unbounded `ttl` under an "ignore over-limit
+  values" rule was also rejected, since silently ignoring a large-but-finite
+  TTL can accidentally make a finite-lived item unlimited; R1's explicit
+  representation-limit error was chosen over the review's own unspecified
+  int64 bound, for portability across Go int widths.
+- **D18:** letting `TaskState.Validate`/`PutTask` alone enforce turn
+  semantics (the brief's implicit assumption) was rejected — low-authority
+  content could otherwise forge a turn boundary and indirectly expire
+  higher-authority TURN requirements; an explicit envelope-kind/
+  authenticated-caller gate is required.
+- **D19:** trusting session scoping alone as sufficient blob protection
+  (the brief's stated position) was rejected — session scoping stops
+  cross-session probes but not narrower-boundary ones within a session;
+  R5's item-must-already-reference-the-blob check was chosen over a new
+  standalone blob-access-record type for Phase 2, deferring that type
+  until a real use case needs it.
+- **M5/R2:** implementing tool-result `DEPENDS_ON` edges in Phase 2 (the
+  review's original M5 scope) was rejected by R2 — `tool_call` items
+  belong to the call ledger, which is Phase 5 work; recording a bare
+  `ToolCallID` in `SourceRef` now avoids inventing edge semantics ahead of
+  the ledger that will actually own them.
+- **M6/R6:** reserving an undocumented ID prefix for agent keys instead of
+  a typed namespace field was rejected — FR-DIR-006 already legally allows
+  dotted IDs like `agent.status`, so a prefix reservation would
+  retroactively make an otherwise-legal directive ID illegal; a typed
+  namespace field is additive instead.
+- **M8/R3:** exporting the rich Phase 2 `IngestResult` as a root-package
+  alias now (the review's original phrasing, "if the public API will
+  return items plus diagnostics/commands") was narrowed by R3 to
+  explicitly not do so until the SDD §8 signature itself changes in
+  Phase 5 — an early alias would let Phase 2's internal shape leak into the
+  public contract before the contract is actually revised.
+
+## Consequences / compatibility impact
+
+- Phase 1 schema additions required before Phase 2 store/graph work can
+  proceed: `domain.Event`/`Span`/part envelope (§5), `SourceRef` byte
+  ranges (§5), obligation claim-name field separate from `MatcherRef`
+  (§9), receipt/occurrence-ID types (§10), diagnostic record type (§12),
+  limits config (§13) — all additive to `internal/domain`, none breaking an
+  already-accepted Phase 1 ADR's decision.
+- `internal/store/sqlite`'s lossless text fix (§3, R8) changes on-disk
+  representation for `ContentPart`; it lands before other Phase 2 store
+  work and needs its own `storetest` case, but is a bug fix against
+  Phase 1's own contract (FR-ING-007), not a new Phase 2 requirement.
+- Forward migrations are required for: lossless text (§3), source
+  ranges/receipts (§10/19), obligation claim names (§9), diagnostics
+  (§12), and the typed directive/agent-key namespace (§17) — all additive
+  to migration history; migration 0001 is never edited (R8).
+- `graph.IsCurrent`'s existing incoming-edge-only semantics are
+  insufficient for D10's "never becomes current" guarantee (§7); every
+  current-version consumer, not just the write path, must be updated to
+  also exclude a `DUPLICATE_OF` item and a stale current-map pointer.
+- `graph.Supersede`'s `(session, old target, action, event)` audit-ID
+  scheme collides on two retirements of the same old target within one
+  event; D11's planned edge set (§7) must resolve this itself rather than
+  leaving it for `p2-graph` to discover independently.
+- The SDD §8 `Runtime.Ingest([]ContextItem, error)` signature is unchanged
+  by Phase 2 (§19, R3); any code written against a richer expected return
+  type must wait for the Phase 5 amendment.
+- D1's `PARSED_NOT_EXECUTED` framing (§1) means Phase 3's
+  lifecycle-execution work cannot treat a Phase 2 resolution as
+  pre-authorized; it must redo access, authority, currentness, and grant
+  checks in its own transaction.
+- The classification table (§2) and the closed unsupported-lifecycle
+  vocabulary (§4, applied to the SDD below) are now parser-versioned
+  contracts: any future directive section or lifecycle word requires a
+  table/vocabulary update plus a new parser version, not an ad hoc
+  addition inside `internal/ingest`.
