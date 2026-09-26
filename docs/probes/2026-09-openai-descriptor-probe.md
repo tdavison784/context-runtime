@@ -200,17 +200,25 @@ additionally support `"in_memory"` and `"24h"` retention per that page, but that
 OpenAI exposes two distinct compaction mechanisms, tested separately in
 `probes/descriptor/openai/main.go` `compaction()`.
 
-**K1a — a standalone `/responses/compact` endpoint exists.**
+**K1a — a standalone `/responses/compact` endpoint exists (SPEC-1.2 correction: only 1 of the 2
+input messages is echoed verbatim, not "the original input messages" plural).**
 `gpt_6_astra_k1_compact.json` / `gpt_6_luna_k1_compact.json` post
-`{model, input: [user, assistant], instructions: "Preserve the marker word for the next turn."}`
-to `/responses/compact` and get back `object: "response.compaction"` with an `output` array
-containing (a) the original input messages echoed back verbatim as plain `type: "message"` items,
-and (b) one new `type: "compaction"` item carrying only `encrypted_content` (`{length: 1188,
-sha256: ...}` for astra) — no plaintext summary. `usage: {input_tokens: 54, output_tokens: 48}`
-(astra) is a small, separately-billed operation, not folded into a later inference's usage.
-Verdict: **yes**, native, request/response shape as above; it does accept custom instructions
-(the `instructions` field); minimum trigger for the *manual* endpoint was not tested (any input
-size was accepted here).
+`{model, input: [user "Remember the marker cobalt. Say ready.", assistant "Ready."],
+instructions: "Preserve the marker word for the next turn."}` to `/responses/compact` and get back
+`object: "response.compaction"` with an `output` array of length 2, not 4: **one**
+`type: "message", role: "user"` item, reproducing only the `user` turn verbatim as plain text, and
+**one** new `type: "compaction"` item carrying only `encrypted_content` (`{length: 1188,
+sha256: ...}` for astra) — no plaintext summary. The `assistant` "Ready." turn is not echoed
+anywhere in the output; it was folded into the opaque `compaction` item along with whatever else
+the endpoint chose to compact. So the endpoint's behavior is: echo the still-open/most-recent
+message(s) verbatim, fold the rest into one opaque block — not "echo every input message, then
+append a compaction block." `usage: {input_tokens: 54, output_tokens: 48}` (astra) is a small,
+separately-billed operation, not folded into a later inference's usage. Verdict: **yes**, native,
+request/response shape as above (2-item output: 1 echoed message + 1 compaction block for this
+2-message input); it does accept custom instructions (the `instructions` field); minimum trigger
+for the *manual* endpoint was not tested (any input size was accepted here); which message(s) get
+echoed verbatim versus folded was not swept across different input lengths/shapes — **NOT
+DETERMINED** beyond this one 2-message case.
 
 **K1b — automatic compaction via `context_management` has a documented minimum trigger and runs
 inline with inference, not as a separate pause step.**
@@ -254,15 +262,21 @@ from "the model read the echoed user turn." Verdict: **accepted, effectiveness U
 inline-vs-checkpoint framing above still stands (that part concerns request shape, not authority),
 but no claim of demonstrated restoration follows from this fixture.
 
-**K3 — compacted artifacts are opaque/encrypted, not inspectable.**
+**K3 — compacted artifacts are opaque/encrypted, not inspectable; the response only partially
+reveals what was retained (SPEC-1.2: this sharpens rather than changes the verdict).**
 Both the manual endpoint's `compaction` item (`k1_compact`) and the automatic path's `compaction`
 items (`k1_auto_inline`) carry only `encrypted_content` (hashed in the sanitized fixture, but the
-live response has no plaintext `summary` or `content` field on these items — contrast with the
-`response.compaction`'s echoed *original* messages, which are plain text). Verdict: **opaque**.
-Coverage of what the compacted block actually represents must be tracked by the runtime from its
-own request construction (what it sent into `/responses/compact`), not recovered by inspecting the
-returned block, consistent with FR-MAT-005's "persist the canonical returned blocks and their
-source coverage."
+live response has no plaintext `summary` or `content` field on these items). Verdict: **opaque**
+for the `compaction` item itself — its content cannot be inspected. But per the corrected K1a
+above, the response *is not silent* about which of the input messages were folded into that opaque
+block versus echoed verbatim: the `k1_compact` fixture shows 1 of 2 input messages (the `user`
+turn) echoed as plain text, and 1 (the `assistant` turn) absent from the plaintext output, so
+folded into the `compaction` item. That is a partial, coarse-grained signal (which items are
+*not* opaque), not a way to inspect what the opaque item *contains* or confirms was preserved.
+The runtime should not rely on this echo behavior to infer coverage — it must still track,
+independently, what it sent into `/responses/compact` and treat the returned block as opaque for
+every item not itself echoed back verbatim, consistent with FR-MAT-005's "persist the canonical
+returned blocks and their source coverage."
 
 ## Counter endpoint and model list
 
