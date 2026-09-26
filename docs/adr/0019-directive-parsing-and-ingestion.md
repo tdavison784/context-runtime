@@ -86,7 +86,7 @@ principal a deliberate, audited way to do exactly that when it is actually
 needed. **Commander ruling (FROZEN 2026-09-26): ADOPT the recommendation and
 amend Q1 to add this explicit escape hatch, without weakening Q1's default.**
 
-### Required SDD amendment (proposed for v0.10; not yet applied)
+### SDD amendment (applied in v0.10)
 
 - **FR-DIR-005 / FR-ING-005.** Add: "Ordinary identical restatement compares
   the immutable creation declaration and does not reopen, re-pin, unarchive,
@@ -96,8 +96,7 @@ amend Q1 to add this explicit escape hatch, without weakening Q1's default.**
   exception, itself recorded at FR-AUTH-001/FR-DIR-002 rather than as a
   weakening of this sentence.
 
-This ADR does not edit SDD.md itself; once applied, this subsection is
-retitled "SDD amendment (applied in v0.10)."
+Applied to SDD.md as v0.10 (this ADR does not itself edit SDD.md).
 
 ## Decision
 

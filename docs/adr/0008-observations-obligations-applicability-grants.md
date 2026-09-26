@@ -444,13 +444,11 @@ numbered decision above is the obvious place for them:
   reporter's session-level authority be mistaken for target-specific mutation
   authority it does not have.
 
-## Required SDD amendment
+## SDD amendment (applied in v0.10)
 
-These are proposed replacement/additional sentences for SDD v0.10, exactly as
-the commander's FROZEN "Required normative amendments at freeze" table
-approved them (`phase3-decisions.md`); this ADR does not edit SDD.md itself —
-once the amendment lands there, this subsection is retitled "SDD amendment
-(applied in vX.Y)."
+These sentences are applied to SDD.md as v0.10, exactly as the commander's
+FROZEN "Required normative amendments at freeze" table approved them
+(`phase3-decisions.md`); this ADR does not itself edit SDD.md.
 
 - **FR-REL-001; §7.** Replace "Relationship records support DERIVED_FROM,
   SUPERSEDES, DEPENDS_ON, REFERENCES, SATISFIES, and DUPLICATE_OF.

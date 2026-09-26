@@ -85,7 +85,7 @@ authorization/matcher-specific consequences and owns none of what follows.
   the semantic-tools worker), not a change to this ADR's access/eligibility
   checks themselves.
 
-### Required SDD amendment (proposed for v0.10; not yet applied)
+### SDD amendment (applied in v0.10)
 
 - **FR-DOM-003 / ADR 6.** Add: "V1 registered WORKFLOW and AGENT owners
   remain active for the session lifetime; the absence of active child tasks
@@ -104,8 +104,7 @@ authorization/matcher-specific consequences and owns none of what follows.
   optional residency flip becomes an explicit unchanged-residency
   expectation (`docs/sdd-event-traces.md`'s own amendment, below).
 
-This ADR does not edit SDD.md itself; once applied, this subsection is
-retitled "SDD amendment (applied in v0.10)."
+Applied to SDD.md as v0.10 (this ADR does not itself edit SDD.md).
 
 ## Context
 
