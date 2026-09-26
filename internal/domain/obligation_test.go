@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -512,5 +513,49 @@ func TestObligationTransitionClone(t *testing.T) {
 	}
 	if tr.Matcher.Version != "1" {
 		t.Error("mutating clone.Matcher affected the original")
+	}
+}
+
+func TestObligationClaimIsNameOnly(t *testing.T) {
+	o := validObligationVersion()
+	o.Claim, o.Matcher = "tests_pass", nil
+	if err := o.Validate(); err != nil {
+		t.Fatalf("claim without matcher rejected: %v", err)
+	}
+	for _, bad := range []string{"tests pass", "tests_pass\n", "teſts", "a=b"} {
+		o.Claim = bad
+		if o.Validate() == nil {
+			t.Errorf("claim %q accepted", bad)
+		}
+	}
+	o.Claim = "tests_pass"
+	c := o.Clone()
+	if c.Claim != o.Claim {
+		t.Fatal("Clone dropped claim")
+	}
+}
+
+func TestDerivedObligationIDKeyedByDirectiveNotClaim(t *testing.T) {
+	k := CurrentKey{SessionID: "s1", TaskID: "t1", Access: AccessBoundary{Scope: ScopeTask, SessionID: "s1", TaskID: "t1"}, Namespace: NamespaceDirective, ID: "tests"}
+	id := DerivedObligationID(k, 0)
+	if id != DerivedObligationID(k, 0) || !strings.HasPrefix(id, "obl_") {
+		t.Fatalf("obligation ID %q not stable", id)
+	}
+	for name, mut := range map[string]func(*CurrentKey){
+		"session":   func(k *CurrentKey) { k.SessionID = "s2" },
+		"task":      func(k *CurrentKey) { k.TaskID = "t2" },
+		"boundary":  func(k *CurrentKey) { k.Access.AgentID = "a1" },
+		"scope":     func(k *CurrentKey) { k.Access.Scope = ScopeTurn },
+		"namespace": func(k *CurrentKey) { k.Namespace = NamespaceAgentKey },
+		"id":        func(k *CurrentKey) { k.ID = "api" },
+	} {
+		other := k
+		mut(&other)
+		if DerivedObligationID(other, 0) == id {
+			t.Errorf("obligation ID ignores %s", name)
+		}
+	}
+	if DerivedObligationID(k, 1) == id {
+		t.Error("obligation ID ignores slot")
 	}
 }
