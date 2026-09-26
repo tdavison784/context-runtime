@@ -27,44 +27,6 @@
     {
       "ref": "event#1",
       "id": "itm_b623d3fd3fdc3528e4ab3f5985039486",
-      "kind": "instruction",
-      "generation": "DURABLE",
-      "authority": "SYSTEM",
-      "scope": "SESSION",
-      "access": {
-        "scope": "SESSION",
-        "task_id": "T"
-      },
-      "residency": "RESIDENT",
-      "retention": "HIGH",
-      "created_turn": 1,
-      "has_turn_id": true,
-      "parts": [
-        {
-          "text": "## Pinned\n"
-        }
-      ],
-      "content_hash": "sha256:1ac93b054edfea8fdd389777ce0d49b71bd881f50d4fb811fb84aad458e50b65",
-      "source_ranges": [
-        {
-          "transcript": "event#0",
-          "part": 0,
-          "range": [
-            0,
-            10
-          ],
-          "slices": [
-            [
-              0,
-              10
-            ]
-          ]
-        }
-      ]
-    },
-    {
-      "ref": "event#2",
-      "id": "itm_efc23d59122918592092a74c28560762",
       "role": "TRANSCRIPT",
       "kind": "evidence",
       "generation": "EPHEMERAL",
@@ -86,17 +48,7 @@
       "content_hash": "sha256:208cd9ab74df732051171058f39db1d80eda8974bc13bd9edd049ac3b6913cea"
     }
   ],
-  "relationships": [
-    {
-      "type": "DERIVED_FROM",
-      "from": "event#1",
-      "to": "event#0",
-      "authority": "SYSTEM",
-      "coverage": [
-        "event#0"
-      ]
-    }
-  ],
+  "relationships": [],
   "obligations": [],
   "lifecycle": [],
   "diagnostics": [
