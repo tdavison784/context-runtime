@@ -76,13 +76,15 @@ type Store interface {
 	// errors.Is works).
 	//
 	// Semantic-write rule: a transaction that changes semantic state (any
-	// write other than conversations, calls, call attempts, and TargetCall
-	// lifecycle events) must also write at least one record carrying a
+	// write other than blobs, conversations, calls, call attempts, and
+	// TargetCall lifecycle events) must also write at least one record carrying a
 	// sequence number allocated in it (an item, relationship, event record,
 	// obligation version or transition, grant, or non-TargetCall lifecycle
 	// event); otherwise the commit fails with domain.ErrInvalidRecord. The
 	// call ledger's preview-staleness check depends on every semantic
-	// change being visible in the sequence (FR-CALL-001).
+	// change being visible in the sequence (FR-CALL-001). Blobs are exempt
+	// because they are content-addressed and inert until a sequenced record
+	// references them.
 	//
 	// Cancellation: ctx may abort the transaction before commit, and then
 	// Update returns the context's error (errors.Is(err, context.Canceled)
