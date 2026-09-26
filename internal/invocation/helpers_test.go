@@ -50,17 +50,25 @@ func request(p domain.Principal, body string, base, seq, epoch uint64) PrepareRe
 	}
 }
 
-func completed(resp string) domain.CallOutcome {
+func completed(attempt int, resp string) domain.CallOutcome {
 	in, out := int64(100), int64(20)
 	return domain.CallOutcome{
-		State:    domain.CallCompleted,
-		Response: []byte(resp),
-		Usage:    []domain.UsageIteration{{Iteration: 1, InputTokens: &in, OutputTokens: &out}},
+		Attempt:      attempt,
+		State:        domain.CallCompleted,
+		Response:     []byte(resp),
+		ResponseHash: domain.HashBytes([]byte(resp)),
+		Usage:        []domain.UsageIteration{{Iteration: 1, InputTokens: &in, OutputTokens: &out}},
 	}
 }
 
-func failed(reason string, retryable bool) domain.CallOutcome {
-	return domain.CallOutcome{State: domain.CallFailed, FailureReason: reason, Retryable: retryable}
+func failed(attempt int, reason string, retryable bool) domain.CallOutcome {
+	return domain.CallOutcome{Attempt: attempt, State: domain.CallFailed, FailureReason: reason, Retryable: retryable}
+}
+
+// forAttempt returns o bound to attempt n.
+func forAttempt(o domain.CallOutcome, n int) domain.CallOutcome {
+	o.Attempt = n
+	return o
 }
 
 // ingest commits one semantic item, as ingestion would.
