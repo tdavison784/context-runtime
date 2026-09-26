@@ -127,15 +127,20 @@ func checkServiceActor(p domain.Principal) error {
 	return nil
 }
 
-// checkActorScope rejects a service actor whose non-empty owner fields do not
-// match the call's inference principal, so a dispatcher scoped to one task or
-// agent cannot drive another's conversation.
+// actorInScope reports whether a service actor may act for inference
+// principal p: same session, and every non-empty owner field on the actor
+// matches p, so a dispatcher scoped to one task or agent cannot drive
+// another's conversation.
+func actorInScope(actor, p domain.Principal) bool {
+	return actor.SessionID == p.SessionID &&
+		(actor.WorkflowID == "" || actor.WorkflowID == p.WorkflowID) &&
+		(actor.TaskID == "" || actor.TaskID == p.TaskID) &&
+		(actor.AgentID == "" || actor.AgentID == p.AgentID)
+}
+
+// checkActorScope rejects a service actor that is not in scope for call c.
 func checkActorScope(actor domain.Principal, c domain.CallRecord) error {
-	p := c.Principal
-	if actor.SessionID != c.SessionID ||
-		(actor.WorkflowID != "" && actor.WorkflowID != p.WorkflowID) ||
-		(actor.TaskID != "" && actor.TaskID != p.TaskID) ||
-		(actor.AgentID != "" && actor.AgentID != p.AgentID) {
+	if actor.SessionID != c.SessionID || !actorInScope(actor, c.Principal) {
 		return fmt.Errorf("service actor is not scoped to call %s: %w", c.CallID, domain.ErrInvalidAuthorityPromotion)
 	}
 	return nil
