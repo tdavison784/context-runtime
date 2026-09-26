@@ -161,6 +161,7 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 		AuthoritativeRevision: u.ResultingAuthoritativeRevision,
 		WorkspaceFingerprint:  u.WorkspaceFingerprint,
 		Freshness:             u.Freshness,
+		Revision:              state.Revision + 1, // CAS result; the store assigns it
 	}
 	if _, err := sem.PutResourceState(next, state.Revision); err != nil {
 		return domain.MutationResult{}, w.fail(err)

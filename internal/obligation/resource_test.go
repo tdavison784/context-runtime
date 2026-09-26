@@ -28,6 +28,7 @@ func (s *Service) report(t *testing.T, st store.Store, actor domain.Principal, i
 
 type resourceFixture struct {
 	fixture
+	sysTests domain.ObligationRef // bound SYSTEM obligation
 	reporter domain.Principal
 	rev      uint64 // state CAS revision
 	auth     uint64 // authoritative revision
@@ -35,7 +36,8 @@ type resourceFixture struct {
 }
 
 func newResourceFixture(t *testing.T) *resourceFixture {
-	f := &resourceFixture{fixture: newFixture(t), reporter: sessionReporter()}
+	ef := newEvalFixture(t)
+	f := &resourceFixture{fixture: ef.fixture, sysTests: ef.sysTests, reporter: sessionReporter()}
 	seedResource(t, f.st, "repo2", f.reporter)
 	f.resync(t, 1, hashOf("W1"))
 	return f
@@ -229,24 +231,24 @@ func TestResourceInvalidationScope(t *testing.T) {
 	mustUpdate(t, f.st, func(tx store.Tx) error {
 		return tx.InsertGrant(domain.MutationGrant{
 			ID: "g-a", SessionID: testSession, Action: domain.ActionAssertObligation,
-			Targets: []domain.GrantTarget{domain.ObligationGrantTarget(testSession, f.sys.ObligationID, 1)},
+			Targets: []domain.GrantTarget{domain.ObligationGrantTarget(testSession, f.sysTests.ObligationID, 1)},
 			Issuer:  f.system, Grantee: &f.harness, IssuedSeq: tx.NextSeq(),
 		})
 	})
-	sat := f.assertBound(t, f.sys, f.harness)
+	sat := f.assertBound(t, f.sysTests, f.harness)
 	mustUpdate(t, f.st, func(tx store.Tx) error {
 		ev := domain.LifecycleEvent{ID: "revoke-g-a", SessionID: testSession, Seq: tx.NextSeq(), TargetKind: domain.TargetGrant, TargetID: "g-a", Action: "revoke", Actor: f.system}
 		_, err := tx.RevokeGrant("g-a", ev)
 		return err
 	})
 	f.edit(t, hashOf("W2"))
-	o := f.status(t, f.sys)
+	o := f.status(t, f.sysTests)
 	if o.Status != domain.ObligationUnresolved {
 		t.Fatalf("revoked-grant proof survived: %+v", o)
 	}
 	var trs []domain.ObligationTransition
 	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
-		trs, _ = tx.ObligationTransitions(f.sys.ObligationID)
+		trs, _ = tx.ObligationTransitions(f.sysTests.ObligationID)
 		return nil
 	})
 	if last := trs[len(trs)-1]; last.GrantID != "" || last.OriginAuthorizationRef.GrantID != "g-a" || last.OriginAuthorizationRef.TransitionID != sat.TransitionIDs[0] {
@@ -360,5 +362,18 @@ func TestRegisterResourceReceipt(t *testing.T) {
 	})
 	if first.Records.IDs[0] != again.Records.IDs[0] {
 		t.Errorf("replay = %+v, want %+v", again, first)
+	}
+}
+
+func TestResourceBoundNeedsBoundTarget(t *testing.T) {
+	f := newResourceFixture(t)
+	in := intent(f.sys, 1, domain.ObligationSatisfied) // f.sys is UNBOUND (Q-3)
+	in.AssertionMode = domain.AssertionResourceBound
+	in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyWorkspace, ResourceID: "repo2", ResourceRevision: 1, Fingerprint: hashOf("W1")}}
+	if _, err := f.s.transition(t, f.st, f.system, in); !errors.Is(err, domain.ErrUnknownApplicability) {
+		t.Errorf("resource-bound assertion on unbound obligation: %v", err)
+	}
+	if _, err := f.s.transition(t, f.st, f.system, intent(f.sys, 1, domain.ObligationSatisfied)); err != nil {
+		t.Errorf("attestation of unbound obligation: %v", err)
 	}
 }

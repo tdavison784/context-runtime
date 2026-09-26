@@ -146,7 +146,7 @@ func markSubject(sem store.SemanticTx, seq uint64, st domain.SubjectState, c cha
 		return nil
 	}
 	expected := st.Revision
-	st.Applicability, st.Seq = next, seq
+	st.Applicability, st.Seq, st.Revision = next, seq, expected+1
 	_, err = sem.PutSubjectState(st, expected, cause)
 	return err
 }

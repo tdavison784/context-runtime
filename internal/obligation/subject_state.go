@@ -76,6 +76,7 @@ func (s *Service) deriveState(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 		Access:          run.Access,
 		AcceptedOrdinal: run.Ordinal,
 		Applicability:   domain.ApplicabilityCurrent,
+		Revision:        prior.Revision + 1, // CAS result; the store assigns it
 	}
 	if _, err := sem.PutSubjectState(next, prior.Revision, obs.ID); err != nil {
 		return w.fail(err)

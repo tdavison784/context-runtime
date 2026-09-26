@@ -10,6 +10,31 @@ import (
 
 var errProbeRollback = errors.New("probe rollback")
 
+// w4FamiliesSupported probes whether the backend implements W4's proof,
+// resource, and observation facet families (W2 publishes SQLite after memory).
+func w4FamiliesSupported(t *testing.T, st store.Store) bool {
+	t.Helper()
+	supported := true
+	_ = st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			supported = false
+			return nil
+		}
+		for _, err := range []error{
+			func() error { _, err := r.ResourceBinding("probe"); return err }(),
+			func() error { _, err := r.ApplicabilityProof("probe"); return err }(),
+			func() error { _, err := r.ObservationRun("probe"); return err }(),
+		} {
+			if errors.Is(err, domain.ErrUnsupportedSchema) {
+				supported = false
+			}
+		}
+		return nil
+	})
+	return supported
+}
+
 // observationNamespaceSupported probes whether the backend can file an
 // OBSERVATION-namespace current pointer (P3-3). SQLite migration 0005's
 // CHECK(namespace IN ('DIRECTIVE','AGENT_KEY')) rejects it until W2's forward
@@ -43,7 +68,8 @@ func TestSQLiteSuite(t *testing.T) {
 	prev := backendFactory
 	backendFactory = sqliteBackend
 	t.Cleanup(func() { backendFactory = prev })
-	observations := observationNamespaceSupported(t, sqliteBackend(t))
+	families := w4FamiliesSupported(t, sqliteBackend(t))
+	observations := families && observationNamespaceSupported(t, sqliteBackend(t))
 	observationsUnsupported = !observations
 	t.Cleanup(func() { observationsUnsupported = false })
 	for _, tc := range []struct {
@@ -100,6 +126,9 @@ func TestSQLiteSuite(t *testing.T) {
 		{"ConcurrentINV16", TestConcurrentINV16, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if !families && tc.name != "ReceiptReplayAndConflict" {
+				t.Skip("blocked on W2: SQLite proof/resource/observation facet not yet published")
+			}
 			if tc.obs && !observations {
 				t.Skip("blocked on W2: SQLite migration 0005 CHECK rejects the OBSERVATION namespace")
 			}

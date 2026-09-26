@@ -8,9 +8,12 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
+// snapshot is the committed state an injected failure must leave unchanged:
+// the session sequence (every committed write consumes one) and every
+// obligation version's status, revision, and proof caches.
 type snapshot struct {
-	lastSeq uint64
-	sizes   [14]int
+	lastSeq     uint64
+	obligations string
 }
 
 func (f fixture) snap(t *testing.T) snapshot {
@@ -18,14 +21,22 @@ func (f fixture) snap(t *testing.T) snapshot {
 	var s snapshot
 	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
 		s.lastSeq = tx.LastSeq()
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		all, _ := tx.Obligations("")
+		for _, o := range all {
+			for v := uint64(1); v <= o.Version; v++ {
+				x, err := r.ExactObligation(domain.ObligationRef{SessionID: testSession, ObligationID: o.ObligationID, Version: v})
+				if err != nil {
+					return err
+				}
+				s.obligations += fmt.Sprintf("%s/%d:%s:%d:%s:%s:%v;", x.ObligationID, x.Version, x.Status, x.Revision, x.CurrentProofID, x.CurrentAssertionID, x.Current)
+			}
+		}
 		return nil
 	})
-	f.st.mu.Lock()
-	st := f.st.state(testSession)
-	s.sizes = [14]int{len(st.decls), len(st.caches), len(st.proofs), len(st.deps), len(st.assertions),
-		len(st.details), len(st.resBindings), len(st.resStates), len(st.resUpdates), len(st.pathStates), len(st.wsBindings),
-		len(st.runs), len(st.observations), len(st.subjects)}
-	f.st.mu.Unlock()
 	return s
 }
 
@@ -154,7 +165,7 @@ func TestFailureInjectionAtomicity(t *testing.T) {
 				}
 				f, op := sc.setup(t)
 				before := f.snap(t)
-				f.st.failAt = k
+				f.st.failAt.Store(int64(k))
 				err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
 					_ = op(tx) // deliberately ignored: poisoning must still roll back
 					return nil

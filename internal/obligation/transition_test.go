@@ -322,16 +322,8 @@ func TestTransitionIgnoredErrorPoisons(t *testing.T) {
 	in := intent(f.user, 1, domain.ObligationSatisfied)
 	in.AssertionMode = domain.AssertionResourceBound
 	in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyWorkspace, ResourceID: "repo1", ResourceRevision: 3, Fingerprint: hashOf("W1")}}
-	// Occupy the assertion ID the service will derive, so the second write
-	// fails after the proof was inserted.
-	trID := recordID("otr_", "transition", f.user.Target().AuthorizationKey, in.RequestID)
-	mustUpdate(t, f.st, func(tx store.Tx) error {
-		sem, _ := store.Semantic(tx)
-		return sem.InsertAssertion(domain.AssertionRecord{
-			SemanticMeta: domain.SemanticMeta{ID: recordID("asr_", "assertion", trID), SessionID: testSession, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
-			Target:       f.user, Mode: domain.AssertionAttestation, Actor: f.system, TransitionID: "otr_other", Access: taskBoundary(),
-		})
-	})
+	// Fail the second write (the assertion) after the proof was inserted.
+	f.st.failAt.Store(2)
 	err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
 		_, _ = f.s.ApplyTransitionTx(tx, f.system, in, tx.NextSeq()) // error deliberately ignored
 		return nil
