@@ -54,7 +54,9 @@ type SemanticOperation struct {
 	Replace           *ReplaceDirectiveIntent             `operation:"REPLACE"`
 }
 
-func (o SemanticOperation) Validate() error {
+func (o SemanticOperation) Validate() error { return o.validate(false) }
+
+func (o SemanticOperation) validate(resolved bool) error {
 	if o.Alias != "" && !ValidAgentKey(o.Alias) {
 		return invalid("operation: invalid local alias")
 	}
@@ -75,8 +77,21 @@ func (o SemanticOperation) Validate() error {
 		if v.Type().Field(n).Tag.Get("operation") != string(o.Kind) {
 			return invalid("operation: discriminant mismatch")
 		}
+		payload := f
+		if !resolved && o.Kind != OperationSpan {
+			request := f.Elem().FieldByName("RequestID")
+			if !request.IsValid() || request.Kind() != reflect.String || request.String() != "" {
+				return invalid("operation: caller request identity forbidden")
+			}
+			// Validate the rest of the intent without changing the submitted
+			// event. This private placeholder is never hashed, stored or used
+			// as a receipt identity; ingest derives the real ID after resolution.
+			payload = reflect.New(f.Elem().Type())
+			payload.Elem().Set(f.Elem())
+			payload.Elem().FieldByName("RequestID").SetString("validation-only")
+		}
 		if len(o.References) == 0 {
-			if err := f.Interface().(interface{ Validate() error }).Validate(); err != nil {
+			if err := payload.Interface().(interface{ Validate() error }).Validate(); err != nil {
 				return err
 			}
 		}
