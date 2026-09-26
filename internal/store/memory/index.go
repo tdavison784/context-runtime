@@ -49,50 +49,51 @@ func iterFirst[V any](seq iter.Seq[V]) (V, bool) {
 	return zero, false
 }
 
-// liveIndex is a multimap from a key to the IDs of live items, seen through
-// a transaction. Unlike index it supports removal (an item stops being live
-// when it is superseded or classified a duplicate): the overlay records
-// additions and tombstones, and commit applies both.
-type liveIndex[K comparable] struct {
-	base map[K]map[string]bool
-	over map[K]map[string]bool // true adds, false removes; nil when read-only
+// liveIndex is a multimap from a key to a set of values (usually the IDs of
+// live items), seen through a transaction. Unlike index it supports
+// removal (an item stops being live when it is superseded or classified a
+// duplicate): the overlay records additions and tombstones, and commit
+// applies both.
+type liveIndex[K, V comparable] struct {
+	base map[K]map[V]bool
+	over map[K]map[V]bool // true adds, false removes; nil when read-only
 }
 
-func newLiveIndex[K comparable](base map[K]map[string]bool, writable bool) liveIndex[K] {
-	x := liveIndex[K]{base: base}
+func newLiveIndex[K, V comparable](base map[K]map[V]bool, writable bool) liveIndex[K, V] {
+	x := liveIndex[K, V]{base: base}
 	if writable {
-		x.over = map[K]map[string]bool{}
+		x.over = map[K]map[V]bool{}
 	}
 	return x
 }
 
-func (x *liveIndex[K]) set(k K, id string, live bool) {
+func (x *liveIndex[K, V]) set(k K, v V, live bool) {
 	m := x.over[k]
 	if m == nil {
-		m = map[string]bool{}
+		m = map[V]bool{}
 		x.over[k] = m
 	}
-	m[id] = live
+	m[v] = live
 }
 
-func (x *liveIndex[K]) add(k K, id string)    { x.set(k, id, true) }
-func (x *liveIndex[K]) remove(k K, id string) { x.set(k, id, false) }
+func (x *liveIndex[K, V]) add(k K, v V)    { x.set(k, v, true) }
+func (x *liveIndex[K, V]) remove(k K, v V) { x.set(k, v, false) }
 
-// lookup yields the live IDs under k in no particular order.
-func (x *liveIndex[K]) lookup(k K) iter.Seq[string] {
-	return func(yield func(string) bool) {
+// lookup yields the live values under k in no particular order.
+func (x *liveIndex[K, V]) lookup(k K) iter.Seq[V] {
+	return func(yield func(V) bool) {
 		over := x.over[k]
-		for id := range x.base[k] {
-			if live, ok := over[id]; ok && !live {
+		for v := range x.base[k] {
+			if live, ok := over[v]; ok && !live {
 				continue
 			}
-			if !yield(id) {
+			if !yield(v) {
 				return
 			}
 		}
-		for id, live := range over {
-			if live && !x.base[k][id] {
-				if !yield(id) {
+		for v, live := range over {
+			if live && !x.base[k][v] {
+				if !yield(v) {
 					return
 				}
 			}
@@ -100,16 +101,16 @@ func (x *liveIndex[K]) lookup(k K) iter.Seq[string] {
 	}
 }
 
-func (x *liveIndex[K]) commit() {
+func (x *liveIndex[K, V]) commit() {
 	for k, m := range x.over {
-		for id, live := range m {
+		for v, live := range m {
 			if live {
 				if x.base[k] == nil {
-					x.base[k] = map[string]bool{}
+					x.base[k] = map[V]bool{}
 				}
-				x.base[k][id] = true
+				x.base[k][v] = true
 			} else {
-				delete(x.base[k], id)
+				delete(x.base[k], v)
 			}
 		}
 	}

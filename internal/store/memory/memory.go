@@ -50,6 +50,13 @@ type directiveKey struct {
 	namespace           domain.DirectiveNamespace
 }
 
+// currentIDKey is a current-version identity without its boundary.
+type currentIDKey struct {
+	taskID    string
+	namespace domain.DirectiveNamespace
+	id        string
+}
+
 type obligationKey struct {
 	id      string
 	version uint64
@@ -94,6 +101,11 @@ type state struct {
 	sources     map[sourceKey]map[string]bool    // live
 	refOwners   map[sourceKey][]string
 	itemsByTask map[string][]string // task ID -> item IDs (SPEC-1.3)
+	// Keyed secondary indexes (SPEC-2.1): the boundaries a (task,
+	// namespace, ID) has current-version pointers in, and the obligation
+	// versions bound to each source item.
+	currentIDs   map[currentIDKey]map[domain.AccessBoundary]bool
+	oblsBySource map[string]map[obligationKey]bool
 }
 
 func newState() *state {
@@ -124,6 +136,8 @@ func newState() *state {
 		canonical:    map[canonicalKey]map[string]bool{},
 		working:      map[workingKey]map[string]bool{},
 		sources:      map[sourceKey]map[string]bool{},
+		currentIDs:   map[currentIDKey]map[domain.AccessBoundary]bool{},
+		oblsBySource: map[string]map[obligationKey]bool{},
 		refOwners:    map[sourceKey][]string{},
 		itemsByTask:  map[string][]string{},
 	}

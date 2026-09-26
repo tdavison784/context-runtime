@@ -43,6 +43,8 @@ func (t *tx) commit(st *state) bool {
 	t.canonical.commit()
 	t.working.commit()
 	t.sources.commit()
+	t.currentIDs.commit()
+	t.oblsBySource.commit()
 	t.refOwners.commit()
 	t.itemsByTask.commit()
 	t.relsTo.commit()
@@ -251,6 +253,7 @@ func (t *tx) SetCurrentVersion(itemID string) error {
 		return fmt.Errorf("item %s: %w", itemID, err)
 	}
 	t.directives.put(directiveKey{key.TaskID, key.ID, key.Access, key.Namespace}, itemID)
+	t.currentIDs.add(currentIDKey{key.TaskID, key.Namespace, key.ID}, key.Access)
 	t.markSemantic()
 	return nil
 }
@@ -291,6 +294,7 @@ func (t *tx) InsertObligationVersion(o domain.ObligationVersion) error {
 	}
 	t.obligations.put(obligationKey{o.ObligationID, o.Version}, o)
 	t.latest.put(o.ObligationID, o.Version)
+	t.oblsBySource.add(o.SourceItemID, obligationKey{o.ObligationID, o.Version})
 	t.markSequenced()
 	return nil
 }
