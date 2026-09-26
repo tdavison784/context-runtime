@@ -38,6 +38,8 @@ type semState struct {
 	runs         map[string]domain.ObservationRun
 	observations map[string]domain.ObservationRecord
 	subjects     map[string]domain.SubjectState
+	coverages    map[string]domain.CoverageRecord
+	members      map[string][]domain.CoverageMember
 }
 
 func newSemState() *semState {
@@ -49,7 +51,8 @@ func newSemState() *semState {
 		resStates: map[string]domain.ResourceState{}, resUpdates: map[string]domain.ResourceUpdate{},
 		pathStates: map[string]domain.ResourcePathState{}, wsBindings: map[domain.WorkspaceBindingRef]domain.WorkspaceBinding{},
 		runs: map[string]domain.ObservationRun{}, observations: map[string]domain.ObservationRecord{},
-		subjects: map[string]domain.SubjectState{},
+		subjects: map[string]domain.SubjectState{}, coverages: map[string]domain.CoverageRecord{},
+		members: map[string][]domain.CoverageMember{},
 	}
 }
 
@@ -61,6 +64,7 @@ func (s *semState) clone() *semState {
 		details: cloneMap(s.details), resBindings: cloneMap(s.resBindings), resStates: cloneMap(s.resStates),
 		resUpdates: cloneMap(s.resUpdates), pathStates: cloneMap(s.pathStates), wsBindings: cloneMap(s.wsBindings),
 		runs: cloneMap(s.runs), observations: cloneMap(s.observations), subjects: cloneMap(s.subjects),
+		coverages: cloneMap(s.coverages), members: cloneMap(s.members),
 	}
 }
 
@@ -78,6 +82,11 @@ func (s *semState) checkCommit() error {
 	for _, p := range s.proofs {
 		if _, ok := s.details[p.TransitionID]; !ok {
 			return domain.ErrDanglingRelationship
+		}
+		if p.EvidenceCoverageID != "" {
+			if c, ok := s.coverages[p.EvidenceCoverageID]; !ok || c.Purpose != domain.CoverageEvidenceSupport {
+				return domain.ErrDanglingRelationship
+			}
 		}
 	}
 	return nil
@@ -879,6 +888,57 @@ func (b *semBackend) InsertObservation(o domain.ObservationRecord) error {
 			return domain.ErrInvalidRecord
 		}
 		b.st.observations[o.ID] = o
+		return nil
+	})
+}
+
+// --- coverage ---
+
+func (b *semBackend) Coverage(id string) (domain.CoverageRecord, error) {
+	c, ok := b.st.coverages[id]
+	if !ok {
+		return domain.CoverageRecord{}, domain.ErrNotFound
+	}
+	return c, nil
+}
+
+func (b *semBackend) CoverageMembers(id string, p store.Page) (store.ResultPage[domain.CoverageMember], error) {
+	var out []domain.CoverageMember
+	for _, m := range b.st.members[id] {
+		out = append(out, m.Clone())
+	}
+	return page(out, func(m domain.CoverageMember) store.Cursor { return store.Cursor{Seq: m.Seq, ID: m.ID} }, p)
+}
+
+func (b *semBackend) InsertCoverage(c domain.CoverageRecord, members []domain.CoverageMember) error {
+	return b.write(&c.SemanticMeta, func() error {
+		if err := c.Validate(); err != nil {
+			return err
+		}
+		if _, ok := b.st.coverages[c.ID]; ok {
+			return domain.ErrImmutable
+		}
+		sig, err := domain.CoverageSignature(c, members)
+		if err != nil || sig != c.Signature {
+			return domain.ErrInvalidRecord
+		}
+		for _, m := range members {
+			if k, _ := m.Key(); m.ID != k {
+				return domain.ErrInvalidRecord
+			}
+			if m.Source != nil {
+				it, err := b.rtx.Item(m.Source.ItemID)
+				if err != nil || it.ContentHash != m.Source.ContentHash {
+					return domain.ErrDanglingRelationship
+				}
+			}
+		}
+		b.st.coverages[c.ID] = c
+		cp := make([]domain.CoverageMember, len(members))
+		for i, m := range members {
+			cp[i] = m.Clone()
+		}
+		b.st.members[c.ID] = cp
 		return nil
 	})
 }

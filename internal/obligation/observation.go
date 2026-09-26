@@ -186,5 +186,8 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 	if err := s.deriveState(tx, sem, actor, obs, run, seq); err != nil {
 		return domain.ObservationRecord{}, w.fail(err)
 	}
+	if err := s.evaluate(tx, sem, actor, obs, run); err != nil {
+		return domain.ObservationRecord{}, w.fail(err)
+	}
 	return obs, nil
 }

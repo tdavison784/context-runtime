@@ -123,3 +123,10 @@ func seedResourceState(t *testing.T, st store.Store, resourceID string, rev uint
 		return err
 	})
 }
+
+// seedItemTx builds a Pinned directive item for insertion in tx.
+func seedItemTx(tx store.Tx, id, dirID string, a domain.Authority, text string) domain.ContextItem {
+	it := storetest.NewDirective(testSession, id, dirID, tx.NextSeq(), text)
+	it.Authority = a
+	return it
+}
