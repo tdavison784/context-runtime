@@ -30,7 +30,9 @@ func TestAnonymousOccurrencesNeverAlias(t *testing.T) {
 			before := f.snapshot()
 			r, err := ingest()
 			if err != nil {
-				if !errors.Is(err, domain.ErrImmutable) && err != domain.ErrEventIDConflict {
+				// A reserved internal ID prefix is rejected up front
+				// (R20.1); anything reaching the store is a conflict.
+				if !errors.Is(err, domain.ErrImmutable) && err != domain.ErrEventIDConflict && err != domain.ErrInvalidRecord {
 					t.Errorf("%s: unexpected error %v", name, err)
 				}
 				if after := f.snapshot(); !reflect.DeepEqual(before, after) {
