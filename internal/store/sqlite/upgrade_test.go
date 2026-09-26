@@ -545,3 +545,34 @@ func TestUpgradePhase3RowFields(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeGrantTargetIndex checks migration 0021's backfill of the exact
+// grant index from grants an earlier binary stored: a legacy occurrence
+// grant is found for its item, and a legacy stable-ID obligation grant never
+// names an exact obligation version (P3-5/41).
+func TestUpgradeGrantTargetIndex(t *testing.T) {
+	l := openLegacy(t, 20)
+	item := storetest.NewGrant("s", "g-item", 1, "i1")
+	obl := storetest.NewGrant("s", "g-obl", 2, "o1")
+	obl.Action = domain.ActionAssertObligation
+	l.insert("grant", item, nil)
+	l.insert("grant", obl, nil)
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gs, err := r.GrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i1"), 5)
+		if err != nil || len(gs) != 1 || gs[0].ID != "g-item" {
+			t.Errorf("GrantsFor(resolve, i1) = %v, %v; want the legacy occurrence grant", gs, err)
+		}
+		gs, err = r.GrantsFor(domain.ActionAssertObligation, domain.ObligationGrantTarget("s", "o1", 1), 5)
+		if err != nil || len(gs) != 0 {
+			t.Errorf("GrantsFor(assert, o1 v1) = %v, %v; a stable-ID grant must stay inert", gs, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

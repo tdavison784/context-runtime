@@ -229,7 +229,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 
 func openTemp(t *testing.T) (*Store, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "state.db")
+	path := freshPath(t)
 	s, err := Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -282,6 +282,7 @@ var committedMigrations = map[string]string{
 	"0018_phase3_row_fields.sql":           "5a3fa32221c30d3a6f0f250ac57d4d017049ccd9d5176ff68dda72310e827817",
 	"0019_command_execution_result.sql":    "1acd85fe8876b64c211fc842a7bb3af8c841773685b4471a9e0359ad4679d96d",
 	"0020_phase3_membership.sql":           "58d3ea7d924fdc784d8b1cc5ee0feb9b4b9a9f149b9f4159ada8d368266d6d83",
+	"0021_phase3_declarations.sql":         "2e1b287ab04010fd28fa38494d0f5ce6d3f51e858979da59fc8e2b55bd89e0d7",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {
