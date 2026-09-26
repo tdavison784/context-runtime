@@ -37,6 +37,10 @@ func (f *membershipFaultWriter) InsertLogicalExchange(x domain.LogicalExchange) 
 	return f.after(f.SemanticTx.InsertLogicalExchange(x))
 }
 
+func (f *membershipFaultWriter) InsertExchangeMember(m domain.ExchangeMember) error {
+	return f.after(f.SemanticTx.InsertExchangeMember(m))
+}
+
 func (f *membershipFaultWriter) PutConversationMembership(s domain.ConversationMembershipState, revision uint64) (domain.ConversationMembershipState, error) {
 	got, err := f.SemanticTx.PutConversationMembership(s, revision)
 	return got, f.after(err)
