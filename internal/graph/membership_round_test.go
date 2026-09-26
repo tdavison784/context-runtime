@@ -56,12 +56,13 @@ type membershipRound struct {
 // registerMembershipRound registers one exchange whose output issued a tool
 // call. withResult controls whether that call's result is registered.
 func registerMembershipRound(tx store.Tx, service *MembershipService, actor domain.Principal, intent domain.RegisterExchangeIntent, n string, withResult bool) (r membershipRound, err error) {
-	intent.RequestID = "register-" + n
+	sem, _ := store.Semantic(tx)
+	state, _ := sem.ConversationMembership(domain.ConversationIDFor(intent.Principal.TaskID, intent.Principal.AgentID))
+	intent.RequestID, intent.ExpectedMembershipRevision = "register-"+n, state.Revision
 	registered, err := service.RegisterExchange(tx, actor, intent)
 	if err != nil {
 		return r, err
 	}
-	sem, _ := store.Semantic(tx)
 	if r.x, err = sem.LogicalExchange(registered.IDs[0]); err != nil {
 		return r, err
 	}
@@ -90,4 +91,35 @@ func registerMembershipRound(tx store.Tx, service *MembershipService, actor doma
 	}
 	r.x, err = sem.LogicalExchange(r.x.ID)
 	return r, err
+}
+
+// consumeMembershipRound admits and acknowledges r with a later completed
+// inference, returning that call and its generation manifest.
+func consumeMembershipRound(tx store.Tx, service *MembershipService, actor domain.Principal, r membershipRound, callID string, sources ...domain.ItemContentRef) (domain.CallRecord, domain.AdmissionManifest, error) {
+	sem, _ := store.Semantic(tx)
+	call, err := tx.Call(callID)
+	if err != nil {
+		if call, err = membershipCall(tx, r.x, callID); err != nil {
+			return call, domain.AdmissionManifest{}, err
+		}
+	}
+	if len(sources) == 0 {
+		sources = []domain.ItemContentRef{storetest.ContentRef(r.toolResult)}
+	}
+	coverage, err := service.RecordAdmissionCoverage(tx, actor, r.x.Principal, "input-"+callID, sources)
+	if err != nil {
+		return call, domain.AdmissionManifest{}, err
+	}
+	state, _ := sem.ConversationMembership(r.x.ConversationID)
+	admitted, err := service.AdmitExchange(tx, actor, domain.AdmitExchangeIntent{RequestID: "admit-" + callID, ExchangeID: r.x.ID, CoverageID: coverage.ID, CallID: callID, Purpose: domain.AdmissionGenerationInput, ExpectedMembershipRevision: state.Revision})
+	if err != nil {
+		return call, domain.AdmissionManifest{}, err
+	}
+	manifest, err := sem.AdmissionManifest(admitted.IDs[0])
+	if err != nil {
+		return call, manifest, err
+	}
+	x, _ := sem.LogicalExchange(r.x.ID)
+	_, err = service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack-" + callID, ExchangeID: x.ID, ManifestID: manifest.ID, ConsumingCallID: callID, ExpectedRevision: x.Revision})
+	return call, manifest, err
 }
