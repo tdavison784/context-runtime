@@ -21,6 +21,24 @@ func verifyItemContent(v domain.ContextItem) error {
 	return nil
 }
 
+// Caps on the per-transaction item cache (SPEC-4.1): two maximum-size
+// spans' transcripts, and a bounded number of entries.
+const (
+	itemCacheMaxBytes   = 16 << 20
+	itemCacheMaxEntries = 1024
+)
+
+// itemCacheFootprint reports the cache's entry count and text bytes.
+func (t *transaction) itemCacheFootprint() (entries, bytes int) {
+	for _, v := range t.itemCache {
+		entries++
+		for _, p := range v.Parts {
+			bytes += len(p.Text)
+		}
+	}
+	return entries, bytes
+}
+
 func (t *transaction) Item(id string) (domain.ContextItem, error) {
 	if v, ok := t.itemCache[id]; ok {
 		return v.Clone(), nil
