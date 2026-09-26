@@ -1,6 +1,10 @@
 package domain
 
-import "slices"
+import (
+	"slices"
+	"unicode"
+	"unicode/utf8"
+)
 
 // EventKind is the trusted envelope kind of an ingestion event (D15, D18,
 // M2). The embedding API sets it from the authenticated caller, never from
@@ -66,6 +70,9 @@ func (s Span) Validate() error {
 	}
 	if err := s.Access.Validate(); err != nil {
 		return err
+	}
+	if !ownerIDsBounded(s.Access.SessionID, s.Access.WorkflowID, s.Access.TaskID, s.Access.AgentID) {
+		return invalid("span: access boundary owner ID too long")
 	}
 	if s.DirectiveCapable && !s.Authority.CanHoldLifecycleAuthority() {
 		return invalid("span: authority cannot be directive-capable")
@@ -150,7 +157,7 @@ func (e Event) Validate() error {
 // span can narrow but never escape p's ownership. A turn-opening event needs
 // p's task.
 func (e Event) ValidateFor(p Principal, limits Limits) error {
-	if err := p.Validate(); err != nil {
+	if err := validateIngestPrincipal(p); err != nil {
 		return err
 	}
 	if err := limits.Validate(); err != nil {
@@ -268,7 +275,7 @@ func (e Event) PayloadHash(p Principal) (string, error) {
 	if err := e.Validate(); err != nil {
 		return "", err
 	}
-	if err := p.Validate(); err != nil {
+	if err := validateIngestPrincipal(p); err != nil {
 		return "", err
 	}
 	c := NewCanonicalEncoder("context-runtime/ingest-payload/v2")
@@ -308,8 +315,63 @@ func (s SourceRef) Validate() error {
 	if s.Locator == "" {
 		return invalid("source: locator is required")
 	}
+	if len(s.Locator) > MaxLocatorBytes || !displaySafe(s.Locator) {
+		return invalid("source: locator too long or not display-safe UTF-8")
+	}
+	if len(s.ToolCallID) > MaxToolCallIDBytes || !printableASCII(s.ToolCallID, false) {
+		return invalid("source: tool call ID too long or not printable ASCII")
+	}
 	if s.ContentHash != "" && !ValidHash(s.ContentHash) {
 		return invalid("source: invalid content hash")
 	}
 	return nil
+}
+
+// validateIngestPrincipal checks p and bounds its owner IDs (SEC-1.4); the
+// principal is hashed into the payload identity and copied into records.
+func validateIngestPrincipal(p Principal) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if !ownerIDsBounded(p.SessionID, p.WorkflowID, p.TaskID, p.AgentID) {
+		return invalid("principal: owner ID too long")
+	}
+	return nil
+}
+
+func ownerIDsBounded(ids ...string) bool {
+	for _, id := range ids {
+		if len(id) > MaxOwnerIDBytes {
+			return false
+		}
+	}
+	return true
+}
+
+// printableASCII reports whether s is ASCII 0x21-0x7E, plus SP when
+// allowSpace.
+func printableASCII(s string, allowSpace bool) bool {
+	for i := range len(s) {
+		c := s[i]
+		if (c < 0x21 || c > 0x7e) && !(allowSpace && c == ' ') {
+			return false
+		}
+	}
+	return true
+}
+
+// displaySafe reports whether s is valid UTF-8 with no control characters
+// (C0, DEL, C1) and no bidirectional formatting characters, so a locator
+// cannot inject line breaks, terminal escapes, or reordered text into logs,
+// diagnostics, or rendered context.
+func displaySafe(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+			return false
+		}
+	}
+	return true
 }
