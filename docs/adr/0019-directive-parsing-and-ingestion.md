@@ -720,3 +720,135 @@ Owner: `internal/domain`/root package (alias scope), `internal/store`
   contracts: any future directive section or lifecycle word requires a
   table/vocabulary update plus a new parser version, not an ad hoc
   addition inside `internal/ingest`.
+
+## Tests that lock the behavior
+
+Required, not yet written except where a package/file is named; `p2-tests`
+reconciles exact names in a later round.
+
+- **§1 (lifecycle commands):** `internal/ingest` — an unauthorized source
+  actor's Resolve/Unpin aborts the whole event (no partial mutation); an
+  unknown/inaccessible/ambiguous target produces the expected diagnostic
+  without aborting; a resolved, authorized command is recorded
+  `PARSED_NOT_EXECUTED` and changes no goal/pin/obligation state. Trace
+  T06's parse/authorization half, both stores.
+- **§2 (classification):** `internal/policy` — table-driven unit tests per
+  (event/span type, section) → defaults; `internal/ingest` — a surface
+  token (`MUST`, `PASS`, a JSON role label) in ordinary text creates no
+  privileged record; an unsupported event variant is rejected.
+- **§3 (bytes/hashes):** `internal/store/storetest` — a common byte
+  round-trip case across memory and SQLite for invalid UTF-8, a lone CR,
+  and a leading BOM, asserting `ContentHash` identity survives a restart;
+  a dedicated SQLite regression for the fixed lossy encoding (R8, its own
+  commit).
+- **§4 (grammar):** `internal/directive` fuzz tests (seed corpus
+  committed) for panics, O(n) time, offsets-in-bounds, round-trip
+  invariants, and capability gating; `testdata/directives/` canonical
+  examples including the SDD's own worked example, golden-JSON expected
+  items/diagnostics; targeted unit tests for each D5/D6/D7 boundary case
+  (short fence closer, comment-wrapped keyword, deeper non-keyword
+  heading, trailing-whitespace-significant item, invalid `[id]` dropped
+  not salvaged).
+- **§5 (transcript/derived items, isolation):** `internal/ingest` —
+  exactly one transcript item per span plus expected directive items,
+  `DERIVED_FROM` coverage naming the transcript item; a trusted heading
+  fragment split across two spans creates no directive; a fence opened in
+  one span and closed in another creates no suppression; an
+  image/document part interrupts text parsing. Trace T18 end-to-end on
+  both stores.
+- **§6 (derived vs. explicit IDs):** `internal/directive` — an explicit
+  `[id]` with derived-ID shape is dropped with `ErrMalformedDirective`,
+  never silently reassigned a derived ID.
+- **§7 (dedup/replacement/Working):** `internal/graph` — a duplicate
+  directive never resolves as current by literal ID (closing the review's
+  reproduced hole); `internal/store/storetest` — cross-turn/cross-TTL-origin
+  items are never deduplicated as stand-ins; `internal/graph` —
+  `W1={a,b}→W2={a}` correctly retires `b`; identical-snapshot,
+  partial-overlap, repeated-explicit-ID, mixed-boundary, and
+  multiple-Working-sections-in-one-event cases; two retirements of the
+  same old target in one event do not collide on audit ID.
+- **§8 (attributes/TTL/scope):** `internal/policy`/`internal/directive` —
+  exact-case attribute/scope rejection; `ttl=0001` accepted (leading
+  zeros); a `ttl` value above 2147483647 fails event validation with the
+  representation-limit error, not a silent ignore; USER-span
+  WORKFLOW/SESSION widening ignored with a diagnostic; AGENT scope never
+  removes an existing task/workflow constraint.
+- **§9 (obligations):** `internal/graph`/`internal/domain` — a Pinned
+  `obligation=` declaration creates an UNRESOLVED version bound to its
+  source; replacing the pin retires the old obligation version in the
+  same transaction and starts a fresh UNRESOLVED version only if the new
+  source redeclares one; dropping `obligation=` on replacement retires
+  without creating a replacement. Trace T02's obligation half.
+- **§10 (idempotency/receipts):** `internal/store/storetest` — a repeated
+  identical `EventID`/payload returns the *original* receipt even after an
+  intervening lifecycle mutation or policy-version upgrade; a conflicting
+  payload/principal fails `ErrEventIDConflict`; anonymous (no-`EventID`)
+  events remain isolated from each other under an empty key;
+  `internal/ingest` — the transaction-scoped core never re-enters
+  `Store.Update`/`View` (a deadlock regression test against SQLite
+  specifically). Trace T10.
+- **§11 (authority/actor):** `internal/ingest` — a SYSTEM-carried USER
+  span's Resolve executes (once Phase 3 lands) at USER authority, never
+  SYSTEM; directive-capable marking on an AGENT/TOOL/RETRIEVED_CONTENT
+  span rejects the event; an inaccessible target lookup returns bare
+  `ErrNotFound`.
+- **§12 (diagnostics):** `internal/store/storetest` — a diagnostic is
+  unreadable by a principal outside its source's access boundary;
+  migration/rollback/restart/replay coverage; the 256-plus-one truncation
+  marker is stable and stored.
+- **§13 (limits):** `internal/directive` fuzz/benchmark — a pathological
+  many-small-spans input is bounded in total work, not just per-span; an
+  oversized event is rejected wholesale with no partial state change.
+- **§14 (turns):** `internal/domain`/`internal/ingest` — an
+  AGENT/TOOL/RETRIEVED_CONTENT payload cannot advance a turn; a first
+  task-bound event creates Turn=0→1 correctly; a TURN-scoped item expires
+  on the next turn even with a larger `ttl`; an exact retry never
+  re-advances the turn. Trace T03/T10.
+- **§15 (blobs):** `internal/ingest` — a blob hash reference not already
+  referenced by an accessible item in-session is rejected, requiring bytes
+  instead; missing and inaccessible references are indistinguishable.
+- **§16 (references):** `internal/ingest` — a References item lexically
+  matches an accessible same-session target and links deterministically;
+  an inaccessible target is indistinguishable from absent; a Phase 2 TOOL
+  span's `ToolCallID` lands only in `SourceRef`, with no edge created.
+- **§17 (namespace):** `internal/store/storetest` — `agent.status` is
+  accepted as a legal directive ID string and does not collide with a
+  keyed agent-write namespace entry, both stores; `internal/graph` —
+  `ResolveLifecycleTarget` never resolves an `AGENT_KEY`-namespace entry as
+  a directive target.
+- **§18 (relationship input):** `internal/ingest` — an event carrying an
+  arbitrary/unsupported explicit relationship field is rejected wholesale;
+  relationship-shaped JSON inside tool text produces no edge.
+- **§19 (API shape):** static/import-boundary check — the root package
+  aliases only `Event`/`Span`, not `IngestResult`; `internal/store/storetest`
+  — an upgrade/restart parity fixture for a pre-Phase-2 record read after
+  the new migrations land.
+- **Cross-cutting (decision-review gate additions):** every path above run
+  under `-race` where concurrent ingestion applies; injection-resistance
+  tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
+  injection, pasted-document directives, tool-based escalation, authority
+  downgrade, cross-authority supersession/dedup, cross-session/cross-task
+  lookup, fenced/quoted/comment smuggling, Unicode look-alike keywords,
+  CRLF/BOM tricks, over-long IDs, attribute injection).
+
+## Open questions
+
+- Whether the classification table (§2/M2) needs its own version number
+  independent of the parser version, once Phase 3 adds sections the table
+  doesn't yet cover.
+- Whether the References lexical identity rule (§16) needs a configurable
+  base-directory/namespace policy beyond the default this ADR assumes,
+  once multi-repository sessions exist.
+- Whether `MutationGrant`'s exact-target-ID matching (ADR 16) is
+  expressive enough once Phase 3's matcher registry needs a grant scoped
+  to "any target satisfying obligation claim X," which would touch §9's
+  obligation identity here.
+- Whether the SDD §8 `Runtime.Ingest` signature amendment (§19, deferred
+  to Phase 5 by R3) should be drafted now as a proposed-but-unapplied
+  amendment, so Phase 5 doesn't have to rediscover the shape Phase 2's
+  internal `IngestResult` already settled.
+- Whether `graph.Supersede`'s per-event audit-ID collision (§7,
+  Consequences) should be fixed by versioning the audit identity or by
+  restructuring the planned edge set to guarantee at most one retirement
+  of a given old target per event; `p2-graph` decides the mechanism, this
+  ADR only requires the collision not occur.
