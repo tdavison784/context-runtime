@@ -68,10 +68,12 @@ var suite = []testCase{
 	// Semantic state.
 	{"ItemRichRoundTrip", testItemRichRoundTrip},
 	{"ItemInsertRules", testItemInsertRules},
+	{"ItemBlobIntegrity", testItemBlobIntegrity},
 	{"ItemsFilterOrder", testItemsFilterOrder},
 	{"UpdateItem", testUpdateItem},
 	{"GoalLifecycle", testGoalLifecycle},
 	{"Relationships", testRelationships},
+	{"RelationshipFilters", testRelationshipFilters},
 	{"SupersessionAcyclic", testSupersessionAcyclic},
 	{"Events", testEvents},
 	{"Blobs", testBlobs},
@@ -85,6 +87,8 @@ var suite = []testCase{
 	{"LifecycleEvents", testLifecycleEvents},
 	{"Conversations", testConversations},
 	{"Calls", testCalls},
+	{"CallReservation", testCallReservation},
+	{"CallEvidence", testCallEvidence},
 	{"CallAttempts", testCallAttempts},
 }
 
@@ -121,6 +125,9 @@ func noErr(t *testing.T, err error) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// errOf returns the error of a two-result call.
+func errOf[T any](_ T, err error) error { return err }
 
 // seqs allocates n sequence numbers.
 func seqs(tx store.Tx, n int) []uint64 {

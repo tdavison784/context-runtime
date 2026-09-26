@@ -22,17 +22,18 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		grant domain.MutationGrant
 		call  domain.CallRecord
 	}
+	// fresh returns the records as stored after the first transaction; the
+	// obligation reflects transition t.
 	fresh := func() fixture {
+		// The call is completed through one attempt sent at seq 4.
 		call := NewCall(sessA, "call", "conv", 1)
-		call.State, call.FinishedSeq = domain.CallCompleted, 2
+		call.Attempts, call.Revision = 1, 3
+		call = Finish(call, domain.CallCompleted, 5)
 		in := int64(10)
-		call.Outcome = &domain.CallOutcome{
-			State:    domain.CallCompleted,
-			Response: []byte("response"),
-			Usage:    []domain.UsageIteration{{Iteration: 1, InputTokens: &in}},
-		}
+		call.Outcome.Usage = []domain.UsageIteration{{Iteration: 1, InputTokens: &in}}
+		call.OutcomeHash = call.Outcome.OutcomeHash()
 		obl := NewObligation(sessA, "o", 1, 1, "rich")
-		obl.EvidenceIDs = []string{"ev"}
+		obl.Status, obl.EvidenceIDs, obl.Revision = domain.ObligationSatisfied, []string{"ev-t"}, 2
 		rel := NewRelationship(sessA, "r", domain.RelDerivedFrom, "rich", "plain", 2)
 		rel.Coverage = &domain.Coverage{ConversationID: "conv", FromSeq: 1, ToSeq: 2}
 		return fixture{
@@ -41,7 +42,7 @@ func testDeepCopies(t *testing.T, s store.Store) {
 			event: NewEvent(sessA, "e", 1, "p"),
 			blob:  NewBlob(sessA, []byte("bytes")),
 			obl:   obl,
-			tr:    NewTransition(sessA, "t", "o", 1, 2, domain.ObligationUnresolved, domain.ObligationBlocked),
+			tr:    NewTransition(sessA, "t", "o", 1, 2, domain.ObligationUnresolved, domain.ObligationSatisfied),
 			grant: NewGrant(sessA, "g", 1, "rich"),
 			call:  call,
 		}
@@ -110,18 +111,31 @@ func testDeepCopies(t *testing.T, s store.Store) {
 	}
 
 	update(t, s, sessA, func(tx store.Tx) error {
-		seqs(tx, 2)
+		seqs(tx, 5)
 		f := fresh()
+		noErr(t, tx.InsertBlob(richBlob(sessA)))
 		noErr(t, tx.InsertItem(f.item))
 		noErr(t, tx.InsertItem(NewItem(sessA, "plain", 2, "plain")))
 		noErr(t, tx.InsertRelationship(f.rel))
 		_, _, err := tx.InsertEvent(f.event)
 		noErr(t, err)
 		noErr(t, tx.InsertBlob(f.blob))
-		noErr(t, tx.InsertObligationVersion(f.obl))
-		noErr(t, tx.AppendObligationTransition(f.tr))
+		obl := NewObligation(sessA, "o", 1, 1, "rich")
+		noErr(t, tx.InsertObligationVersion(obl))
+		obl.Matcher.Name = "scribbled"
+		applied, err := tx.AppendObligationTransition(f.tr, 1)
+		noErr(t, err)
+		applied.EvidenceIDs[0] = "scribbled"
 		noErr(t, tx.InsertGrant(f.grant))
-		noErr(t, tx.InsertCall(f.call))
+		noErr(t, tx.InsertCall(NewCall(sessA, "call", "conv", 1)))
+		noErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call", 1, 4)))
+		sent := NewCall(sessA, "call", "conv", 1)
+		sent.State, sent.Attempts = domain.CallSent, 1
+		_, err = tx.UpdateCall(sent, 1)
+		noErr(t, err)
+		noErr(t, tx.PutCallAttempt(CloseAttempt(NewAttempt(sessA, "call", 1, 4), domain.AttemptCompleted, f.call.OutcomeHash, 5)))
+		_, err = tx.UpdateCall(f.call, 2)
+		noErr(t, err)
 
 		scribble(&f)
 		check(t, tx, "after mutating inserted records")
@@ -136,22 +150,22 @@ func testDeepCopies(t *testing.T, s store.Store) {
 			t.Errorf("repeated InsertEvent existed = false")
 		}
 		stored.ItemIDs[0] = "scribbled"
-		it, err := tx.UpdateItem("rich", 1, domain.ItemChange{})
+		it, err := tx.UpdateItem("rich", 1, domain.ItemChange{}, NewItemEvent(sessA, "l", 3, "rich"))
 		noErr(t, err)
 		it.Tags[0] = "scribbled"
 		it.Parts[0].Text = "scribbled"
-		ov, err := tx.UpdateObligationVersion(fresh().obl, 1)
+		ov, err := tx.UpdateObligationVersion(fresh().obl, 2)
 		noErr(t, err)
 		ov.EvidenceIDs[0] = "scribbled"
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		out := read(t, tx)
-		if out.item.Version != 2 || out.obl.Revision != 2 {
-			t.Fatalf("versions = (item %d, obligation revision %d), want (2, 2)", out.item.Version, out.obl.Revision)
+		if out.item.Version != 2 || out.obl.Revision != 3 {
+			t.Fatalf("versions = (item %d, obligation revision %d), want (2, 3)", out.item.Version, out.obl.Revision)
 		}
 		want := fresh()
-		want.item.Version, want.obl.Revision = 2, 2
+		want.item.Version, want.obl.Revision = 2, 3
 		scribble(&out)
 		got := read(t, tx)
 		assertEqual(t, "item after mutating a committed read", got.item, want.item)

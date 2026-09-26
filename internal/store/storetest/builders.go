@@ -165,7 +165,13 @@ func NewTask(sess, taskID string) domain.TaskState {
 	}
 }
 
-// NewLifecycleEvent returns a valid lifecycle event on an item.
+// NewItemEvent returns a valid lifecycle event for a change to item itemID,
+// as UpdateItem requires.
+func NewItemEvent(sess, id string, seq uint64, itemID string) domain.LifecycleEvent {
+	return NewLifecycleEvent(sess, id, seq, domain.TargetItem, itemID)
+}
+
+// NewLifecycleEvent returns a valid lifecycle event.
 func NewLifecycleEvent(sess, id string, seq uint64, kind domain.TargetKind, target string) domain.LifecycleEvent {
 	return domain.LifecycleEvent{
 		ID:         id,
@@ -193,10 +199,11 @@ func NewConversation(sess, id string) domain.Conversation {
 	}
 }
 
-// NewCall returns a valid PREPARED inference call at Revision 1.
+// NewCall returns a valid PREPARED inference call at Revision 1 with a
+// matching ProposalHash. Tests that change a frozen field call Reseal.
 func NewCall(sess, callID, conversationID string, preparedSeq uint64) domain.CallRecord {
 	req := []byte("request " + callID)
-	return domain.CallRecord{
+	return Reseal(domain.CallRecord{
 		CallID:                  callID,
 		SessionID:               sess,
 		ConversationID:          conversationID,
@@ -213,7 +220,54 @@ func NewCall(sess, callID, conversationID string, preparedSeq uint64) domain.Cal
 		ManifestHash:            domain.HashBytes([]byte("manifest")),
 		PreparedSeq:             preparedSeq,
 		Revision:                1,
+	})
+}
+
+// Reseal recomputes a call's ProposalHash after its frozen fields changed.
+func Reseal(c domain.CallRecord) domain.CallRecord {
+	c.ProposalHash = domain.CallProposalHash(c)
+	return c
+}
+
+// NewOutcome returns the outcome of c's latest attempt in state
+// (COMPLETED or FAILED).
+func NewOutcome(c domain.CallRecord, state domain.CallState, retryable bool) domain.CallOutcome {
+	o := domain.CallOutcome{Attempt: c.Attempts, State: state, Retryable: retryable}
+	if state == domain.CallCompleted {
+		o.Response = []byte("response " + c.CallID)
+		o.ResponseHash = domain.HashBytes(o.Response)
+	} else {
+		o.FailureReason = "failure " + c.CallID
 	}
+	return o
+}
+
+// Finish returns c in terminal state at finishedSeq carrying the evidence
+// CallRecord.Validate requires: COMPLETED and FAILED (after an attempt)
+// get the latest attempt's outcome; an unsent FAILED call and an ABANDONED
+// call get a reason instead.
+func Finish(c domain.CallRecord, state domain.CallState, finishedSeq uint64) domain.CallRecord {
+	c = c.Clone()
+	c.State, c.FinishedSeq = state, finishedSeq
+	c.Outcome, c.OutcomeHash, c.Reason = nil, "", ""
+	switch {
+	case state == domain.CallAbandoned, state == domain.CallFailed && c.Attempts == 0:
+		c.Reason = "reason " + c.CallID
+	default:
+		o := NewOutcome(c, state, false)
+		c.Outcome, c.OutcomeHash = &o, o.OutcomeHash()
+	}
+	return c
+}
+
+// CloseAttempt returns a closed at finishedSeq in state. COMPLETED and
+// FAILED attempts take outcomeHash; ABANDONED takes none.
+func CloseAttempt(a domain.CallAttempt, state domain.AttemptState, outcomeHash string, finishedSeq uint64) domain.CallAttempt {
+	a.State, a.FinishedSeq, a.FinishedAt = state, finishedSeq, T0.Add(1e9)
+	if state != domain.AttemptAbandoned {
+		a.OutcomeHash = outcomeHash
+	}
+	return a
 }
 
 // NewAttempt returns a valid SENT attempt.
