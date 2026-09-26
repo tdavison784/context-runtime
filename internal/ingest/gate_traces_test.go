@@ -152,7 +152,43 @@ func TestGateT02_ReplacementRetiresOldRequirement(t *testing.T) {
 		})
 	})
 	t.Run("v2 satisfied only by separately authorized reevaluation", func(t *testing.T) { pending(t, depW4+" (C-4 REEVALUATE)") })
-	t.Run("explicit same-content ReplaceDirective starts a new OPEN version", func(t *testing.T) { pending(t, depW1Dedup+"; "+depW3Life+" (C-1 REPLACE)") })
+	t.Run("explicit same-content ReplaceDirective starts a new OPEN version", func(t *testing.T) {
+		semanticStores(t, func(t *testing.T, f *fixture) {
+			sys := principal(domain.AuthoritySystem)
+			g := mustDirective(t, f.mustIngest(sys, sysEvent("t02-g", "## Goal [g]\nShip v2.\n")), "g")
+			f.mustIngest(sys, sysEvent("t02-res", "## Resolve [g]\n"))
+			var resolved domain.ContextItem
+			f.view(func(tx store.ReadTx) error { var err error; resolved, err = tx.Item(g.ID); return err })
+			// C-1: an explicit, authenticated, CAS replacement may reuse
+			// identical content; ordinary restatement never reopens.
+			replace := domain.SemanticOperation{Kind: domain.OperationReplace, Alias: "g2", Replace: &domain.ReplaceDirectiveIntent{
+				ItemMutationIntent: domain.ItemMutationIntent{ItemID: g.ID, ExpectedVersion: resolved.Version},
+				Parts:              g.Parts}}
+			r := f.mustIngest(sys, domain.Event{EventID: "t02-replace", Kind: domain.EventSystem, Operations: []domain.SemanticOperation{replace}})
+			newID := r.Operations[0].Result.Records.IDs[0]
+			if !f.isCurrent(newID) || f.isCurrent(g.ID) {
+				t.Fatalf("currentness after replacement: new %v old %v", f.isCurrent(newID), f.isCurrent(g.ID))
+			}
+			f.view(func(tx store.ReadTx) error {
+				n, err := tx.Item(newID)
+				if err != nil || *n.GoalStatus != domain.GoalOpen || n.Parts[0].Text != g.Parts[0].Text || n.Authority != g.Authority {
+					t.Errorf("replacement = %+v (%v)", n, err)
+				}
+				old, err := tx.Item(g.ID)
+				if err != nil || *old.GoalStatus != domain.GoalResolved {
+					t.Errorf("replaced goal = %+v (%v)", old.GoalStatus, err)
+				}
+				return nil
+			})
+			// A stale expected version is a CAS conflict, atomically.
+			f.requireAtomic(domain.ErrVersionConflict, func() error {
+				stale := replace
+				stale.Replace = &domain.ReplaceDirectiveIntent{ItemMutationIntent: domain.ItemMutationIntent{ItemID: newID, ExpectedVersion: 99}, Parts: g.Parts}
+				_, err := f.ingest(sys, domain.Event{EventID: "t02-stale", Kind: domain.EventSystem, Operations: []domain.SemanticOperation{stale}})
+				return err
+			})
+		})
+	})
 }
 
 // TestGateT03_NewTurnExpiresTurnContent: TURN/opaque eligibility ends at a
