@@ -99,3 +99,39 @@ func TestDiagnosticCapKeepsSourceOrder(t *testing.T) {
 		t.Fatal("cap is not a prefix of the full source-ordered diagnostics")
 	}
 }
+
+func TestParseUnitEntryPoint(t *testing.T) {
+	event := domain.Event{Spans: []domain.Span{
+		{Authority: domain.AuthorityUser, DirectiveCapable: true, Parts: []domain.InputPart{{Type: domain.PartText, Text: "## Pinned\n- a"}, {Type: domain.PartImage}, {Type: domain.PartText, Text: "- b"}}},
+		{Authority: domain.AuthorityRetrievedContent, Parts: []domain.InputPart{{Type: domain.PartText, Text: "## Pinned\n- evil"}}},
+	}}
+	units := event.ParseUnits()
+	if len(units) != 3 {
+		t.Fatal(units)
+	}
+	var texts []string
+	for _, u := range units {
+		r := ParseUnit(u, domain.Limits{})
+		if r.Err != nil {
+			t.Fatal(r.Err)
+		}
+		for _, it := range r.Items {
+			texts = append(texts, it.Text)
+		}
+		for _, d := range r.Diagnostics {
+			if d.SpanIndex != u.SpanIndex || d.PartIndex != u.PartIndex {
+				t.Fatal(d)
+			}
+		}
+	}
+	// The second text part of span 0 is its own unit: its bullet is not a
+	// Pinned item, and the retrieved span is never parsed.
+	if !reflect.DeepEqual(texts, []string{"a"}) {
+		t.Fatal(texts)
+	}
+	u := units[0]
+	u.Text += "\n- smuggled"
+	if r := ParseUnit(u, domain.Limits{}); !errors.Is(r.Err, domain.ErrInvalidRecord) || len(r.Items) != 0 {
+		t.Fatal("snapshot hash mismatch accepted")
+	}
+}

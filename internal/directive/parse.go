@@ -9,6 +9,18 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
+// ParseUnit parses one domain.ParseUnit (M1), the entry point for ingestion.
+// The unit's snapshot hash must match its text, so a result can never be
+// attributed to bytes other than those parsed; the source gate is the
+// contract's ParsesDirectives. Access is not consulted: the parser never
+// widens or narrows boundaries.
+func ParseUnit(u domain.ParseUnit, limits domain.Limits) Result {
+	if u.SnapshotHash != domain.HashBytes([]byte(u.Text)) {
+		return parseFailure("parse unit snapshot hash mismatch")
+	}
+	return Parse([]byte(u.Text), Options{Authority: u.Authority, DirectiveCapable: u.DirectiveCapable, SpanIndex: u.SpanIndex, PartIndex: u.PartIndex, Limits: limits})
+}
+
 // Parse interprets one immutable text part under its trusted source gate.
 // Recoverable syntax errors preserve unrelated directives; resource failures
 // return an error and no partial items. All ranges address original bytes.
@@ -23,7 +35,7 @@ func Parse(input []byte, opts Options) Result {
 	if len(input) > limits.MaxSpanBytes {
 		return parseFailure("span exceeds byte limit")
 	}
-	capable := opts.Authority == domain.AuthoritySystem || opts.Authority == domain.AuthorityHarness || opts.Authority == domain.AuthorityUser && opts.DirectiveCapable
+	capable := domain.Span{Authority: opts.Authority, DirectiveCapable: opts.DirectiveCapable}.ParsesDirectives()
 	p := &coreParser{authority: opts.Authority, data: input, limits: scanLimits{limits.MaxSpanBytes, limits.MaxItemsPerSpan, min(limits.MaxDiagnosticsPerSpan, 256), limits.MaxSpanBytes}}
 	p.scan(capable)
 	for _, s := range p.sections {
