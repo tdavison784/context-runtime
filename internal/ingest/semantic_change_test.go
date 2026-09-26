@@ -1,0 +1,92 @@
+package ingest
+
+import (
+	"testing"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
+)
+
+// P3-36 state contract: semantic presentation resolves a restatement to the
+// current canonical declaration and its lifecycle state; a duplicate's
+// receipt snapshot (OPEN/PINNED at creation) never restores a requirement.
+
+// restate ingests setup, applies the lifecycle event, then restates setup
+// verbatim, returning the original and the restatement receipts.
+func (f *fixture) restate(setup, lifecycle string) (domain.IngestReceipt, domain.IngestReceipt) {
+	f.t.Helper()
+	sys := principal(domain.AuthoritySystem)
+	first := f.mustIngest(sys, sysEvent("orig", setup))
+	f.mustIngest(sys, sysEvent("life", lifecycle))
+	return first, f.mustIngest(sys, sysEvent("again", setup))
+}
+
+// TestP336_ResolvedRestatementStaysResolved (P3-4/36, Q1, C-1): restating
+// a resolved goal verbatim records a noncurrent duplicate occurrence; the
+// resolved goal stays current and RESOLVED, and nothing reopens.
+func TestP336_ResolvedRestatementStaysResolved(t *testing.T) {
+	pending(t, "W1 declaration dedup + graph.DeclareCreation (P3-4); verified failing: restatement reopens as a new OPEN current goal")
+	phase3Stores(t, func(t *testing.T, f *fixture) {
+		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+		first, again := f.restate("## Goal [g]\nShip.\n", "## Resolve [g]\n")
+		g, dup := mustDirective(t, first, "g"), mustDirective(t, again, "g")
+		if len(again.Replacements) != 0 || len(semanticDups(again)) != 1 {
+			t.Fatalf("restatement: replacements %+v duplicates %+v", again.Replacements, again.Duplicates)
+		}
+		if !f.isCurrent(g.ID) || f.isCurrent(dup.ID) {
+			t.Fatalf("currentness: original %v, duplicate %v", f.isCurrent(g.ID), f.isCurrent(dup.ID))
+		}
+		f.view(func(tx store.ReadTx) error {
+			it, err := tx.Item(g.ID)
+			if err != nil || *it.GoalStatus != domain.GoalResolved {
+				t.Errorf("original goal %+v (%v)", it.GoalStatus, err)
+			}
+			return nil
+		})
+	})
+}
+
+// TestP336_UnpinnedRestatementStaysUnpinned (P3-4/36, Q1): restating an
+// unpinned directive verbatim never re-pins it.
+func TestP336_UnpinnedRestatementStaysUnpinned(t *testing.T) {
+	pending(t, "W1 declaration dedup + graph.DeclareCreation (P3-4); verified failing: restatement re-pins as a new current PINNED version")
+	phase3Stores(t, func(t *testing.T, f *fixture) {
+		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+		first, again := f.restate("## Pinned\n- [p] Keep the API stable.\n", "## Unpin [p]\n")
+		p, dup := mustDirective(t, first, "p"), mustDirective(t, again, "p")
+		if len(again.Replacements) != 0 || !f.isCurrent(p.ID) || f.isCurrent(dup.ID) {
+			t.Fatalf("restatement replaced the unpinned directive: %+v", again.Replacements)
+		}
+		f.view(func(tx store.ReadTx) error {
+			it, err := tx.Item(p.ID)
+			if err != nil || it.Generation == domain.GenerationPinned {
+				t.Errorf("original pin generation %s (%v)", it.Generation, err)
+			}
+			return nil
+		})
+	})
+}
+
+// TestP336_ChangedRestatementReplaces (Q1, FR-DIR-002): a restatement with
+// changed content is an authorized replacement: a new OPEN current goal
+// supersedes the resolved one, which keeps its RESOLVED status.
+func TestP336_ChangedRestatementReplaces(t *testing.T) {
+	phase3Stores(t, func(t *testing.T, f *fixture) {
+		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+		sys := principal(domain.AuthoritySystem)
+		g := mustDirective(t, f.mustIngest(sys, sysEvent("orig", "## Goal [g]\nShip v1.\n")), "g")
+		f.mustIngest(sys, sysEvent("life", "## Resolve [g]\n"))
+		r := f.mustIngest(sys, sysEvent("v2", "## Goal [g]\nShip v2.\n"))
+		g2 := mustDirective(t, r, "g")
+		if len(r.Replacements) != 1 || r.Replacements[0].TargetID != g.ID || !f.isCurrent(g2.ID) || f.isCurrent(g.ID) || *g2.GoalStatus != domain.GoalOpen {
+			t.Fatalf("replacement = %+v", r.Replacements)
+		}
+		f.view(func(tx store.ReadTx) error {
+			old, err := tx.Item(g.ID)
+			if err != nil || *old.GoalStatus != domain.GoalResolved {
+				t.Errorf("replaced goal status %v (%v)", old.GoalStatus, err)
+			}
+			return nil
+		})
+	})
+}
