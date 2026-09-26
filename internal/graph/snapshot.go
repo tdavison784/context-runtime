@@ -93,6 +93,9 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	if len(newIDs) == 0 {
 		return SnapshotResult{}, nil
 	}
+	if len(newIDs) > maxSnapshotMembers {
+		return SnapshotResult{}, store.ErrLimitExceeded
+	}
 	if err := actor.Validate(); err != nil {
 		return SnapshotResult{}, err
 	}
@@ -115,7 +118,13 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	retired := map[string]domain.ContextItem{}
 	expectedPrior := map[string]string{}
 	var filed, dupes, dupeOf []domain.ContextItem
+	declarations := make([]domain.SnapshotDeclaration, 0, len(parts))
 	for _, p := range parts {
+		declaration, err := planSnapshotDeclaration(tx, sem, p.members, eventID)
+		if err != nil {
+			return SnapshotResult{}, err
+		}
+		declarations = append(declarations, declaration)
 		dupSnapshot, err := isDuplicateSnapshot(tx, p)
 		if err != nil {
 			return SnapshotResult{}, err
@@ -178,6 +187,11 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	}
 
 	res := SnapshotResult{Unverified: unverified}
+	for _, declaration := range declarations {
+		if err := sem.InsertSnapshotDeclaration(declaration); err != nil {
+			return SnapshotResult{}, err
+		}
+	}
 	for _, plan := range plans {
 		rel, err := applySupersession(tx, plan)
 		if err != nil {
