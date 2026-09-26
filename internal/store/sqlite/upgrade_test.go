@@ -481,3 +481,67 @@ func TestUpgradeCommandDetailAndLookupItemIndexes(t *testing.T) {
 		})
 	}
 }
+
+// TestUpgradePhase3RowFields checks migration 0018 on a database migrated
+// through 0017: rows written by the Phase 2 binary read back in their
+// frozen legacy form (no namespace, typed grant target, obligation binding,
+// or request hash schema is invented), and an event record without a
+// replayable envelope is marked "unknown" so it can never authorize replay
+// (P3-40/41).
+func TestUpgradePhase3RowFields(t *testing.T) {
+	l := openLegacy(t, 17)
+	occ := domain.CallerOccurrenceID("s", "with-envelope")
+	env, _ := storetest.NewIngestion("s", "with-envelope", occ, 1)
+	l.insert("envelope", env, nil)
+	l.insert("event", storetest.NewEvent("s", "with-envelope", 1, "p"), nil)
+	l.insert("event", storetest.NewEvent("s", "bare", 2, "p"), nil)
+	l.insert("grant", storetest.NewGrant("s", "g", 3, "i"), nil)
+	l.insert("obligation", storetest.NewObligation("s", "o", 1, 4, "src"), nil)
+	l.insert("item", storetest.NewDirective("s", "i", "dir", 5, "text"), nil)
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		for id, want := range map[string]string{"with-envelope": "", "bare": "unknown"} {
+			e, err := tx.Event(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if e.RequestHashVersion != want {
+				t.Errorf("event %s RequestHashVersion = %q, want %q", id, e.RequestHashVersion, want)
+			}
+		}
+		gotEnv, err := tx.Envelope(occ)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gotEnv.RequestHashVersion != "" || gotEnv.SemanticPolicy != nil || gotEnv.Event.Operations != nil {
+			t.Errorf("legacy envelope gained Phase 3 metadata: %+v", gotEnv)
+		}
+		if err := gotEnv.Validate(); err != nil {
+			t.Errorf("legacy envelope no longer verifies: %v", err)
+		}
+		g, err := tx.Grant("g")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g.Targets != nil || len(g.TargetIDs) != 1 {
+			t.Errorf("legacy grant = %+v, want its TargetIDs and no typed targets", g)
+		}
+		o, err := tx.Obligation("o")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if o.DeclarationKind != "" || o.TargetSpec != nil || o.BindingState != "" || o.CurrentProofID != "" {
+			t.Errorf("legacy obligation gained a binding: %+v", o)
+		}
+		it, err := tx.Item("i")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if it.Namespace != "" {
+			t.Errorf("legacy item Namespace = %q, want empty (frozen fallback)", it.Namespace)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

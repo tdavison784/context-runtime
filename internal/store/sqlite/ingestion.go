@@ -33,6 +33,10 @@ type receiptRow struct {
 	Replacements  []domain.IngestLink
 	Versions      domain.ExecutionVersions
 	SchemaVersion string
+	// Phase 3 receipt fields (P3-40); empty on a legacy receipt.
+	RequestHashVersion string
+	MutationReceiptIDs []string
+	Operations         []domain.OperationResult
 }
 
 // receiptItem is the original value of the Ordinal-th item a receipt
@@ -90,7 +94,8 @@ func (t *transaction) InsertIngestion(env domain.EventEnvelope, r domain.IngestR
 	row := receiptRow{SessionID: r.SessionID, OccurrenceID: r.OccurrenceID, EventID: r.EventID, Principal: r.Principal,
 		PayloadHash: r.PayloadHash, Seq: r.Seq, OpenedTurn: r.OpenedTurn, TurnID: r.TurnID, ItemCount: len(r.Items),
 		DiagnosticIDs: []string{}, CommandIDs: []string{}, Duplicates: r.Duplicates, Replacements: r.Replacements,
-		Versions: r.Versions, SchemaVersion: r.SchemaVersion}
+		Versions: r.Versions, SchemaVersion: r.SchemaVersion,
+		RequestHashVersion: r.RequestHashVersion, MutationReceiptIDs: r.MutationReceiptIDs, Operations: r.Operations}
 	for _, d := range r.Diagnostics {
 		row.DiagnosticIDs = append(row.DiagnosticIDs, d.ID)
 	}
@@ -161,6 +166,7 @@ func (t *transaction) Receipt(occurrenceID string) (domain.IngestReceipt, error)
 	r := domain.IngestReceipt{SessionID: row.SessionID, OccurrenceID: row.OccurrenceID, EventID: row.EventID, Principal: row.Principal,
 		PayloadHash: row.PayloadHash, Seq: row.Seq, OpenedTurn: row.OpenedTurn, TurnID: row.TurnID, Duplicates: row.Duplicates,
 		Replacements: row.Replacements, Versions: row.Versions, SchemaVersion: row.SchemaVersion,
+		RequestHashVersion: row.RequestHashVersion, MutationReceiptIDs: row.MutationReceiptIDs, Operations: row.Operations,
 		Items: make([]domain.ContextItem, row.ItemCount)}
 	for i := range r.Items {
 		var ri receiptItem

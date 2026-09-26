@@ -71,6 +71,18 @@ func makeSchemas() map[string]*recordSchema {
 		s := &recordSchema{kind: d.kind, table: "rec_" + d.kind, idField: d.id, subField: d.sub, typ: reflect.TypeOf(d.record)}
 		for i := 0; i < s.typ.NumField(); i++ {
 			f := s.typ.Field(i)
+			if f.Anonymous && f.Type == semanticMetaType {
+				// An embedded SemanticMeta is flattened: its promoted fields
+				// are the record's own, so ID and SessionID can be keys.
+				for j := 0; j < f.Type.NumField(); j++ {
+					g := f.Type.Field(j)
+					if g.Name == "SessionID" || g.Name == s.idField || g.Name == s.subField {
+						continue
+					}
+					s.collect(g.Type, []int{i, j}, "f_"+snake(g.Name))
+				}
+				continue
+			}
 			if f.Name == "SessionID" || f.Name == s.idField || f.Name == s.subField {
 				continue
 			}
@@ -96,7 +108,10 @@ func makeSchemas() map[string]*recordSchema {
 	return out
 }
 
-var timeType = reflect.TypeOf(time.Time{})
+var (
+	timeType         = reflect.TypeOf(time.Time{})
+	semanticMetaType = reflect.TypeOf(domain.SemanticMeta{})
+)
 
 func (s *recordSchema) collect(typ reflect.Type, path []int, name string) {
 	if typ.Kind() == reflect.Pointer {
