@@ -136,7 +136,7 @@
         20,
         36
       ],
-      "access_scope": "TASK"
+      "access_scope": "SESSION"
     },
     {
       "span": 0,
@@ -149,7 +149,7 @@
         59,
         67
       ],
-      "access_scope": "TASK"
+      "access_scope": "SESSION"
     },
     {
       "span": 0,

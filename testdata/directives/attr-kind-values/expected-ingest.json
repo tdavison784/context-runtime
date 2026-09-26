@@ -859,7 +859,7 @@
         244,
         264
       ],
-      "access_scope": "TASK"
+      "access_scope": "TURN"
     },
     {
       "span": 0,
@@ -873,7 +873,7 @@
         264,
         287
       ],
-      "access_scope": "TASK"
+      "access_scope": "TURN"
     },
     {
       "span": 0,
@@ -887,7 +887,7 @@
         287,
         311
       ],
-      "access_scope": "TASK"
+      "access_scope": "TURN"
     },
     {
       "span": 0,
