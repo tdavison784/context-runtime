@@ -1,6 +1,10 @@
 package graph
 
-import "github.com/tdavison784/context-runtime/internal/domain"
+import (
+	"strconv"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+)
 
 // Relationship and lifecycle event IDs are derived deterministically from the
 // data that identifies the edge, mirroring domain.DerivedItemID: retrying the
@@ -13,8 +17,9 @@ const (
 	// v2 adds the counterpart (for a retirement, the successor) to the
 	// audit identity, so two audit records about one target in one event
 	// can never alias (D11). v1 IDs already stored are left as they are.
-	lifecycleEventIDTag = "context-runtime/graph/lifecycle-event-id/v2"
-	idHashDisplayLength = 32
+	lifecycleEventIDTag  = "context-runtime/graph/lifecycle-event-id/v2"
+	obligationAuditIDTag = "context-runtime/graph/obligation-audit-id/v1"
+	idHashDisplayLength  = 32
 )
 
 func deriveID(prefix, tag string, parts ...string) string {
@@ -40,4 +45,11 @@ func relationshipID(sessionID string, relType domain.RelationshipType, fromID, t
 // retirement, the successor).
 func lifecycleEventID(sessionID, targetID, action, eventID, counterpartID string) string {
 	return deriveID("evt", lifecycleEventIDTag, sessionID, targetID, action, eventID, counterpartID)
+}
+
+// obligationAuditID derives the ID of the audit record for one action on
+// one obligation version raised by eventID, whose other party is
+// counterpartID (for a retirement, the replacing source).
+func obligationAuditID(sessionID, obligationID string, version uint64, action, eventID, counterpartID string) string {
+	return deriveID("evt", obligationAuditIDTag, sessionID, obligationID, strconv.FormatUint(version, 10), action, eventID, counterpartID)
 }

@@ -77,8 +77,9 @@ type snapshotPartition struct {
 // hold its ID (a boundary change through ID reuse, FR-DIR-002). New
 // members never supersede each other, and no item is retired twice.
 //
-// The whole plan, including every supersession's authorization, is
-// validated before the first write, so a denied replacement fails the call
+// The whole plan, including every supersession's authorization and the
+// authorization of each bound obligation retirement (D13), is validated
+// before the first write, so a denied replacement fails the call
 // with nothing written. Edges are then written in the retired item's
 // (Seq, ID) order, members are filed as their directives' current versions
 // in source order, and duplicate links follow. Callers run it inside
@@ -144,6 +145,9 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	olds := make([]domain.ContextItem, 0, len(retired))
 	for _, old := range retired {
 		if err := domain.AuthorizeSupersession(actor, retire[old.ID], old); err != nil {
+			return SnapshotResult{}, err
+		}
+		if _, err := planObligationRetirement(tx, actor, old.ID); err != nil {
 			return SnapshotResult{}, err
 		}
 		olds = append(olds, old)

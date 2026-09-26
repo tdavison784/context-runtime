@@ -145,6 +145,12 @@ func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, task
 // oldID that is already superseded (ErrAlreadySuperseded, D11). The audit
 // record's ID names the successor, so it is unique per retirement.
 //
+// In the same transaction it retires every current obligation version
+// bound to oldID (FR-OBL-006, D13), whatever replaces it (a pin without
+// obligation=, another section, a snapshot member), each authorized as an
+// indirect effect before anything is written and audited separately; an
+// unauthorized retirement fails the whole supersession.
+//
 // ruleVersion names the deterministic rule that produced the edge (FR-REL-
 // 007); pass "" for an edge created directly from an authorized event, such
 // as a directive replacement.
@@ -173,6 +179,10 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 	}
 	if len(retired) > 0 {
 		return domain.Relationship{}, ErrAlreadySuperseded
+	}
+	obligations, err := planObligationRetirement(tx, actor, oldID)
+	if err != nil {
+		return domain.Relationship{}, err
 	}
 
 	rel := domain.Relationship{
@@ -203,6 +213,9 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 		EventID:    eventID,
 	}
 	if err := tx.AppendLifecycleEvent(ev); err != nil {
+		return domain.Relationship{}, err
+	}
+	if err := retireObligations(tx, actor, obligations, oldID, newID, eventID); err != nil {
 		return domain.Relationship{}, err
 	}
 	return rel, nil
