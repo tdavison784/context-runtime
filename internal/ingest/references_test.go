@@ -1,7 +1,7 @@
 package ingest
 
 import (
-	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -111,51 +111,90 @@ func TestReferences_SurviveRestart(t *testing.T) {
 	}
 }
 
-// TestReferenceDeclarationLookupBound_R19: declaration-time matching reads
-// the bounded source-key index; more already-ingested sources for one
-// locator than the lookup limit reject the declaring event (fail closed)
-// rather than linking only some.
-func TestReferenceDeclarationLookupBound_R19(t *testing.T) {
+// TestReferencesByItemID_F4 is SPEC-1.2 (FR-DIR-003): a References item
+// naming an accessible same-session item ID links to it; a missing and an
+// inaccessible ID link nothing and produce identical receipts (apart from
+// IDs), so references never probe existence; a target narrower than the
+// reference is never linked.
+func TestReferencesByItemID_F4(t *testing.T) {
 	eachStore(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
-		f.mustIngest(user, userEvent("u0", "hi", false))
-		for _, id := range []string{"t1", "t2", "t3"} {
-			f.mustIngest(user, sourceEvent(id, "go.mod", taskAccess()))
+		target := f.mustIngest(user, userEvent("u0", "hello", false)).Items[0]
+		r := f.mustIngest(user, userEvent("u1", "## References\n- "+target.ID+"\n", true))
+		if got := f.references(semantic(r)[0].ID); len(got) != 1 || got[0] != target.ID {
+			t.Errorf("item-ID reference links = %v, want [%s]", got, target.ID)
 		}
-		e := userEvent("u1", "## References\n- go.mod\n", true)
-		f.in.LookupLimit = 2
-		before := f.lastSeq()
-		if _, err := f.ingest(user, e); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
-			t.Errorf("over the bound: err = %v", err)
+
+		private := domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: sess, TaskID: "T", AgentID: "A"}
+		priv := textSpan(domain.AuthorityUser, false, "private note")
+		priv.Access = private
+		hidden := f.mustIngest(user, domain.Event{EventID: "p0", Kind: domain.EventUser, Spans: []domain.Span{priv}}).Items[0]
+
+		agentB := user
+		agentB.AgentID = "B"
+		shape := func(r domain.IngestReceipt) string {
+			return fmt.Sprintf("items=%d dups=%d diags=%d links=%d", len(r.Items), len(r.Duplicates), len(r.Diagnostics), len(f.references(semantic(r)[0].ID)))
 		}
-		f.in.LookupLimit = 3
-		r, err := f.ingest(user, e)
-		if err != nil {
-			t.Fatalf("within the bound: %v", err)
+		hid := f.mustIngest(agentB, userEvent("b1", "## References\n- "+hidden.ID+"\n", true))
+		miss := f.mustIngest(agentB, userEvent("b2", "## References\n- itm_00000000000000000000000000000000\n", true))
+		if shape(hid) != shape(miss) || len(f.references(semantic(hid)[0].ID)) != 0 {
+			t.Errorf("inaccessible %s vs missing %s", shape(hid), shape(miss))
 		}
-		if got := f.references(semantic(r)[0].ID); len(got) != 3 {
-			t.Errorf("linked %d earlier sources, want 3", len(got))
+
+		// Agent A can see its private note, but a task-wide reference must
+		// not disclose it to the rest of the task.
+		wide := f.mustIngest(user, userEvent("a1", "## References\n- "+hidden.ID+"\n", true))
+		if got := f.references(semantic(wide)[0].ID); len(got) != 0 {
+			t.Errorf("task-wide reference linked a private item: %v", got)
 		}
 	})
 }
 
-// TestReferenceLookupBound_R19: deferred linking reads the bounded
-// locator-key index; more stored references to one locator than the lookup
-// limit reject the source's event (fail closed) rather than linking only
-// some.
-func TestReferenceLookupBound_R19(t *testing.T) {
+// TestReferenceLinkBudget_Ruling1: optional REFERENCES edges have their own
+// per-event budget; reaching it stops linking with a
+// reference_links_truncated diagnostic, and optional links never consume
+// MaxRelationships, so they can never make an essential edge reject the
+// event.
+func TestReferenceLinkBudget_Ruling1(t *testing.T) {
 	eachStore(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
 		f.mustIngest(user, userEvent("u0", "hi", false))
-		f.mustIngest(user, userEvent("u1", "## References\n- go.mod\n- ./go.mod\n- a/../go.mod\n", true))
-		f.in.LookupLimit = 2
-		before := f.lastSeq()
-		if _, err := f.ingest(user, sourceEvent("t1", "go.mod", taskAccess())); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
-			t.Errorf("over the bound: err = %v", err)
+		for i := range 4 {
+			// Distinct content: identical re-reads would be duplicates of
+			// the first read, not separate live sources.
+			e := sourceEvent(fmt.Sprintf("s%d", i), "a.md", taskAccess())
+			e.Spans[0].Parts[0].Text = fmt.Sprintf("a.md revision %d", i)
+			f.mustIngest(user, e)
 		}
-		f.in.LookupLimit = 3
-		if _, err := f.ingest(user, sourceEvent("t1", "go.mod", taskAccess())); err != nil {
-			t.Errorf("within the bound: %v", err)
+
+		f.in.Limits = domain.Limits{MaxReferenceLinks: 2}
+		r := f.mustIngest(user, userEvent("r1", "## References\n- a.md\n", true))
+		if got := f.references(semantic(r)[0].ID); len(got) != 2 {
+			t.Errorf("links = %d, want the budget of 2", len(got))
+		}
+		truncated := 0
+		for _, d := range r.Diagnostics {
+			if d.Code == domain.ReferenceLinksTruncated && d.Reason == domain.ReasonReferenceLinksTruncated {
+				truncated++
+			}
+		}
+		if truncated != 1 {
+			t.Errorf("truncation diagnostics = %d, want 1", truncated)
+		}
+
+		// Two essential DERIVED_FROM edges exactly fill MaxRelationships;
+		// four optional links must not push either out.
+		f.in.Limits = domain.Limits{MaxRelationships: 2}
+		r2, err := f.ingest(user, userEvent("r2", "## References\n- ./a.md\n## Remember\n- essential fact\n", true))
+		if err != nil {
+			t.Fatalf("optional links rejected the event: %v", err)
+		}
+		if got := f.references(semantic(r2)[0].ID); len(got) != 4 {
+			t.Errorf("links = %d, want all 4 within the default budget", len(got))
+		}
+		// The budget is an execution limit the receipt records.
+		if r.Versions.Limits.MaxReferenceLinks != 2 || r2.Versions.Limits.MaxReferenceLinks != 256 {
+			t.Errorf("recorded budgets = %d, %d; want 2, 256", r.Versions.Limits.MaxReferenceLinks, r2.Versions.Limits.MaxReferenceLinks)
 		}
 	})
 }

@@ -1,0 +1,11 @@
+{
+  "description": "Control: an indented fence or quote inside an item is that item's text, and a comment closed on a bullet's own line does not suppress it (SPEC-1.1).",
+  "requirements": [
+    "FR-DIR-006",
+    "D5",
+    "R17",
+    "SPEC-1.1"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false
+}

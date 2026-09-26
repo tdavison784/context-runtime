@@ -136,7 +136,7 @@ func TestD13_DuplicateLeavesObligations(t *testing.T) {
 		update(t, s, sess, func(tx store.Tx) error {
 			dup := storetest.NewDirective(sess, "p1-dup", "tests", tx.NextSeq(), "All tests must pass p1")
 			mustInsert(t, tx, dup)
-			_, err := LinkDuplicate(tx, actor, dup.ID, "p1", "evt-dup", "")
+			_, err := LinkDuplicate(tx, actor, dup.ID, "p1", "evt-dup", "", "")
 			return err
 		})
 		view(t, s, sess, func(tx store.ReadTx) error {

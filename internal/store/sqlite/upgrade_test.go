@@ -363,3 +363,30 @@ func TestUpgradeCurrentNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeReceiptLimits checks that a receipt stored before migration
+// 0014 keeps its recorded limits and reports MaxReferenceLinks as 0 (not
+// recorded), never the current default (M8).
+func TestUpgradeReceiptLimits(t *testing.T) {
+	l := openLegacy(t, 13)
+	occ := domain.CallerOccurrenceID("s", "evt-1")
+	_, r := storetest.NewIngestion("s", "evt-1", occ, 1)
+	row := receiptRow{SessionID: r.SessionID, OccurrenceID: r.OccurrenceID, EventID: r.EventID, Principal: r.Principal,
+		PayloadHash: r.PayloadHash, Seq: r.Seq, DiagnosticIDs: []string{}, CommandIDs: []string{}, Versions: r.Versions, SchemaVersion: r.SchemaVersion}
+	l.insert("receipt", row, nil)
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		got, err := tx.Receipt(occ)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := r.Versions.Limits
+		want.MaxReferenceLinks = 0
+		if got.Versions.Limits != want {
+			t.Errorf("legacy receipt limits = %+v, want %+v", got.Versions.Limits, want)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -1,0 +1,107 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_ba6648d501ecd6416e6092efdce644f4",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Pinned\n- a\n\u003e - [evil4] quoted\n"
+        }
+      ],
+      "content_hash": "sha256:8cb300f1ec256799e4fce3ca987c37700e0677de77dcf38785077f001109b22c"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_887a776f708fb41a9ad3dea81742c9cf",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Pinned\n- a\n\u003e - [evil4] quoted\n"
+        }
+      ],
+      "content_hash": "sha256:4e00b964b390a7efc8de3111eca5c3529f6222d376d44c996087055114def5e8",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            33
+          ],
+          "slices": [
+            [
+              0,
+              33
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        14,
+        32
+      ],
+      "access_scope": "SESSION"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "block_quote",
+      "section": "PINNED",
+      "range": [
+        14,
+        32
+      ],
+      "access_scope": "SESSION"
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_9b3c272c9bb316a4ace5b4c4e17b886c",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "#\tPinned\n- x\n##\n- y\n # Pinned\n- z\n"
+        }
+      ],
+      "content_hash": "sha256:e27c12c3ee6920ce51901082cede17e902560a25ff4ea5c474ec8277c102e355"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_2129a8bcca11ba8f112d251cc7605a45",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "#\tPinned\n- x\n##\n- y\n # Pinned\n- z\n"
+        }
+      ],
+      "content_hash": "sha256:f8b15a346edfd0ac17cb6df466ece74b06e43ffb9f0cd5b484d8077d4371cd89",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            34
+          ],
+          "slices": [
+            [
+              0,
+              34
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "indented",
+      "section": "PINNED",
+      "range": [
+        21,
+        29
+      ],
+      "access_scope": "SESSION"
+    }
+  ]
+}

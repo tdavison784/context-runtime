@@ -68,6 +68,33 @@ func SameDirectiveSemantics(a, b domain.ContextItem) bool {
 		slices.Equal(a.Tags, b.Tags)
 }
 
+// maxDeclaredClaims bounds the obligation lookup of one canonical source
+// when comparing declarations (R9, D17): a Pinned directive declares at
+// most one obligation slot.
+const maxDeclaredClaims = 256
+
+// SameDirective is the single duplicate comparison of R11 (SPEC-1.12):
+// SameDirectiveSemantics plus the obligation declaration. newClaim is the
+// claim the new item declares ("" for none); the canonical's declaration
+// is the claim of its current obligation versions. They must match exactly:
+// no claim on both, or exactly one current version with the same claim.
+func SameDirective(tx store.ReadTx, it domain.ContextItem, newClaim string, canonical domain.ContextItem) (bool, error) {
+	if !SameDirectiveSemantics(it, canonical) {
+		return false, nil
+	}
+	versions, err := tx.ObligationsBySource(canonical.ID, maxDeclaredClaims)
+	if err != nil {
+		return false, err
+	}
+	var claims []string
+	for _, v := range versions {
+		if v.Current {
+			claims = append(claims, v.Claim)
+		}
+	}
+	return len(claims) == 0 && newClaim == "" || len(claims) == 1 && claims[0] == newClaim, nil
+}
+
 func equalPtr[T comparable](a, b *T) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -104,12 +131,14 @@ func sameContentOccurrence(a, b domain.ContextItem) bool {
 // (not named by the current map, no SUPERSEDES edge in either direction, no
 // prior DUPLICATE_OF), canonicalID must be current under IsCurrent (a stale
 // or retired version cannot stand in for a new write), and the two must be
-// SameDirectiveSemantics. For non-directive content, detection only, the
+// SameDirective, including the obligation declaration. For non-directive content, detection only, the
 // items need the same content, authority, and boundary; the duplicate
 // remains a current occurrence. Anything else fails with ErrNotDuplicate.
 //
 // ruleVersion names the deterministic deduplication rule (FR-REL-007).
-func LinkDuplicate(tx store.Tx, actor domain.Principal, dupID, canonicalID, eventID, ruleVersion string) (domain.Relationship, error) {
+// claim is the obligation claim the duplicate declares ("" for none); it
+// must match the canonical's declaration (SameDirective, R11).
+func LinkDuplicate(tx store.Tx, actor domain.Principal, dupID, canonicalID, eventID, ruleVersion, claim string) (domain.Relationship, error) {
 	if err := actor.Validate(); err != nil {
 		return domain.Relationship{}, err
 	}
@@ -167,7 +196,11 @@ func LinkDuplicate(tx store.Tx, actor domain.Principal, dupID, canonicalID, even
 		case err != nil && !errors.Is(err, domain.ErrNotFound):
 			return domain.Relationship{}, err
 		}
-		if !SameDirectiveSemantics(dup, canonical) {
+		same, err := SameDirective(tx, dup, claim, canonical)
+		if err != nil {
+			return domain.Relationship{}, err
+		}
+		if !same {
 			return domain.Relationship{}, ErrNotDuplicate
 		}
 		cur, err := isCurrentItem(tx, canonical)

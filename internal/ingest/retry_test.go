@@ -166,3 +166,69 @@ func TestRetryIdentity_SessionScoped(t *testing.T) {
 		}
 	})
 }
+
+// TestRetryIdentity_SessionScopedRich (TEST-1.2): the same EventID carrying
+// a directive-rich event in two sessions yields two independent events.
+// Item IDs are disjoint, obligations and lifecycle outcomes stay in their
+// own session, and each session's retry returns only its own receipt.
+func TestRetryIdentity_SessionScopedRich(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		inSession := func(s string) (domain.Principal, domain.Event) {
+			p := principal(domain.AuthorityUser)
+			p.SessionID = s
+			e := richEvent("shared")
+			for i := range e.Spans {
+				e.Spans[i].Access.SessionID = s
+			}
+			return p, e
+		}
+		pa, ea := inSession(sess)
+		pb, eb := inSession("S2")
+		ra, err := f.in.Ingest(ctx, f.s, pa, ea)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rb, err := f.in.Ingest(ctx, f.s, pb, eb)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ra.OccurrenceID == rb.OccurrenceID || slices.ContainsFunc(rb.ItemIDs(), func(id string) bool { return slices.Contains(ra.ItemIDs(), id) }) {
+			t.Fatal("sessions share item IDs or occurrences")
+		}
+		for _, pair := range []struct {
+			s string
+			r domain.IngestReceipt
+		}{{sess, ra}, {"S2", rb}} {
+			own := pair.r.ItemIDs()
+			for _, it := range pair.r.Items {
+				if it.SessionID != pair.s || it.Access.SessionID != pair.s {
+					t.Fatalf("%s: item in another session: %+v", pair.s, it)
+				}
+			}
+			for _, c := range pair.r.Lifecycle {
+				if c.SessionID != pair.s || c.ResolvedItemID != "" && !slices.Contains(own, c.ResolvedItemID) {
+					t.Fatalf("%s: lifecycle outcome crosses sessions: %+v", pair.s, c)
+				}
+			}
+			if err := f.s.View(ctx, pair.s, func(tx store.ReadTx) error {
+				obs, err := tx.Obligations("")
+				if err != nil {
+					return err
+				}
+				if len(obs) != 1 || obs[0].SessionID != pair.s || !slices.Contains(own, obs[0].SourceItemID) {
+					t.Fatalf("%s: obligations = %+v", pair.s, obs)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Each session's retry returns its own original receipt.
+		if again, err := f.in.Ingest(ctx, f.s, pa, ea); err != nil || !reflect.DeepEqual(again, ra) {
+			t.Fatalf("session S retry: %v", err)
+		}
+		if again, err := f.in.Ingest(ctx, f.s, pb, eb); err != nil || !reflect.DeepEqual(again, rb) {
+			t.Fatalf("session S2 retry: %v", err)
+		}
+	})
+}

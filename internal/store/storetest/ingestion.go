@@ -1,6 +1,7 @@
 package storetest
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -31,7 +32,7 @@ func NewIngestion(sess, eventID, occurrenceID string, seq uint64, items ...domai
 				Parts: []domain.InputPart{{Type: domain.PartText, MediaType: "text/markdown", Text: "# Resolve goal-1\n\xff"}}},
 			{Authority: domain.AuthorityUser, Access: PrivateBoundary(sess),
 				Parts:  []domain.InputPart{{Type: domain.PartImage, MediaType: "image/png", Data: blob.Data}},
-				Source: &domain.SourceRef{Kind: domain.SourcePath, Locator: "/private\xfe.png"}},
+				Source: &domain.SourceRef{Kind: domain.SourcePath, Locator: "/privé.png"}},
 		},
 	}
 	env, err := domain.NewEventEnvelope(p, occurrenceID, event)
@@ -420,6 +421,32 @@ func testIngestionAcrossRestart(t *testing.T, open Opener) {
 		ds, err := tx.Diagnostics(store.DiagnosticFilter{Viewer: NewPrincipal(sessA, domain.AuthorityUser)})
 		noErr(t, err)
 		assertEqual(t, "diagnostics after restart", ds, append(append([]domain.DiagnosticRecord{}, r.Diagnostics...), ra.Diagnostics...))
+		return nil
+	})
+}
+
+// testReceiptRecordsEveryLimit checks that a receipt records every
+// execution limit exactly (D14): each domain.Limits field, found by
+// reflection so a new limit cannot be forgotten, gets a distinct
+// non-default value that must round-trip.
+func testReceiptRecordsEveryLimit(t *testing.T, s store.Store) {
+	occ := domain.CallerOccurrenceID(sessA, "evt-limits")
+	var want domain.IngestReceipt
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertBlob(richBlob(sessA)))
+		env, r := NewIngestion(sessA, "evt-limits", occ, tx.NextSeq())
+		v := reflect.ValueOf(&r.Versions.Limits).Elem()
+		for i := range v.NumField() {
+			v.Field(i).SetInt(int64(i + 2)) // distinct, positive, within every grammar bound
+		}
+		noErr(t, r.Versions.Validate())
+		want = r
+		return tx.InsertIngestion(env, r)
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		got, err := tx.Receipt(occ)
+		noErr(t, err)
+		assertEqual(t, "receipt limits", got.Versions, want.Versions)
 		return nil
 	})
 }

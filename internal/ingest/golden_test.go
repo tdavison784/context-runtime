@@ -325,6 +325,19 @@ func runExample(t *testing.T, f *fixture, dir, name string) []byte {
 				t.Fatalf("injection example created a directive item: %+v", it)
 			}
 		}
+		// F6/SEC-1.3: a diagnostic or command record is readable at most
+		// where its source span is: its boundary is Within the span's,
+		// whatever scope label it carries.
+		for _, d := range r.Diagnostics {
+			if !d.Access.Within(e.Spans[d.SpanIndex].Access) {
+				t.Fatalf("diagnostic %+v readable beyond its span %+v", d.Access, e.Spans[d.SpanIndex].Access)
+			}
+		}
+		for _, c := range r.Lifecycle {
+			if !c.Access.Within(e.Spans[c.SpanIndex].Access) {
+				t.Fatalf("command %+v readable beyond its span %+v", c.Access, e.Spans[c.SpanIndex].Access)
+			}
+		}
 		if u.NoDirectives && (len(r.Lifecycle) != 0 || len(g.Obligations) != 0) {
 			t.Fatal("injection example created lifecycle commands or obligations")
 		}

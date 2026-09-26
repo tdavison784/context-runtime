@@ -43,10 +43,12 @@ type readTx struct {
 	receipts     table[string, domain.IngestReceipt]
 	envelopes    table[string, domain.EventEnvelope]
 	references   table[string, domain.UnresolvedReference]
-	itemsByBlob  index[string]
-	duplicates   index[duplicateKey]
-	refsByKey    index[string]
-	itemsByKey   index[string]
+	blobOwners   index[blobKey]
+	canonical    liveIndex[canonicalKey]
+	working      liveIndex[workingKey]
+	sources      liveIndex[sourceKey]
+	refOwners    index[sourceKey]
+	itemsByTask  index[string]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -77,10 +79,12 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		receipts:     newTable(st.receipts, writable, domain.IngestReceipt.Clone),
 		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
 		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
-		itemsByBlob:  newIndex(st.itemsByBlob, writable),
-		duplicates:   newIndex(st.duplicates, writable),
-		refsByKey:    newIndex(st.refsByKey, writable),
-		itemsByKey:   newIndex(st.itemsByKey, writable),
+		blobOwners:   newIndex(st.blobOwners, writable),
+		canonical:    newLiveIndex(st.canonical, writable),
+		working:      newLiveIndex(st.working, writable),
+		sources:      newLiveIndex(st.sources, writable),
+		refOwners:    newIndex(st.refOwners, writable),
+		itemsByTask:  newIndex(st.itemsByTask, writable),
 	}
 }
 
@@ -121,9 +125,19 @@ func (r *readTx) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 		return nil, err
 	}
 	var out []domain.ContextItem
-	for _, it := range r.items.all() {
+	add := func(it domain.ContextItem) {
 		if matchItem(f, it) {
 			out = append(out, it.Clone())
+		}
+	}
+	if f.TaskID != "" { // a task filter reads the task's index entry (SPEC-1.3)
+		for id := range r.itemsByTask.lookup(f.TaskID) {
+			it, _ := r.items.peek(id)
+			add(it)
+		}
+	} else {
+		for _, it := range r.items.all() {
+			add(it)
 		}
 	}
 	slices.SortFunc(out, func(a, b domain.ContextItem) int {
@@ -510,93 +524,4 @@ func (r *readTx) UnresolvedReference(id string) (domain.UnresolvedReference, err
 		return domain.UnresolvedReference{}, notFound("unresolved reference", id)
 	}
 	return v, nil
-}
-
-func (r *readTx) UnresolvedReferences(f store.ReferenceFilter) ([]domain.UnresolvedReference, error) {
-	if err := r.check(); err != nil {
-		return nil, err
-	}
-	if f.Limit <= 0 {
-		return nil, invalid("unresolved references: limit must be positive")
-	}
-	// A locator key lookup reads the key's index entry, never every
-	// reference (R19).
-	candidates := func(yield func(domain.UnresolvedReference) bool) {
-		if f.LocatorKey != "" {
-			for id := range r.refsByKey.lookup(f.LocatorKey) {
-				v, _ := r.references.peek(id)
-				if !yield(v) {
-					return
-				}
-			}
-			return
-		}
-		for _, v := range r.references.all() {
-			if !yield(v) {
-				return
-			}
-		}
-	}
-	out := []domain.UnresolvedReference{}
-	for v := range candidates {
-		if f.RuleVersion != "" && v.RuleVersion != f.RuleVersion {
-			continue
-		}
-		if len(out) == f.Limit {
-			return nil, store.ErrLimitExceeded
-		}
-		out = append(out, v)
-	}
-	slices.SortFunc(out, func(a, b domain.UnresolvedReference) int {
-		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
-	})
-	return out, nil
-}
-
-func (r *readTx) ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, error) {
-	if err := r.check(); err != nil {
-		return nil, err
-	}
-	if limit <= 0 || !domain.ValidHash(blobHash) {
-		return nil, invalid("items by blob: positive limit and valid hash required")
-	}
-	return r.indexedItems(r.itemsByBlob.lookup(blobHash), limit)
-}
-
-func (r *readTx) ItemsBySourceKey(locatorKey string, limit int) ([]domain.ContextItem, error) {
-	if err := r.check(); err != nil {
-		return nil, err
-	}
-	if limit <= 0 || locatorKey == "" || len(locatorKey) > domain.MaxLocatorKeyBytes {
-		return nil, invalid("items by source key: positive limit and a locator key required")
-	}
-	return r.indexedItems(r.itemsByKey.lookup(locatorKey), limit)
-}
-
-func (r *readTx) DuplicateCandidates(f store.DuplicateFilter) ([]domain.ContextItem, error) {
-	if err := r.check(); err != nil {
-		return nil, err
-	}
-	if err := f.Validate(); err != nil {
-		return nil, err
-	}
-	key := duplicateKey{f.TaskID, f.Section, f.Role, f.Authority, f.Access, f.ContentHash}
-	return r.indexedItems(r.duplicates.lookup(key), f.Limit)
-}
-
-// indexedItems loads at most limit indexed items, ordered by Seq then ID;
-// more fail with store.ErrLimitExceeded.
-func (r *readTx) indexedItems(ids iter.Seq[string], limit int) ([]domain.ContextItem, error) {
-	out := []domain.ContextItem{}
-	for id := range ids {
-		if len(out) == limit {
-			return nil, store.ErrLimitExceeded
-		}
-		it, _ := r.items.get(id)
-		out = append(out, it)
-	}
-	slices.SortFunc(out, func(a, b domain.ContextItem) int {
-		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
-	})
-	return out, nil
 }

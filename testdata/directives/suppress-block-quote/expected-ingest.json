@@ -137,7 +137,7 @@
         2,
         11
       ],
-      "access_scope": "TASK"
+      "access_scope": "SESSION"
     },
     {
       "span": 0,
@@ -150,7 +150,7 @@
         24,
         31
       ],
-      "access_scope": "TASK"
+      "access_scope": "SESSION"
     },
     {
       "span": 0,
@@ -163,7 +163,7 @@
         37,
         47
       ],
-      "access_scope": "TASK"
+      "access_scope": "SESSION"
     },
     {
       "span": 0,
@@ -176,7 +176,7 @@
         52,
         63
       ],
-      "access_scope": "TASK"
+      "access_scope": "SESSION"
     },
     {
       "span": 0,
@@ -190,7 +190,7 @@
         85,
         92
       ],
-      "access_scope": "TASK"
+      "access_scope": "TURN"
     }
   ]
 }

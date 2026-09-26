@@ -31,6 +31,9 @@ type LifecycleAuthorization struct {
 	SourceActor domain.Principal
 	// TargetVersion is the target's version when it was checked.
 	TargetVersion uint64
+	// TargetAccess is the target's access boundary, so a record of the
+	// command can be narrowed to it (F6, SEC-1.3).
+	TargetAccess domain.AccessBoundary
 	// GrantID names the action-specific grant that authorized the command
 	// (FR-AUTH-002), or is empty when the source actor's own authority did.
 	GrantID string
@@ -82,7 +85,7 @@ func AuthorizeLifecycleCommand(tx store.ReadTx, caller domain.Principal, taskID 
 
 	// A mismatch names the resolved target (it is visible to the source
 	// actor), so the caller can record it (R14).
-	mismatch := LifecycleAuthorization{Command: cmd, ResolvedItemID: target.ID, SourceActor: actor, TargetVersion: target.Version}
+	mismatch := LifecycleAuthorization{Command: cmd, ResolvedItemID: target.ID, SourceActor: actor, TargetVersion: target.Version, TargetAccess: target.Access}
 	var action domain.Action
 	switch cmd.Action {
 	case domain.LifecycleResolve:
@@ -119,6 +122,7 @@ func AuthorizeLifecycleCommand(tx store.ReadTx, caller domain.Principal, taskID 
 		ResolvedItemID: target.ID,
 		SourceActor:    actor,
 		TargetVersion:  target.Version,
+		TargetAccess:   target.Access,
 		GrantID:        auth.GrantIDs[target.ID],
 	}, nil
 }

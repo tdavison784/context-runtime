@@ -25,7 +25,7 @@ type tx struct {
 func (t *tx) markSemantic()  { t.semantic = true }
 func (t *tx) markSequenced() { t.semantic, t.sequenced = true, true }
 
-var _ store.Tx = (*tx)(nil)
+var _ store.TxBase = (*tx)(nil)
 
 // commit folds the transaction into st and reports whether it wrote any
 // record.
@@ -39,10 +39,12 @@ func (t *tx) commit(st *state) bool {
 	t.supersedes.commit()
 	t.supersededBy.commit()
 	t.relsFrom.commit()
-	t.itemsByBlob.commit()
-	t.duplicates.commit()
-	t.refsByKey.commit()
-	t.itemsByKey.commit()
+	t.blobOwners.commit()
+	t.canonical.commit()
+	t.working.commit()
+	t.sources.commit()
+	t.refOwners.commit()
+	t.itemsByTask.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
 	t.events.commit()
@@ -153,19 +155,8 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 		}
 	}
 	t.items.put(it.ID, it)
-	indexed := map[string]bool{}
-	for _, p := range it.Parts {
-		if p.BlobHash != "" && !indexed[p.BlobHash] {
-			indexed[p.BlobHash] = true
-			t.itemsByBlob.add(p.BlobHash, it.ID)
-		}
-	}
-	t.duplicates.add(itemDuplicateKey(it), it.ID)
-	if it.Source != nil {
-		if key, ok := domain.LocatorKey(it.Source.Kind, it.Source.Locator); ok {
-			t.itemsByKey.add(key, it.ID)
-		}
-	}
+	t.indexLookups(it)
+	t.itemsByTask.add(it.TaskID, it.ID)
 	t.markSequenced()
 	return nil
 }
@@ -233,6 +224,13 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	t.relsFrom.add(r.FromID, r.ID)
 	t.relsTo.add(r.ToID, r.ID)
 	t.relsByType.add(r.Type, r.ID)
+	// A superseded or duplicate item is no longer live (F1).
+	switch r.Type {
+	case domain.RelSupersedes:
+		t.retireLookups(r.ToID)
+	case domain.RelDuplicateOf:
+		t.retireLookups(r.FromID)
+	}
 	t.markSequenced()
 	return nil
 }
@@ -850,7 +848,7 @@ func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
 		return fmt.Errorf("unresolved reference %s: %w", r.ID, domain.ErrImmutable)
 	}
 	t.references.put(r.ID, r)
-	t.refsByKey.add(r.LocatorKey, r.ID)
+	t.refOwners.add(sourceKey{r.LocatorKey, ownersOf(r.Access)}, r.ID)
 	t.markSequenced()
 	return nil
 }

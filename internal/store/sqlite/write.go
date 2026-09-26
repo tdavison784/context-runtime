@@ -66,24 +66,7 @@ func (t *transaction) InsertItem(v domain.ContextItem) error {
 		if err := t.put("item", v.ID, 0, v, false); err != nil {
 			return err
 		}
-		// item_sources indexes the item's source locator key (R19).
-		if v.Source != nil {
-			if key, ok := domain.LocatorKey(v.Source.Kind, v.Source.Locator); ok {
-				if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO item_sources(session_id,rule_version,locator_key,item_id) VALUES(?,?,?,?)", t.session, domain.LocatorRuleVersion, key, v.ID); err != nil {
-					return err
-				}
-			}
-		}
-		// item_blobs indexes each referenced blob once per item (R19).
-		for _, part := range v.Parts {
-			if part.BlobHash == "" {
-				continue
-			}
-			if _, err := t.conn.ExecContext(t.ctx, "INSERT OR IGNORE INTO item_blobs(session_id,blob_hash,item_id) VALUES(?,?,?)", t.session, part.BlobHash, v.ID); err != nil {
-				return err
-			}
-		}
-		return nil
+		return t.indexLookups(v)
 	})
 }
 func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error) {
@@ -153,7 +136,20 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 			return domain.ErrSupersessionCycle
 		}
 	}
-	if err := t.put("relationship", v.ID, 0, v, false); err != nil {
+	err := t.atomic(func() error {
+		if err := t.put("relationship", v.ID, 0, v, false); err != nil {
+			return err
+		}
+		// A superseded or duplicate item is no longer live (F1).
+		switch v.Type {
+		case domain.RelSupersedes:
+			return t.retireLookups(v.ToID)
+		case domain.RelDuplicateOf:
+			return t.retireLookups(v.FromID)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	if v.Type == domain.RelSupersedes {

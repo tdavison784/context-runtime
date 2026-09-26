@@ -63,7 +63,7 @@
         0,
         10
       ],
-      "access_scope": "TASK"
+      "access_scope": "SESSION"
     },
     {
       "span": 1,
@@ -76,7 +76,7 @@
         29,
         43
       ],
-      "access_scope": "TASK"
+      "access_scope": "TURN"
     }
   ]
 }

@@ -25,6 +25,9 @@ func (p InputPart) Snapshot() ContentPart {
 }
 
 func (p InputPart) Validate() error {
+	if len(p.MediaType) > MaxMediaTypeBytes || !printableASCII(p.MediaType, true) {
+		return invalid("input part: media type too long or not printable ASCII")
+	}
 	if p.Type == PartText && p.Data != nil {
 		return invalid("input part: text must use Text")
 	}
