@@ -67,62 +67,6 @@ func (t *semTx) SetObligationMaterialization(domain.ObligationRef, bool, uint64,
 	return domain.ObligationVersion{}, errUnsupported
 }
 
-// Resources and observations.
-
-func (r semRead) ResourceBinding(string) (domain.ResourceBinding, error) {
-	return domain.ResourceBinding{}, errUnsupported
-}
-func (r semRead) ResourceState(string) (domain.ResourceState, error) {
-	return domain.ResourceState{}, errUnsupported
-}
-func (r semRead) ResourceUpdate(string) (domain.ResourceUpdate, error) {
-	return domain.ResourceUpdate{}, errUnsupported
-}
-func (r semRead) ResourceUpdates(string, store.Page) (store.ResultPage[domain.ResourceUpdate], error) {
-	return store.ResultPage[domain.ResourceUpdate]{}, errUnsupported
-}
-func (r semRead) ResourcePathState(domain.ResourceLocator) (domain.ResourcePathState, error) {
-	return domain.ResourcePathState{}, errUnsupported
-}
-func (r semRead) WorkspaceBinding(domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error) {
-	return domain.WorkspaceBinding{}, errUnsupported
-}
-func (r semRead) WorkspaceBindingsByContext(string, string, string, store.Page) (store.ResultPage[domain.WorkspaceBinding], error) {
-	return store.ResultPage[domain.WorkspaceBinding]{}, errUnsupported
-}
-func (r semRead) Observation(string) (domain.ObservationRecord, error) {
-	return domain.ObservationRecord{}, errUnsupported
-}
-func (r semRead) ObservationRun(string) (domain.ObservationRun, error) {
-	return domain.ObservationRun{}, errUnsupported
-}
-func (r semRead) RunsBySubject(string, store.Page) (store.ResultPage[domain.ObservationRun], error) {
-	return store.ResultPage[domain.ObservationRun]{}, errUnsupported
-}
-func (r semRead) ObservationsByRun(string, store.Page) (store.ResultPage[domain.ObservationRecord], error) {
-	return store.ResultPage[domain.ObservationRecord]{}, errUnsupported
-}
-func (r semRead) SubjectState(string, string, domain.AccessBoundary) (domain.SubjectState, error) {
-	return domain.SubjectState{}, errUnsupported
-}
-func (r semRead) SubjectStatesByResource(string, store.Page) (store.ResultPage[domain.SubjectState], error) {
-	return store.ResultPage[domain.SubjectState]{}, errUnsupported
-}
-func (t *semTx) InsertResourceBinding(domain.ResourceBinding) error { return errUnsupported }
-func (t *semTx) InsertResourceUpdate(domain.ResourceUpdate) error   { return errUnsupported }
-func (t *semTx) PutResourceState(domain.ResourceState, uint64) (domain.ResourceState, error) {
-	return domain.ResourceState{}, errUnsupported
-}
-func (t *semTx) PutResourcePathState(domain.ResourcePathState, uint64) (domain.ResourcePathState, error) {
-	return domain.ResourcePathState{}, errUnsupported
-}
-func (t *semTx) InsertWorkspaceBinding(domain.WorkspaceBinding) error { return errUnsupported }
-func (t *semTx) InsertObservationRun(domain.ObservationRun) error     { return errUnsupported }
-func (t *semTx) InsertObservation(domain.ObservationRecord) error     { return errUnsupported }
-func (t *semTx) PutSubjectState(domain.SubjectState, uint64, string) (domain.SubjectState, error) {
-	return domain.SubjectState{}, errUnsupported
-}
-
 // Retrieval.
 
 func (r semRead) RetrievalLease(string) (domain.RetrievalLease, error) {
