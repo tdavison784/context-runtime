@@ -3,6 +3,21 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
+## Amended in Phase 2 (ADR 19, 2026-09-26)
+
+The store methods this ADR's `ResolveLifecycleTarget` and
+`rejectVisibleBoundaryConflict` decisions call — `CurrentDirective`/
+`CurrentDirectives` — were replaced in Phase 2 by the typed, namespaced
+`store.CurrentVersion`/`store.CurrentVersions` (see ADR 4's amendment note;
+M6/R6, ADR 19 §17), and both `internal/graph` functions now carry a
+`domain.DirectiveNamespace`: `rejectVisibleBoundaryConflict` takes one
+explicitly, and `ResolveLifecycleTarget`'s candidate gathering resolves
+only the `DIRECTIVE` namespace, per R6, so a keyed agent write can never be
+mistaken for a lifecycle target. The authorization rules and the
+ambiguity/stale-pointer handling this ADR decides are unchanged by the
+rename; only the store call site's name and its added namespace argument
+differ from the text below.
+
 ## Context
 
 FR-AUTH-001 requires every mutation to check access to its targets and
