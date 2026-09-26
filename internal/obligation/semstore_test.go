@@ -889,3 +889,13 @@ func (b *semBackend) ObligationsByTaskOwner(taskID string, p store.Page) (store.
 		return store.Cursor{Seq: o.CreatedSeq, ID: o.ObligationID}
 	}, p)
 }
+
+// --- semantic changes (W2 facet) ---
+
+func (b *semBackend) InsertSemanticChange(c domain.SemanticChange) error {
+	return b.write(nil, func() error { return b.realW.InsertSemanticChange(c) })
+}
+
+func (b *semBackend) SemanticChanges(viewer domain.Principal, target domain.GrantTarget, p store.Page) (store.ResultPage[domain.SemanticChange], error) {
+	return b.real.SemanticChanges(viewer, target, p)
+}

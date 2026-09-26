@@ -124,7 +124,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 		d.AssertionID = assertion.ID
 	}
 	w.start()
-	after, err := sem.AppendSemanticObligationTransition(t, d, in.ExpectedRevision)
+	after, err := appendTransition(tx, sem, o, t, d, in.ExpectedRevision)
 	if err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
