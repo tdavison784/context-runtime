@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
 )
@@ -19,6 +20,18 @@ import (
 type genStep struct {
 	p domain.Principal
 	e domain.Event
+	// transition, when set, builds the step from state at its turn: an
+	// obligation transition by trans.authority on the pick-th current
+	// obligation (so replaying the same history makes the same choice).
+	trans *genTransition
+}
+
+type genTransition struct {
+	id        string
+	authority domain.Authority
+	to        domain.ObligationStatus
+	pick      int
+	stale     bool
 }
 
 // genHistory is a deterministic history for seed.
@@ -31,7 +44,14 @@ func genHistory(seed uint64, n int) []genStep {
 		id := fmt.Sprintf("g%d-%d", seed, i)
 		key, text := pick(keys), pick([]string{"alpha", "beta", "gamma"})
 		var body string
-		switch rng.IntN(7) {
+		if rng.IntN(9) == 8 {
+			out = append(out, genStep{trans: &genTransition{id: id,
+				authority: domain.Authority(pick([]string{string(domain.AuthoritySystem), string(domain.AuthorityHarness), string(domain.AuthorityUser)})),
+				to:        domain.ObligationStatus(pick([]string{string(domain.ObligationSatisfied), string(domain.ObligationBlocked), string(domain.ObligationUnresolved), string(domain.ObligationWaived)})),
+				pick:      rng.IntN(8), stale: rng.IntN(6) == 0}})
+			continue
+		}
+		switch rng.IntN(8) {
 		case 0:
 			body = "## Goal [" + key + "]\nDo " + text + ".\n"
 		case 1:
@@ -44,6 +64,12 @@ func genHistory(seed uint64, n int) []genStep {
 			body = "## Unpin [" + key + "]\n"
 		case 5:
 			body = "## Remember\n- fact " + text + "\n"
+		case 6:
+			// Claim pins declare obligations through W4 (P3-12).
+			body = "## Pinned\n- [" + key + "] {obligation=tests_pass} Rule " + text + ".\n"
+			if text == "gamma" {
+				body = "## Pinned\n- [" + key + "] All tests must pass.\n"
+			}
 		default:
 			body = "plain " + text
 		}
@@ -51,19 +77,19 @@ func genHistory(seed uint64, n int) []genStep {
 		switch a := rng.IntN(5); a {
 		case 0:
 			p := phase2Principal(domain.AuthoritySystem, agent)
-			out = append(out, genStep{p, domain.Event{EventID: id, Kind: domain.EventSystem, Spans: []domain.Span{textSpan(domain.AuthoritySystem, false, body)}}})
+			out = append(out, genStep{p: p, e: domain.Event{EventID: id, Kind: domain.EventSystem, Spans: []domain.Span{textSpan(domain.AuthoritySystem, false, body)}}})
 		case 1:
 			p := phase2Principal(domain.AuthorityHarness, agent)
-			out = append(out, genStep{p, domain.Event{EventID: id, Kind: domain.EventHarness, TurnBoundary: rng.IntN(2) == 0, Spans: []domain.Span{textSpan(domain.AuthorityHarness, false, body)}}})
+			out = append(out, genStep{p: p, e: domain.Event{EventID: id, Kind: domain.EventHarness, TurnBoundary: rng.IntN(2) == 0, Spans: []domain.Span{textSpan(domain.AuthorityHarness, false, body)}}})
 		case 2, 3:
 			p := phase2Principal(domain.AuthorityUser, agent)
-			out = append(out, genStep{p, userEvent(id, body, rng.IntN(3) != 0)})
+			out = append(out, genStep{p: p, e: userEvent(id, body, rng.IntN(3) != 0)})
 		default:
 			// A SYSTEM caller carrying agent or tool text: a confused-deputy
 			// attempt that must never gain the caller's authority.
 			p := phase2Principal(domain.AuthoritySystem, agent)
 			a := pick([]string{string(domain.AuthorityAgent), string(domain.AuthorityTool)})
-			out = append(out, genStep{p, domain.Event{EventID: id, Kind: domain.EventSystem, Spans: []domain.Span{textSpan(domain.Authority(a), false, body)}}})
+			out = append(out, genStep{p: p, e: domain.Event{EventID: id, Kind: domain.EventSystem, Spans: []domain.Span{textSpan(domain.Authority(a), false, body)}}})
 		}
 	}
 	return out
@@ -88,8 +114,16 @@ func newPropertyFixture(t *testing.T) *fixture {
 func runHistory(t *testing.T, f *fixture, h []genStep) []*domain.IngestReceipt {
 	t.Helper()
 	resolved := map[string]bool{}
+	frozen := map[string]domain.ObligationStatus{}
 	out := make([]*domain.IngestReceipt, len(h))
 	for i, st := range h {
+		if st.trans != nil {
+			var ok bool
+			if st.p, st.e, ok = f.transitionStep(*st.trans); !ok {
+				continue
+			}
+			h[i] = st
+		}
 		before := snapshotPhase2(t, f.s)
 		r, err := f.ingest(st.p, st.e)
 		if err != nil {
@@ -100,8 +134,91 @@ func runHistory(t *testing.T, f *fixture, h []genStep) []*domain.IngestReceipt {
 		}
 		out[i] = &r
 		checkInvariants(t, f, i, resolved)
+		f.view(func(tx store.ReadTx) error { obligationInvariants(t, tx, i, frozen); return nil })
 	}
 	return out
+}
+
+// transitionStep builds a generated transition against the current
+// obligations, or ok=false when there are none yet.
+func (f *fixture) transitionStep(g genTransition) (domain.Principal, domain.Event, bool) {
+	var cur []domain.ObligationVersion
+	f.view(func(tx store.ReadTx) error {
+		all, err := tx.Obligations("T")
+		for _, o := range all {
+			if o.Current {
+				cur = append(cur, o)
+			}
+		}
+		return err
+	})
+	if len(cur) == 0 {
+		return domain.Principal{}, domain.Event{}, false
+	}
+	o := cur[g.pick%len(cur)]
+	if g.stale && o.Revision > 1 {
+		o.Revision--
+	}
+	mode := domain.AssertionMode("")
+	if g.to == domain.ObligationSatisfied {
+		mode = domain.AssertionAttestation
+	}
+	kind := map[domain.Authority]domain.EventKind{domain.AuthoritySystem: domain.EventSystem, domain.AuthorityHarness: domain.EventHarness, domain.AuthorityUser: domain.EventUser}[g.authority]
+	return principal(g.authority), transitionEvent(g.id, kind, o, g.to, mode), true
+}
+
+// obligationInvariants checks the obligation half after a step: at most one
+// current version per obligation, whose source is the current directive;
+// SATISFIED always rests on an assertion or proof (INV-16); WAIVED is
+// terminal and retired versions never change afterwards; every recorded
+// transition was made at or above its source's authority or under a grant
+// (INV-04).
+func obligationInvariants(t *testing.T, tx store.ReadTx, step int, frozen map[string]domain.ObligationStatus) {
+	t.Helper()
+	latest, err := tx.Obligations("T")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range latest {
+		versions, err := tx.ObligationVersions(l.ObligationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current := 0
+		for _, o := range versions {
+			key := fmt.Sprintf("%s/%d", o.ObligationID, o.Version)
+			if prev, ok := frozen[key]; ok && prev != o.Status {
+				t.Fatalf("step %d: frozen obligation %s changed %s -> %s", step, key, prev, o.Status)
+			}
+			if !o.Current || o.Status == domain.ObligationWaived {
+				frozen[key] = o.Status
+			}
+			if o.Status == domain.ObligationSatisfied && o.CurrentAssertionID == "" && o.CurrentProofID == "" {
+				t.Fatalf("step %d: %s SATISFIED without assertion or proof", step, key)
+			}
+			if !o.Current {
+				continue
+			}
+			current++
+			if ok, err := graph.IsCurrent(tx, o.SourceItemID); err != nil || !ok {
+				t.Fatalf("step %d: current obligation %s has a noncurrent source (%v)", step, key, err)
+			}
+		}
+		if current > 1 {
+			t.Fatalf("step %d: %s has %d current versions", step, l.ObligationID, current)
+		}
+		trs, err := tx.ObligationTransitions(l.ObligationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tr := range trs {
+			for _, o := range versions {
+				if o.Version == tr.Version && !tr.Actor.Authority.AtLeast(o.SourceAuthority) && tr.GrantID == "" {
+					t.Fatalf("step %d: %s-authority transition on a %s source without a grant: %+v", step, tr.Actor.Authority, o.SourceAuthority, tr)
+				}
+			}
+		}
+	}
 }
 
 func checkInvariants(t *testing.T, f *fixture, step int, resolved map[string]bool) {
