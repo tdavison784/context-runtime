@@ -95,13 +95,21 @@ func TestIDAndAttributeLexing(t *testing.T) {
 			t.Fatal(id)
 		}
 	}
-	p := scanner("## Pinned [a] kind=instruction obligation=tests_pass unknown=secret scope=TASK ttl=+1\nx", true)
-	if len(p.sections) != 1 || len(p.sections[0].heading.attrs) != 3 || len(p.diagnostics) != 2 {
+	p := scanner("## Pinned [a] kind=instruction obligation=tests_pass unknown=secret scope=TASK \t\nx", true)
+	if len(p.sections) != 1 || !p.sections[0].heading.valid || len(p.sections[0].heading.attrs) != 3 || len(p.diagnostics) != 1 {
 		t.Fatalf("%+v %+v", p.sections, p.diagnostics)
 	}
 	for _, d := range p.diagnostics {
 		if strings.Contains(d.reason, "secret") {
 			t.Fatal("content in diagnostic")
+		}
+	}
+	// Syntax errors make the whole heading malformed rather than salvaging it.
+	for _, heading := range []string{"## Pinned ttl=+1", "## Goal ##", "## Goal [g] ##", "## Pinned  kind=instruction", "## Pinned kind=instruction  scope=TASK",
+		"## Pinned kind=instruction\tscope=TASK", "## Pinned kind=", "## Pinned =x", "## Pinned kind=a=b", "## Pinned kind=instruction [a]", "## Resolve [g] scope=TASK", "## Unpin [g] x"} {
+		p := scanner(heading+"\nbody", true)
+		if len(p.sections) != 1 || p.sections[0].heading.valid || len(p.diagnostics) != 1 || p.diagnostics[0].code != "ErrMalformedDirective" {
+			t.Fatalf("%q: %+v %+v", heading, p.sections, p.diagnostics)
 		}
 	}
 }

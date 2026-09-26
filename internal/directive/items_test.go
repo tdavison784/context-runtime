@@ -56,7 +56,7 @@ func TestItemAttributesAndValidationHook(t *testing.T) {
 	}
 }
 func TestMalformedItemsAndLifecycle(t *testing.T) {
-	for _, input := range []string{"## Resolve [g]\ntext", "## Resolve\n- [g] text", "## Unpin\n- no ID", "## Working\n- [id]text", "## Working\n- {kind=task_state text", "## Working\n- {kind=task_state}text"} {
+	for _, input := range []string{"## Resolve [g]\ntext", "## Resolve\n- [g] text", "## Unpin\n- no ID", "## Working\n- [id]text", "## Working\n- {kind=task_state text", "## Working\n- {kind=task_state}text", "## Working\n- {kind=+x} text", "## Working\n- {} text", "## Working\n- { kind=task_state} text", "## Working\n- {kind=task_state  ttl=2} text"} {
 		p := parsedCore(input)
 		if len(p.items) != 0 || len(p.diagnostics) == 0 {
 			t.Fatalf("%q: %+v", input, p)

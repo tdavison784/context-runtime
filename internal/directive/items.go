@@ -104,7 +104,12 @@ func (p *coreParser) listItem(si int, lines []sourceLine, validate attributeVali
 			p.malformed(h.section, "unterminated item attributes", item.byteRange)
 			return
 		}
-		own := p.validated(h.section, p.lexAttributes(h.section, b[1:end], offset+1), validate)
+		lexed, ok := p.lexAttributes(h.section, b[1:end], offset+1)
+		if !ok {
+			p.malformed(h.section, "invalid attribute syntax", item.byteRange)
+			return
+		}
+		own := p.validated(h.section, lexed, validate)
 		for _, a := range own {
 			found := false
 			for i := range attrs {
