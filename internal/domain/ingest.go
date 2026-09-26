@@ -34,6 +34,16 @@ func (k EventKind) Authority() Authority {
 // MaxEventIDBytes bounds a caller EventID.
 const MaxEventIDBytes = 256
 
+// Bounds on the other caller-supplied strings of an event (SEC-1.4). With
+// MaxSpans and MaxParts they cap an event's metadata by construction, before
+// PayloadHash hashes it or ingestion persists it.
+const (
+	MaxLocatorBytes    = 4096 // SourceRef.Locator
+	MaxToolCallIDBytes = 256  // SourceRef.ToolCallID
+	MaxMediaTypeBytes  = 255  // InputPart.MediaType (RFC 6838 type/subtype)
+	MaxOwnerIDBytes    = 256  // principal and span-boundary session/workflow/task/agent IDs
+)
+
 // Span is one source/authority/access boundary with its own ordered parts
 // (M1). Spans own their bytes, so spans cannot overlap or leave gaps, and no
 // span inherits a neighbor's authority. The trusted embedding API, not event
