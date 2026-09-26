@@ -438,7 +438,7 @@ func TestSnapshot_RejectsBeforeWriting(t *testing.T) {
 				_, err := SupersedeSnapshot(tx, actor, []string{"turn-a"}, "task", "evt")
 				return err
 			},
-			wantErr: domain.ErrInvalidAuthorityPromotion,
+			wantErr: ErrBoundaryConflict,
 		},
 	}
 	for _, tc := range cases {

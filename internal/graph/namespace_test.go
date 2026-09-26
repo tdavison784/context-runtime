@@ -87,3 +87,42 @@ func TestR6_NamespacesNeverReplaceEachOther(t *testing.T) {
 		})
 	})
 }
+
+// TestR13_CheckBoundaryConflict: ingestion pre-checks each directive item
+// before writing anything, so a boundary conflict (a visible current
+// version of the same ID at another boundary, explicit or derived ID)
+// rejects only that item (R13). Stale pointers and hidden boundaries are
+// never conflicts, and the item's own boundary is a replacement, not a
+// conflict.
+func TestR13_CheckBoundaryConflict(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess, dirID = "sess-r13", "d"
+		user := principal(sess, domain.AuthorityUser)
+		update(t, s, sess, func(tx store.Tx) error {
+			task := storetest.NewDirective(sess, "d-task", dirID, tx.NextSeq(), "task-wide")
+			hidden := agentScopedItem(sess, "h-hidden", tx.NextSeq(), "agent-b")
+			hidden.DirectiveID, hidden.Section = "h", domain.SectionPinned
+			mustInsert(t, tx, task, hidden)
+			mustFile(t, tx, task, hidden)
+			return nil
+		})
+		probe := func(id, dir string, scope domain.Scope) domain.ContextItem {
+			it := storetest.NewDirective(sess, id, dir, 99, "probe")
+			it.Scope = scope
+			it.Access.Scope = scope
+			return it
+		}
+		view(t, s, sess, func(tx store.ReadTx) error {
+			if err := CheckBoundaryConflict(tx, user, probe("p1", dirID, domain.ScopeTurn)); !errors.Is(err, ErrBoundaryConflict) {
+				t.Errorf("other visible boundary: err = %v, want ErrBoundaryConflict", err)
+			}
+			if err := CheckBoundaryConflict(tx, user, probe("p2", dirID, domain.ScopeTask)); err != nil {
+				t.Errorf("same boundary (a replacement): err = %v", err)
+			}
+			if err := CheckBoundaryConflict(tx, user, probe("p3", "h", domain.ScopeTask)); err != nil {
+				t.Errorf("hidden boundary: err = %v, want nil", err)
+			}
+			return nil
+		})
+	})
+}

@@ -514,8 +514,10 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityUser), taskID, dirID, u.ID, "evt-u")
 			return err
 		})
-		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
-			t.Fatalf("err = %v, want ErrInvalidAuthorityPromotion", err)
+		// R13: a boundary change through ID reuse rejects that item
+		// (ErrBoundaryConflict), distinct from an authorization failure.
+		if !errors.Is(err, ErrBoundaryConflict) || errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Fatalf("err = %v, want ErrBoundaryConflict only", err)
 		}
 
 		// h must remain the only current version; the rejected write left
