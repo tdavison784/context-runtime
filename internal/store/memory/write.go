@@ -251,23 +251,6 @@ func (t *tx) SetCurrentVersion(itemID string) error {
 	return nil
 }
 
-func (t *tx) SetCurrentDirective(taskID, directiveID, itemID string) error {
-	if err := t.check(); err != nil {
-		return err
-	}
-	if taskID == "" || directiveID == "" {
-		return invalid("directive: task and directive IDs are required")
-	}
-	it, ok := t.items.peek(itemID)
-	if !ok {
-		return notFound("item", itemID)
-	}
-	if it.DirectiveID != directiveID || it.TaskID != taskID {
-		return invalid("item %s is not directive %s of task %s", itemID, directiveID, taskID)
-	}
-	return t.SetCurrentVersion(itemID)
-}
-
 func (t *tx) InsertBlob(b domain.Blob) error {
 	if err := t.own(b.SessionID); err != nil {
 		return err

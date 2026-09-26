@@ -664,7 +664,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		p1 = NewDirective(sessA, "p1", "dep", tx.NextSeq(), "Use dependency v2.")
 		noErr(t, tx.InsertItem(p1))
-		noErr(t, tx.SetCurrentDirective("task", "dep", "p1"))
+		noErr(t, tx.SetCurrentVersion("p1"))
 		noErr(t, tx.InsertObligationVersion(NewObligation(sessA, "obl", 1, p1.Seq, "p1")))
 		return nil
 	})
@@ -673,7 +673,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		p2 = NewDirective(sessA, "p2", "dep", seq, "Use dependency v3.")
 		noErr(t, tx.InsertItem(p2))
 		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "p2-p1", domain.RelSupersedes, "p2", "p1", seq)))
-		noErr(t, tx.SetCurrentDirective("task", "dep", "p2"))
+		noErr(t, tx.SetCurrentVersion("p2"))
 		old, err := tx.Obligation("obl")
 		noErr(t, err)
 		old.Current, old.RetiredSeq = false, seq
@@ -683,10 +683,10 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
-		cur, err := tx.CurrentDirective("task", "dep", DirectiveBoundary(sessA))
+		cur, err := currentDirective(tx, "task", "dep", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "p2" {
-			t.Errorf("CurrentDirective = %q, want p2", cur)
+			t.Errorf("CurrentVersion(DIRECTIVE) = %q, want p2", cur)
 		}
 		got, err := tx.Item("p1")
 		noErr(t, err)
@@ -710,25 +710,24 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		return nil
 	})
 	err := s.Update(ctx, sessA, func(tx store.Tx) error {
-		wantErr(t, tx.SetCurrentDirective("task", "dep", "missing"), domain.ErrNotFound)
+		wantErr(t, tx.SetCurrentVersion("missing"), domain.ErrNotFound)
 		noErr(t, tx.InsertItem(NewItem(sessA, "plain", tx.NextSeq(), "no directive")))
-		wantErr(t, tx.SetCurrentDirective("task", "dep", "plain"), domain.ErrInvalidRecord)
-		wantErr(t, tx.SetCurrentDirective("task", "other", "p2"), domain.ErrInvalidRecord)
-		// The item must belong to the task it becomes current in.
-		wantErr(t, tx.SetCurrentDirective("task2", "dep", "p2"), domain.ErrInvalidRecord)
-		wantErr(t, tx.SetCurrentDirective("", "dep", "p2"), domain.ErrInvalidRecord)
-		wantErr(t, tx.SetCurrentDirective("task", "", "p2"), domain.ErrInvalidRecord)
-		_, err := tx.CurrentDirective("task", "other", DirectiveBoundary(sessA))
+		wantErr(t, tx.SetCurrentVersion("plain"), domain.ErrInvalidRecord)
+		// The key comes from the item, so an item is only ever current
+		// under its own task, directive ID, and boundary.
+		_, err := currentDirective(tx, "task", "other", DirectiveBoundary(sessA))
 		wantErr(t, err, domain.ErrNotFound)
-		_, err = tx.CurrentDirective("task2", "dep", DirectiveBoundary(sessA))
+		task2 := DirectiveBoundary(sessA)
+		task2.TaskID = "task2"
+		_, err = currentDirective(tx, "task2", "dep", task2)
 		wantErr(t, err, domain.ErrNotFound)
 		// Moving the pointer back is permitted; the store does not judge
 		// which version is current.
-		noErr(t, tx.SetCurrentDirective("task", "dep", "p1"))
-		cur, err := tx.CurrentDirective("task", "dep", DirectiveBoundary(sessA))
+		noErr(t, tx.SetCurrentVersion("p1"))
+		cur, err := currentDirective(tx, "task", "dep", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "p1" {
-			t.Errorf("CurrentDirective = %q, want p1", cur)
+			t.Errorf("CurrentVersion(DIRECTIVE) = %q, want p1", cur)
 		}
 		return errRollback
 	})
@@ -815,18 +814,18 @@ func testDirectiveBoundaries(t *testing.T, s store.Store) {
 		for _, it := range []domain.ContextItem{shared, private, private2} {
 			noErr(t, tx.InsertItem(it))
 		}
-		ids, err := tx.CurrentDirectives("task", "dir")
+		ids, err := currentDirectives(tx, "task", "dir")
 		if err != nil || len(ids) != 0 {
-			t.Errorf("CurrentDirectives before any is set = %v, %v; want empty and nil", ids, err)
+			t.Errorf("CurrentVersions(DIRECTIVE) before any is set = %v, %v; want empty and nil", ids, err)
 		}
-		noErr(t, tx.SetCurrentDirective("task", "dir", "shared"))
-		noErr(t, tx.SetCurrentDirective("task", "dir", "private"))
+		noErr(t, tx.SetCurrentVersion("shared"))
+		noErr(t, tx.SetCurrentVersion("private"))
 		// Replacing the agent-only version leaves the task-wide one alone.
-		noErr(t, tx.SetCurrentDirective("task", "dir", "private2"))
-		ids, err = tx.CurrentDirectives("task", "dir")
+		noErr(t, tx.SetCurrentVersion("private2"))
+		ids, err = currentDirectives(tx, "task", "dir")
 		noErr(t, err)
 		if want := []string{"private2", "shared"}; !slices.Equal(ids, want) {
-			t.Errorf("CurrentDirectives inside Update = %v, want %v", ids, want)
+			t.Errorf("CurrentVersions(DIRECTIVE) inside Update = %v, want %v", ids, want)
 		}
 		return nil
 	})
@@ -835,22 +834,22 @@ func testDirectiveBoundaries(t *testing.T, s store.Store) {
 			boundary domain.AccessBoundary
 			want     string
 		}{{taskWide, "shared"}, {agentOnly, "private2"}} {
-			got, err := tx.CurrentDirective("task", "dir", tc.boundary)
+			got, err := currentDirective(tx, "task", "dir", tc.boundary)
 			noErr(t, err)
 			if got != tc.want {
-				t.Errorf("CurrentDirective(%+v) = %q, want %q", tc.boundary, got, tc.want)
+				t.Errorf("CurrentVersion(DIRECTIVE, %+v) = %q, want %q", tc.boundary, got, tc.want)
 			}
 		}
-		// CurrentDirectives lists the current version in every boundary,
+		// CurrentVersions lists the current version in every boundary,
 		// ordered by item ID, and nothing for other tasks or IDs.
 		for _, tc := range []struct {
 			task, dir string
 			want      []string
 		}{{"task", "dir", []string{"private2", "shared"}}, {"task2", "dir", nil}, {"task", "other", nil}} {
-			ids, err := tx.CurrentDirectives(tc.task, tc.dir)
+			ids, err := currentDirectives(tx, tc.task, tc.dir)
 			noErr(t, err)
 			if !slices.Equal(ids, tc.want) {
-				t.Errorf("CurrentDirectives(%s, %s) = %v, want %v", tc.task, tc.dir, ids, tc.want)
+				t.Errorf("CurrentVersions(DIRECTIVE)(%s, %s) = %v, want %v", tc.task, tc.dir, ids, tc.want)
 			}
 		}
 		// Every boundary field is part of the key.
@@ -859,20 +858,25 @@ func testDirectiveBoundaries(t *testing.T, s store.Store) {
 			func(b *domain.AccessBoundary) { b.WorkflowID = "wf" },
 			func(b *domain.AccessBoundary) { b.Scope = domain.ScopeTurn },
 			func(b *domain.AccessBoundary) { b.SessionID = sessB },
-			func(b *domain.AccessBoundary) { b.TaskID = "task2" },
 		} {
 			b := taskWide
 			edit(&b)
-			_, err := tx.CurrentDirective("task", "dir", b)
+			_, err := currentDirective(tx, "task", "dir", b)
 			if !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("CurrentDirective(%+v): error = %v, want ErrNotFound", b, err)
+				t.Errorf("CurrentVersion(DIRECTIVE, %+v): error = %v, want ErrNotFound", b, err)
 			}
 		}
+		// A boundary naming another task than the key is a malformed key,
+		// rejected structurally without consulting stored state.
+		b := taskWide
+		b.TaskID = "task2"
+		_, err := currentDirective(tx, "task", "dir", b)
+		wantErr(t, err, domain.ErrInvalidRecord)
 		return nil
 	})
 }
 
-// testCurrentDirectivesOrder checks that CurrentDirectives orders by item
+// testCurrentDirectivesOrder checks that CurrentVersions orders by item
 // ID regardless of insertion order: six boundaries are set in reverse
 // item-ID order, so neither insertion order nor hash order can pass.
 func testCurrentDirectivesOrder(t *testing.T, s store.Store) {
@@ -884,24 +888,24 @@ func testCurrentDirectivesOrder(t *testing.T, s store.Store) {
 			it.AgentID = fmt.Sprintf("agent-%d", i)
 			it.Access.AgentID = it.AgentID
 			noErr(t, tx.InsertItem(it))
-			noErr(t, tx.SetCurrentDirective("task", "dir", it.ID))
+			noErr(t, tx.SetCurrentVersion(it.ID))
 		}
 		for i := range n {
 			want = append(want, fmt.Sprintf("v%d", i))
 		}
-		got, err := tx.CurrentDirectives("task", "dir")
+		got, err := currentDirectives(tx, "task", "dir")
 		noErr(t, err)
 		if !slices.Equal(got, want) {
-			t.Errorf("CurrentDirectives inside Update = %v, want %v", got, want)
+			t.Errorf("CurrentVersions(DIRECTIVE) inside Update = %v, want %v", got, want)
 		}
 		return nil
 	})
 	for range 3 {
 		view(t, s, sessA, func(tx store.ReadTx) error {
-			got, err := tx.CurrentDirectives("task", "dir")
+			got, err := currentDirectives(tx, "task", "dir")
 			noErr(t, err)
 			if !slices.Equal(got, want) {
-				t.Errorf("CurrentDirectives = %v, want %v", got, want)
+				t.Errorf("CurrentVersions(DIRECTIVE) = %v, want %v", got, want)
 			}
 			return nil
 		})

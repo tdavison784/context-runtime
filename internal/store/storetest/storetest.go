@@ -86,7 +86,7 @@ var suite = []testCase{
 	{"Blobs", testBlobs},
 	{"DirectiveReplacement", testDirectiveReplacement},
 	{"DirectiveBoundaries", testDirectiveBoundaries},
-	{"CurrentDirectivesOrder", testCurrentDirectivesOrder},
+	{"CurrentVersions(DIRECTIVE)Order", testCurrentDirectivesOrder},
 	{"CurrentNamespaces", testCurrentNamespaces},
 
 	// Ingestion records.

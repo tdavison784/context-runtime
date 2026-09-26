@@ -61,7 +61,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 		}
 		expected["items"] = []domain.ContextItem{item, second}
 		expected["blob"] = blob
-		if err := tx.SetCurrentDirective("task", "d1", "i1"); err != nil {
+		if err := tx.SetCurrentVersion("i1"); err != nil {
 			return err
 		}
 		expected["directive"] = "i1"
@@ -170,7 +170,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 			if m["blob"], err = tx.Blob(domain.HashBytes([]byte("blob"))); err != nil {
 				return err
 			}
-			if m["directive"], err = tx.CurrentDirective("task", "d1", item.Access); err != nil {
+			if m["directive"], err = tx.CurrentVersion(domain.CurrentKey{SessionID: "s", TaskID: "task", Access: item.Access, Namespace: domain.NamespaceDirective, ID: "d1"}); err != nil {
 				return err
 			}
 			if m["obligation"], err = tx.Obligation("o1"); err != nil {

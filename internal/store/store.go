@@ -36,7 +36,7 @@
 //     another session than the transaction's, breaks the sequence rule, or
 //     carries an audit event that does not target the record it describes.
 //   - domain.ErrNotFound: a single-record getter, or a write, names a record
-//     missing from this session (an item for SetCurrentDirective, an
+//     missing from this session (an item for SetCurrentVersion, an
 //     obligation version for a transition, a call for an attempt).
 //   - domain.ErrImmutable: an immutable record's ID is reused, or a write
 //     changes a field outside those its method may change (obligation fields
@@ -251,20 +251,6 @@ type ReadTx interface {
 	// principal cannot see stays invisible (FR-DIR-002, FR-DIR-005). An
 	// invalid namespace is ErrInvalidRecord.
 	CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error)
-	// CurrentDirective is the namespace-agnostic view that predates M6: the
-	// DIRECTIVE pointer for (task, directive ID, boundary) if there is one,
-	// else the AGENT_KEY pointer. Callers must check the returned item's
-	// namespace (domain.ContextItem.DirectiveNamespace).
-	//
-	// Deprecated: use CurrentVersion; lifecycle resolution must consider
-	// only the DIRECTIVE namespace (R6).
-	CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error)
-	// CurrentDirectives is the namespace-agnostic view that predates M6: the
-	// pointers of both namespaces for (task, directive ID), ordered by item
-	// ID. Callers must filter by the items' namespaces.
-	//
-	// Deprecated: use CurrentVersions.
-	CurrentDirectives(taskID, directiveID string) ([]string, error)
 	// Obligation returns the latest version of an obligation.
 	Obligation(obligationID string) (domain.ObligationVersion, error)
 	ObligationVersions(obligationID string) ([]domain.ObligationVersion, error)
@@ -380,12 +366,6 @@ type Tx interface {
 	// (domain.ErrNotFound) and have a valid key (domain.ErrInvalidRecord). It
 	// is a semantic write.
 	SetCurrentVersion(itemID string) error
-	// SetCurrentDirective is SetCurrentVersion for an item that belongs to
-	// taskID and carries directiveID (domain.ErrInvalidRecord otherwise); the
-	// namespace still comes from the item.
-	//
-	// Deprecated: use SetCurrentVersion.
-	SetCurrentDirective(taskID, directiveID, itemID string) error
 
 	// InsertBlob stores an immutable blob after verifying its hash.
 	// Inserting identical bytes again is a no-op.

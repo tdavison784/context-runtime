@@ -199,16 +199,6 @@ func (t *transaction) SetCurrentVersion(itemID string) error {
 	}
 	return err
 }
-func (t *transaction) SetCurrentDirective(taskID, directiveID, itemID string) error {
-	v, err := t.Item(itemID)
-	if err != nil {
-		return err
-	}
-	if taskID == "" || v.TaskID != taskID || v.DirectiveID != directiveID {
-		return fmt.Errorf("%w: directive item mismatch", domain.ErrInvalidRecord)
-	}
-	return t.SetCurrentVersion(itemID)
-}
 func (t *transaction) InsertBlob(v domain.Blob) error {
 	if err := v.Validate(); err != nil {
 		return err
