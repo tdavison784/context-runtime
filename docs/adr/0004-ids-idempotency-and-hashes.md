@@ -304,16 +304,17 @@ item ID only when it actually occurs, is less disruptive and matches how
   AGENT/TOOL/RETRIEVED_CONTENT item fails (AUTH-2.2); the existing
   `Section`-with-`DirectiveID` passing cases above need a
   SYSTEM/HARNESS/USER authority to keep passing once this check lands.
-- Required (round 2, `memstore-worker`/`sqlite-worker` assigned): a
-  `storetest` case for `CurrentDirectives` — returns every current
-  version's item ID across boundaries in a task, ordered by item ID, empty
-  (not an error) when none exist; and a case for the visible-boundary
-  reuse rejection this ADR decides (an actor that can access a current
-  version of a directive ID in one boundary is rejected when it tries to
-  write a new current version of the same ID in a different, also-
-  accessible boundary). `internal/store/memory` implements
-  `CurrentDirectives` as of this update; `internal/store/sqlite` does not
-  yet.
+- `internal/store/storetest/semantic.go:testCurrentDirectivesOrder`
+  (`TestConformance/CurrentDirectivesOrder`) locks `CurrentDirectives`
+  exactly: every current version's item ID across boundaries in a task,
+  ordered by item ID, empty (not an error) when none exist. Both
+  `internal/store/memory` and `internal/store/sqlite` implement it;
+  `internal/store/sqlite/current_directives_test.go
+  :TestCurrentDirectivesAcrossBoundaries` reconfirms it SQLite-specifically.
+  The visible-boundary reuse *rejection* itself is a caller-side
+  authorization decision built on top of `CurrentDirectives`, not a store
+  behavior — see ADR 16's `ReplaceDirective` decision (not yet implemented,
+  `graph-worker` assigned) for its test requirements.
 
 ## Open questions
 
@@ -368,13 +369,16 @@ SQLite-only `DirectiveBoundaries` failure this ADR flagged is fixed
 (`a8e895f`).
 
 **Round 2 review** (PR #2; AUTH — Claude Opus, `auth-review-round2.md`;
-SPEC — Codex GPT-6, `spec-pr-comment-round2.md`). AUTH-2.2: `Section` could
-be forged onto an AGENT/TOOL/RETRIEVED_CONTENT item; fixed by requiring
-`CanHoldLifecycleAuthority()` whenever `Section` is non-empty. SPEC-2.2: a
-principal could see two simultaneously-current versions of one directive
-ID in different boundaries, with no defined Resolve/Unpin target; fixed by
-`CurrentDirectives` plus the SDD v0.8 amendment (visible-boundary reuse
-rejected, `ErrAmbiguousDirective` for a genuinely ambiguous target).
-Recorded here since both are directive-identity decisions; ADR 16 covers
-the authorization call sites (`ResolveLifecycleTarget`,
-`ReplaceDirective`'s AUTH-2.1 check) that consume `CurrentDirectives`.
+SPEC — Codex GPT-6, `spec-pr-comment-round2.md`). AUTH-2.2: `Section`
+could be forged onto an AGENT/TOOL/RETRIEVED_CONTENT item; fixed and
+tested (`CanHoldLifecycleAuthority()` required whenever `Section` is
+non-empty). SPEC-2.2: a principal could see two simultaneously-current
+versions of one directive ID in different boundaries, with no defined
+Resolve/Unpin target; the primitive this ADR decides,
+`CurrentDirectives`, is fixed and tested on both stores, and the SDD v0.8
+amendment (visible-boundary reuse rejected, `ErrAmbiguousDirective` for a
+genuinely ambiguous target) is applied. Recorded here since both are
+directive-identity decisions; ADR 16 covers the authorization call sites
+that consume `CurrentDirectives` (`ResolveLifecycleTarget`,
+`ReplaceDirective`'s AUTH-2.1 reuse check), which are decided but not yet
+implemented.
