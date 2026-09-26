@@ -3,7 +3,7 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
-## Amended in Phase 2 (ADR 19, 2026-09-26)
+## Amended in Phase 2 (ADR 19, 2026-09-26; corrected 2026-09-27 per SPEC-1.8)
 
 `store.ReadTx.CurrentDirective(taskID, directiveID, boundary)`,
 `CurrentDirectives(taskID, directiveID)`, and `Tx.SetCurrentDirective(...)`,
@@ -11,16 +11,70 @@ which this ADR's Decision and Review sections describe below, were
 replaced in Phase 2 by typed, namespaced equivalents that also distinguish
 a parsed directive from keyed agent state (M6/R6; ADR 19 §17):
 `store.CurrentVersion(domain.CurrentKey{SessionID, TaskID, Access,
-Namespace, ID})`, `store.CurrentVersions(taskID, ns, id)`, and
-`store.SetCurrentVersion(itemID)`. The untyped methods were marked
-`Deprecated`, then deleted once every caller in `internal/graph` switched
-(`p2/store` commit `55761b8`). This is a rename plus an added namespace
-parameter, not a change to the boundary-keyed identity or
-visible-boundary-reuse decisions this ADR records below — those decisions
-apply unchanged to the typed replacements. The Decision and Review text
-below is left as written, describing Phase 1's original mechanism; read
+Namespace, ID})` (no namespace argument on `SetCurrentVersion`; the whole
+key derives from the item itself), `store.CurrentVersions(taskID, ns,
+id)`, and `store.SetCurrentVersion(itemID)`. The untyped methods were
+marked `Deprecated`, then deleted once every caller in `internal/graph`
+switched (`p2/store` commit `55761b8`).
+
+**This was not a rename alone; the earlier text here overclaimed
+"unchanged" (SPEC-1.8).** Behavior actually changed in several ways this
+ADR's Decision and Review sections below do not reflect, since they
+predate Phase 2:
+
+- **Visible-boundary ID reuse now rejects with `graph.ErrBoundaryConflict`
+  (R13, ADR 19 §7), not `domain.ErrInvalidAuthorityPromotion`.** The
+  round-2/round-3 text below (`AUTH-2.1`, `rejectVisibleBoundaryConflict`)
+  describes the Phase 1 mechanism, which used
+  `ErrInvalidAuthorityPromotion`. Phase 2 deliberately changed this: a
+  same-ID write whose boundary conflicts with a visible current version
+  now fails with the graph-level `ErrBoundaryConflict`
+  (`internal/graph/graph.go:61`), distinct on purpose so ingestion can
+  reject only the offending item with a `boundary_conflict` diagnostic
+  (R13) instead of aborting the whole event the way an authority-promotion
+  failure does. `TestReplaceDirective_VisibleBoundaryConflict`'s
+  `VisibleOtherBoundaryRejected` subtest now asserts `ErrBoundaryConflict`
+  and explicitly asserts `ErrInvalidAuthorityPromotion` is *not* returned.
+- **`CurrentKey.Validate` rejects a `TaskID` mismatch structurally, before
+  any store lookup**, with `domain.ErrInvalidRecord`
+  (`internal/domain/namespace.go:38-39`) — not the uniform `ErrNotFound`
+  every other boundary-field mismatch gets (see this ADR's
+  `testDirectiveBoundaries` citation below, which is otherwise still
+  accurate for `AgentID`/`WorkflowID`/`Scope`/`SessionID`). This discloses
+  nothing: a malformed key is rejected before the store is ever consulted,
+  so no existence information about a differently-scoped key leaks.
+- **`IsCurrent` gained two more conditions** (D10, ADR 19 §7):
+  the current-version map must name the item, and the item must carry no
+  `DUPLICATE_OF` edge — not incoming-`SUPERSEDES`-absence alone.
+- **`ResolveLifecycleTarget`'s literal-item-ID path now requires the
+  DIRECTIVE namespace** (R6, ADR 19 §17), so it can never resolve a keyed
+  agent-state item.
+- **`Supersede` gained `ErrAlreadySuperseded`** and now retires bound
+  obligation versions as part of the same operation (D13).
+- **`SupersedeSnapshot` moved to `internal/graph/snapshot.go`**, returns a
+  `SnapshotResult` (`Supersedes`/`Duplicates` relationship lists) instead
+  of its Phase 1 return shape, and has new error cases.
+
+None of this changes the boundary-*keyed identity* decision this ADR
+itself owns ("each (session, task, access boundary, directive ID) has one
+current version"); what changed is the authorization/graph mechanics
+layered on top of it, which is ADR 16's territory — see ADR 16's own
+Phase 2 amendment note. The Decision and Review text below is otherwise
+left as written, describing Phase 1's original mechanism; read
 `CurrentDirective(s)`/`SetCurrentDirective` there as the typed methods'
-Phase 1 predecessor.
+Phase 1 predecessor, and read a bare `ErrInvalidAuthorityPromotion` claim
+about visible-boundary reuse specifically as superseded by the
+`ErrBoundaryConflict` bullet above.
+
+New Phase 2 ID forms this ADR's original ID taxonomy does not name:
+`evc_`/`eva_` occurrence-ID prefixes (`internal/domain/ids.go`), the
+`IDDomain` derived-artifact domains (`dgn`, `cmd`, `sec`, `ref`), and
+`DerivedTurnID`. An anonymous (no caller `EventID`) event's items also now
+get deterministic `itm_`-prefixed IDs derived from the occurrence
+(`internal/ingest/run.go:58-63,164`), not the random `IDGenerator` this
+ADR's Decision section describes as the anonymous-event path; the random
+generator remains available but is no longer what ingestion actually uses
+for that path.
 
 ## Context
 
@@ -309,7 +363,10 @@ item ID only when it actually occurs, is less disruptive and matches how
   but different access boundaries resolve independently; every boundary
   field (`AgentID`, `WorkflowID`, `Scope`, `SessionID`, `TaskID`) is part of
   the key, and a boundary that doesn't match returns exactly the same
-  `ErrNotFound` as an unused ID. Passes on both `internal/store/memory` and
+  `ErrNotFound` as an unused ID — except `TaskID`, which
+  `CurrentKey.Validate` now rejects structurally with `ErrInvalidRecord`
+  before any lookup (see this ADR's Phase 2 amendment note above,
+  SPEC-1.8). Passes on both `internal/store/memory` and
   `internal/store/sqlite` (fixed in `a8e895f`: `CurrentDirective` was
   reporting a different-session boundary as `ErrInvalidRecord` instead of
   `ErrNotFound`, the same existence-disclosure pattern AUTH-1.3 fixed
@@ -325,7 +382,10 @@ item ID only when it actually occurs, is less disruptive and matches how
   RETRIEVED_CONTENT item fails; a non-directive item allows any
   authority).
 - `internal/store/storetest/semantic.go:testCurrentDirectivesOrder`
-  (`TestConformance/CurrentDirectivesOrder`) locks `CurrentDirectives`
+  (`TestConformance/CurrentVersions(DIRECTIVE)Order` — SPEC-1.8: renamed
+  from `CurrentDirectivesOrder` when the store switched to the typed
+  namespaced methods; the `-run` filter must use the new name) locks
+  `CurrentVersions`
   exactly: every current version's item ID across boundaries in a task,
   ordered by item ID, empty (not an error) when none exist. Both
   `internal/store/memory` and `internal/store/sqlite` implement it;
