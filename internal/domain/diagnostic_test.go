@@ -174,3 +174,20 @@ func TestLifecycleCommandRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestIngestionReasonsAndMismatch(t *testing.T) {
+	for _, r := range []DiagnosticReason{ReasonBoundaryConflict, ReasonTargetMismatch} {
+		if !r.Valid() {
+			t.Errorf("rejected reason %q", r)
+		}
+	}
+	c := commandRecordFixture()
+	c.Resolution = TargetMismatch
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	c.ResolvedItemID, c.ResolvedVersion = "", 0
+	if c.Validate() == nil {
+		t.Fatal("mismatch without its accessible target accepted")
+	}
+}
