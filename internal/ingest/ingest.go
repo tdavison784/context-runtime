@@ -75,6 +75,11 @@ func (g Ingester) now() time.Time {
 // problems, boundary conflicts (R13), and unresolved or mismatched
 // lifecycle targets (R7, R14) are diagnostics in the receipt.
 func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event) (domain.IngestReceipt, error) {
+	r, err := g.ingest(ctx, s, p, e)
+	return r, sanitize(err)
+}
+
+func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event) (domain.IngestReceipt, error) {
 	e = e.Clone()
 	if err := e.ValidateFor(p, g.Limits); err != nil {
 		return domain.IngestReceipt{}, err
@@ -89,7 +94,7 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 	}
 	var out domain.IngestReceipt
 	err := s.Update(ctx, p.SessionID, func(tx store.Tx) error {
-		r, err := g.Apply(tx, p, e, anonymous)
+		r, err := g.apply(tx, p, e, anonymous)
 		if err != nil {
 			return err
 		}
@@ -107,7 +112,15 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 // otherwise; the caller generates it once per attempt, outside any retried
 // transaction callback. Apply revalidates e, so it is safe to call
 // directly. On error the caller must abort tx.
+//
+// Every error Ingest and Apply return is a bare public sentinel (or a join
+// of them): never text naming an item or other record (R20.1).
 func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
+	r, err := g.apply(tx, p, e, anonymousOccurrence)
+	return r, sanitize(err)
+}
+
+func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
 	e = e.Clone()
 	limits := g.Limits.Effective()
 	if err := e.ValidateFor(p, limits); err != nil {
