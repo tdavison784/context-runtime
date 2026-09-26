@@ -214,10 +214,11 @@ func TestDirectives_Residual_D8(t *testing.T) {
 				instr = append(instr, it)
 			}
 		}
-		// "Also cite sources." belongs to the Pinned section body (its
-		// list continues until a same/higher heading), so only the
-		// leading text is residue.
-		if len(instr) != 1 || instr[0].Parts[0].Text != "Be concise." || instr[0].Scope != domain.ScopeSession {
+		// "Also cite sources." is stray prose in the Pinned list, which
+		// makes that section malformed: its unwritten text joins the
+		// residue, byte for byte, while the written item [a] does not
+		// (R20.3).
+		if len(instr) != 1 || instr[0].Parts[0].Text != "  Be concise.\n## Pinned\nAlso cite sources.\n" || instr[0].Scope != domain.ScopeSession {
 			t.Fatalf("residual = %+v", instr)
 		}
 		h := f.mustIngest(sys, domain.Event{EventID: "h1", Kind: domain.EventHarness, Spans: []domain.Span{textSpan(domain.AuthorityHarness, false, "Use tabs.")}})

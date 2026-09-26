@@ -63,14 +63,16 @@ func TestWorking_DuplicateAndMalformed(t *testing.T) {
 			t.Errorf("identical snapshot: dups %v repls %v current %v", semanticDups(r), r.Replacements, f.currentWorking())
 		}
 
+		// A refused trusted section's text survives as residual instruction
+		// text (R20.3), never as Working members.
 		r = f.mustIngest(sys, sysEvent("w3", "## Working\n- c\n- [bad id!] d\n"))
-		if len(semantic(r)) != 0 || !slices.Equal(f.currentWorking(), []string{"a", "b"}) {
+		if workingItems(r) != 0 || len(residuals(r)) != 1 || !slices.Equal(f.currentWorking(), []string{"a", "b"}) {
 			t.Errorf("malformed snapshot replaced state: %v", f.currentWorking())
 		}
 
 		f.mustIngest(sys, sysEvent("p1", "## Pinned\n- [status] pinned status\n"))
 		r = f.mustIngest(sys, sysEvent("w4", "## Working\n- [status] {scope=TURN} c\n- e\n"))
-		if !hasDiag(r, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict) || len(semantic(r)) != 0 || !slices.Equal(f.currentWorking(), []string{"a", "b"}) {
+		if !hasDiag(r, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict) || workingItems(r) != 0 || len(residuals(r)) != 1 || !slices.Equal(f.currentWorking(), []string{"a", "b"}) {
 			t.Errorf("boundary-conflict snapshot: items %v current %v diags %+v", kinds(semantic(r)), f.currentWorking(), r.Diagnostics)
 		}
 	})
@@ -132,4 +134,14 @@ func TestLifecycle_SourceActor_R7(t *testing.T) {
 			t.Errorf("SYSTEM Resolve = %+v", r.Lifecycle[0])
 		}
 	})
+}
+
+func workingItems(r domain.IngestReceipt) int {
+	n := 0
+	for _, it := range r.Items {
+		if it.Section == domain.SectionWorking {
+			n++
+		}
+	}
+	return n
 }
