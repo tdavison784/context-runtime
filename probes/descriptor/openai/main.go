@@ -172,7 +172,11 @@ func (p *probe) reasoning(model string) {
 func (p *probe) cache(model string) {
 	base := strings.ReplaceAll(model, "-", "_")
 	// Deterministic natural-language filler; the counter establishes actual lengths.
-	words := strings.Repeat("The archive records a quiet blue lantern beside the north window. ", 125)
+	var filler strings.Builder
+	for i := 0; i < 125; i++ {
+		fmt.Fprintf(&filler, "Archive line %03d records a quiet lantern beside the north window.\n", i)
+	}
+	words := filler.String()
 	for _, n := range []int{75, 84, 85, 100} {
 		prefix := strings.Repeat("The archive records a quiet blue lantern beside the north window. ", n)
 		req := object{"model": model, "input": []any{object{"role": "developer", "content": prefix}, object{"role": "user", "content": "Reply OK."}}, "max_output_tokens": 32, "store": false}
@@ -184,8 +188,10 @@ func (p *probe) cache(model string) {
 	makeReq := func(prefix string, suffix string) object {
 		return object{"model": model, "input": []any{object{"role": "developer", "content": prefix}, object{"role": "user", "content": suffix}}, "max_output_tokens": 32, "store": false}
 	}
-	p.call(base+"_c3_append", "/responses", makeReq(words, "Reply OK, then stop."))
-	p.call(base+"_c3_edit", "/responses", makeReq("Changed. "+words, "Reply OK."))
+	p.call(base+"_c3_seed", "/responses", makeReq("The marker is BLUE.\n"+words, "Reply with the marker."))
+	p.call(base+"_c3_repeat", "/responses", makeReq("The marker is BLUE.\n"+words, "Reply with the marker."))
+	p.call(base+"_c3_append", "/responses", makeReq("The marker is BLUE.\n"+words, "Reply with the marker, then stop."))
+	p.call(base+"_c3_edit", "/responses", makeReq("The marker is RED.\n"+words, "Reply with the marker."))
 }
 
 func (p *probe) compaction(model string) {
@@ -198,6 +204,7 @@ func (p *probe) compaction(model string) {
 	}
 	// A deliberately tiny threshold tests whether the service enforces a floor.
 	p.call(base+"_k1_auto_threshold", "/responses", object{"model": model, "store": false, "input": input, "context_management": []any{object{"type": "compaction", "compact_threshold": 1}}, "max_output_tokens": 32})
+	p.call(base+"_k1_auto_inline", "/responses", object{"model": model, "store": false, "input": []any{object{"role": "user", "content": strings.Repeat("Keep the marker cobalt in mind. ", 400) + "What is the marker?"}}, "context_management": []any{object{"type": "compaction", "compact_threshold": 1000}}, "max_output_tokens": 64})
 }
 
 func at(v any, keys ...string) any {
