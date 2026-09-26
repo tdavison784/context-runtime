@@ -491,3 +491,24 @@ Same as Opus 5.5 except:
    probed, because fallbacks change the model and so drop reasoning).
 8. The SDK exposes everything used here as typed beta fields in v1.75.0. No raw-HTTP escape
    was needed; ADR 9's transport choice for Anthropic can rely on the official SDK.
+
+## Commander rulings (2026-09-26)
+
+These rulings resolve the open questions above. Where they conflict with the draft
+`Capabilities` values, the rulings take precedence.
+
+1. **Reasoning-binding control is always explicit.** The descriptor sets the
+   `thinking-binding-controls-2026-08-01` beta and `prefix_mismatch_behavior` explicitly on
+   every request, so behavior fails closed. The org-default (field unset) behavior does not need
+   to be verified (resolves open question 1).
+2. **Middle-thinking removal and post-edit replay are DOCUMENTED-only.** Phase 5 adapter
+   contract tests must exercise both with forced thinking (open question 2).
+3. **Unpaused threshold compaction stays disabled** (FR-MAT-005). Threshold compaction on
+   Sonnet 5 is deferred to the Phase 5 contract tests (open question 3).
+4. **`MidConversationSystem = false` for all profiles**, including claude-opus-5-5, until a
+   Phase 5 test proves that system authority is carried (open question 4).
+5. **`ContextEditing = false` (unverified) for all profiles** until the `clear_tool_uses`
+   anomaly is explained in Phase 5 (open question 5).
+6. **Cache TTLs are DOCUMENTED** (open question 6).
+7. **Refusal allowance** is recorded as an input to ADR 15 (Phase 9) (open question 7).
+8. **go.mod**: the commander reconciles both probe modules at merge (open question 8).
