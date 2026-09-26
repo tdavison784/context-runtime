@@ -36,12 +36,24 @@ type Request[I any] struct {
 // a committed request and returns the frozen result to record.
 type effect func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, error)
 
+// sourcedEffect also names the item delivered to the model as the call's
+// result. Only retrieval supplies one: its effect (retrieve.Apply) persists the
+// TOOL-authority result, which is registered after that effect succeeds.
+type sourcedEffect func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, *domain.ItemContentRef, error)
+
 // execute replays a committed invocation before reading any current state,
 // otherwise authenticates it, applies the effect, and commits the result
 // transcript, its TOOL_RESULT membership, and both receipts atomically. The
 // dispatcher is the trusted actor executing on the agent's behalf; seq is the
 // operation sequence the caller allocated in tx (W7-5).
-func execute[I any](s *Service, tx store.Tx, dispatcher domain.Principal, request Request[I], method, requestID string, seq uint64, apply effect) (result domain.ToolResult, err error) {
+func execute[I any](s *Service, tx store.Tx, dispatcher domain.Principal, request Request[I], method, requestID string, seq uint64, apply effect) (domain.ToolResult, error) {
+	return executeSourced(s, tx, dispatcher, request, method, requestID, seq, func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, *domain.ItemContentRef, error) {
+		result, err := apply(tx, sem, state)
+		return result, nil, err
+	})
+}
+
+func executeSourced[I any](s *Service, tx store.Tx, dispatcher domain.Principal, request Request[I], method, requestID string, seq uint64, apply sourcedEffect) (result domain.ToolResult, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
@@ -90,13 +102,14 @@ func execute[I any](s *Service, tx store.Tx, dispatcher domain.Principal, reques
 	if err != nil {
 		return result, err
 	}
-	if result, err = apply(tx, sem, state); err != nil {
+	var source *domain.ItemContentRef
+	if result, source, err = apply(tx, sem, state); err != nil {
 		return domain.ToolResult{}, err
 	}
 	if err = result.Validate(); err != nil {
 		return domain.ToolResult{}, err
 	}
-	if err = s.associateResult(tx, dispatcher, i, invocationID, state, ResultText(result)); err != nil {
+	if err = s.associateResult(tx, dispatcher, i, invocationID, state, result, source); err != nil {
 		return domain.ToolResult{}, err
 	}
 	receipt := domain.MutationReceipt{
@@ -149,29 +162,47 @@ func replayTool[I any](sem store.SemanticReader, prior domain.ToolExecutionRecei
 	return prior.Result.Clone(), nil
 }
 
-// associateResult persists the closed result text as a TOOL transcript of the
-// originating turn and registers it as the call's TOOL_RESULT. The trusted
-// dispatcher performs the registration; the model never asserts membership.
-func (s *Service) associateResult(tx store.Tx, dispatcher domain.Principal, i domain.ToolInvocation, invocationID string, state invocationState, text string) error {
-	if len(text) > s.policy.MaxToolResultBytes {
-		return domain.ErrResourceLimit
-	}
+// associateResult registers the call's TOOL_RESULT: the closed result text,
+// persisted as a TOOL transcript of the originating turn, or the retrieval
+// result item its effect already wrote. The trusted dispatcher performs the
+// registration; the model never asserts membership.
+func (s *Service) associateResult(tx store.Tx, dispatcher domain.Principal, i domain.ToolInvocation, invocationID string, state invocationState, result domain.ToolResult, source *domain.ItemContentRef) error {
 	p, x := i.Principal, state.exchange
-	parts := []domain.ContentPart{{Type: domain.PartText, MediaType: "text/plain", Text: text}}
-	item := domain.ContextItem{
-		ID: toolID("toolresult", invocationID), Role: domain.RoleTranscript, Seq: tx.NextSeq(),
-		SessionID: p.SessionID, WorkflowID: p.WorkflowID, TaskID: p.TaskID, AgentID: p.AgentID, TurnID: x.TurnID,
-		Kind: domain.KindToolResult, Generation: domain.GenerationWorking, Authority: domain.AuthorityTool,
-		Scope: domain.ScopeTask, Access: conversationBoundary(p), Residency: domain.ResidencyResident, Retention: domain.RetentionNormal,
-		Parts: parts, ContentHash: domain.ContentHash(parts), SemanticBytes: domain.SemanticBytes(parts),
-		CreatedTurn: x.Turn, Source: &domain.SourceRef{Kind: domain.SourceTool, ToolCallID: i.ToolCallID}, Version: 1,
-	}
-	if err := tx.InsertItem(item); err != nil {
-		return err
+	var ref domain.ItemContentRef
+	if source != nil {
+		if result.RetrievalResultID == "" {
+			return domain.ErrIntegrity
+		}
+		it, err := tx.Item(source.ItemID)
+		if err != nil {
+			return err
+		}
+		if it.Authority != domain.AuthorityTool || it.ContentHash != source.ContentHash || !it.Access.Permits(p) || !conversationBoundary(p).Within(it.Access) {
+			return domain.ErrIntegrity
+		}
+		ref = *source
+	} else {
+		text := ResultText(result)
+		if len(text) > s.policy.MaxToolResultBytes {
+			return domain.ErrResourceLimit
+		}
+		parts := []domain.ContentPart{{Type: domain.PartText, MediaType: "text/plain", Text: text}}
+		item := domain.ContextItem{
+			ID: toolID("toolresult", invocationID), Role: domain.RoleTranscript, Seq: tx.NextSeq(),
+			SessionID: p.SessionID, WorkflowID: p.WorkflowID, TaskID: p.TaskID, AgentID: p.AgentID, TurnID: x.TurnID,
+			Kind: domain.KindToolResult, Generation: domain.GenerationWorking, Authority: domain.AuthorityTool,
+			Scope: domain.ScopeTask, Access: conversationBoundary(p), Residency: domain.ResidencyResident, Retention: domain.RetentionNormal,
+			Parts: parts, ContentHash: domain.ContentHash(parts), SemanticBytes: domain.SemanticBytes(parts),
+			CreatedTurn: x.Turn, Source: &domain.SourceRef{Kind: domain.SourceTool, ToolCallID: i.ToolCallID}, Version: 1,
+		}
+		if err := tx.InsertItem(item); err != nil {
+			return err
+		}
+		ref = domain.ItemContentRef{ItemID: item.ID, ContentHash: item.ContentHash}
 	}
 	_, err := s.membership.RegisterExchangeMember(tx, dispatcher, domain.RegisterExchangeMemberIntent{
 		RequestID: toolID("toolresult-member", invocationID), ExchangeID: x.ID, ExpectedRevision: x.Revision,
-		Position: state.nextPosition, Role: domain.MemberToolResult, Source: domain.ItemContentRef{ItemID: item.ID, ContentHash: item.ContentHash},
+		Position: state.nextPosition, Role: domain.MemberToolResult, Source: ref,
 		CallID: i.CallID, ToolCallID: i.ToolCallID,
 	}, tx.NextSeq())
 	return err

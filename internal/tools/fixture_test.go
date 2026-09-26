@@ -109,22 +109,26 @@ func seedAgentInvocation(t *testing.T, s store.Store, agent string) domain.ToolI
 // invocation, as the harness would for a second call in one response.
 func addToolCall(t *testing.T, s store.Store, i domain.ToolInvocation, toolCallID string) domain.ToolInvocation {
 	t.Helper()
-	update(t, s, func(tx store.Tx) error {
-		membership, _ := graph.NewMembershipService(testPolicy())
-		sem, _ := store.Semantic(tx)
-		x, err := sem.LogicalExchange(i.ExchangeID)
-		if err != nil {
-			return err
-		}
-		members, err := sem.ExchangeMembers(x.ID, store.Page{Limit: 64})
-		if err != nil {
-			return err
-		}
-		actor := i.Principal
-		actor.Authority = domain.AuthorityHarness
-		_, err = membership.RegisterExchangeMember(tx, actor, domain.RegisterExchangeMemberIntent{RequestID: "call-" + i.CallID + "-" + toolCallID, ExchangeID: x.ID, ExpectedRevision: x.Revision, Position: uint64(len(members.Records)) + 1, Role: domain.MemberToolCall, Source: members.Records[0].Source, CallID: i.CallID, ToolCallID: toolCallID}, tx.NextSeq())
-		return err
-	})
+	var out domain.ToolInvocation
+	update(t, s, func(tx store.Tx) error { out = addToolCallTx(t, tx, i, toolCallID); return nil })
+	return out
+}
+
+func addToolCallTx(t *testing.T, tx store.Tx, i domain.ToolInvocation, toolCallID string) domain.ToolInvocation {
+	t.Helper()
+	membership, _ := graph.NewMembershipService(testPolicy())
+	sem, _ := store.Semantic(tx)
+	x, err := sem.LogicalExchange(i.ExchangeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members, err := sem.ExchangeMembers(x.ID, store.Page{Limit: 64})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = membership.RegisterExchangeMember(tx, dispatcher(i), domain.RegisterExchangeMemberIntent{RequestID: "call-" + i.CallID + "-" + toolCallID, ExchangeID: x.ID, ExpectedRevision: x.Revision, Position: uint64(len(members.Records)) + 1, Role: domain.MemberToolCall, Source: members.Records[0].Source, CallID: i.CallID, ToolCallID: toolCallID}, tx.NextSeq()); err != nil {
+		t.Fatal(err)
+	}
 	i.ToolCallID = toolCallID
 	return i
 }
