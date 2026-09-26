@@ -31,11 +31,16 @@ type SemanticReadProvider interface{ SemanticReadBackend() SemanticReader }
 
 // Semantic binds new services to the SAME transaction and poison state. It
 // never opens a Store transaction and never substitutes unguarded backend writes.
+type SemanticTransactionProvider interface{ SemanticTransaction() (SemanticTx, error) }
+
 func Semantic(tx Tx) (SemanticTx, error) {
-	g, ok := tx.(*Guard)
-	if !ok {
-		return nil, domain.ErrUnsupportedSchema
+	if p, ok := tx.(SemanticTransactionProvider); ok {
+		return p.SemanticTransaction()
 	}
+	return nil, domain.ErrUnsupportedSchema
+}
+
+func (g *Guard) SemanticTransaction() (SemanticTx, error) {
 	p, ok := g.TxBase.(SemanticBackendProvider)
 	if !ok {
 		return nil, domain.ErrUnsupportedSchema

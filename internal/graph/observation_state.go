@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"errors"
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -31,7 +32,7 @@ func FileObservationState(tx store.Tx, actor domain.Principal, newItemID, subjec
 	}
 	key, _ := item.CurrentKey()
 	prior, err := tx.CurrentVersion(key)
-	if err != nil && err != domain.ErrNotFound {
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return err
 	}
 	if prior != expectedPriorID {

@@ -49,3 +49,17 @@ func TestSemanticFacetIsFailClosedWithoutBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type semanticProxy struct {
+	Tx
+	bound SemanticTx
+}
+
+func (p semanticProxy) SemanticTransaction() (SemanticTx, error) { return p.bound, nil }
+func TestSemanticFacetPreservesFaultInjectionProxy(t *testing.T) {
+	bound := &semanticGuard{base: NewGuard(nil)}
+	got, err := Semantic(semanticProxy{bound: bound})
+	if err != nil || got != bound {
+		t.Fatal("semantic proxy bypassed", err)
+	}
+}

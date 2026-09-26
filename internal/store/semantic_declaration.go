@@ -3,6 +3,7 @@ package store
 import "github.com/tdavison784/context-runtime/internal/domain"
 
 type DeclarationReader interface {
+	LifecycleByTarget(kind domain.TargetKind, targetID string, page Page) (ResultPage[domain.LifecycleEvent], error)
 	// Missing creation declaration is ErrNotFound: legacy identity is unknown.
 	CreationDeclaration(itemID string) (domain.CreationDeclaration, error)
 	SnapshotDeclaration(id string) (domain.SnapshotDeclaration, error)
