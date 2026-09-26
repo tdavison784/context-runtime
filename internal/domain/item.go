@@ -176,6 +176,12 @@ func (it ContextItem) Validate() error {
 	if it.Section != SectionNone && it.DirectiveID == "" {
 		return invalid("item %s: a directive-section item requires a directive ID", it.ID)
 	}
+	// Directive sections are parsed only from SYSTEM, HARNESS, and marked
+	// USER spans (FR-ING-004); agent, tool, and retrieved content never
+	// carry one.
+	if it.Section != SectionNone && !it.Authority.CanHoldLifecycleAuthority() {
+		return invalid("item %s: a %s item cannot carry a directive section", it.ID, it.Authority)
+	}
 	if !it.Retention.Valid() {
 		return invalid("item %s: invalid retention %q", it.ID, it.Retention)
 	}
