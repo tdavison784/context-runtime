@@ -177,9 +177,16 @@ preserve valid state.
     `relationship_to` index on `rec_relationship(type, to_id)` and a
     `reference_visible` index on `rec_reference` adding the owner columns.
     Backfilled from 0009-0011's tables, which still held data at 0012's
-    replay point. The store deletes an item's lookup rows in the same
-    write that retires it (`SUPERSEDES`/`DUPLICATE_OF`), so repeated
-    identical content never grows these tables (DUR-1.1).
+    replay point. The store deletes an item's rows from
+    `lookup_canonical`/`lookup_working`/`lookup_source` in the same write
+    that retires it (`SUPERSEDES`/`DUPLICATE_OF`), so repeated identical
+    content never grows these three tables (DUR-1.1). **(SPEC-3.3)
+    `lookup_blob` does not follow the same rule:** its row is dropped only
+    when the retiring item is itself a duplicate, not on an ordinary
+    supersession (the canonical item's content and boundary still
+    authorize the same blob references), and 0012's `lookup_blob` backfill
+    carries forward even a pre-existing duplicate's row, with no
+    `DUPLICATE_OF` exclusion — unlike the other three tables' backfills.
   - `0013_drop_pre_f1_lookups.sql` drops `item_blobs`, `item_sources`, the
     `item_duplicate` index, and the `reference_locator` index once 0012
     has carried their data forward — "nothing reads or writes these"
@@ -229,18 +236,22 @@ preserve valid state.
 
   SPEC-1.3 separately found that *other* per-item graph/ingest reads —
   `Relationships` filtered by type/from/to, and `Items` filtered by task —
-  were not indexed even though R19's three named lookups were. 0012's own
-  `relationship_to`/item-task indexes did not actually close this (SPEC-2.1:
-  they carried the key but not the `(Seq, ID)` order, so SQLite preferred a
+  were not indexed even though R19's three named lookups were. The
+  key-only indexes behind them did not actually close this (SPEC-2.1: they
+  carried the key but not the `(Seq, ID)` order, so SQLite preferred a
   session-wide order index to avoid a sort — each read still grew with the
   session, and `TestGraphReadsUseIndex`'s plan guard could not yet catch it,
   since it only rejected an unindexed `SCAN`, not a session-prefix `SEARCH`).
+  **(SPEC-3.3, corrected) Only `relationship_to` is from 0012 — `relationship_from`
+  and `item_task` are 0001_init.sql originals**, so this gap predates 0012
+  and was never actually about 0012's own additions.
   **`0015_ordered_graph_indexes.sql` (SPEC-2.1, p2-store) fixes this
   properly:** `relationship_from_seq`/`relationship_to_seq` on
   `rec_relationship(session_id, f_type, f_from_id|f_to_id, f_seq, id)` and
   `item_task_seq` on `rec_item(session_id, f_task_id, f_seq, id)` carry both
-  the key and the order in one index, dropping the 0012 key-only indexes
-  they supersede (`relationship_from`, `relationship_to`, `item_task`); a
+  the key and the order in one index, dropping the three key-only indexes
+  they supersede (`relationship_from`/`item_task` from 0001,
+  `relationship_to` from 0012); a
   strengthened plan guard now requires the exact key columns in the index's
   search constraint, not merely that some index is used
   (`internal/store/sqlite/lookups_test.go`'s `assertIndexed`,
@@ -315,7 +326,7 @@ preserve valid state.
   is content-part-specific** (`verifyItemContent`, below): a lossless
   tag/ID list corrupted the same way decodes cleanly (the wire format
   itself is intact) and is returned as-is with no `ErrIntegrity`, since
-  nothing compares it against a separate hash \u2014 see
+  nothing compares it against a separate hash — see
   `TestUpgradeLosslessStringLists` below.
 ## Alternatives considered
 
@@ -446,8 +457,10 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all fourteen migrations replay on a fresh database (SPEC-2.6:
-    corrected from an earlier, stale "eleven", itself corrected from a
+    after all fifteen migrations replay on a fresh database (SPEC-3.6:
+    corrected from a stale "fourteen" once 0015 landed; SPEC-2.6 had
+    already corrected that from an earlier, stale "eleven", itself
+    corrected from a
     stale "seven"), still matches every Go
     struct field exactly, locking the no-opaque-copy design above against
     every migration added since Phase 1, not only 0001.
