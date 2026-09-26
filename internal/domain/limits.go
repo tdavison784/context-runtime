@@ -29,6 +29,7 @@ type Limits struct {
 	MaxEventItems       int
 	MaxEventDiagnostics int
 	MaxRelationships    int // relationships the event may generate
+	MaxReferenceLinks   int // REFERENCES edges one References entry or new source may create
 }
 
 // DefaultLimits returns the Phase 2 resource limits (D17).
@@ -49,13 +50,14 @@ func DefaultLimits() Limits {
 		MaxEventItems:         16384,
 		MaxEventDiagnostics:   4096,
 		MaxRelationships:      65536,
+		MaxReferenceLinks:     256,
 	}
 }
 
 func (l *Limits) fields() []*int {
 	return []*int{&l.MaxSpanBytes, &l.MaxItemsPerSpan, &l.MaxDiagnosticsPerSpan, &l.MaxIDBytes, &l.MaxHeadingLevel,
 		&l.MaxHeadingBytes, &l.MaxAttributes, &l.MaxAttributeBytes, &l.MaxSpans, &l.MaxParts, &l.MaxEventBytes,
-		&l.MaxBlobBytes, &l.MaxEventItems, &l.MaxEventDiagnostics, &l.MaxRelationships}
+		&l.MaxBlobBytes, &l.MaxEventItems, &l.MaxEventDiagnostics, &l.MaxRelationships, &l.MaxReferenceLinks}
 }
 
 // Effective fills zero fields with defaults and clamps the per-span

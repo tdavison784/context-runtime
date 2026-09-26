@@ -39,10 +39,6 @@ func (t *tx) commit(st *state) bool {
 	t.supersedes.commit()
 	t.supersededBy.commit()
 	t.relsFrom.commit()
-	t.itemsByBlob.commit()
-	t.duplicates.commit()
-	t.refsByKey.commit()
-	t.itemsByKey.commit()
 	t.blobOwners.commit()
 	t.canonical.commit()
 	t.working.commit()
@@ -159,21 +155,8 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 		}
 	}
 	t.items.put(it.ID, it)
-	indexed := map[string]bool{}
-	for _, p := range it.Parts {
-		if p.BlobHash != "" && !indexed[p.BlobHash] {
-			indexed[p.BlobHash] = true
-			t.itemsByBlob.add(p.BlobHash, it.ID)
-		}
-	}
-	t.duplicates.add(itemDuplicateKey(it), it.ID)
 	t.indexLookups(it)
 	t.itemsByTask.add(it.TaskID, it.ID)
-	if it.Source != nil {
-		if key, ok := domain.LocatorKey(it.Source.Kind, it.Source.Locator); ok {
-			t.itemsByKey.add(key, it.ID)
-		}
-	}
 	t.markSequenced()
 	return nil
 }
@@ -865,7 +848,6 @@ func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
 		return fmt.Errorf("unresolved reference %s: %w", r.ID, domain.ErrImmutable)
 	}
 	t.references.put(r.ID, r)
-	t.refsByKey.add(r.LocatorKey, r.ID)
 	t.refOwners.add(sourceKey{r.LocatorKey, ownersOf(r.Access)}, r.ID)
 	t.markSequenced()
 	return nil

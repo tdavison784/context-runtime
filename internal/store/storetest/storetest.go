@@ -75,9 +75,6 @@ var suite = []testCase{
 	{"ItemLosslessText", testItemLosslessText},
 	{"ByteExactStringLists", testByteExactStringLists},
 	{"ItemProvenance", testItemProvenance},
-	{"ItemsByBlob", testItemsByBlob},
-	{"DuplicateCandidates", testDuplicateCandidates},
-	{"ItemsBySourceKey", testItemsBySourceKey},
 	{"BlobReferrerAccess", testBlobReferrerAccess},
 	{"CanonicalCandidates", testCanonicalCandidates},
 	{"CurrentWorking", testCurrentWorking},
@@ -105,6 +102,7 @@ var suite = []testCase{
 	{"AnonymousIngestions", testAnonymousIngestions},
 	{"DiagnosticsAccess", testDiagnosticsAccess},
 	{"IngestionDeepCopies", testIngestionDeepCopies},
+	{"ReceiptRecordsEveryLimit", testReceiptRecordsEveryLimit},
 	{"UnresolvedReferences", testUnresolvedReferences},
 	{"UnresolvedReferenceInsertRules", testUnresolvedReferenceInsertRules},
 

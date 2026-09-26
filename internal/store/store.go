@@ -65,7 +65,6 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
@@ -161,43 +160,6 @@ type CommandFilter struct {
 	OccurrenceID string
 }
 
-// DuplicateFilter selects duplicate candidates (R19, D10, FR-ING-005):
-// items of this session whose task, directive section (which fixes the
-// directive namespace), role, authority, exact access boundary, and content
-// hash all equal the filter's. Every field is compared exactly, including
-// empty ones, so a candidate never crosses task, section, role, authority,
-// or boundary. Limit is required as in ReferenceFilter.
-type DuplicateFilter struct {
-	TaskID      string
-	Section     domain.DirectiveSection
-	Role        domain.ItemRole
-	Authority   domain.Authority
-	Access      domain.AccessBoundary
-	ContentHash string
-	Limit       int
-}
-
-// Validate checks the filter's enums, boundary, hash, and limit.
-func (f DuplicateFilter) Validate() error {
-	if f.Limit <= 0 || !domain.ValidHash(f.ContentHash) || !f.Section.Valid() || !f.Role.Valid() || !f.Authority.Valid() {
-		return fmt.Errorf("%w: duplicate filter: positive limit and valid hash, section, role, and authority required", domain.ErrInvalidRecord)
-	}
-	return f.Access.Validate()
-}
-
-// ReferenceFilter selects unresolved references (M5, R2). Empty
-// LocatorKey or RuleVersion does not filter; both compare exact bytes.
-// Limit is required: it must be positive (domain.ErrInvalidRecord
-// otherwise), and more matches than Limit fail with ErrLimitExceeded.
-// Results are ordered by Seq, then ID. Records carry their ownership context
-// (Access, Authority) unfiltered: linking a reference must satisfy both it
-// and the later event's authorization, so callers apply access (R2).
-type ReferenceFilter struct {
-	LocatorKey  string
-	RuleVersion string
-	Limit       int
-}
-
 // CallFilter selects call records. Results are ordered by PreparedSeq
 // ascending, then CallID.
 type CallFilter struct {
@@ -231,29 +193,6 @@ type ReadTx interface {
 	// VisibleReferences returns one page of the unresolved references f
 	// selects, whether more remain, and the cursor to continue after.
 	VisibleReferences(f VisibleReferenceFilter) (refs []domain.UnresolvedReference, more bool, next Cursor, err error)
-
-	// Deprecated: the lookups below count records the caller cannot see
-	// (SEC-1.1) and are removed once ingest uses the access-filtered ones.
-	//
-	// ItemsByBlob returns every item in the session with a part referencing
-	// the blob hash, each once, ordered by Seq then ID (R19, R5). It is
-	// bounded like ObligationsBySource: limit must be positive and a
-	// malformed hash is domain.ErrInvalidRecord; more matches than limit
-	// fail with ErrLimitExceeded. Callers filter by access: possession of a
-	// hash authorizes nothing.
-	ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, error)
-	// ItemsBySourceKey returns every item whose source locator has the given
-	// key under domain.LocatorRuleVersion (domain.LocatorKey of its
-	// Source.Kind and Locator), ordered by Seq then ID (R19, M5, R2). Items
-	// without a source, or whose source is not a linkable locator, are never
-	// returned. Bounded like ItemsByBlob: an empty or over-long key or a
-	// non-positive limit is domain.ErrInvalidRecord; more matches than limit
-	// fail with ErrLimitExceeded. Callers apply access and authorization.
-	ItemsBySourceKey(locatorKey string, limit int) ([]domain.ContextItem, error)
-	// DuplicateCandidates returns the items f selects, ordered by Seq then
-	// ID; more than f.Limit fail with ErrLimitExceeded. Callers apply the
-	// remaining duplicate rules (directive ID, metadata, currentness, D10).
-	DuplicateCandidates(f DuplicateFilter) ([]domain.ContextItem, error)
 	Relationships(f RelationshipFilter) ([]domain.Relationship, error)
 	Event(eventID string) (domain.EventRecord, error)
 	// Blob returns the blob with the given hash after verifying its bytes;
@@ -308,8 +247,6 @@ type ReadTx interface {
 	LifecycleCommands(f CommandFilter) ([]domain.LifecycleCommandRecord, error)
 	// UnresolvedReference returns one unresolved reference by ID.
 	UnresolvedReference(id string) (domain.UnresolvedReference, error)
-	// UnresolvedReferences returns the references f selects.
-	UnresolvedReferences(f ReferenceFilter) ([]domain.UnresolvedReference, error)
 	Grant(id string) (domain.MutationGrant, error)
 	// Grants returns every grant in the session ordered by ID.
 	Grants() ([]domain.MutationGrant, error)
