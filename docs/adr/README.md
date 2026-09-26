@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 ADRs record decisions that gate a delivery phase (SDD §11) before that
-phase's exit gate is checked. SDD §15 lists all 18 required ADRs; this index
+phase's exit gate is checked. SDD §15 lists all 19 required ADRs; this index
 tracks which are written and which phase still needs them.
 
 ## Format
@@ -29,7 +29,7 @@ vX.Y)** and keeps the record of what changed and why.
 Each ADR also carries a **Review** section once an independent review (e.g.
 Codex) has scrutinized it, noting which findings changed the decision.
 
-## Status of all 18 ADRs (SDD §15)
+## Status of all 19 ADRs (SDD §15)
 
 | # | Title | Gates phase (§11) | Status |
 |---|-------|--------------------|--------|
@@ -51,18 +51,25 @@ Codex) has scrutinized it, noting which findings changed the decision.
 | 16 | Common mutation authorization, directive/obligation version replacement, independent residency/goal status, immutable source snapshots | Phase 1 | [Accepted](0016-mutation-authorization.md) |
 | 17 | Provider call/attempt state machine, conversation reservation, outcome reconciliation, streaming completion, crash/retry tests | Phase 1 | [Accepted](0017-call-ledger.md) |
 | 18 | Semantic state tool schemas, result formats, reference instruction block | Phase 5 | pending — gates Phase 5 |
-| 19 | Directive parsing and ingestion: grammar, IDs, span/parse-unit isolation, deterministic classification, deduplication/replacement, Working snapshots, obligations, receipts, and lifecycle-command deferral | Phase 2 | [Written](0019-directive-parsing-and-ingestion.md) |
+| 19 | Directive parsing and ingestion: grammar, IDs, span/parse-unit isolation, deterministic classification, deduplication/replacement, Working snapshots, obligations, receipts, and lifecycle-command deferral | Phase 2 | [Proposed](0019-directive-parsing-and-ingestion.md) |
 
-ADR 19 is not one of SDD §15's original 18; Phase 2's adversarial decision
+ADR 19 was not one of SDD §15's original 18; Phase 2's adversarial decision
 review found the brief's decisions needed a dedicated ADR beyond that list,
-and the commander added it by ruling (`phase2-amendments.md` R4). It gates
-Phase 2 exit the same way ADRs 1-18 gate their phases.
+and the commander added it by ruling (`phase2-amendments.md` R4). SDD §11
+item 2 and §15 now list it (commander ruling, SPEC-1.13's open item
+resolved): ADR 19 gates Phase 2 exit the same way ADRs 1-18 gate their
+phases.
 
 Phase 1 (Contracts, domain, and stores) requires ADRs 1, 3, 4, 6, 13, 16, 17,
 all written here. Phase 1's exit gate (state-transition, restart, graph, and
 concurrency tests for the foundational event traces) is tracked in
 `internal/domain/*_test.go` and `internal/store/storetest`, not in this
 directory.
+
+Phase 2 (Directives and ingestion) requires ADR 19, written here. Phase 2's
+exit gate (canonical directive examples, parser fuzzing, retry identity,
+and injection resistance) is tracked in `internal/directive`,
+`internal/ingest`, and `testdata/directives`, not in this directory.
 
 ## SDD conflicts found and applied (v0.6)
 

@@ -132,10 +132,11 @@ func (d IDDomain) Valid() bool { return slices.Contains(idDomains, d) }
 // reservedIDPrefixes are the prefixes of every internally generated ID: the
 // occurrence forms, each artifact ID domain, and the item, call, turn, and
 // obligation IDs derived here. internal/graph derives relationship ("rel")
-// and lifecycle-audit ("evt") IDs; they are reserved here too because the
-// domain cannot import graph.
+// and lifecycle-audit ("evt") IDs, and internal/invocation derives call
+// lifecycle-event ("lce") IDs; all three are reserved here too because the
+// domain cannot import either package (SPEC-1.13: "lce" was missing).
 var reservedIDPrefixes = func() []string {
-	out := []string{callerOccurrencePrefix, anonymousOccurrencePrefix + "_", "itm_", "call_", "turn_", "obl_", "rel_", "evt_"}
+	out := []string{callerOccurrencePrefix, anonymousOccurrencePrefix + "_", "itm_", "call_", "turn_", "obl_", "rel_", "evt_", "lce_"}
 	for _, d := range idDomains {
 		out = append(out, string(d)+"_")
 	}

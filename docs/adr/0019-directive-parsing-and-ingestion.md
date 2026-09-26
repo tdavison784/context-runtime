@@ -179,12 +179,23 @@ audit/pending-input envelope, never an independent current requirement
 merely because its authority is SYSTEM or HARNESS: an accepted directive
 gets its own semantic instruction item, and the raw transcript copy must
 not persist as an active instruction after that directive is replaced —
-future rendering (Phase 4/5) must track expiry against both. Transcript
-defaults: USER/AGENT messages get WORKING generation, TASK scope, NORMAL
-retention; TOOL/RETRIEVED_CONTENT get EPHEMERAL generation, TURN scope, LOW
-retention; SYSTEM/HARNESS instructions get DURABLE generation, HIGH
-retention, SESSION scope (SYSTEM) or TASK scope (HARNESS) — all RESIDENT on
-creation. Final item access is the requested scope boundary intersected
+future rendering (Phase 4/5) must track expiry against both. **Landed
+transcript defaults differ from this ADR's original text (SPEC-1.5,
+corrected here): every transcript item, regardless of authority, is
+`policy.ForTranscript`'s row (`internal/policy/defaults.go`) — USER gets
+kind `user_message`, AGENT `assistant_message`, TOOL `tool_result`,
+RETRIEVED_CONTENT `evidence` (TOOL/RETRIEVED_CONTENT additionally get
+EPHEMERAL generation, TURN scope, LOW retention), and SYSTEM/HARNESS get
+kind `conversation` with WORKING generation and NORMAL retention (SESSION
+scope for SYSTEM, TASK scope for HARNESS) — never `instruction`/DURABLE/
+HIGH.** The `instruction`/DURABLE/HIGH/mandatory-for-SYSTEM row this ADR
+originally described belongs to the separate residual instruction item
+(`policy.ForResidual`, §24/R20 below), derived from a SYSTEM or HARNESS
+transcript's unclaimed bytes, never to the transcript item itself — a raw
+transcript never becomes an active instruction merely because of its
+authority, which is D8's own concern and the safer of the two readings.
+`TestTranscriptDefaults` and `TestResidualRows` lock the two rows
+separately. Final item access is the requested scope boundary intersected
 with the authenticated span boundary; an impossible combination is
 rejected, and a derived item's access must stay within its
 transcript/source boundary (scope attributes cannot declassify). Store a
@@ -464,6 +475,21 @@ Owner: `internal/directive` (per-span/per-parse-unit limits),
 `internal/domain` (limits config type), `internal/ingest` (whole-event
 totals, graph-scan bounds).
 
+**Deferred ruling: `tx.Grants()` per obligation retirement/lifecycle
+command (SPEC-1.3, part of F1's bounded-lookup findings).** `graph
+/obligation.go`'s retirement path and `graph/lifecycle.go`'s command
+authorization both call `tx.Grants()` once per call — an unfiltered,
+whole-session read of every `MutationGrant`, not an exact-key lookup —
+before checking `domain.AuthorizeMutation`'s grant-based path. Unlike
+F1's other findings, this is ruled a deferred *performance* item, not a
+correctness or security gap: a grant can only be created by an issuer
+`AuthorizeGrantIssuance` already authorized (ADR 16), so the read
+discloses nothing a session-scoped actor couldn't already be trusted to
+see, and an unbounded grant count neither locks out a legitimate mutation
+(it still succeeds, just slower) nor leaks anything (no boundary or
+authority check is skipped). It is indexed in Phase 3, alongside that
+phase's other obligation/grant work (ADR 8), rather than in this round.
+
 ### 14. Turn advancement (D18)
 
 Terminology (§1 of the SDD), FR-DOM-003/007, FR-AUTH-001/003, FR-ING-006,
@@ -684,12 +710,14 @@ Answers to `p2-contract`'s implementation questions, appended to
   caller-supplied `EventID` is printable ASCII, at most 256 bytes — a
   syntax bound on the idempotency key itself, distinct from D14's
   payload-hash/receipt semantics.
-- **HARNESS residual instructions are not mandatory (refines §5, D8).**
-  FR-DOM-007's mandatory-by-policy list names SYSTEM-authority
-  instructions only; a HARNESS-authority residual/transcript instruction
-  item (§5's transcript defaults) is eligible for scoring like any other
-  non-mandatory item, never automatically mandatory merely because it is
-  HARNESS.
+- **HARNESS residual instructions are not mandatory (refines §5, D8;
+  wording corrected by SPEC-1.5).** FR-DOM-007's mandatory-by-policy list
+  names SYSTEM-authority instructions only; a HARNESS-authority residual
+  instruction item (`policy.ForResidual`, not the transcript item — §5's
+  transcript defaults are the separate `conversation`/WORKING/NORMAL row)
+  is eligible for scoring like any other non-mandatory item, never
+  automatically mandatory merely because it is HARNESS. `ForResidual`
+  confirms this precisely: only the SYSTEM row sets `Mandatory = true`.
 - **Parser item ranges become `SourceRange.Slices` (refines §4/§5,
   D7/M1).** The parser's `Item.TextRanges` (D7's per-item byte ranges)
   populate `SourceRef.Slices` on the derived item (§5's transcript-range
@@ -752,19 +780,18 @@ Answers to `p2-contract`'s implementation questions, appended to
 
 **R18 (p2-store questions, all accepted):**
 
-- **Retiring the untyped namespace methods (refines §17, M6/R6/R10 — in
-  progress).** `p2-store` has landed the typed methods
+- **Retiring the untyped namespace methods (refines §17, M6/R6/R10 —
+  landed, SPEC-1.4).** `p2-store` landed the typed methods
   `store.CurrentVersion(domain.CurrentKey)` and
   `store.CurrentVersions(taskID, ns, id)`; the pre-M6
-  `CurrentDirective`/`CurrentDirectives`/`SetCurrentDirective` methods are
-  marked `Deprecated` in `internal/store/store.go` but not yet removed.
-  R18 confirms the sequence: `internal/graph` and `internal/ingest` switch
-  every call site to the typed methods (retiring R10's
-  `ErrNamespaceConflict` transitional fail-closed rule, which was never
-  actually implemented since the switch was still pending), and only then
-  does `p2-store` delete the deprecated methods. As of this ADR revision,
-  `internal/graph` (`graph.go`) still calls the deprecated methods; the
-  switch is `p2-graph`'s outstanding work, not yet done.
+  `CurrentDirective`/`CurrentDirectives`/`SetCurrentDirective` methods were
+  deleted once every caller switched (`55761b8`; `internal/graph`'s call
+  sites now use `CurrentVersion`/`CurrentVersions` exclusively,
+  `0a99ac7`). R10's `ErrNamespaceConflict` transitional fail-closed rule
+  was never actually implemented, since the switch itself landed directly
+  — there was no gap for a transitional rule to cover, and no such symbol
+  exists in the codebase; this ADR's Tests section no longer requires one
+  (SPEC-1.4 correction, below).
 - **Obligation retirement lookup, named (confirms §9/§20, D13/R9).**
   `store.ObligationsBySource(sourceItemID string, limit int)
   ([]domain.ObligationVersion, error)` and
@@ -774,25 +801,22 @@ Answers to `p2-contract`'s implementation questions, appended to
   (`internal/store/memory`, `internal/store/sqlite`) R9 called for — the
   `limit` parameter is D17's bounded-scan requirement made concrete.
 - **`domain.UnresolvedReference` and migration 0008 (refines §16, M5/R2 —
-  not yet landed).** `p2-contract` is to add `domain.UnresolvedReference`
-  (session, occurrence, span, and item IDs; lexical locator key and rule
-  version; owner access boundary and authority; `Seq`; an ID derived from
-  occurrence plus ordinal) and `p2-store` persists it in a new migration
-  0008, so an unresolved References item survives restart for later
-  linking (§16's "unresolved references persist" requirement, now given a
-  concrete shape). Neither the type nor migration 0008 exists as of this
-  ADR revision; `p2-tests` should not assume it when writing References
-  fixtures until it lands.
-- **`domain.TTLLive`'s zero-creation-turn guard (refines §19, M8 — not yet
-  landed).** `TTLLive(created, current uint64, n int) bool` is landed
-  (`internal/domain/item.go`) with D18's difference-form comparison, but
-  does not yet special-case `created == 0`: R18 rules that a pre-Phase-2
-  item with no recorded creation turn (`created == 0`) must report
-  `false` regardless of `current`/`n`, so a record migrated without turn
-  metadata is never treated as live by an invented default (M8) merely
-  because the difference formula happens to fall inside `n`. This guard
-  is not yet in the merged `TTLLive`; landing it is `p2-contract`'s
-  outstanding work.
+  landed, SPEC-1.4).** `domain.UnresolvedReference` (`internal/domain
+  /reference.go`) carries session, occurrence, span, and item IDs; lexical
+  locator key and rule version; owner access boundary and authority;
+  `Seq`; an ID derived from occurrence plus ordinal. Migration
+  `0008_unresolved_references.sql` persists it as `rec_reference`, indexed
+  on `(session_id, locator_key, rule_version, seq, id)`, so an unresolved
+  References item survives restart for later linking (§16's "unresolved
+  references persist" requirement).
+- **`domain.TTLLive`'s zero-creation-turn guard (refines §19, M8 —
+  landed, SPEC-1.4).** `TTLLive(created, current uint64, n int) bool`
+  (`internal/domain/item.go`) now reads `n > 0 && created > 0 && current
+  >= created && current-created < uint64(n)`: a pre-Phase-2 item with no
+  recorded creation turn (`created == 0`) reports `false` regardless of
+  `current`/`n`, so a record migrated without turn metadata is never
+  treated as live by an invented default (M8) merely because the
+  difference formula would otherwise fall inside `n`.
 - **Bounded diagnostic/lifecycle-command list reads (refines §12/§1 —
   deferred).** A future cross-event caller reading diagnostics or
   lifecycle commands by list (rather than by one event's receipt) needs a
@@ -819,15 +843,31 @@ Answers to `p2-ingest`'s implementation questions, appended to
   when the event actually advanced the turn), is the SDD's "turn-opening
   message" and its pending-input items — no separate pending-input
   structure is needed; the receipt already carries it.
-- **Indexed lookups, not session-wide scans (refines §7/§13/§15/§16,
-  D10/D17/D19/M5 — not yet landed).** `p2-store` adds indexes so blob-
-  reference lookup (§15, R5), duplicate-candidate lookup (§7, D10), and
-  reference matching (§16, M5/R2) are bounded lookups, not a scan of every
-  item in a session, matching D17/NFR's bounded-work discipline. No such
-  index or lookup method exists in `internal/store/store.go` as of this
-  ADR revision; this is `p2-store`'s outstanding work, and `p2-ingest`
-  must not implement any of the three as a full-session scan in the
-  meantime.
+- **Indexed lookups, not session-wide scans — superseded by F1's
+  access-filtered redesign (refines §7/§13/§15/§16, D10/D17/D19/M5 —
+  landed, SPEC-1.4; see §26 for the full F1 record).** `p2-store` first
+  added bounded-but-session-wide indexed lookups for blob reference
+  (migration 0009), duplicate candidates (migration 0010), and reference
+  matching (migration 0008), plus a fourth for source-key matching
+  (migration 0011) — each properly indexed, matching D17/NFR's
+  bounded-work discipline, but each still returning every matching row in
+  the session regardless of whether the calling principal could see it.
+  The first external review's F1/SEC-1.1/SEC-1.2 findings (§26) caught
+  this gap and required an access-filtered redesign, which superseded all
+  four: `store.BlobReferrer`, `CanonicalCandidates`, `CurrentWorking`,
+  `SourceItems`, and `VisibleReferences` (migration 0012, with 0009-0011's
+  tables dropped by 0013) filter inside the query by the caller's
+  `Viewer`, before any limit, and separately report a visible match whose
+  content fails verification without blocking on it (DUR-1.4). ADR 3
+  records the full migration sequence and every locking test. SPEC-1.3
+  also found that *other* graph/ingest reads issued once per ingested item
+  or section — `Relationships`/`Items` filtered by type/task — were not
+  indexed even though the named lookups were; migration 0012's
+  `relationship_to` index and an item-by-task index close this
+  (`TestGraphReadsUseIndex`). `tx.Grants()` remains an unfiltered
+  whole-session read, deliberately deferred to Phase 3 (§13 records the
+  ruling in full: a grant can only be created by an authorized issuer, so
+  the read discloses nothing and only costs time, never correctness).
 - **Locator identity has no repository namespace in V1 (resolves the §16
   open question, M5/R2).** Sharpens this ADR's earlier "References
   base-directory policy — resolved, deferred" open-question answer with
@@ -867,66 +907,49 @@ Findings from `p2-ingest`'s own test suite, appended to
 `phase2-amendments.md` as R20.
 
 - **Reserved internal ID prefixes on caller `EventID` (refines §10/§11,
-  D14/D15/R16 — not yet landed).** `Event.Validate`
-  (`internal/domain/ingest.go`) checks length and printable-ASCII (R16)
-  but not shape: a caller-supplied `EventID` equal to or prefixed like an
-  internally generated occurrence or artifact ID — `evc_` (caller
-  occurrence, `internal/domain/ids.go`'s `callerOccurrencePrefix`), `eva_`
-  (anonymous occurrence), or any `IDDomain` prefix (`dgn`, `cmd`, `sec`,
-  `ref`, `internal/domain/ids.go`) — currently passes validation. R20
-  rules that `Event.Validate` must reject any caller `EventID` using a
-  reserved internal prefix, so a caller can never construct an `EventID`
-  that collides with, or is mistaken for, an internally derived ID; this
-  is `p2-contract`'s outstanding work. Separately, R20 confirms "ingest
-  errors never echo item IDs" as already true: `internal/ingest`'s only
+  D14/D15/R16 — landed, SPEC-1.4).** `Event.Validate`
+  (`internal/domain/ingest.go:111`) now also calls `ReservedIDPrefix`: a
+  caller-supplied `EventID` equal to or prefixed like an internally
+  generated occurrence or artifact ID — `evc_`, `eva_`, any `IDDomain`
+  prefix (`dgn`, `cmd`, `sec`, `ref`), `itm_`, `call_`, `turn_`, `obl_`,
+  `rel_`, `evt_`, or `lce_` (SPEC-1.13 added the last) — is rejected,
+  locked by `TestEventIDRejectsReservedPrefixes`. "Ingest errors never
+  echo item IDs" is likewise confirmed true: `internal/ingest`'s only
   formatted error (`internal/ingest/ids.go`) names a limit, never an ID.
 - **`DirectiveIDDerived` notices for a refused section (refines §6/§10,
-  D9/D14 — not yet landed).** `internal/directive` emits an informational
-  `DirectiveIDDerived` diagnostic (`internal/directive/items.go:265`) for
-  every item it derives an ID for, before `internal/ingest` decides
-  whether that item's section is actually applied. `internal/ingest
-  /diagnostics.go`'s `diagnostics.add`/`records` currently keep every
-  diagnostic the parser produced regardless of that later decision, so a
-  section ingest ultimately refuses (for example a Working section
-  `workingSection` drops entirely on a boundary conflict, per the D11 item
-  below) can still leave a `DirectiveIDDerived` notice in the receipt for
-  an item that was never created. R20 rules the receipt must drop a
-  section's `DirectiveIDDerived` notices when ingest refuses that section,
-  so a diagnostic never reports a derived ID for an item that does not
-  exist; `p2-ingest`'s outstanding work.
+  D9/D14 — landed, SPEC-1.4).** `internal/directive` emits an
+  informational `DirectiveIDDerived` diagnostic for every item it derives
+  an ID for, before `internal/ingest` decides whether that item's section
+  is actually applied. `internal/ingest`'s unit loop now filters this: `if
+  d.Code == domain.DirectiveIDDerived && !r.written[d.Range] { continue
+  }` — a derived-ID notice is reported only for a range ingestion actually
+  wrote, so a section ingest refuses (a Working section dropped whole on a
+  boundary conflict, per the D11 item below) never leaves a
+  `DirectiveIDDerived` notice for an item that does not exist.
 - **Residual instructions: no BOM/whitespace-only items, lossless bytes,
   and malformed trusted headings still produce residue (refines §5, D8 —
-  not yet landed as specified).** `internal/ingest/derive.go`'s
-  `residualSlices` already drops a whitespace-only residual range before
-  `residualInstruction` is ever called (its trim loop empties `out`, and
-  `applyUnit` only queues a residual step when `len(residual) > 0`), so
-  whitespace-only residue already creates no item; R20 additionally
-  requires the same for a residue that is only a leading UTF-8 BOM
-  (3 bytes, not ASCII whitespace, so the current trim loop does not strip
-  it) — not yet handled. R20's other two requirements are not yet
-  implemented and contradict the function's current documented behavior:
-  (a) *lossless bytes* — `residualSlices`'s trim loop mutates the same
-  `Start`/`End` range both to decide whether residue exists and to build
-  the residual instruction item's actual content
-  (`residualInstruction`'s `b.WriteString(c.text[s.Start:s.End])`), so
-  today a residual instruction's persisted text has already lost its
-  leading/trailing whitespace bytes; R20 requires the trim to affect only
-  the *emptiness* decision, never the bytes actually stored. (b) *malformed
-  trusted headings still produce residue* — `residualSlices`'s doc comment
-  states "Malformed section bytes are never salvaged into an instruction:
-  only text the parser did not claim is residual," and its implementation
-  excludes every section's `Range` from residual regardless of
-  `Section.Malformed`; for a SYSTEM/HARNESS span this means a malformed
-  trusted heading's body currently is neither a directive item (it failed
-  to parse) nor a residual instruction (its bytes are excluded as
-  "claimed") — it is silently dropped, which is exactly the outcome D8's
-  residual-instruction mechanism exists to prevent. R20 rules that for a
-  SYSTEM/HARNESS span specifically, a malformed section's bytes must
-  still be included in `residualSlices`'s output (not excluded as
-  claimed), so a malformed trusted heading degrades to trusted plain text
-  instead of vanishing. This is `p2-ingest`'s outstanding work; the
-  function's doc comment above states the pre-R20 behavior and must be
-  updated when the fix lands.
+  landed, SPEC-1.4).** `internal/ingest/derive.go`'s pre-ruling
+  `residualSlices`/`residualInstruction` were replaced by `residue`
+  (called last from `applyUnit`, after every directive item and lifecycle
+  command in the unit, per R21's amended M3 order below): a SYSTEM/HARNESS
+  unit's residue is now every byte not claimed by an accepted section or a
+  written item — computed from the parser's own `Section` extents, never
+  re-scanned — so a malformed or refused trusted section's bytes join
+  residue instead of vanishing, exactly as R20 required. The function's
+  own doc comment states this plainly: "text inside a malformed or refused
+  trusted section becomes instruction text rather than silently
+  vanishing." Bytes are kept exactly (no separate trim-for-content step,
+  closing the lossless-bytes gap this ADR previously flagged), and "a
+  residue of only ASCII whitespace and a leading BOM creates no item"
+  closes the BOM-only gap. What remains from a naive "any malformed
+  trusted section becomes residual" reading — wrongly turning a malformed
+  *lifecycle* section (Resolve, Unpin, or an unsupported word) into a
+  residual instruction, which would surface a runtime command's text as
+  trusted instruction content — is `residue`'s own explicit exclusion:
+  "Lifecycle commands ... are never shown to the model as trusted
+  instructions (R21)." §25 records that carve-out and R21's other two
+  refinements in full; all three are landed together in the same
+  function.
 - **A malformed Working section writes no members, stricter than D11's
   literal text (confirms §7, D11 — landed).** `internal/ingest/derive.go
   :workingSection` already returns immediately, creating no items and no
@@ -943,62 +966,417 @@ Findings from `p2-ingest`'s own test suite, appended to
   ReasonBoundaryConflict` (§23), not a per-member drop, because a Working
   snapshot is one atomic operation (D11).
 
-### 25. Round 7 ruling: R21
+### 25. Round 7 ruling: R21 (landed together with R20, SPEC-1.4)
 
-Refines §24/R20's residual-instruction fix before it lands, plus a
-creation-order amendment to M3.
+Refines §24/R20's residual-instruction fix, plus a creation-order
+amendment to M3. All three points below are implemented in the single
+landed `internal/ingest/derive.go:residue` function (§24).
 
 - **A residue that is only a bare heading line creates no item (refines
-  §5/§24, D8/R20 — not yet landed).** Once R20's fix lands (a malformed
-  content section's bytes join residual for a SYSTEM/HARNESS span instead
-  of being excluded as claimed), an empty malformed section — a heading
-  with no body at all — would otherwise become a residual instruction
-  whose entire content is the bare heading line itself. R21 narrows R20:
-  if a unit's residual, after R20's fix, reduces to nothing but such a
-  bare malformed heading line with no other trusted body text anywhere in
-  the unit, no residual instruction item is created for it — a heading
-  alone conveys no instruction content worth preserving, and creating an
-  item for it would just be noise. This does not change R20's core fix
-  for a malformed section that *does* have body text.
+  §5/§24, D8/R20).** An empty malformed section — a heading with no body
+  at all — would otherwise become a residual instruction whose entire
+  content is the bare heading line itself. R21 narrows R20: `residue`'s
+  `case blankBytes(c.text, s.BodyRange):` treats such a section's `Range`
+  as claimed (excluded from residual) directly, so no residual instruction
+  item is ever created for it — a heading alone conveys no instruction
+  content worth preserving. A malformed section that *does* have body text
+  is unaffected and still joins residual under R20's core fix.
 - **Malformed lifecycle sections are never residual instructions (refines
   §5/§24 and §1/§9, D1/D8/R20 — a scoping limit on R20, not a gap).** R20's
   fix (§24) is scoped to malformed *content* sections (Goal, Pinned,
   Working, Remember, References, Ephemeral); it does not extend to a
   malformed Resolve, Unpin, or unsupported-lifecycle-word section (M4's
-  closed vocabulary, §4). A malformed lifecycle heading in a trusted span
-  stays transcript-only, with its diagnostic, exactly as today — R21
-  forbids ever surfacing it as a residual *instruction* item. The reason
-  is D1's core guarantee: a lifecycle command is `PARSED_NOT_EXECUTED`
-  and must never be rendered as a trusted instruction to the model; if a
-  malformed `## Resolve`/`## Unpin`/unsupported-word heading became
-  residual instruction text, a runtime command that failed to parse would
-  reappear as ordinary trusted prose, which is worse than the diagnostic-
-  only status quo it would replace. `internal/directive`'s `Section`
-  already carries its `Keyword`, so `p2-ingest`'s R20 implementation must
-  gate on it: only a content-section keyword's malformed bytes join
-  residual; a lifecycle-section keyword's malformed bytes never do,
-  regardless of span authority.
+  closed vocabulary, §4). `residue`'s first case —
+  `s.Status == directive.SectionUnsupported || s.Keyword == directive.Resolve
+  || s.Keyword == directive.Unpin` — claims (excludes from residual) every
+  lifecycle section regardless of whether it is malformed, so a malformed
+  lifecycle heading in a trusted span stays transcript-only, with its
+  diagnostic, exactly as before R20. The reason is D1's core guarantee: a
+  lifecycle command is `PARSED_NOT_EXECUTED` and must never be rendered as
+  a trusted instruction to the model; if a malformed
+  `## Resolve`/`## Unpin`/unsupported-word heading became residual
+  instruction text, a runtime command that failed to parse would reappear
+  as ordinary trusted prose, which is worse than the diagnostic-only
+  status quo it would replace.
 - **Creation order: a unit's residual instruction item is created after
-  its directive items, amending M3 (refines §10 — not yet landed).** M3
-  (§10) originally ordered a unit's items as "transcript items first, then
-  residual/directive items in source order" — treating residual and
-  directive items as one byte-position-ordered group. R21 amends this: a
-  unit's residual content, and thus its residual instruction item, can
-  only be computed *after* every section and lifecycle command in the
-  unit has been resolved, because whether a given section's bytes end up
-  in residual depends on whether ingest ultimately refused that section
-  (R20) and on that section's keyword (R21, above) — information that
-  does not exist until the whole unit has been processed. `internal/ingest
-  /derive.go`'s `applyUnit` currently sorts a single residual step into
-  its position-ordered `steps` list by `residual[0].Start` — the byte
-  offset of the first residual range — which can place it before some of
-  the unit's own directive items when residual text happens to start
-  earlier in the span than a later section. R21 requires the residual
-  step to run last for its unit unconditionally, never by byte position;
-  `p2-ingest`'s `applyUnit` must be changed accordingly, and this is the
-  amended creation-order M3 (§10) now records: transcript item, then the
-  unit's directive items and lifecycle commands in source order, then
-  finally its residual instruction item, if any.
+  its directive items, amending M3 (refines §10).** M3 (§10) originally
+  ordered a unit's items as "transcript items first, then residual/
+  directive items in source order" — treating residual and directive items
+  as one byte-position-ordered group. R21 amends this: a unit's residual
+  content, and thus its residual instruction item, can only be computed
+  *after* every section and lifecycle command in the unit has been
+  resolved, because whether a given section's bytes end up in residual
+  depends on whether ingest ultimately refused that section (R20) and on
+  that section's keyword (R21, above) — information that does not exist
+  until the whole unit has been processed. `applyUnit` no longer sorts a
+  residual step into its position-ordered `steps` list at all: the steps
+  loop covers only directive items, Working sections, and lifecycle
+  commands, and the function ends with an unconditional `return
+  r.residue(c)` — residue always runs last for its unit, never ordered by
+  byte position. This is the amended creation-order M3 (§10) now records:
+  transcript item, then the unit's directive items and lifecycle commands
+  in source order, then finally its residual instruction item, if any.
+
+### 26. PR #5 review round 1: commander rulings F1-F6 (all landed, final pass)
+
+The first external review of this PR (`round1-p5-fixes.md`) produced
+commander rulings F1-F6. All six are now landed and reconciled against
+the code at this ADR's final-pass head.
+
+- **F1 (SEC-1.1, SEC-1.2, DUR-1.1, SPEC-1.3 — access-filtered lookups,
+  refines §7/§9/§13/§15/§16, D10/D17/D19/M5/R19; full record, ADR 3 owns
+  the migrations).** The original R19 lookups (§23) were properly indexed
+  but session-wide: they returned every matching row regardless of
+  whether the calling principal could see it (SEC-1.1's existence
+  oracle/cross-task-lockout), and `SupersedeSnapshot`'s `freezePartitions`
+  still ran a full per-task item scan (SEC-1.2). F1 redesigned every
+  lookup as access-filtered from the start: `internal/store/lookups.go`
+  defines `Cursor`, `Page`, and `Lookup{Items, Unverified, More, Next}`,
+  and five `Validate()`-checked filters — `BlobReferrerFilter`,
+  `CanonicalFilter`, `WorkingFilter`, `SourceFilter`,
+  `VisibleReferenceFilter` — each carrying a `Viewer domain.Principal`.
+  The `ReadTx` methods `BlobReferrer`, `CanonicalCandidates`,
+  `CurrentWorking`, `SourceItems`, and `VisibleReferences`
+  (`store.go:184-195`) replace the deleted `ItemsByBlob`/
+  `DuplicateCandidates`/`ItemsBySourceKey`/`UnresolvedReferences` and the
+  `freezePartitions` task scan; SQLite filters by owner columns on new
+  tables (migration 0012's `lookup_blob`/`lookup_canonical`/
+  `lookup_working`/`lookup_source`, ADR 3) inside the query, before any
+  limit, so an inaccessible row is never counted, returned, or
+  observable — closing SEC-1.1 — and `CanonicalFilter`/`WorkingFilter`
+  fail `ErrLimitExceeded` only on *visible* overflow, so
+  `SupersedeSnapshot` now does one indexed `CurrentWorking` lookup per
+  partition instead of a task scan (`internal/graph/snapshot.go:279`),
+  closing SEC-1.2. The lookup tables hold live items only (excluded by
+  subquery once superseded or classified `DUPLICATE_OF`), and the store
+  deletes an item's lookup rows in the same write that retires it, so
+  repeated identical content never grows them (DUR-1.1). Ingest call
+  sites: `internal/ingest/directives.go:269` (`CanonicalCandidates`),
+  `references.go:42,133` (`SourceItems`, `VisibleReferences`),
+  `run.go:304` (`BlobReferrer`). Separately, SPEC-1.3 found that
+  `internal/ingest`'s *other* per-item reads — `Relationships` filtered by
+  type/from/to, `Items` filtered by task — were not indexed even though
+  the three named R19 lookups were; migration 0012's `relationship_to`
+  index and an item-by-task index close this. Tests:
+  `TestAccessLookupsUseIndex`, `TestUpgradeAccessLookups`,
+  `TestGraphReadsUseIndex`, `TestLegacyLookupsDropped`
+  (`internal/store/sqlite/access_lookups_test.go`,
+  `lookups_test.go`); storetest conformance rows `BlobReferrerAccess`,
+  `CanonicalCandidates`, `CurrentWorking`, `SourceItems`,
+  `VisibleReferences` (`internal/store/storetest/access_lookups.go`,
+  registered `storetest.go:78-82`); ingest-level
+  `TestLookupsNeverLockOut_F1` (`internal/ingest/lookups_test.go`).
+  DUR-1.4's unverified-item handling rides the same redesign: a visible
+  match whose stored content fails verification (a legacy row `0001`
+  altered before the lossless fix, D3/R8) is excluded from `Lookup.Items`
+  and named in `Lookup.Unverified` instead of blocking the whole lookup or
+  hiding behind unrelated identical content; `internal/ingest/run.go`'s
+  `reportUnverified` records one content-free `domain.ItemUnverified`/
+  `ReasonUnverifiedItem` diagnostic per unverified ID, and reading the row
+  directly still fails `domain.ErrIntegrity`. Tests:
+  `TestLegacyUnverifiedNeverBlocks` (SQLite),
+  `TestUnverifiedMatchesNeverBlock_DUR14` (`internal/ingest/lookups_test.go`).
+- **F3 (SPEC-1.7, DUR-1.2 — retry precedes limit/policy checks, refines
+  §10, D14; landed, confirming the mechanism §26's earlier draft
+  described correctly).** `internal/ingest/ingest.go`'s `apply()` runs the
+  idempotency lookup (`lookupReceipt`) before the second, limits-carrying
+  `e.ValidateFor(p, limits)` call — "Only a new occurrence is held to the
+  currently configured limits" (the function's own comment) — so a
+  retry of a known `EventID` always replays the stored receipt verbatim,
+  even when limits or policy versions changed since the original event;
+  only a genuinely new event sees the new configuration. Test:
+  `TestRetryAfterLimitsChange_F3` (`internal/ingest/fixes_r1_test.go`).
+- **F4 (SPEC-1.2 — References-by-item-ID, refines §16, M5/R2/FR-DIR-003;
+  landed).** FR-DIR-003's "a name that matches an item ID in scope … gets
+  a REFERENCES edge" is now implemented: a References entry whose text is
+  a valid item ID resolves it the same way any other accessible source
+  resolves (`internal/ingest/references.go`), and links it, keeping an
+  inaccessible or missing item ID indistinguishable — the same rule §16
+  already specified for path/URL locators. Covered within
+  `internal/ingest/references_test.go`'s existing reference suite rather
+  than a separately named test.
+- **F6 (SEC-1.3 — diagnostic/lifecycle-command record access, refines
+  §12/§1, D16/D1; landed).** A diagnostic or lifecycle-command record's
+  access is now the *narrower* of the source span's boundary and the
+  boundary of the content or target it describes, not the span boundary
+  alone: diagnostics carry a `scopedDiag{d, access}`
+  (`internal/ingest/diagnostics.go`) computed per diagnostic rather than
+  defaulting to the span's transcript access, and a lifecycle command's
+  record narrows via `domain.Intersect(scope, spanAccess, targetAccess)`
+  (`internal/domain/principal.go:101`, `internal/ingest/derive.go:332`)
+  when its target resolves to a narrower-boundary item. This closes the
+  over-disclosure SEC-1.3 found: a span-boundary-only access field could
+  let a principal who can see the span, but not a narrower-boundary target
+  it describes, learn the target exists. Reads filter on the narrowed
+  boundary like any other access-checked record. Test:
+  `TestRecordsAtNarrowerBoundary_F6` (`internal/ingest/fixes_r1_test.go`).
+- **F5 (DUR-1.8, SPEC-1.9 — migration 0011's Go-step checksum) is recorded
+  in ADR 3's Phase 2 migrations section**, not repeated here: migration
+  0011's backfill is now a frozen, private copy of the locator rule with
+  its identity folded into the migration's checksum, so it is no longer
+  outside checksum protection and no longer depends on live domain code.
+
+- **F2 (SEC-1.5 — caller `EventID` namespace, refines §10/§11, D14/D15).**
+  `CallerOccurrenceID(session, eventID)` ignores the principal, so a
+  session-wide `EventID` collision across tasks/agents/workflows lets one
+  principal's guessable ID block another's identical retry and lets an
+  attacker probe which IDs another principal has used (reproduced:
+  `TestSEC_EventIDCrossPrincipal`, a `wf2/T2` principal using `EventID:
+  "turn-2"` blocks a later, unrelated `T`-scoped event with the same ID).
+  Ruling: mitigation, not redesign — FR-ING-006's session-scoped identity
+  is unchanged; a different principal reusing an `EventID` still fails
+  `domain.ErrEventIDConflict`
+  (`errors.New("event ID conflict")`, `internal/domain/errors.go:24`),
+  returned bare with no ID, principal, or session detail
+  (`internal/ingest/ingest.go:170,177`) — `p2-contract` verifies this with
+  a test. **Accepted residual risk, recorded here:** an `EventID` is a
+  session-wide idempotency key, not a per-principal one; a harness that
+  lets predictable, cross-principal-guessable `EventID`s reach the runtime
+  (sequential counters, fixed strings like `"turn-2"`, anything derived
+  from public state) allows one principal to block another's retry using
+  the same ID, and to learn *that* another principal has used it, though
+  never what payload it carried or that principal's identity beyond
+  "someone already used this ID." **Harness guidance (binding on
+  integrations, not enforced by the runtime):** generate `EventID`s with
+  enough entropy that they cannot be guessed across principals, and
+  prefix or otherwise derive them so that two principals never
+  legitimately produce the same one by construction (for example,
+  `<principal-scoped-namespace>:<random>` chosen by the harness, not the
+  runtime). This is deliberately not enforced in `Event.Validate` — R20's
+  reserved-prefix check (§24) rejects a caller `EventID` that collides
+  with an *internal* generated-ID shape, but a harness's own entropy and
+  uniqueness discipline across its principals is outside the runtime's
+  authority to verify, and inventing a per-principal namespace now (the
+  redesign SEC-1.5 offered as an alternative) was rejected: it would
+  change FR-ING-006's session-scoped retry-key contract for every caller
+  to close a risk that only materializes when a harness supplies
+  low-entropy, cross-principal-predictable IDs against its own guidance.
+
+### 27. PR #5 review round 1 rulings: SPEC-1.10, SPEC-1.11
+
+- **SPEC-1.11 ruling: CommonMark-heading-shaped lines close but never open
+  a section (refines §4, D5/D6/R17 — landed).** Parser v1 previously
+  treated a bare ATX line (`#` through `######` alone) or a tab-separated
+  one (`#\tOther`) as ordinary content: it neither opened nor closed a
+  section, and inside a list body counted as stray prose (marking the
+  section malformed). SPEC-1.11 flagged this as the one deliberate
+  deviation that leaves *more* text inside a section than CommonMark
+  would, and asked for a ruling rather than leaving it an open deviation
+  forever. **Ruling:** a line matching CommonMark's ATX heading *shape*
+  (0-3 leading spaces, 1-6 `#`, then SP, HTAB, or end of line — the same
+  shape D5 already requires for a real directive heading, just without a
+  valid keyword) closes an open section of the same or higher level
+  exactly as a valid directive heading would (D6), but never opens a new
+  section, since it has no keyword to open one with. A line that is not
+  heading-shaped at all — seven or more `#`, 4+ space or tab indentation
+  before the `#`, fenced/quoted/commented, or a bare `#` immediately
+  followed by non-space text like `#5` — is unaffected and stays body or
+  ordinary content. The parser has no list-container model, so a
+  heading-shaped line indented inside a list item also closes its
+  section; closing early only drops directive text, never fabricates any.
+  **Landed:** `internal/directive/scan.go`'s heading-recognition loop —
+  when a candidate line is heading-shaped (`atxShape(b) > 0`) but is not
+  itself a valid directive heading (`blocked != ""` or no capable
+  keyword) and its shape level is at or above the open section's, the
+  section closes (`p.sections[active].end = line.start; active = -1`)
+  without ever opening a new one; the code comment cites "SPEC-1.11
+  ruling" directly. `internal/directive/doc.go`'s deviation list is
+  updated to match. Locked by `TestHeadingShapedLinesClose`
+  (`internal/directive/scan_test.go`, replacing the pre-ruling
+  `TestBareAndTabATXLines`) and four canonical goldens:
+  `testdata/directives/form-heading-shaped-close` (a bare `#\tOther`
+  mid-list closes the open Pinned section), `form-heading-shaped-indented`
+  (an indented `  ## Notes` inside a list also closes),
+  `form-heading-shaped-inert` (4-space/tab indentation, seven `#`, and
+  `#5 bolt` are not heading-shaped and stay body text), and
+  `form-heading-shaped-never-opens` (the same heading-shaped line closes
+  the prior section but never itself opens a new one).
+- **SPEC-1.10 ruling: parser/policy version-bump replay is covered by the
+  general verbatim-receipt property; a real upgrade test is deferred
+  (refines §10, D14).** SPEC-1.10 listed "replay after a policy/parser-
+  version change" among several ADR clauses with no direct test.
+  **Ruling:** this is already covered in substance by D14's general
+  property that a retry never re-parses or re-classifies, only replays the
+  stored receipt verbatim — `TestReplayNeverRecomputes`
+  (`internal/ingest/clauses_test.go`) exercises exactly this property
+  using a changed `Limits` configuration (which, like a parser or policy
+  version bump, changes the ingester's recorded execution `Versions`): a
+  retry under the changed configuration returns the original receipt and
+  its original `Versions` unchanged, with no new sequence number, while
+  the identical request as a genuinely new event does get the new
+  configuration. A *literal* parser/policy version bump cannot be
+  exercised in-process today, because `directive.ParserVersion` and the
+  policy version are compile-time constants, not an injectable seam; a
+  dedicated test for that exact case is deferred until the first real
+  version bump, when introducing the seam is no longer speculative.
+
+  SPEC-1.10's other missing-test clauses are also landed now, each in
+  `internal/ingest/clauses_test.go` unless noted:
+  `TestCompletedTaskNeverReactivated` (ADR §14, D18); `TestRetrievedBeforeFirstTurn`
+  (R19: RETRIEVED_CONTENT before the first turn, matching the TOOL case
+  §23 already covered); `TestToolCallIDCreatesNoEdge` (ADR §16: a TOOL
+  span's `ToolCallID` lands in `SourceRef` only); `TestTruncationPersistedAndReplayed`
+  (the 256-plus-one diagnostic cap, D16/D17); `TestAmbiguousLifecycleTarget`
+  (FR-DIR-005 at the ingest layer, not only graph); `TestDefaultLimitValues`
+  (`internal/domain/limits_test.go` — D17's 8 MiB/4096-item defaults);
+  `TestReplaceDirective_ObligationFanOut` (`internal/graph/fanout_test.go`
+  — R9's large-fan-out obligation retirement); `TestRetryIdentity_SessionScopedRich`
+  (`internal/ingest/retry_test.go` — TEST-1.2's session-scoped rich-event
+  retry, alongside the existing `_RichReceipt` case).
+
+### 28. PR #5 review round 1: remaining DUR/SEC/SPEC findings (all landed, final pass)
+
+Findings not folded into F1-F6 (§26) or already-recorded rulings (§27),
+each with its own fix and test.
+
+- **DUR-1.3: the poison primitive (refines §10, D14).** `Apply`/`apply`
+  (`internal/ingest/ingest.go`) is failure-atomic: once the core has
+  started writing, any error calls `tx.Poison(err)`
+  (`store.Tx.Poison(err error)`, `store.go:263-272`) before returning, so
+  the caller's `Update` rolls back everything the transaction wrote even
+  if the caller ignores the returned error — no partial ingestion result
+  can ever commit. `store.Guard` (`internal/store/guard.go`) implements
+  it: the first `Poison` call wins, every write method of `TxBase` checks
+  the poison first and short-circuits with it, and reads/`NextSeq`/
+  `Allocated` keep working. Poisoning never poisons the `EventID` itself —
+  nothing committed, so the same `EventID` remains retryable — only the
+  in-flight transaction. `domain.ErrPoisoned` is the sentinel for
+  `Poison(nil)`. Tests: `TestApplyFailureAtomic_DUR13`
+  (`internal/ingest/fixes_r1_test.go`); store-level `TestConformance
+  /PoisonRollsBack`, `.../PoisonFirstErrorWins`, `.../PoisonBlocksEveryWrite`
+  (`internal/store/storetest/poison.go`).
+- **DUR-1.5: Working-snapshot derived-ID collisions across authorities,
+  option A (refines §7, D11/FR-DIR-007).** A Working member with a
+  *derived* ID (no explicit `[id]`) ran the same same-ID replacement path
+  as an explicit-ID member, but a derived ID carries no authority
+  (`DerivedDirectiveID(section, contentHash)`), so an identical line under
+  a different authority either aborted the whole event or partially
+  erased the other authority's snapshot set. Of the two options the
+  finding offered — restricting by-ID replacement to explicit IDs, or
+  folding authority into the derived-ID hash — **option A was chosen**:
+  `internal/ingest/derive.go`'s `workingSection` now checks, only for a
+  member without an explicit ID, whether its derived-ID slot is already
+  held by a current version at an authority the new item does not
+  dominate (`derivedSlotHeldAbove`, via `graph.CurrentVersionFor`); if so,
+  that member alone is refused with `ErrMalformedDirective`/
+  `ReasonBoundaryConflict` (R13's item-level pattern, §7), and the event
+  continues, rather than aborting with `ErrInvalidAuthorityPromotion` or
+  silently erasing part of another authority's set. Explicit-ID members
+  are unaffected. Test: `TestWorking_DerivedIDAcrossAuthorities_DUR15`
+  (`internal/ingest/working_test.go`).
+- **DUR-1.6: `MaxRelationships` now bounds the replacement and duplicate
+  paths too (refines §13, D17).** The limit was checked before a
+  `DERIVED_FROM` edge (`internal/ingest/directives.go`'s `linkDerived`)
+  but not before the `SUPERSEDES` edge a replacement writes or the
+  `DUPLICATE_OF` edge a duplicate writes, so either path could exceed the
+  event's relationship budget uncounted. `internal/ingest/directives.go`
+  now checks `r.rels >= r.limits.MaxRelationships` at every edge-writing
+  site (three call sites, plus `derive.go`'s original one), failing
+  `errLimit("MaxRelationships")` before the edge is written. Test:
+  `TestRelationshipLimitOnReplaceAndDuplicate_DUR16`
+  (`internal/ingest/fixes_r1_test.go`).
+- **DUR-1.7: deterministic failure order for a Working snapshot's
+  retirements (refines §7, D11).** When several planned retirements in one
+  snapshot write could each independently fail authorization, the order
+  they were checked in was map-iteration order — nondeterministic, so a
+  replay could fail on a different member than the original attempt.
+  `internal/graph/snapshot.go` now sorts the retirement set by `(Seq, ID)`
+  (`bySeqID`) before validating, so "when several planned retirements
+  would fail, the error is always the earliest one's" (the code's own
+  comment) — deterministic across replay. Test:
+  `TestSnapshot_DeterministicFailure_DUR17`
+  (`internal/graph/snapshot_test.go`).
+- **SEC-1.4: whole-event byte limits cover every caller-supplied string,
+  and locators are constrained to a display-safe charset (refines §13,
+  D17; new decisions, not previously recorded).** D17's original limits
+  bounded span/item/blob/diagnostic counts and total bytes, but several
+  individually-small, caller-supplied strings outside those counts —
+  `Source.Locator`, `Source.ToolCallID`, `ContentPart.MediaType`, and
+  every owner ID (session/workflow/task/agent, on both the principal and
+  each span's access boundary) — were unbounded, so an event could carry
+  an arbitrarily large amount of caller-controlled text `PayloadHash`
+  hashes and ingestion persists without ever being counted by
+  `MaxEventBytes`. **Landed:** `internal/domain/ingest.go` adds
+  `MaxLocatorBytes = 4096`, `MaxToolCallIDBytes = 256`,
+  `MaxMediaTypeBytes = 255`, and `MaxOwnerIDBytes = 256`, enforced in
+  `SourceRef.Validate`, `InputPart` validation, and
+  `validateIngestPrincipal`/span-boundary validation; every field is
+  accepted at its bound and rejected one byte over, by `Validate`,
+  `PayloadHash`, and `ValidateFor` alike (`TestEventMetadataBounds_SEC14`).
+  **Locator UTF-8/charset rule:** a locator must be valid UTF-8 with no
+  control characters (C0, DEL, C1) and no bidirectional-formatting
+  characters (`displaySafe`, `internal/domain/ingest.go`) — "so a locator
+  cannot inject line breaks, terminal escapes, or reordered text into
+  logs, diagnostics, or rendered context" (the function's own comment); a
+  non-ASCII but otherwise clean path or URL (e.g. a Unicode filename) is
+  accepted, only control and bidi-override bytes are rejected. A tool-call
+  ID must be printable ASCII with no space; a media type must be printable
+  ASCII (parameters like `; charset=utf-8` allowed). **Harness guidance
+  (binding on integrations, not enforced beyond charset validity):** a
+  harness whose natural locator representation contains a byte this rule
+  rejects — for example a URL component that legitimately needs a raw
+  control byte — must percent-encode it before constructing the `Event`;
+  the runtime validates the charset, it does not perform the encoding.
+  Test: `TestEventMetadataCharsets_SEC14`
+  (`internal/domain/sec14_test.go`, both tests). Separately landed in the
+  same area: `Limits.MaxReferenceLinks` (default 256, §13/D17) bounds the
+  REFERENCES edges one event may create; exceeding it stops adding
+  optional edges and reports `ReferenceLinksTruncated`
+  (`internal/ingest/references.go`), a new `DiagnosticCode` alongside
+  `ItemUnverified` (DUR-1.4, §26); `Diagnostic.Validate` now mechanically
+  enforces every reason-to-code pairing through a `reasonCode` map
+  (`internal/domain/diagnostic.go:145-151`:
+  `ReasonBoundaryConflict→ErrMalformedDirective`,
+  `ReasonTargetMismatch→DiagnosticNotFound`,
+  `ReasonUnverifiedItem→ItemUnverified`,
+  `ReasonReferenceLinksTruncated→ReferenceLinksTruncated`) — this
+  formalizes and mechanically locks §23's R19 code/reason pinning decision,
+  which was previously enforced only by convention at each call site. A
+  receipt now also records the `MaxReferenceLinks` value an event was
+  checked against (migration 0014, ADR 3), so a replayed old receipt
+  reports the limit that actually applied, never today's default (M8).
+  Test: `TestMaxReferenceLinks` (`internal/domain/limits_reference_test.go`).
+- **SPEC-1.1: a suppressed line never starts a directive item, even
+  mid-list (refines §4, D5/R17; distinct from — and narrower than — the
+  column-0 fence/quote case §22 already records).** A bullet on a line
+  that was itself suppressed (inside an indented fence, an HTML comment,
+  or a quote, without triggering the column-0 whole-section-malformed
+  case) could still start an item, because bullet recognition did not
+  check the line's suppression state. `internal/directive/items.go`'s
+  `startsItem` now requires `l.suppressed == ""`, so a suppressed line
+  never starts an item regardless of position; a `poison` tracker
+  separately flags the first column-0 suppressed line inside a list body
+  and, when set, drops every item the whole section produced (`p.items =
+  p.items[:first]`), per R17. Tests: `TestSuppressedListContent`
+  (`internal/directive/attacks_test.go`), `TestSuppressedListContent_Ingest`
+  (`internal/ingest/structure_test.go`); canonical goldens
+  `testdata/directives/suppress-list-{comment,fence,indented-control,
+  indented-fence,lifecycle-fence,quote}`.
+- **SPEC-1.12: R11's duplicate-semantics comparison now includes the
+  obligation declaration (refines §7/§20, D10/D13/R11).** R11 required
+  `SameDirectiveSemantics` to compare the obligation declaration "so
+  `p2-graph` and `p2-ingest` implement one comparison, not two," but the
+  comparison left it to callers, and `graph.LinkDuplicate` could link a
+  Pinned item as `DUPLICATE_OF` a canonical item whose declared obligation
+  claim actually differed. `internal/graph/duplicate.go`'s new
+  `SameDirective(tx, it, newClaim, canonical)` wraps
+  `SameDirectiveSemantics` and additionally compares the obligation claim
+  via `tx.ObligationsBySource(canonical.ID, maxDeclaredClaims)` (bounded,
+  R9/D17): an exact match requires no claim on either side, or exactly one
+  current version with the same claim. Test:
+  `TestLinkDuplicate_ComparesObligationClaim`
+  (`internal/graph/duplicate_test.go`).
+- **TEST-1.1/1.2/1.3 (test-suite gaps the first review found, not tied to
+  a fix).** TEST-1.1: `TestD10_MappedDuplicateNeverCurrent`
+  (`internal/graph/current_test.go`, alongside the existing
+  `TestD10_DuplicateDirectiveNeverCurrent`) locks that a `DUPLICATE_OF`
+  item can never become current through a stale current-map pointer,
+  independent of `TestD10_DuplicateDirectiveNeverCurrent`'s coverage.
+  TEST-1.2: `TestRetryIdentity_SessionScopedRich` (above). TEST-1.3:
+  `TestDiagnosticsCapTruncates` (`internal/ingest/retry_concurrency_test.go`,
+  comment cites "TEST-1.3, D17" directly) locks that a late limit
+  rejection is atomic and never poisons the `EventID` for a future retry,
+  and that the diagnostics cap truncates correctly under it.
 
 ## Alternatives considered
 
@@ -1096,14 +1474,20 @@ creation-order amendment to M3.
   ranges/receipts (§10/19), obligation claim names (§9), diagnostics
   (§12), and the typed directive/agent-key namespace (§17) — all additive
   to migration history; migration 0001 is never edited (R8).
-- `graph.IsCurrent`'s existing incoming-edge-only semantics are
-  insufficient for D10's "never becomes current" guarantee (§7); every
-  current-version consumer, not just the write path, must be updated to
-  also exclude a `DUPLICATE_OF` item and a stale current-map pointer.
+- `graph.IsCurrent`'s existing incoming-edge-only semantics were
+  insufficient for D10's "never becomes current" guarantee (§7); resolved
+  (see ADR 4/16's Phase 2 amendment notes) — every current-version
+  consumer now also excludes a `DUPLICATE_OF` item and a stale
+  current-map pointer.
 - `graph.Supersede`'s `(session, old target, action, event)` audit-ID
-  scheme collides on two retirements of the same old target within one
-  event; D11's planned edge set (§7) must resolve this itself rather than
-  leaving it for `p2-graph` to discover independently.
+  scheme collided on two retirements of the same old target within one
+  event; resolved by versioning the audit identity
+  (`internal/graph/ids.go`'s `lifecycleEventIDTag` v1→v2), which adds the
+  retirement's counterpart (its successor) to the hashed identity, so two
+  audit records about one target in one event can never alias — a v1 ID
+  already stored is left as it is. DUR-1.7 (§28) separately fixed a
+  related nondeterminism: which of several retirements' *failures*
+  surfaces first, now ordered by `(Seq, ID)`.
 - The SDD §8 `Runtime.Ingest([]ContextItem, error)` signature is unchanged
   by Phase 2 (§19, R3); any code written against a richer expected return
   type must wait for the Phase 5 amendment.
@@ -1119,8 +1503,11 @@ creation-order amendment to M3.
 
 ## Tests that lock the behavior
 
-Required, not yet written except where a package/file is named; `p2-tests`
-reconciles exact names in a later round.
+Concrete test names are cited per clause below where they exist
+(SPEC-1.4: nearly all now do, confirmed against the merged integration
+head); a clause still phrased as a requirement rather than naming a test
+is a genuine gap for `p2-tests` to close, not an unwritten placeholder
+for the whole section.
 
 - **§1 (lifecycle commands):** `internal/ingest` — an unauthorized source
   actor's Resolve/Unpin aborts the whole event (no partial mutation); an
@@ -1221,9 +1608,11 @@ reconciles exact names in a later round.
   the new migrations land.
 - **§20 (round 2 rulings, R9-R15):** `internal/graph`/`internal/store` —
   retiring obligations bound to a replaced source uses the obligations-
-  by-source lookup and stays bounded under a large-fan-out source (R9);
-  `internal/graph` returns `ErrNamespaceConflict` for an ambiguous
-  pre-migration lookup rather than guessing a namespace (R10);
+  by-source lookup and stays bounded under a large-fan-out source (R9).
+  **R10's `ErrNamespaceConflict` transitional rule (SPEC-1.4: removed
+  here) never needed a test:** the typed namespace switch (M6/R6) landed
+  directly, with no gap for a transitional fail-closed rule to cover, so
+  no such symbol exists and none should be expected.
   `SameDirectiveSemantics` includes creation turn, TTL origin, and
   obligation declaration in its comparison, both in `internal/graph` unit
   tests and as the single comparison `internal/ingest` calls (R11); the
@@ -1263,14 +1652,15 @@ reconciles exact names in a later round.
   confirming R1); every persisted item/diagnostic/receipt records parser
   version `directive/v1` (R17). `internal/store/storetest` —
   `ObligationsBySource` with a `limit` lower than the bound source's
-  obligation count returns exactly `limit` versions, deterministically
-  ordered (R18). Deferred until landed: once `internal/graph`/
-  `internal/ingest` switch to `CurrentVersion`/`CurrentVersions`, a static
-  check asserts no remaining call site uses the deprecated
-  `CurrentDirective`/`CurrentDirectives`/`SetCurrentDirective` (R18); once
-  landed, `domain.TTLLive(0, current, n)` is `false` for every
-  `current`/`n` (R18); once landed, `domain.UnresolvedReference`
-  round-trips through migration 0008 and survives restart (R18).
+  obligation count fails `store.ErrLimitExceeded` (SPEC-1.4: corrected —
+  not "returns exactly `limit` versions"; R9/D17's bounded-scan discipline
+  rejects an oversized request outright rather than silently truncating
+  it), `bysource.go:61-62` (R9/R18). Landed and covered: no remaining
+  `internal/graph` call site uses the deleted `CurrentDirective`/
+  `CurrentDirectives`/`SetCurrentDirective` (R18); `domain.TTLLive(0,
+  current, n)` is `false` for every `current`/`n` (R18); `domain
+  .UnresolvedReference` round-trips through migration 0008 and survives
+  restart (R18).
 - **§23 (round 5 ruling, R19):** `internal/domain` — a derived item's
   `SourceRanges` alone reconstructs its transcript coverage, with no
   companion section record to keep consistent (R19); an `IngestReceipt`
@@ -1279,34 +1669,36 @@ reconciles exact names in a later round.
   always carries `Code: ErrMalformedDirective`, and one paired with
   `ReasonTargetMismatch` always carries `Code: DiagnosticNotFound`, never
   a different code for either (R19, the pinning decision above).
-  `internal/ingest` (once it lands) — a TOOL or RETRIEVED_CONTENT event
-  for a task with `Turn=0` is rejected before any item is created (R19); a
-  References locator match never considers a repository/namespace
-  component, so two same-named locators in different conceptual
-  repositories within one session are treated as the same target (R19,
-  until multi-repo support exists). Deferred until `p2-store` lands the
-  indexes: blob-reference lookup, duplicate-candidate lookup, and
-  reference matching each run in bounded time independent of session
-  size, not as a linear scan (R19).
-- **§24 (round 6 ruling, R20):** `internal/domain` — once landed, an
-  `EventID` equal to or prefixed like `evc_`, `eva_`, or any `IDDomain`
-  prefix fails `Event.Validate` (R20). `internal/ingest` — once landed, a
-  `DirectiveIDDerived` diagnostic for an item whose section ingest refused
-  is absent from the receipt, not merely present-but-orphaned (R20); a
-  residual instruction is never created for a leading-BOM-only residue,
-  matching the existing whitespace-only case (R20); a residual
-  instruction's content includes leading and trailing whitespace exactly
-  as it appeared in the transcript, once the trim-for-emptiness and
-  trim-for-content paths are split (R20); a malformed section inside a
-  SYSTEM or HARNESS span still produces a residual instruction item from
-  its bytes, so the malformed-heading-drops-a-trusted-requirement case has
-  a regression test (R20). Already passing: `workingSection` creates zero
-  items for a `Malformed` section or one with no items, confirmed as the
-  correct (stricter) reading of D11 (R20); a boundary conflict on any
-  Working-section member aborts the whole section's write with
-  `ErrMalformedDirective`/`ReasonBoundaryConflict`, never a partial commit
-  (R20, confirming §23's pinning).
-- **§25 (round 7 ruling, R21):** `internal/ingest` (once R20 lands) — a
+  `internal/ingest` — `TestRetrievedBeforeFirstTurn` (`clauses_test.go`)
+  confirms a TOOL or RETRIEVED_CONTENT event for a task with `Turn=0` is
+  rejected before any item is created (R19); a References locator match
+  never considers a repository/namespace component, so two same-named
+  locators in different conceptual repositories within one session are
+  treated as the same target (R19, until multi-repo support exists).
+  Landed, then superseded by F1's access-filtered redesign (§26): blob
+  reference, duplicate-candidate, working-snapshot, and source-key lookups
+  each run in bounded time via `TestAccessLookupsUseIndex` and
+  `TestGraphReadsUseIndex` (`internal/store/sqlite/access_lookups_test.go`),
+  independent of session size and of the calling principal's visibility —
+  see ADR 3.
+- **§24 (round 6 ruling, R20 — all landed, SPEC-1.4):** `internal/domain
+  /ingest_test.go:TestEventIDRejectsReservedPrefixes` — an `EventID` equal
+  to or prefixed like `evc_`, `eva_`, any `IDDomain` prefix, or `lce_`
+  fails `Event.Validate`. `internal/ingest` — a `DirectiveIDDerived`
+  diagnostic for an item whose section ingest refused is absent from the
+  receipt (the `!r.written[d.Range]` filter, `derive.go`); a residual
+  instruction is never created for a leading-BOM-only or whitespace-only
+  residue (`blankResidue`); a residual instruction's content includes
+  leading and trailing whitespace exactly as it appeared in the
+  transcript (`residue` keeps bytes exactly, no separate trim-for-content
+  step); a malformed section inside a SYSTEM or HARNESS span still
+  produces a residual instruction item from its bytes. Also confirmed:
+  `workingSection` creates zero items for a `Malformed` section or one
+  with no items, the correct (stricter) reading of D11; a boundary
+  conflict on any Working-section member aborts the whole section's write
+  with `ErrMalformedDirective`/`ReasonBoundaryConflict`, never a partial
+  commit, confirming §23's pinning.
+- **§25 (round 7 ruling, R21 — landed with R20, SPEC-1.4):** `internal/ingest` — a
   unit whose only residue is a bare malformed heading with no body creates
   no residual instruction item (R21); a malformed Resolve/Unpin/
   unsupported-lifecycle-word section in a SYSTEM or HARNESS span never
@@ -1318,6 +1710,30 @@ reconciles exact names in a later round.
   creates its residual instruction item, if any, after every directive
   item and lifecycle command the unit produced, never ordered by the
   residual's own byte position (R21, amending M3's creation order).
+- **§26 (F1-F6, all landed):** `TestAccessLookupsUseIndex`,
+  `TestUpgradeAccessLookups`, `TestGraphReadsUseIndex`,
+  `TestLegacyLookupsDropped`, `TestLegacyUnverifiedNeverBlocks` (SQLite,
+  F1/DUR-1.1/DUR-1.4); storetest `BlobReferrerAccess`/`CanonicalCandidates`/
+  `CurrentWorking`/`SourceItems`/`VisibleReferences`; `TestLookupsNeverLockOut_F1`,
+  `TestUnverifiedMatchesNeverBlock_DUR14`, `TestRetryAfterLimitsChange_F3`,
+  `TestRelationshipLimitOnReplaceAndDuplicate_DUR16`,
+  `TestRecordsAtNarrowerBoundary_F6` (`internal/ingest`); a repeated
+  `EventID` from a different principal fails `domain.ErrEventIDConflict`
+  as a bare sentinel, no ID/principal/session detail in its text or
+  wrapped chain (F2). Full citations and mechanisms are in each finding's
+  own §26 paragraph above, not repeated here.
+- **§27-§28 (further round 1 rulings and findings, all landed):** see each
+  finding's own paragraph above for its exact test name(s) —
+  `TestHeadingShapedLinesClose` and its four canonical goldens (SPEC-1.11);
+  `TestReplayNeverRecomputes` plus SPEC-1.10's other named clauses;
+  `TestApplyFailureAtomic_DUR13` and the `storetest/poison.go` conformance
+  rows (DUR-1.3); `TestWorking_DerivedIDAcrossAuthorities_DUR15` (DUR-1.5);
+  `TestSnapshot_DeterministicFailure_DUR17` (DUR-1.7);
+  `TestEventMetadataBounds_SEC14`/`TestEventMetadataCharsets_SEC14`/
+  `TestMaxReferenceLinks` (SEC-1.4); `TestSuppressedListContent`(`_Ingest`)
+  (SPEC-1.1); `TestLinkDuplicate_ComparesObligationClaim` (SPEC-1.12);
+  `TestD10_MappedDuplicateNeverCurrent`/`TestDiagnosticsCapTruncates`
+  (TEST-1.1/1.3).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
@@ -1398,9 +1814,38 @@ This ADR records the commander's disposition of an adversarial decision
 review (Codex gpt-6-astra xhigh) of the Phase 2 brief against the merged
 Phase 1 codebase and SDD v0.8: D2/D4/D9 agreed as written; D1, D3, D5-D8,
 D10-D19 amended; M1-M8 added as missing decisions; all accepted, with
-commander rulings R1-R8 (`phase2-amendments.md`) overriding eight of them
-as recorded above. No Phase 2 code exists yet against which to re-verify
-these decisions; that verification is this ADR's own gate (the tests in
-the section above) once `p2-contract`, `p2-parser`, `p2-store`, `p2-graph`,
-and `p2-ingest` land their work, and it is expected to move this ADR from
-Proposed to Accepted at Phase 2 exit, not before.
+commander rulings R1-R8 (`phase2-amendments.md`) overriding eight of them,
+followed by seven further rounds of worker questions and rulings (R9-R21)
+as recorded above.
+
+**(SPEC-1.4, 2026-09-27) Phase 2 code landed** across `internal/domain`,
+`internal/policy`, `internal/directive`, `internal/store` (memory and
+SQLite), `internal/graph`, and `internal/ingest`, and the decision groups
+above were re-verified and corrected against it in place (each correction
+marked "SPEC-1.4" or "landed" inline) rather than left describing a
+pre-implementation state. A first external review of the resulting PR
+(`round1-p5-fixes.md`, §26-§28 above) found further gaps, all now fixed by
+their owning workers and merged into this ADR's final-pass head
+(`p2fix/adr` at commit `dd9813d`, integrating every `p2fix/*` branch):
+F1-F6, every named DUR/SEC/SPEC/TEST finding, and the SPEC-1.10/SPEC-1.11
+rulings are all landed and recorded above with grep-verified test
+citations, not intended designs.
+
+**(2026-09-27) Final reconciliation pass complete.** Every statement in
+this ADR was checked against the code at the merged integration head, not
+assumed from a commit message or an earlier draft; three genuine drift
+points were caught and fixed in the process — F1's access-filtered lookup
+redesign superseded the R19 lookups this ADR (and ADR 3) had described as
+current (§7/§9/§13/§15/§16/§23, §26); SPEC-1.6's diagnostic/reason pairing
+is now mechanically enforced by a `reasonCode` map, not merely a call-site
+convention (§13/§28); and SPEC-1.11's fix, R21's fix, and R20's fix had
+all landed since this ADR's previous revision described them as pending.
+This ADR is ready for the commander to move from Proposed to Accepted at
+Phase 2 exit, pending only the open questions recorded above (§ Open
+questions). **(2026-09-27) The SDD §11/§15 amendment SPEC-1.13 flagged is
+applied:** by commander ruling, SDD §11 item 2 now names "ADR 19." and
+§15 lists it as item 19 ("Directive parsing and ingestion (grammar
+deviations, parse units, ingestion pipeline, receipts, dedup/replacement/
+snapshots, lifecycle parse/authorize)"), so Phase 2 can exit with this
+ADR accepted; docs/adr/README.md is updated to match, and this is no
+longer an open item.

@@ -6,7 +6,8 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
-// The SDD v0.8 FR-DIR-006 example is intentionally verbatim.
+// The SDD v0.9 FR-DIR-006 example (unchanged since v0.8) is intentionally
+// verbatim.
 const canonicalExample = `## Goal
 Upgrade Foo to v2 while maintaining backwards compatibility.
 

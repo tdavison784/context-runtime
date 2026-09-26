@@ -27,9 +27,9 @@ func testUnresolvedReferences(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		noErr(t, tx.InsertItem(NewItem(sessA, "ref-item", tx.NextSeq(), "## References\n- go.mod")))
 		seq := tx.NextSeq()
-		r1 = NewUnresolvedReference(sessA, occ, 1, "ref-item", "repo:a/go.mod\xff", seq)
-		r0 = NewUnresolvedReference(sessA, occ, 0, "ref-item", "repo:a/go.mod\xff", seq)
-		r2 = NewUnresolvedReference(sessA, occ, 2, "ref-item", "repo:b/go.mod", seq)
+		r1 = NewUnresolvedReference(sessA, occ, 1, "ref-item", "loc:a/go.mod\xff", seq)
+		r0 = NewUnresolvedReference(sessA, occ, 0, "ref-item", "loc:a/go.mod\xff", seq)
+		r2 = NewUnresolvedReference(sessA, occ, 2, "ref-item", "loc:b/go.mod", seq)
 		for _, r := range []domain.UnresolvedReference{r1, r0, r2} {
 			noErr(t, tx.InsertUnresolvedReference(r))
 		}
@@ -40,7 +40,7 @@ func testUnresolvedReferences(t *testing.T, s store.Store) {
 	})
 	var later domain.UnresolvedReference
 	update(t, s, sessA, func(tx store.Tx) error {
-		later = NewUnresolvedReference(sessA, domain.CallerOccurrenceID(sessA, "evt-0"), 0, "ref-item", "repo:a/go.mod\xff", tx.NextSeq())
+		later = NewUnresolvedReference(sessA, domain.CallerOccurrenceID(sessA, "evt-0"), 0, "ref-item", "loc:a/go.mod\xff", tx.NextSeq())
 		return tx.InsertUnresolvedReference(later)
 	})
 	first, second := r0, r1
@@ -54,21 +54,21 @@ func testUnresolvedReferences(t *testing.T, s store.Store) {
 		_, err = tx.UnresolvedReference("missing")
 		wantErr(t, err, domain.ErrNotFound)
 
-		refs := visibleRefs(t, tx, sessA, "repo:a/go.mod\xff")
+		refs := visibleRefs(t, tx, sessA, "loc:a/go.mod\xff")
 		assertEqual(t, "by locator key", refs, []domain.UnresolvedReference{first, second, later})
 		// Keys are exact bytes: the lossy spelling matches nothing.
-		assertEqual(t, "lossy key", visibleRefs(t, tx, sessA, "repo:a/go.mod\ufffd"), []domain.UnresolvedReference{})
-		assertEqual(t, "other key", visibleRefs(t, tx, sessA, "repo:b/go.mod"), []domain.UnresolvedReference{r2})
+		assertEqual(t, "lossy key", visibleRefs(t, tx, sessA, "loc:a/go.mod\ufffd"), []domain.UnresolvedReference{})
+		assertEqual(t, "other key", visibleRefs(t, tx, sessA, "loc:b/go.mod"), []domain.UnresolvedReference{r2})
 		return nil
 	})
 	// A reference under another rule version is stored but never matched.
 	update(t, s, sessA, func(tx store.Tx) error {
-		old := NewUnresolvedReference(sessA, domain.CallerOccurrenceID(sessA, "evt-9"), 0, "ref-item", "repo:a/go.mod\xff", tx.NextSeq())
+		old := NewUnresolvedReference(sessA, domain.CallerOccurrenceID(sessA, "evt-9"), 0, "ref-item", "loc:a/go.mod\xff", tx.NextSeq())
 		old.RuleVersion = "locator/v0"
 		return tx.InsertUnresolvedReference(old)
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
-		assertEqual(t, "after an old-rule reference", visibleRefs(t, tx, sessA, "repo:a/go.mod\xff"), []domain.UnresolvedReference{first, second, later})
+		assertEqual(t, "after an old-rule reference", visibleRefs(t, tx, sessA, "loc:a/go.mod\xff"), []domain.UnresolvedReference{first, second, later})
 		return nil
 	})
 	view(t, s, sessB, func(tx store.ReadTx) error {
@@ -148,7 +148,7 @@ func testUnresolvedReferencesAcrossRestart(t *testing.T, open Opener) {
 	var want domain.UnresolvedReference
 	update(t, s, sessA, func(tx store.Tx) error {
 		noErr(t, tx.InsertItem(NewItem(sessA, "ref-item", tx.NextSeq(), "refs")))
-		want = NewUnresolvedReference(sessA, domain.NewAnonymousOccurrenceID(anonymousIDs), 0, "ref-item", "repo:a/\xfe", tx.NextSeq())
+		want = NewUnresolvedReference(sessA, domain.NewAnonymousOccurrenceID(anonymousIDs), 0, "ref-item", "loc:a/\xfe", tx.NextSeq())
 		return tx.InsertUnresolvedReference(want)
 	})
 	s = reopen(t, s, open)

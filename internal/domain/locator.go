@@ -22,8 +22,11 @@ const LocatorRuleVersion = "reference-locator/v1"
 //   - empty text, whitespace or control bytes, backslashes, absolute paths,
 //     escaping paths, and other source kinds are not locators.
 //
-// The repository namespace and base directory are the session's single
-// default in v1 (multi-repository identity is deferred, R19).
+// There is no repository or namespace component at all in v1 (SPEC-1.13:
+// corrected — not a per-session default): a locator is matched on its
+// lexical bytes alone within the session, so the same relative path in two
+// conceptually different repositories is one target. Multi-repository
+// identity is deferred (R19).
 func LocatorKey(kind SourceKind, locator string) (string, bool) {
 	if locator == "" || len(locator) > MaxLocatorKeyBytes-5 {
 		return "", false

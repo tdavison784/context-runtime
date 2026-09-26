@@ -9,14 +9,20 @@ import (
 	"testing"
 )
 
-// TestRootAliasesExcludeIngestResults enforces R3: the root package may alias
-// the Event/Span input types, but not ingestion results, receipts, envelopes,
-// diagnostics, or lifecycle command records, which stay internal until the
-// SDD section 8 Ingest signature is settled.
-func TestRootAliasesExcludeIngestResults(t *testing.T) {
-	forbidden := map[string]bool{
-		"IngestReceipt": true, "IngestResult": true, "IngestLink": true, "EventEnvelope": true, "ExecutionVersions": true,
-		"Diagnostic": true, "DiagnosticRecord": true, "DiagnosticCode": true, "LifecycleCommand": true, "LifecycleCommandRecord": true,
+// TestRootAliasesOnlyIngestInputTypes enforces R3 as an allowlist
+// (SPEC-1.13: a denylist would pass a future alias, such as
+// UnresolvedReference, that R3 never authorized): the root package may
+// declare or alias only the named domain types and the Event/Span input
+// shape below. Ingestion results, receipts, envelopes, diagnostics, and
+// lifecycle command records stay internal until the SDD section 8
+// Ingest signature is settled; any other new root type must extend this
+// allowlist deliberately, not slip through unnoticed.
+func TestRootAliasesOnlyIngestInputTypes(t *testing.T) {
+	allowed := map[string]bool{
+		"Principal": true, "Authority": true, "Kind": true, "Generation": true,
+		"Scope": true, "Residency": true, "GoalStatus": true, "RetentionClass": true,
+		"AccessBoundary": true, "ContentPart": true, "SourceRef": true, "ContextItem": true, "ItemRef": true,
+		"Event": true, "EventKind": true, "Span": true, "InputPart": true, "PartType": true,
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -36,11 +42,8 @@ func TestRootAliasesExcludeIngestResults(t *testing.T) {
 			if !ok {
 				return true
 			}
-			if forbidden[ts.Name.Name] {
-				t.Errorf("%s: root declares %s", name, ts.Name.Name)
-			}
-			if sel, ok := ts.Type.(*ast.SelectorExpr); ok && forbidden[sel.Sel.Name] {
-				t.Errorf("%s: root aliases %s", name, sel.Sel.Name)
+			if !allowed[ts.Name.Name] {
+				t.Errorf("%s: root declares or aliases %s, not on the R3 allowlist", name, ts.Name.Name)
 			}
 			return true
 		})
