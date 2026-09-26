@@ -17,10 +17,9 @@ var errDone = errors.New("memory store: transaction is finished")
 // readTx implements store.ReadTx over a session's committed state plus, in
 // an Update, the transaction's overlay.
 type readTx struct {
-	diagnostics table[diagnosticKey, domain.Diagnostic]
-	sessionID   string
-	lastSeq     uint64
-	done        bool
+	sessionID string
+	lastSeq   uint64
+	done      bool
 
 	items        table[string, domain.ContextItem]
 	rels         table[string, domain.Relationship]
@@ -47,7 +46,6 @@ var _ store.ReadTx = (*readTx)(nil)
 
 func newReadTx(sessionID string, st *state, writable bool) *readTx {
 	return &readTx{
-		diagnostics:  newTable(st.diagnostics, writable, same[domain.Diagnostic]),
 		sessionID:    sessionID,
 		lastSeq:      st.lastSeq,
 		items:        newTable(st.items, writable, domain.ContextItem.Clone),
