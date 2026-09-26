@@ -289,3 +289,98 @@ func TestFileReadEndToEnd(t *testing.T) {
 		t.Errorf("current-content read satisfied without path state: %+v", got)
 	}
 }
+
+// seedPathState records authoritative current content for a path at the
+// resource's current revision (standing in for PathContents reporting).
+func (f *evalFixture) seedPathState(t *testing.T, p, content string, expected uint64) {
+	t.Helper()
+	mustUpdate(t, f.st, func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		rs, err := sem.ResourceState("repo1")
+		if err != nil {
+			return err
+		}
+		_, err = sem.PutResourcePathState(domain.ResourcePathState{
+			SemanticMeta:     domain.SemanticMeta{ID: "ps-" + p, SessionID: testSession, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+			Locator:          domain.ResourceLocator{ResourceID: "repo1", BaseDir: ".", Path: p},
+			ContentHash:      hashOf(content),
+			ResourceUpdateID: rs.LastUpdateID,
+			ResourceRevision: rs.AuthoritativeRevision,
+			Revision:         expected + 1,
+			Freshness:        domain.ResourceKnown,
+		}, expected)
+		return err
+	})
+}
+
+func (f *evalFixture) editPaths(t *testing.T, fp string, all bool, paths ...string) {
+	t.Helper()
+	f.r.n++
+	in := domain.ReportResourceChangeIntent{RequestID: fmt.Sprintf("paths-%d", f.r.n), ResourceID: "repo1", ExpectedRevision: f.r.rev,
+		ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf(fp), AllPaths: all, ChangedPaths: paths}
+	if _, err := f.s.report(t, f.st, f.harness, in); err != nil {
+		t.Fatal(err)
+	}
+	f.r.rev++
+	f.r.auth++
+}
+
+func TestCurrentContentFreshness(t *testing.T) {
+	f := newEvalFixture(t)
+	target := fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, "")
+	in := domain.DeclareObligationIntent{RequestID: "d-cur", SourceItemID: "pu", DeclarationSlot: "5", Description: "read it",
+		ExpectedSourceVersion: 1, Target: &target, Matcher: &FileReadV1}
+	if _, err := f.s.declare(t, f.st, f.harness, in); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := f.item(t, "pu").CurrentKey()
+	ref := domain.ObligationRef{SessionID: testSession, ObligationID: domain.DerivedObligationID(key, 5), Version: 1}
+	f.matcherGrant(t, "g-cur", ref, FileReadV1, f.userP)
+	f.seedPathState(t, "docs/a.md", "v1", 0)
+	read := func(content string) {
+		runN++
+		run, err := f.registerRun(t, f.harness, runIntent(fmt.Sprintf("run-%d", runN), fmt.Sprintf("exec-%d", runN), target))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.report(t, run, domain.OutcomePass, hashOf(content), nil)
+	}
+	read("v0")
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("stale read satisfied: %+v", o)
+	}
+	read("v1")
+	sat := f.status(t, ref)
+	if sat.Status != domain.ObligationSatisfied {
+		t.Fatalf("current read = %+v", sat)
+	}
+	// An unrelated path edit keeps a path-specific proof (P3-19).
+	f.editPaths(t, "W2", false, "docs/b.md")
+	if o := f.status(t, ref); o.Status != domain.ObligationSatisfied || o.CurrentProofID != sat.CurrentProofID {
+		t.Fatalf("unrelated edit invalidated: %+v", o)
+	}
+	// The recorded content no longer describes the path after it is listed:
+	// the proof is invalidated and a re-read of the old content is stale.
+	f.editPaths(t, "W3", false, "docs/a.md")
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("path edit kept proof: %+v", o)
+	}
+	read("v1")
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Errorf("read against superseded path content satisfied: %+v", o)
+	}
+	// New authoritative content at the current revision makes reads apply again;
+	// an all-paths change then invalidates.
+	f.seedPathState(t, "docs/a.md", "v2", 1)
+	read("v2")
+	if o := f.status(t, ref); o.Status != domain.ObligationSatisfied {
+		t.Fatalf("re-read at new content = %+v", o)
+	}
+	f.editPaths(t, "W4", true)
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Errorf("all-paths edit kept proof: %+v", o)
+	}
+}
