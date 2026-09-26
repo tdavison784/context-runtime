@@ -28,6 +28,12 @@ var (
 	// ErrDirectiveMismatch reports a directive replacement whose new item
 	// does not carry the task and directive ID it is being filed under.
 	ErrDirectiveMismatch = errors.New("graph: item does not carry the given task and directive ID")
+	// ErrSnapshotTaskMismatch reports a Working-snapshot item that does not
+	// belong to the task its snapshot is being superseded within.
+	ErrSnapshotTaskMismatch = errors.New("graph: snapshot item does not belong to the given task")
+	// ErrCoverageMismatch reports a LinkDerived call whose caller-supplied
+	// coverage.ItemIDs disagrees with the sources actually being linked.
+	ErrCoverageMismatch = errors.New("graph: coverage item IDs do not match the linked sources")
 )
 
 // Supersede records that newID supersedes oldID (FR-REL-003, FR-REL-004,
@@ -130,6 +136,69 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 	return previousID, nil
 }
 
+// SupersedeSnapshot ingests a Working section (FR-DIR-007 v0.6): for each new
+// item in newIDs, it finds every other current task_state item in taskID
+// that shares that new item's authority and access boundary exactly, and
+// Supersedes it. Boundary equality, not mere task membership, decides what a
+// snapshot replaces, so an item scoped more narrowly than the snapshot (for
+// example an AGENT-scoped Working item belonging to a different agent) is
+// left untouched even though it lives in the same task. Items in newIDs are
+// never candidates to supersede each other. It returns every SUPERSEDES
+// relationship created, or nothing if none matched.
+func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, taskID, eventID string) ([]domain.Relationship, error) {
+	if len(newIDs) == 0 {
+		return nil, nil
+	}
+
+	newItems := make([]domain.ContextItem, 0, len(newIDs))
+	newSet := make(map[string]bool, len(newIDs))
+	for _, id := range newIDs {
+		it, err := tx.Item(id)
+		if err != nil {
+			return nil, err
+		}
+		if !it.Access.Permits(actor) {
+			return nil, domain.ErrNotFound
+		}
+		if it.TaskID != taskID {
+			return nil, ErrSnapshotTaskMismatch
+		}
+		newItems = append(newItems, it)
+		newSet[id] = true
+	}
+
+	candidates, err := tx.Items(store.ItemFilter{TaskID: taskID, Kinds: []domain.Kind{domain.KindTaskState}})
+	if err != nil {
+		return nil, err
+	}
+
+	var rels []domain.Relationship
+	for _, cand := range candidates {
+		if newSet[cand.ID] {
+			continue
+		}
+		cur, err := IsCurrent(tx, cand.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !cur {
+			continue
+		}
+		for _, ni := range newItems {
+			if ni.Authority != cand.Authority || ni.Access != cand.Access {
+				continue
+			}
+			rel, err := Supersede(tx, actor, ni.ID, cand.ID, eventID, "")
+			if err != nil {
+				return nil, err
+			}
+			rels = append(rels, rel)
+			break // one superseder per candidate is enough
+		}
+	}
+	return rels, nil
+}
+
 // IsCurrent reports whether itemID is not the target of any SUPERSEDES edge,
 // i.e. no other item has superseded it (FR-DOM-005).
 func IsCurrent(tx store.ReadTx, itemID string) (bool, error) {
@@ -210,6 +279,12 @@ func CheckDerivedBoundary(derived domain.AccessBoundary, sources []domain.Contex
 // source, all carrying the same coverage. Run inside store.Store.Update so a
 // failure partway through (an inaccessible source, or a boundary violation)
 // leaves nothing committed.
+//
+// coverage's ItemIDs must be complete for dispatch to recheck eligibility
+// later (see domain.Coverage): if coverage is given with ItemIDs unset,
+// LinkDerived populates it with sourceIDs, sorted and deduplicated; if the
+// caller already set ItemIDs, they must name exactly the same set of sources
+// or the call fails with ErrCoverageMismatch and nothing is written.
 func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) ([]domain.Relationship, error) {
 	if err := actor.Validate(); err != nil {
 		return nil, err
@@ -237,11 +312,27 @@ func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceID
 		return nil, err
 	}
 
+	var covTemplate *domain.Coverage
+	if coverage != nil {
+		wantIDs := sortedUniqueIDs(sourceIDs)
+		c := *coverage
+		switch {
+		case len(c.ItemIDs) == 0:
+			c.ItemIDs = wantIDs
+		case !slices.Equal(sortedUniqueIDs(c.ItemIDs), wantIDs):
+			return nil, ErrCoverageMismatch
+		default:
+			c.ItemIDs = wantIDs // canonicalize to the sorted/unique form Relationship.Validate requires
+		}
+		covTemplate = &c
+	}
+
 	rels := make([]domain.Relationship, 0, len(sources))
 	for _, src := range sources {
 		var cov *domain.Coverage
-		if coverage != nil {
-			c := *coverage
+		if covTemplate != nil {
+			c := *covTemplate
+			c.ItemIDs = slices.Clone(covTemplate.ItemIDs)
 			cov = &c
 		}
 		rel := domain.Relationship{
@@ -258,9 +349,17 @@ func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceID
 		if err := tx.InsertRelationship(rel); err != nil {
 			return nil, err
 		}
-		rels = append(rels, rel)
+		rels = append(rels, rel.Clone())
 	}
 	return rels, nil
+}
+
+// sortedUniqueIDs returns ids sorted and deduplicated, as
+// domain.Coverage.ItemIDs and domain.Relationship.Validate require.
+func sortedUniqueIDs(ids []string) []string {
+	out := slices.Clone(ids)
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // ProvenanceNode is one item reachable from a provenance query's root.
