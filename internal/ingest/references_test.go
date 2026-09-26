@@ -198,3 +198,44 @@ func TestReferenceLinkBudget_Ruling1(t *testing.T) {
 		}
 	})
 }
+
+// TestReferenceLinkTruncationReporting_SPEC23_DUR22: truncation is reported
+// exactly when a linkable candidate meets an exhausted budget: for item-ID
+// references too (SPEC-2.3), and never when the only remaining candidates
+// could not have been linked anyway (DUR-2.2).
+func TestReferenceLinkTruncationReporting_SPEC23_DUR22(t *testing.T) {
+	count := func(r domain.IngestReceipt) int {
+		n := 0
+		for _, d := range r.Diagnostics {
+			if d.Code == domain.ReferenceLinksTruncated {
+				n++
+			}
+		}
+		return n
+	}
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("u0", "hi", false))
+		a := f.mustIngest(user, userEvent("a", "item a", false)).Items[0]
+		b := f.mustIngest(user, userEvent("b", "item b", false)).Items[0]
+		f.in.Limits = domain.Limits{MaxReferenceLinks: 1}
+		r := f.mustIngest(user, userEvent("ids", "## References\n- "+a.ID+"\n- "+b.ID+"\n", true))
+		if links := len(f.references(semantic(r)[0].ID)) + len(f.references(semantic(r)[1].ID)); links != 1 || count(r) != 1 {
+			t.Errorf("item-ID references at the budget: links %d, truncation diagnostics %d; want 1, 1", links, count(r))
+		}
+
+		// A task-wide source is linkable; an agent-private one never is
+		// from a task-wide reference. Spending the budget on the first
+		// must not report the second as truncated.
+		f.in.Limits = domain.Limits{}
+		f.mustIngest(user, sourceEvent("s1", "doc.md", taskAccess()))
+		private := sourceEvent("s2", "doc.md", domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: sess, TaskID: "T", AgentID: "A"})
+		private.Spans[0].Parts[0].Text = "private revision"
+		f.mustIngest(user, private)
+		f.in.Limits = domain.Limits{MaxReferenceLinks: 1}
+		r = f.mustIngest(user, userEvent("docs", "## References\n- doc.md\n", true))
+		if links := len(f.references(semantic(r)[0].ID)); links != 1 || count(r) != 0 {
+			t.Errorf("complete link set: links %d, truncation diagnostics %d; want 1, 0", links, count(r))
+		}
+	})
+}
