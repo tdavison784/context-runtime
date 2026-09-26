@@ -89,7 +89,10 @@ func (p *coreParser) scan(capable bool) {
 		blocked := ""
 		if fence != 0 {
 			blocked = "fenced code"
-			if ch, n, tail := fenceRun(b); ch == fence && n >= fenceLength && len(bytes.TrimSpace(tail)) == 0 {
+			// D5: only the same character, at least the opening length, and
+			// ASCII SP/HTAB trailing bytes close a fence. Unicode spaces or
+			// any other trailing byte leave the fence open.
+			if ch, n, tail := fenceRun(b); ch == fence && n >= fenceLength && blank(tail) {
 				fence = 0
 			}
 		} else if quote {
@@ -98,7 +101,10 @@ func (p *coreParser) scan(capable bool) {
 			blocked = "HTML comment"
 		}
 		if fence == 0 && blocked == "" && !comment {
-			if ch, n, tail := fenceRun(b); n >= 3 && (ch != '`' || !bytes.ContainsRune(tail, '`')) {
+			// Any run of three or more identical fence characters opens a
+			// fence, even with an info string CommonMark would reject: when in
+			// doubt the parser suppresses rather than activates (D5).
+			if ch, n, _ := fenceRun(b); n >= 3 {
 				fence, fenceLength, blocked = ch, n, "fenced code"
 			}
 		}

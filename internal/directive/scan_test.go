@@ -29,7 +29,13 @@ func TestScannerSourceAndMarkdownGates(t *testing.T) {
 		{"ASCII case", "## wOrKiNg\nx", true, 1, 0},
 		{"exact separator", "##  Goal\nx\n##\tPinned\nx", true, 0, 0},
 		{"too deep", "####### Goal\nx", true, 0, 0},
-		{"fence info backtick", "```bad`\n## Goal\nx", true, 1, 0},
+		{"fence info backtick", "```bad`\n## Goal\nx", true, 0, 1},
+		{"closer unicode space", "```\n```\u00a0\n## Goal\nx", true, 0, 1},
+		{"closer tab", "```\n```\t \n## Goal\nx", true, 1, 0},
+		{"closer too short", "````\n```\n## Goal\nx", true, 0, 1},
+		{"closer indented four", "```\n    ```\n## Goal\nx", true, 0, 1},
+		{"closer tab indent", "```\n\t```\n## Goal\nx", true, 0, 1},
+		{"closer other char", "~~~\n```\n## Goal\nx", true, 0, 1},
 		{"comments in code", "```\n<!--\n```\n## Goal\nx", true, 1, 0},
 	}
 	for _, tt := range cases {
