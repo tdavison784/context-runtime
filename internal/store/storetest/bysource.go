@@ -147,9 +147,11 @@ func testRetireObligationVersion(t *testing.T, s store.Store) {
 		if got.Current || got.RetiredSeq != event.Seq || got.Revision != 3 {
 			t.Errorf("retired = %+v", got)
 		}
-		_, err = tx.RetireObligationVersion("o", 1, 3, retireEvent(tx, "again"))
-		wantErr(t, err, domain.ErrInvalidTransition)
 		return nil
+	})
+	rejected(t, s, sessA, domain.ErrInvalidTransition, func(tx store.Tx) error {
+		_, err := tx.RetireObligationVersion("o", 1, 3, retireEvent(tx, "again"))
+		return err
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		o, err := tx.Obligation("o")
