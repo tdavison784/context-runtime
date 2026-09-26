@@ -86,7 +86,8 @@ type Store interface {
 	// write other than blobs, conversations, calls, call attempts, and
 	// TargetCall lifecycle events) must also write at least one record carrying a
 	// sequence number allocated in it (an item, relationship, event record,
-	// ingestion receipt, obligation version or transition, grant, or
+	// ingestion receipt, unresolved reference, obligation version or
+	// transition, grant, or
 	// non-TargetCall lifecycle event); otherwise the commit fails with
 	// domain.ErrInvalidRecord. The
 	// call ledger's preview-staleness check depends on every semantic
@@ -157,6 +158,19 @@ type DiagnosticFilter struct {
 type CommandFilter struct {
 	Viewer       domain.Principal
 	OccurrenceID string
+}
+
+// ReferenceFilter selects unresolved references (M5, R2). Empty
+// LocatorKey or RuleVersion does not filter; both compare exact bytes.
+// Limit is required: it must be positive (domain.ErrInvalidRecord
+// otherwise), and more matches than Limit fail with ErrLimitExceeded.
+// Results are ordered by Seq, then ID. Records carry their ownership context
+// (Access, Authority) unfiltered: linking a reference must satisfy both it
+// and the later event's authorization, so callers apply access (R2).
+type ReferenceFilter struct {
+	LocatorKey  string
+	RuleVersion string
+	Limit       int
 }
 
 // CallFilter selects call records. Results are ordered by PreparedSeq
@@ -246,6 +260,10 @@ type ReadTx interface {
 	Diagnostics(f DiagnosticFilter) ([]domain.DiagnosticRecord, error)
 	// LifecycleCommands returns the recorded commands f selects (D1).
 	LifecycleCommands(f CommandFilter) ([]domain.LifecycleCommandRecord, error)
+	// UnresolvedReference returns one unresolved reference by ID.
+	UnresolvedReference(id string) (domain.UnresolvedReference, error)
+	// UnresolvedReferences returns the references f selects.
+	UnresolvedReferences(f ReferenceFilter) ([]domain.UnresolvedReference, error)
 	Grant(id string) (domain.MutationGrant, error)
 	// Grants returns every grant in the session ordered by ID.
 	Grants() ([]domain.MutationGrant, error)
@@ -293,6 +311,13 @@ type Tx interface {
 	// when the payload hash differs and domain.ErrImmutable otherwise. It
 	// is a sequenced semantic write.
 	InsertIngestion(env domain.EventEnvelope, receipt domain.IngestReceipt) error
+
+	// InsertUnresolvedReference stores an immutable unresolved reference
+	// (M5, R2). It must validate and name this session, its Seq must be
+	// allocated in this transaction, and its declaring ItemID must be a
+	// stored item (domain.ErrInvalidRecord otherwise); reusing an ID fails
+	// with domain.ErrImmutable. It is a sequenced semantic write.
+	InsertUnresolvedReference(r domain.UnresolvedReference) error
 
 	// InsertItem stores a new immutable item. Its Version must be 1 and its
 	// Seq must be allocated in this transaction. Every image or document part
@@ -381,8 +406,9 @@ type Tx interface {
 	// reserved for the call ledger (internal/invocation), and a TargetCall
 	// event's Seq is never shared with a semantic record: at commit, a
 	// sequence number used by a TargetCall event and by an item,
-	// relationship, event record, ingestion receipt, obligation version or
-	// transition, grant, or non-TargetCall lifecycle event fails with
+	// relationship, event record, ingestion receipt, unresolved reference,
+	// obligation version or transition, grant, or non-TargetCall lifecycle
+	// event fails with
 	// domain.ErrInvalidRecord,
 	// so a semantic write cannot hide behind a ledger sequence number
 	// (FR-CALL-001). Ledger records (calls, attempts) may share it.

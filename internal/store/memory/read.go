@@ -42,6 +42,7 @@ type readTx struct {
 	attempts     table[attemptKey, domain.CallAttempt]
 	receipts     table[string, domain.IngestReceipt]
 	envelopes    table[string, domain.EventEnvelope]
+	references   table[string, domain.UnresolvedReference]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -71,6 +72,7 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		attempts:     newTable(st.attempts, writable, same[domain.CallAttempt]),
 		receipts:     newTable(st.receipts, writable, domain.IngestReceipt.Clone),
 		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
+		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
 	}
 }
 
@@ -518,5 +520,39 @@ func (r *readTx) LifecycleCommands(f store.CommandFilter) ([]domain.LifecycleCom
 			}
 		}
 	}
+	return out, nil
+}
+
+func (r *readTx) UnresolvedReference(id string) (domain.UnresolvedReference, error) {
+	if err := r.check(); err != nil {
+		return domain.UnresolvedReference{}, err
+	}
+	v, ok := r.references.get(id)
+	if !ok {
+		return domain.UnresolvedReference{}, notFound("unresolved reference", id)
+	}
+	return v, nil
+}
+
+func (r *readTx) UnresolvedReferences(f store.ReferenceFilter) ([]domain.UnresolvedReference, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if f.Limit <= 0 {
+		return nil, invalid("unresolved references: limit must be positive")
+	}
+	out := []domain.UnresolvedReference{}
+	for _, v := range r.references.all() {
+		if f.LocatorKey != "" && v.LocatorKey != f.LocatorKey || f.RuleVersion != "" && v.RuleVersion != f.RuleVersion {
+			continue
+		}
+		if len(out) == f.Limit {
+			return nil, store.ErrLimitExceeded
+		}
+		out = append(out, v)
+	}
+	slices.SortFunc(out, func(a, b domain.UnresolvedReference) int {
+		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
+	})
 	return out, nil
 }

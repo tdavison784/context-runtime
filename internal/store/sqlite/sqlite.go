@@ -463,6 +463,8 @@ func (t *transaction) noteSequence(value any) {
 		semantic(v.IssuedSeq)
 	case receiptRow:
 		semantic(v.Seq)
+	case domain.UnresolvedReference:
+		semantic(v.Seq)
 	case domain.LifecycleEvent:
 		if v.TargetKind == domain.TargetCall {
 			if t.ledgerSeqs == nil {

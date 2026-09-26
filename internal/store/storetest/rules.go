@@ -229,6 +229,9 @@ func testLedgerSeqIsolation(t *testing.T, s store.Store) {
 		{"other lifecycle event", func(tx store.Tx, seq uint64) error {
 			return tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "l", seq, domain.TargetTask, "task"))
 		}},
+		{"unresolved reference", func(tx store.Tx, seq uint64) error {
+			return tx.InsertUnresolvedReference(NewUnresolvedReference(sessA, "eva_ledger", 0, "a", "k", seq))
+		}},
 		{"ingestion receipt", func(tx store.Tx, seq uint64) error {
 			noErr(t, tx.InsertBlob(richBlob(sessA)))
 			return tx.InsertIngestion(NewIngestion(sessA, "", "eva_ledger", seq))

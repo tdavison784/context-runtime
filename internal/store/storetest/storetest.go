@@ -94,6 +94,8 @@ var suite = []testCase{
 	{"AnonymousIngestions", testAnonymousIngestions},
 	{"DiagnosticsAccess", testDiagnosticsAccess},
 	{"IngestionDeepCopies", testIngestionDeepCopies},
+	{"UnresolvedReferences", testUnresolvedReferences},
+	{"UnresolvedReferenceInsertRules", testUnresolvedReferenceInsertRules},
 
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
