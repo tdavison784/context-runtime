@@ -51,12 +51,15 @@ Codex) has scrutinized it, noting which findings changed the decision.
 | 16 | Common mutation authorization, directive/obligation version replacement, independent residency/goal status, immutable source snapshots | Phase 1 | [Accepted](0016-mutation-authorization.md) |
 | 17 | Provider call/attempt state machine, conversation reservation, outcome reconciliation, streaming completion, crash/retry tests | Phase 1 | [Accepted](0017-call-ledger.md) |
 | 18 | Semantic state tool schemas, result formats, reference instruction block | Phase 5 | pending — gates Phase 5 |
-| 19 | Directive parsing and ingestion: grammar, IDs, span/parse-unit isolation, deterministic classification, deduplication/replacement, Working snapshots, obligations, receipts, and lifecycle-command deferral | Phase 2 | [Written](0019-directive-parsing-and-ingestion.md) |
+| 19 | Directive parsing and ingestion: grammar, IDs, span/parse-unit isolation, deterministic classification, deduplication/replacement, Working snapshots, obligations, receipts, and lifecycle-command deferral | Phase 2 | [Proposed](0019-directive-parsing-and-ingestion.md) |
 
 ADR 19 is not one of SDD §15's original 18; Phase 2's adversarial decision
 review found the brief's decisions needed a dedicated ADR beyond that list,
-and the commander added it by ruling (`phase2-amendments.md` R4). It gates
-Phase 2 exit the same way ADRs 1-18 gate their phases.
+and the commander added it by ruling (`phase2-amendments.md` R4). This
+index intends it to gate Phase 2 exit the same way ADRs 1-18 gate their
+phases (SPEC-1.13: SDD §11 item 2 does not yet name it, and §15 still
+enumerates exactly 18 — an SDD amendment recording ADR 19 there, or
+retracting this claim, is still open).
 
 Phase 1 (Contracts, domain, and stores) requires ADRs 1, 3, 4, 6, 13, 16, 17,
 all written here. Phase 1's exit gate (state-transition, restart, graph, and
