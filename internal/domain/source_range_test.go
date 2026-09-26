@@ -75,3 +75,43 @@ func TestTranscriptRoleCannotPoseAsRequirement(t *testing.T) {
 		}
 	}
 }
+
+func TestTurnOwnershipAndTTL(t *testing.T) {
+	it := validItem()
+	ttl := 2
+	it.TTLTurns = &ttl
+	if it.ValidateTurnOwnership() == nil {
+		t.Fatal("TTL item without creation turn accepted")
+	}
+	it.CreatedTurn = 3
+	if err := it.ValidateTurnOwnership(); err != nil {
+		t.Fatal(err)
+	}
+	it.TaskID, it.Access.TaskID = "", ""
+	if it.ValidateTurnOwnership() == nil {
+		t.Fatal("TTL item without owning task accepted")
+	}
+	plain := validItem()
+	if err := plain.ValidateTurnOwnership(); err != nil {
+		t.Fatalf("untimed TASK item needs no turn: %v", err)
+	}
+	for _, v := range []int{0, -1, MaxTTLTurns + 1} {
+		bad := validItem()
+		bad.TTLTurns = &v
+		if bad.Validate() == nil {
+			t.Errorf("TTL %d accepted", v)
+		}
+	}
+	for _, c := range []struct {
+		created, current uint64
+		n                int
+		want             bool
+	}{
+		{3, 3, 2, true}, {3, 4, 2, true}, {3, 5, 2, false}, {3, 2, 2, false},
+		{0, ^uint64(0), MaxTTLTurns, false}, {^uint64(0) - 1, ^uint64(0), 2, true}, {1, 1, 0, false},
+	} {
+		if got := TTLLive(c.created, c.current, c.n); got != c.want {
+			t.Errorf("TTLLive(%d, %d, %d) = %v", c.created, c.current, c.n, got)
+		}
+	}
+}

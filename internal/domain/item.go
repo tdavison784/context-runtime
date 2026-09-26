@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"time"
 )
@@ -128,6 +129,9 @@ type ContextItem struct {
 	LastUsedCall uint64
 	AccessCount  int
 	TTLTurns     *int
+	// CreatedTurn is the owning task's (TaskID) turn number when the item
+	// was created, or 0 before any turn opened. TTL counts from it (D18).
+	CreatedTurn uint64
 
 	Tags   []string
 	Source *SourceRef
@@ -235,8 +239,8 @@ func (it ContextItem) Validate() error {
 	if it.GoalStatus != nil && !it.GoalStatus.Valid() {
 		return invalid("item %s: invalid goal status %q", it.ID, *it.GoalStatus)
 	}
-	if it.TTLTurns != nil && *it.TTLTurns <= 0 {
-		return invalid("item %s: TTL must be a positive count of turns", it.ID)
+	if it.TTLTurns != nil && (*it.TTLTurns <= 0 || *it.TTLTurns > MaxTTLTurns) {
+		return invalid("item %s: TTL must be a count of turns in 1..%d", it.ID, MaxTTLTurns)
 	}
 	if len(it.Parts) == 0 {
 		return invalid("item %s: at least one content part is required", it.ID)
@@ -281,6 +285,30 @@ func (it ContextItem) validateRole() error {
 		return invalid("item %s: a transcript cannot carry directive identity or requirement status", it.ID)
 	}
 	return nil
+}
+
+// MaxTTLTurns is the largest accepted TTL (R1): math.MaxInt32, so a TTL is
+// representable in int on every Go platform and in every store.
+const MaxTTLTurns = math.MaxInt32
+
+// ValidateTurnOwnership checks the D18 creation rule ingestion enforces on
+// every new item: a TURN-scoped or TTL-bound item needs an owning task and a
+// turn that has opened, so expiry is never computed against a substitute
+// turn counter. Records that predate CreatedTurn are not checked by Validate.
+func (it ContextItem) ValidateTurnOwnership() error {
+	if (it.Scope == ScopeTurn || it.TTLTurns != nil) && (it.TaskID == "" || it.CreatedTurn == 0) {
+		return invalid("item %s: TURN scope and TTL require an owning task turn", it.ID)
+	}
+	return nil
+}
+
+// TTLLive reports whether an item created at turn created with a TTL of n
+// turns is live at turn current of the same owning task (D18): current >=
+// created and current-created < n. The difference form cannot overflow.
+// TURN scope expires at the next turn regardless of a larger TTL; callers
+// check scope separately.
+func TTLLive(created, current uint64, n int) bool {
+	return n > 0 && current >= created && current-created < uint64(n)
 }
 
 // ItemRef names an item for plans, manifests, and relationships.
