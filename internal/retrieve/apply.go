@@ -2,6 +2,8 @@ package retrieve
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -10,9 +12,14 @@ import (
 // Rehydrate admits historical data atomically. The authenticated actor and
 // origin are supplied by the harness; model text cannot choose either one.
 func (s *Service) Rehydrate(ctx context.Context, actor domain.Principal, intent AdmissionIntent, execution domain.Phase3Policy, allowStub bool) (domain.RetrievalResult, error) {
-	if err := actor.Validate(); err != nil {
-		return domain.RetrievalResult{}, err
+	if err := validateDenialOrigin(actor, intent); err != nil {
+		_, fixed := FixedRetrievalError(err)
+		return domain.RetrievalResult{}, fixed
 	}
+	if err := execution.Validate(); err != nil {
+		return domain.RetrievalResult{}, ErrRetrievalUnavailable
+	}
+	start := time.Now()
 	var out domain.RetrievalResult
 	err := s.store.Update(ctx, actor.SessionID, func(tx store.Tx) error {
 		var err error
@@ -20,7 +27,17 @@ func (s *Service) Rehydrate(ctx context.Context, actor domain.Principal, intent 
 		return err
 	})
 	if err != nil {
-		return domain.RetrievalResult{}, err
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return domain.RetrievalResult{}, err
+		}
+		_, fixed := FixedRetrievalError(err)
+		latency := uint64(time.Since(start).Nanoseconds())
+		if auditErr := s.store.Update(ctx, actor.SessionID, func(tx store.Tx) error {
+			return AppendDenial(tx, actor, intent, err, latency, execution)
+		}); auditErr != nil {
+			return domain.RetrievalResult{}, ErrRetrievalUnavailable
+		}
+		return domain.RetrievalResult{}, fixed
 	}
 	return out.Clone(), nil
 }
