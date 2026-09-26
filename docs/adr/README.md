@@ -51,6 +51,12 @@ Codex) has scrutinized it, noting which findings changed the decision.
 | 16 | Common mutation authorization, directive/obligation version replacement, independent residency/goal status, immutable source snapshots | Phase 1 | [Written](0016-mutation-authorization.md) |
 | 17 | Provider call/attempt state machine, conversation reservation, outcome reconciliation, streaming completion, crash/retry tests | Phase 1 | [Written](0017-call-ledger.md) |
 | 18 | Semantic state tool schemas, result formats, reference instruction block | Phase 5 | pending — gates Phase 5 |
+| 19 | Directive parsing and ingestion: grammar, IDs, span/parse-unit isolation, deterministic classification, deduplication/replacement, Working snapshots, obligations, receipts, and lifecycle-command deferral | Phase 2 | [Written](0019-directive-parsing-and-ingestion.md) |
+
+ADR 19 is not one of SDD §15's original 18; Phase 2's adversarial decision
+review found the brief's decisions needed a dedicated ADR beyond that list,
+and the commander added it by ruling (`phase2-amendments.md` R4). It gates
+Phase 2 exit the same way ADRs 1-18 gate their phases.
 
 Phase 1 (Contracts, domain, and stores) requires ADRs 1, 3, 4, 6, 13, 16, 17,
 all written here. Phase 1's exit gate (state-transition, restart, graph, and
@@ -70,6 +76,18 @@ directory.
   supersession conflicted with the equal-boundary supersession rule. Both
   applied: FR-TOOL-003 states `context_resolve` never resolves in V1;
   FR-DIR-007 requires same authority *and* access boundary.
+
+## SDD conflicts found and applied (v0.9)
+
+- [0019](0019-directive-parsing-and-ingestion.md#sdd-amendment-applied-in-v09):
+  Phase 2's decision review found five gaps the brief did not resolve:
+  FR-ING-004 did not say a span/part is an isolated parse unit (M1);
+  FR-ING-005 did not define a Working snapshot's duplicate identity (D11);
+  FR-DIR-002 did not reject an explicit ID shaped like a derived one (D20);
+  FR-DIR-005 named no closed vocabulary for "other lifecycle words" (M4);
+  FR-DIR-006's `ttl` had no representation bound (D12, narrowed by R1 to
+  1..2147483647). All five are applied as the exact sentences ADR 19
+  records.
 
 Independent review: Codex gpt-6-sol xhigh reviewed all seven Phase 1 ADRs
 against the committed code and the SDD in two passes — the initial review
