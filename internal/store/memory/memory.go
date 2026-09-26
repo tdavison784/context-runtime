@@ -85,6 +85,23 @@ type state struct {
 	receipts     map[string]domain.IngestReceipt // by occurrence ID
 	envelopes    map[string]domain.EventEnvelope // by occurrence ID
 	references   map[string]domain.UnresolvedReference
+	itemsByBlob  map[string][]string // blob hash -> referencing item IDs
+	duplicates   map[duplicateKey][]string
+	refsByKey    map[string][]string // locator key -> unresolved reference IDs
+}
+
+// duplicateKey is the duplicate-candidate identity of an item (R19, D10).
+type duplicateKey struct {
+	taskID      string
+	section     domain.DirectiveSection
+	role        domain.ItemRole
+	authority   domain.Authority
+	access      domain.AccessBoundary
+	contentHash string
+}
+
+func itemDuplicateKey(it domain.ContextItem) duplicateKey {
+	return duplicateKey{it.TaskID, it.Section, it.Role, it.Authority, it.Access, it.ContentHash}
 }
 
 func newState() *state {
@@ -111,6 +128,9 @@ func newState() *state {
 		receipts:     map[string]domain.IngestReceipt{},
 		envelopes:    map[string]domain.EventEnvelope{},
 		references:   map[string]domain.UnresolvedReference{},
+		itemsByBlob:  map[string][]string{},
+		duplicates:   map[duplicateKey][]string{},
+		refsByKey:    map[string][]string{},
 	}
 }
 

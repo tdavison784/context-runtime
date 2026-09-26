@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -139,21 +138,6 @@ func (t *transaction) CurrentVersions(taskID string, ns domain.DirectiveNamespac
 		ids = append(ids, itemID)
 	}
 	return ids, rows.Err()
-}
-
-func (t *transaction) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
-	if err := boundary.Validate(); err != nil {
-		return "", err
-	}
-	id, err := t.current(taskID, directiveID, boundary, domain.NamespaceDirective)
-	if errors.Is(err, domain.ErrNotFound) {
-		return t.current(taskID, directiveID, boundary, domain.NamespaceAgentKey)
-	}
-	return id, err
-}
-
-func (t *transaction) CurrentDirectives(taskID, directiveID string) ([]string, error) {
-	return currentDirectives(t, taskID, directiveID)
 }
 
 // current looks up one pointer. A boundary in another session names nothing
@@ -350,20 +334,5 @@ func (t *transaction) CallAttempts(id string) ([]domain.CallAttempt, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Attempt < out[j].Attempt })
-	return out, nil
-}
-
-// currentDirectives is the deprecated namespace-agnostic view: the pointers
-// of both namespaces, ordered by item ID.
-func currentDirectives(r store.ReadTx, taskID, directiveID string) ([]string, error) {
-	var out []string
-	for _, ns := range []domain.DirectiveNamespace{domain.NamespaceDirective, domain.NamespaceAgentKey} {
-		ids, err := r.CurrentVersions(taskID, ns, directiveID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, ids...)
-	}
-	slices.Sort(out)
 	return out, nil
 }

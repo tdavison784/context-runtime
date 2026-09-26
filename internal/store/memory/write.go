@@ -39,6 +39,9 @@ func (t *tx) commit(st *state) bool {
 	t.supersedes.commit()
 	t.supersededBy.commit()
 	t.relsFrom.commit()
+	t.itemsByBlob.commit()
+	t.duplicates.commit()
+	t.refsByKey.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
 	t.events.commit()
@@ -149,6 +152,14 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 		}
 	}
 	t.items.put(it.ID, it)
+	indexed := map[string]bool{}
+	for _, p := range it.Parts {
+		if p.BlobHash != "" && !indexed[p.BlobHash] {
+			indexed[p.BlobHash] = true
+			t.itemsByBlob.add(p.BlobHash, it.ID)
+		}
+	}
+	t.duplicates.add(itemDuplicateKey(it), it.ID)
 	t.markSequenced()
 	return nil
 }
@@ -238,23 +249,6 @@ func (t *tx) SetCurrentVersion(itemID string) error {
 	t.directives.put(directiveKey{key.TaskID, key.ID, key.Access, key.Namespace}, itemID)
 	t.markSemantic()
 	return nil
-}
-
-func (t *tx) SetCurrentDirective(taskID, directiveID, itemID string) error {
-	if err := t.check(); err != nil {
-		return err
-	}
-	if taskID == "" || directiveID == "" {
-		return invalid("directive: task and directive IDs are required")
-	}
-	it, ok := t.items.peek(itemID)
-	if !ok {
-		return notFound("item", itemID)
-	}
-	if it.DirectiveID != directiveID || it.TaskID != taskID {
-		return invalid("item %s is not directive %s of task %s", itemID, directiveID, taskID)
-	}
-	return t.SetCurrentVersion(itemID)
 }
 
 func (t *tx) InsertBlob(b domain.Blob) error {
@@ -850,6 +844,7 @@ func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
 		return fmt.Errorf("unresolved reference %s: %w", r.ID, domain.ErrImmutable)
 	}
 	t.references.put(r.ID, r)
+	t.refsByKey.add(r.LocatorKey, r.ID)
 	t.markSequenced()
 	return nil
 }
