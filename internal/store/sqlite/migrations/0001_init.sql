@@ -33,6 +33,7 @@ CREATE TABLE blobs (
     hash TEXT NOT NULL,
     media_type TEXT NOT NULL,
     data BLOB NOT NULL,
+    data_nil INTEGER NOT NULL CHECK (data_nil IN (0, 1)),
     PRIMARY KEY (session_id, hash),
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );

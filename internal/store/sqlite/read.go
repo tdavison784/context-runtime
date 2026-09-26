@@ -93,7 +93,8 @@ func (t *transaction) Blob(hash string) (domain.Blob, error) {
 	var v domain.Blob
 	v.SessionID = t.session
 	v.Hash = hash
-	err := t.conn.QueryRowContext(t.ctx, "SELECT media_type,data FROM blobs WHERE session_id=? AND hash=?", t.session, hash).Scan(&v.MediaType, &v.Data)
+	var wasNil bool
+	err := t.conn.QueryRowContext(t.ctx, "SELECT media_type,data,data_nil FROM blobs WHERE session_id=? AND hash=?", t.session, hash).Scan(&v.MediaType, &v.Data, &wasNil)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Blob{}, domain.ErrNotFound
 	}
@@ -102,6 +103,11 @@ func (t *transaction) Blob(hash string) (domain.Blob, error) {
 	}
 	if err = v.Validate(); err != nil {
 		return domain.Blob{}, err
+	}
+	if wasNil {
+		v.Data = nil
+	} else if v.Data == nil {
+		v.Data = []byte{}
 	}
 	return v, nil
 }

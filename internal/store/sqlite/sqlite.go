@@ -103,12 +103,17 @@ func (s *Store) initialize(ctx context.Context) error {
 		return err
 	}
 	sort.Strings(names)
+	var newest int
 	for _, name := range names {
 		base := filepath.Base(name)
 		number, err := strconv.Atoi(strings.SplitN(base, "_", 2)[0])
 		if err != nil {
 			return fmt.Errorf("migration %s: %w", base, err)
 		}
+		if number <= newest {
+			return fmt.Errorf("migration %s: versions must increase", base)
+		}
+		newest = number
 		sqlBytes, err := migrations.ReadFile(name)
 		if err != nil {
 			return err
@@ -142,6 +147,13 @@ func (s *Store) initialize(ctx context.Context) error {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+	}
+	var applied sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, "SELECT MAX(version) FROM schema_migrations").Scan(&applied); err != nil {
+		return err
+	}
+	if applied.Valid && applied.Int64 > int64(newest) {
+		return fmt.Errorf("database migration version %d is newer than this binary", applied.Int64)
 	}
 	return nil
 }
@@ -306,7 +318,7 @@ func (t *transaction) put(kind, id string, sub int, meta recordMeta, value any, 
 	}
 	_, err = t.conn.ExecContext(t.ctx, `INSERT INTO records(session_id,kind,id,subkey,seq,version,revision,task_id,agent_id,directive_id,event_id,from_id,to_id,state,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.session, kind, id, sub, meta.seq, meta.version, meta.revision, meta.task, meta.agent, meta.directive, meta.event, meta.from, meta.to, meta.state, b)
-	if err != nil && strings.Contains(err.Error(), "constraint failed") {
+	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "PRIMARY KEY constraint failed")) {
 		return fmt.Errorf("%w: %s %s", domain.ErrImmutable, kind, id)
 	}
 	return err

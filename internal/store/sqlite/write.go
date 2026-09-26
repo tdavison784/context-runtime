@@ -170,7 +170,7 @@ func (t *transaction) InsertBlob(v domain.Blob) error {
 	if data == nil {
 		data = []byte{}
 	}
-	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO blobs(session_id,hash,media_type,data) VALUES(?,?,?,?)", t.session, v.Hash, v.MediaType, data)
+	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO blobs(session_id,hash,media_type,data,data_nil) VALUES(?,?,?,?,?)", t.session, v.Hash, v.MediaType, data, v.Data == nil)
 	return err
 }
 func (t *transaction) InsertObligationVersion(v domain.ObligationVersion) error {
