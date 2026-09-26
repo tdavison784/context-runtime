@@ -299,11 +299,12 @@ item ID only when it actually occurs, is less disruptive and matches how
   `TestContextItemValidate_SectionNoneWithoutDirectiveIDPasses`,
   `TestContextItemValidate_EachSectionWithDirectiveIDPasses` lock
   `Section`'s validation rules exactly.
-- Required (round 2, `domain-tests-worker` assigned): a
-  `ContextItem.Validate` case asserting a non-empty `Section` on an
-  AGENT/TOOL/RETRIEVED_CONTENT item fails (AUTH-2.2); the existing
-  `Section`-with-`DirectiveID` passing cases above need a
-  SYSTEM/HARNESS/USER authority to keep passing once this check lands.
+- `internal/domain/item_test.go`:
+  `TestContextItemValidate_SectionRequiresLifecycleAuthority` and
+  `TestContextItemValidate_NonDirectiveItemAllowsAnyAuthority` lock
+  AUTH-2.2 exactly (a non-empty `Section` on an AGENT/TOOL/
+  RETRIEVED_CONTENT item fails; a non-directive item allows any
+  authority).
 - `internal/store/storetest/semantic.go:testCurrentDirectivesOrder`
   (`TestConformance/CurrentDirectivesOrder`) locks `CurrentDirectives`
   exactly: every current version's item ID across boundaries in a task,
@@ -313,8 +314,8 @@ item ID only when it actually occurs, is less disruptive and matches how
   :TestCurrentDirectivesAcrossBoundaries` reconfirms it SQLite-specifically.
   The visible-boundary reuse *rejection* itself is a caller-side
   authorization decision built on top of `CurrentDirectives`, not a store
-  behavior — see ADR 16's `ReplaceDirective` decision (not yet implemented,
-  `graph-worker` assigned) for its test requirements.
+  behavior — see ADR 16's `ReplaceDirective`/`rejectVisibleBoundaryConflict`
+  decision for its tests.
 
 ## Open questions
 
@@ -380,5 +381,4 @@ amendment (visible-boundary reuse rejected, `ErrAmbiguousDirective` for a
 genuinely ambiguous target) is applied. Recorded here since both are
 directive-identity decisions; ADR 16 covers the authorization call sites
 that consume `CurrentDirectives` (`ResolveLifecycleTarget`,
-`ReplaceDirective`'s AUTH-2.1 reuse check), which are decided but not yet
-implemented.
+`ReplaceDirective`'s AUTH-2.1 reuse check), both now merged and tested.

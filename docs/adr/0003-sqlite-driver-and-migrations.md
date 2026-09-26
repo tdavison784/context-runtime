@@ -63,9 +63,8 @@ preserve valid state.
   name TEXT, checksum TEXT)`; `Open` compares each applied version's stored
   checksum against the embedded file's and fails to open on any mismatch.
 - **Commit is never cancelled; context/I/O errors are returned as
-  themselves (round 1, DUR-1.2/1.4, decided in `store.go`'s contract,
-  `sqlite-worker`'s implementation in progress).** Two related failures
-  were reproduced against the pre-round-1 SQLite store. First (DUR-1.2):
+  themselves (round 1, DUR-1.2/1.4).** Two related failures were
+  reproduced against the pre-round-1 SQLite store. First (DUR-1.2):
   the final `UPDATE sessions`/`COMMIT` ran under the caller's `ctx`; if that
   context was cancelled while `COMMIT` was in flight, `modernc.org/sqlite`
   can return `ctx.Err()` even though the commit succeeded, so `Update`
@@ -106,21 +105,19 @@ preserve valid state.
   needs to nest legitimately, but no such caller exists yet to justify the
   complexity.
 - **Concurrent `Open` on a fresh database file, and interrupted-migration
-  recovery (round 1, DUR-1.6/1.7, decided; `sqlite-worker`'s implementation
-  pending).** Reproduced: several concurrent `Open` calls against a
-  brand-new file mostly fail `SQLITE_BUSY` at the `PRAGMA journal_mode=WAL`
-  step (3 of 4 failed in 5 of 6 runs) — `busy_timeout` was applied only
-  *after* that pragma, and each migration's implicit deferred transaction
-  cannot wait out a concurrent writer at the WAL switch. **Decision:**
-  apply `busy_timeout` through the connection DSN (`_pragma=busy_timeout`)
-  so it is in effect before the WAL switch, retry the WAL-mode switch on
-  `SQLITE_BUSY`, and run each migration under `BEGIN IMMEDIATE` rather than
-  a deferred transaction. Separately, ADR 3 already requires a migration
-  interrupted partway through to leave the database in a state a restart
-  can cleanly recover from (no partial `schema_migrations` row, no partial
-  `rec_*` tables) — an explicit test for this (interrupt a migration whose
-  last statement fails; assert both tables are absent, then reopen
-  successfully) does not exist yet and is still required.
+  recovery (round 1, DUR-1.6/1.7).** Reproduced: several concurrent `Open`
+  calls against a brand-new file mostly fail `SQLITE_BUSY` at the `PRAGMA
+  journal_mode=WAL` step (3 of 4 failed in 5 of 6 runs) — `busy_timeout`
+  was applied only *after* that pragma, and each migration's implicit
+  deferred transaction cannot wait out a concurrent writer at the WAL
+  switch. **Decision:** apply `busy_timeout` through the connection DSN
+  (`_pragma=busy_timeout`) so it is in effect before the WAL switch, retry
+  the WAL-mode switch on `SQLITE_BUSY`, and run each migration under
+  `BEGIN IMMEDIATE` rather than a deferred transaction. Separately, ADR 3
+  already requires a migration interrupted partway through to leave the
+  database in a state a restart can cleanly recover from (no partial
+  `schema_migrations` row, no partial `rec_*` tables); see Tests, below,
+  for the test that locks it.
 
 ## Alternatives considered
 
