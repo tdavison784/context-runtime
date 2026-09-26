@@ -198,3 +198,74 @@ func testCancellation(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// testLedgerSeqIsolation checks DUR-2.1: a TargetCall event's sequence
+// number is never shared with a semantic record, so a semantic write
+// cannot hide behind a ledger sequence number; ledger records may share it.
+func testLedgerSeqIsolation(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		seq := tx.NextSeq()
+		noErr(t, tx.InsertItem(NewItem(sessA, "a", seq, "a")))
+		return tx.InsertItem(NewItem(sessA, "b", tx.NextSeq(), "b"))
+	})
+	shared := []struct {
+		name  string
+		write func(tx store.Tx, seq uint64) error
+	}{
+		{"item", func(tx store.Tx, seq uint64) error { return tx.InsertItem(NewItem(sessA, "x", seq, "x")) }},
+		{"relationship", func(tx store.Tx, seq uint64) error {
+			return tx.InsertRelationship(NewRelationship(sessA, "r", domain.RelReferences, "a", "b", seq))
+		}},
+		{"event record", func(tx store.Tx, seq uint64) error {
+			return errOf2(tx.InsertEvent(NewEvent(sessA, "e", seq, "p")))
+		}},
+		{"obligation version", func(tx store.Tx, seq uint64) error {
+			return tx.InsertObligationVersion(NewObligation(sessA, "o", 1, seq, "a"))
+		}},
+		{"grant", func(tx store.Tx, seq uint64) error { return tx.InsertGrant(NewGrant(sessA, "g", seq, "a")) }},
+		{"item lifecycle event", func(tx store.Tx, seq uint64) error {
+			return errOf(tx.UpdateItem("a", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "l", seq, "a")))
+		}},
+		{"other lifecycle event", func(tx store.Tx, seq uint64) error {
+			return tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "l", seq, domain.TargetTask, "task"))
+		}},
+	}
+	for _, tc := range shared {
+		err := s.Update(ctx, sessA, func(tx store.Tx) error {
+			seq := tx.NextSeq()
+			noErr(t, tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "call-event", seq, domain.TargetCall, "c")))
+			noErr(t, tc.write(tx, seq))
+			return nil
+		})
+		if !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Errorf("%s sharing a TargetCall seq: error = %v, want ErrInvalidRecord", tc.name, err)
+		}
+		// With its own sequence number the same write commits.
+		err = s.Update(ctx, sessA, func(tx store.Tx) error {
+			noErr(t, tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "call-event", tx.NextSeq(), domain.TargetCall, "c")))
+			noErr(t, tc.write(tx, tx.NextSeq()))
+			return errRollback
+		})
+		wantErr(t, err, errRollback)
+	}
+	// A semantic record beside a TargetCall event on its own sequence
+	// number commits.
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "call-event", tx.NextSeq(), domain.TargetCall, "c")))
+		return tx.InsertItem(NewItem(sessA, "x", tx.NextSeq(), "x"))
+	})
+	// Ledger records may share the TargetCall event's sequence number.
+	update(t, s, sessA, func(tx store.Tx) error {
+		seq := tx.NextSeq()
+		c := NewCall(sessA, "c", "conv", seq)
+		noErr(t, tx.InsertCall(c))
+		noErr(t, tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "prepared", seq, domain.TargetCall, "c")))
+		noErr(t, tx.PutCallAttempt(NewAttempt(sessA, "c", 1, seq)))
+		sent := c.Clone()
+		sent.State, sent.Attempts = domain.CallSent, 1
+		_, err := tx.UpdateCall(sent, c.Revision)
+		noErr(t, err)
+		noErr(t, tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "sent", seq, domain.TargetCall, "c")))
+		return nil
+	})
+}
