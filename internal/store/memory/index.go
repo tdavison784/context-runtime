@@ -197,6 +197,35 @@ func (x *orderedIndex[K]) after(k K, c seqRef) iter.Seq[seqRef] {
 	}
 }
 
+// before yields k's entries strictly before c in descending (Seq, ID)
+// order; a zero c starts at the newest entry.
+func (x *orderedIndex[K]) before(k K, c seqRef) iter.Seq[seqRef] {
+	return func(yield func(seqRef) bool) {
+		b, o, gone := x.base[k], x.over[k], x.gone[k]
+		end := func(l []seqRef) int {
+			if c == (seqRef{}) {
+				return len(l)
+			}
+			return sort.Search(len(l), func(i int) bool { return !l[i].less(c) })
+		}
+		i, j := end(b)-1, end(o)-1
+		for i >= 0 || j >= 0 {
+			var r seqRef
+			if j < 0 || i >= 0 && o[j].less(b[i]) {
+				r, i = b[i], i-1
+			} else {
+				r, j = o[j], j-1
+			}
+			if _, removed := gone[r.id]; removed {
+				continue
+			}
+			if !yield(r) {
+				return
+			}
+		}
+	}
+}
+
 // commit applies removals by binary search and additions by appending
 // (the usual case: new entries carry the newest sequence numbers) or by
 // binary-search insertion.
