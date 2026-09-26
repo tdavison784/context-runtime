@@ -21,6 +21,7 @@ import (
 type object = map[string]any
 
 var out = flag.String("out", "testdata/openai", "sanitized fixture directory")
+var section = flag.String("section", "all", "probe section: all, reasoning, cache, or compaction")
 
 func main() {
 	flag.Parse()
@@ -37,9 +38,15 @@ func main() {
 	p := &probe{client: &client, ctx: ctx}
 	p.models()
 	for _, model := range []string{"gpt-6-astra", "gpt-6-luna"} {
-		p.reasoning(model)
-		p.cache(model)
-		p.compaction(model)
+		if *section == "all" || *section == "reasoning" {
+			p.reasoning(model)
+		}
+		if *section == "all" || *section == "cache" {
+			p.cache(model)
+		}
+		if *section == "all" || *section == "compaction" {
+			p.compaction(model)
+		}
 	}
 	if err := write("index", object{"sdk": "github.com/openai/openai-go/v3 v3.66.0", "observations": p.notes}); err != nil {
 		panic(err)
@@ -91,13 +98,15 @@ func (p *probe) models() {
 	if err := write("models", note); err != nil {
 		panic(err)
 	}
-	fmt.Printf("models: %v available model IDs\n", len(array(note["model_ids"])))
+	if ids, ok := note["model_ids"].([]string); ok {
+		fmt.Printf("models: %d available model IDs\n", len(ids))
+	}
 }
 
 func (p *probe) reasoning(model string) {
 	base := strings.ReplaceAll(model, "-", "_")
 	tool := object{"type": "function", "name": "lookup", "description": "Return the secret word for a code", "parameters": object{"type": "object", "properties": object{"code": object{"type": "string"}}, "required": []string{"code"}, "additionalProperties": false}, "strict": true}
-	first := object{"model": model, "store": false, "max_output_tokens": 160, "reasoning": object{"effort": "medium"}, "input": []any{object{"role": "user", "content": "Use lookup with code A, then answer with the word returned."}}, "tools": []any{tool}, "tool_choice": object{"type": "function", "name": "lookup"}}
+	first := object{"model": model, "store": false, "max_output_tokens": 512, "reasoning": object{"effort": "high"}, "input": []any{object{"role": "user", "content": "Compute 673 times 887 modulo 97. Call lookup with code A if the remainder is even, otherwise code B. After the tool result, answer with its word."}}, "tools": []any{tool}, "tool_choice": object{"type": "function", "name": "lookup"}}
 	r1 := p.call(base+"_r1_tool", "/responses", first)
 	items := array(r1["output"])
 	var call object
@@ -164,10 +173,11 @@ func (p *probe) cache(model string) {
 	base := strings.ReplaceAll(model, "-", "_")
 	// Deterministic natural-language filler; the counter establishes actual lengths.
 	words := strings.Repeat("The archive records a quiet blue lantern beside the north window. ", 125)
-	for _, n := range []int{40, 75, 100, 125} {
+	for _, n := range []int{75, 84, 85, 100} {
 		prefix := strings.Repeat("The archive records a quiet blue lantern beside the north window. ", n)
 		req := object{"model": model, "input": []any{object{"role": "developer", "content": prefix}, object{"role": "user", "content": "Reply OK."}}, "max_output_tokens": 32, "store": false}
-		p.call(fmt.Sprintf("%s_c1_%d_count", base, n), "/responses/input_tokens", req)
+		countReq := object{"model": model, "input": req["input"]}
+		p.call(fmt.Sprintf("%s_c1_%d_count", base, n), "/responses/input_tokens", countReq)
 		p.call(fmt.Sprintf("%s_c1_%d_first", base, n), "/responses", req)
 		p.call(fmt.Sprintf("%s_c1_%d_repeat", base, n), "/responses", req)
 	}
