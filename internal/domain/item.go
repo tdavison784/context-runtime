@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"time"
 )
@@ -52,6 +53,23 @@ func (p ContentPart) Validate() error {
 	return nil
 }
 
+// ItemRole separates a span's verbatim transcript snapshot from semantic
+// items (D8). A TRANSCRIPT item is the immutable audit and pending-input
+// envelope of one span: it is never a directive, never a requirement kind,
+// and never becomes a current requirement merely because its authority is
+// SYSTEM or HARNESS; accepted directives and uncovered trusted instruction
+// text become separate semantic items DERIVED_FROM it. The zero value is a
+// semantic item, which keeps records that predate roles semantic.
+type ItemRole string
+
+const (
+	RoleSemantic   ItemRole = ""
+	RoleTranscript ItemRole = "TRANSCRIPT"
+)
+
+// Valid reports whether r is a known role.
+func (r ItemRole) Valid() bool { return r == RoleSemantic || r == RoleTranscript }
+
 // SourceKind says what a source locator names.
 type SourceKind string
 
@@ -83,7 +101,9 @@ type ContextItem struct {
 	DirectiveID string
 	// Section is the directive section that created the item, if any.
 	Section DirectiveSection
-	Seq     uint64
+	// Role is TRANSCRIPT for a span's verbatim snapshot (D8).
+	Role ItemRole
+	Seq  uint64
 
 	SessionID  string
 	WorkflowID string
@@ -109,9 +129,15 @@ type ContextItem struct {
 	LastUsedCall uint64
 	AccessCount  int
 	TTLTurns     *int
+	// CreatedTurn is the owning task's (TaskID) turn number when the item
+	// was created, or 0 before any turn opened. TTL counts from it (D18).
+	CreatedTurn uint64
 
 	Tags   []string
 	Source *SourceRef
+	// SourceRanges locate the transcript bytes a derived item was formed
+	// from (D8); empty for transcripts and items not derived from a span.
+	SourceRanges []SourceRange
 
 	// Version starts at 1 and increments with every lifecycle change; stores
 	// use it for compare-and-swap.
@@ -127,6 +153,7 @@ func (it ContextItem) Clone() ContextItem {
 	out := it
 	out.Parts = slices.Clone(it.Parts)
 	out.Tags = slices.Clone(it.Tags)
+	out.SourceRanges = cloneSourceRanges(it.SourceRanges)
 	if it.GoalStatus != nil {
 		gs := *it.GoalStatus
 		out.GoalStatus = &gs
@@ -185,6 +212,9 @@ func (it ContextItem) Validate() error {
 	if !it.Retention.Valid() {
 		return invalid("item %s: invalid retention %q", it.ID, it.Retention)
 	}
+	if err := it.validateRole(); err != nil {
+		return err
+	}
 	if err := it.Access.Validate(); err != nil {
 		return fmt.Errorf("item %s: %w", it.ID, err)
 	}
@@ -209,8 +239,8 @@ func (it ContextItem) Validate() error {
 	if it.GoalStatus != nil && !it.GoalStatus.Valid() {
 		return invalid("item %s: invalid goal status %q", it.ID, *it.GoalStatus)
 	}
-	if it.TTLTurns != nil && *it.TTLTurns <= 0 {
-		return invalid("item %s: TTL must be a positive count of turns", it.ID)
+	if it.TTLTurns != nil && (*it.TTLTurns <= 0 || *it.TTLTurns > MaxTTLTurns) {
+		return invalid("item %s: TTL must be a count of turns in 1..%d", it.ID, MaxTTLTurns)
 	}
 	if len(it.Parts) == 0 {
 		return invalid("item %s: at least one content part is required", it.ID)
@@ -218,6 +248,14 @@ func (it ContextItem) Validate() error {
 	for i, p := range it.Parts {
 		if err := p.Validate(); err != nil {
 			return fmt.Errorf("item %s part %d: %w", it.ID, i, err)
+		}
+	}
+	for _, r := range it.SourceRanges {
+		if err := r.Validate(); err != nil {
+			return fmt.Errorf("item %s: %w", it.ID, err)
+		}
+		if r.TranscriptID == it.ID {
+			return invalid("item %s: an item cannot be its own source range", it.ID)
 		}
 	}
 	if want := ContentHash(it.Parts); it.ContentHash != want {
@@ -230,6 +268,47 @@ func (it ContextItem) Validate() error {
 		return invalid("item %s: version must start at 1", it.ID)
 	}
 	return nil
+}
+
+// validateRole fails closed on a transcript that could pose as a
+// requirement: no directive identity, no directive-category kind, no pinned
+// generation or protected retention, and no source ranges (it is the source).
+func (it ContextItem) validateRole() error {
+	if !it.Role.Valid() {
+		return invalid("item %s: invalid role %q", it.ID, it.Role)
+	}
+	if it.Role != RoleTranscript {
+		return nil
+	}
+	if it.Section != SectionNone || it.DirectiveID != "" || len(it.SourceRanges) != 0 ||
+		it.Kind.Category() == CategoryDirective || it.Generation == GenerationPinned || it.Retention == RetentionProtected {
+		return invalid("item %s: a transcript cannot carry directive identity or requirement status", it.ID)
+	}
+	return nil
+}
+
+// MaxTTLTurns is the largest accepted TTL (R1): math.MaxInt32, so a TTL is
+// representable in int on every Go platform and in every store.
+const MaxTTLTurns = math.MaxInt32
+
+// ValidateTurnOwnership checks the D18 creation rule ingestion enforces on
+// every new item: a TURN-scoped or TTL-bound item needs an owning task and a
+// turn that has opened, so expiry is never computed against a substitute
+// turn counter. Records that predate CreatedTurn are not checked by Validate.
+func (it ContextItem) ValidateTurnOwnership() error {
+	if (it.Scope == ScopeTurn || it.TTLTurns != nil) && (it.TaskID == "" || it.CreatedTurn == 0) {
+		return invalid("item %s: TURN scope and TTL require an owning task turn", it.ID)
+	}
+	return nil
+}
+
+// TTLLive reports whether an item created at turn created with a TTL of n
+// turns is live at turn current of the same owning task (D18): current >=
+// created and current-created < n. The difference form cannot overflow.
+// TURN scope expires at the next turn regardless of a larger TTL; callers
+// check scope separately.
+func TTLLive(created, current uint64, n int) bool {
+	return n > 0 && current >= created && current-created < uint64(n)
 }
 
 // ItemRef names an item for plans, manifests, and relationships.
