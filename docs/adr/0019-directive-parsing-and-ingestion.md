@@ -1215,18 +1215,25 @@ the code at this ADR's final-pass head.
   separately named test does exist and §16 already cites it, contradicting
   this paragraph's earlier claim that it doesn't).
 - **F6 (SEC-1.3 — diagnostic/lifecycle-command record access, refines
-  §12/§1, D16/D1; landed).** A diagnostic or lifecycle-command record's
-  access is now the *narrower* of the source span's boundary and the
-  boundary of the content or target it describes, not the span boundary
-  alone: diagnostics carry a `scopedDiag{d, access}`
+  §12/§1, D16/D1; diagnostic half landed; command half superseded by
+  SEC-3.2, §31 below — SPEC-4.2 corrects this paragraph, which had drifted
+  out of sync with the code).** A diagnostic's access is the *narrower* of
+  the source span's boundary and the boundary of the content it describes,
+  not the span boundary alone: diagnostics carry a `scopedDiag{d, access}`
   (`internal/ingest/diagnostics.go`) computed per diagnostic rather than
-  defaulting to the span's transcript access, and a lifecycle command's
-  record narrows via `domain.Intersect(scope, spanAccess, targetAccess)`
-  (`internal/domain/principal.go:101`, `internal/ingest/derive.go:349`)
-  when its target resolves to a narrower-boundary item. This closes the
-  over-disclosure SEC-1.3 found: a span-boundary-only access field could
-  let a principal who can see the span, but not a narrower-boundary target
-  it describes, learn the target exists. Reads filter on the narrowed
+  defaulting to the span's transcript access, using
+  `domain.Intersect(scope, spanAccess, targetAccess)`
+  (`internal/domain/principal.go:101`, `internal/ingest/derive.go:297`)
+  when the diagnostic's cause resolves to a narrower-boundary item. This
+  closes the over-disclosure SEC-1.3 found: a span-boundary-only access
+  field could let a principal who can see the span, but not a
+  narrower-boundary target it describes, learn the target exists.
+  **A lifecycle-command record does not narrow its own `Access` this way**
+  — `rec.Access` stays at the transcript boundary regardless of outcome
+  (`internal/ingest/derive.go:351`, `rec.Access = c.transcript.Access`); §31
+  below records SEC-3.2, the mechanism that actually replaced F6's original
+  per-command narrowing (a separate `DetailAccess` field and redaction,
+  not an `Access` intersection). Reads filter on the narrowed
   boundary like any other access-checked record. Test:
   `TestRecordsAtNarrowerBoundary_F6` (`internal/ingest/fixes_r1_test.go`).
 - **F5 (DUR-1.8, SPEC-1.9 — migration 0011's Go-step checksum) is recorded
@@ -2087,26 +2094,39 @@ mechanisms, or new tests below had been recorded in this ADR until now.
   `TestSizeGateMatchesValidateFor_SEC21` (`checkSizes` accepts exactly what
   `Event.ValidateFor`'s limit accounting accepts, at the edge, on both
   sides) — both `internal/ingest/fixes_r1_test.go`.
-- **SEC-2.2: an ambiguous lifecycle record and a boundary-conflict
-  diagnostic are readable only where their causes are (completes SEC-1.3,
-  refines §7/§1/§20, D10/D1/R13/R14).** `graph.AuthorizeLifecycleCommand`
-  now reports the access boundaries of the accessible current versions
-  that made a target ambiguous, and `graph.CheckBoundaryConflict` returns
-  the conflicting version's boundary alongside `ErrBoundaryConflict`
+- **SEC-2.2: an ambiguous lifecycle record's diagnostic and a
+  boundary-conflict diagnostic are readable only where their causes are
+  (completes SEC-1.3, refines §7/§1/§20, D10/D1/R13/R14; text corrected,
+  SPEC-4.2 — see §31 below for what this round's SEC-3.2 changed about the
+  *command record* itself).** `graph.AuthorizeLifecycleCommand` now
+  reports the access boundaries of the accessible current versions that
+  made a target ambiguous, and `graph.CheckBoundaryConflict` returns the
+  conflicting version's boundary alongside `ErrBoundaryConflict`
   (`internal/graph/graph.go`, `internal/graph/lifecycle.go`). Ingest
-  stamps the `AMBIGUOUS` command record, its diagnostic, and a
-  `boundary_conflict` diagnostic at the base (transcript) boundary
-  intersected with every cause boundary, rather than the base boundary
-  alone — so another agent can no longer learn that a version it cannot
-  see exists, merely because it caused an ambiguity or conflict the agent
-  *can* see the outcome of; the source actor whose write caused it still
-  reads both records normally. Test:
+  stamps the `AMBIGUOUS` diagnostic and the `boundary_conflict` diagnostic
+  at the base (transcript) boundary intersected with every cause boundary,
+  rather than the base boundary alone — so another agent can no longer
+  learn that a version it cannot see exists, merely because it caused an
+  ambiguity or conflict the agent *can* see the outcome of.
+  **The `AMBIGUOUS` *command record* is a different case, changed again by
+  SEC-3.2 (§31): it no longer narrows its own `Access`; instead its
+  resolution is what narrows, via `DetailAccess`, and a viewer outside it
+  reads the record redacted (`WITHHELD`), not omitted** — so "another
+  agent... shows neither record" no longer describes the command-record
+  half correctly: agent B now reads the `AMBIGUOUS` command record too,
+  redacted. The source actor whose write caused it reads every record and
+  diagnostic unredacted. Test:
   `TestRecordsNeverRevealHiddenVersions_SEC22`
-  (`internal/ingest/fixes_r1_test.go`) — reproduces both cases (an
+  (`internal/ingest/fixes_r1_test.go`, **SPEC-4.2: description corrected to
+  match the test's current assertions**) — sets up both cases (an
   agent-private `[plan]` making a task-wide `[plan]` ambiguous; an
-  agent-private `[q]` boundary-conflicting with a task-wide restatement)
-  and asserts a different agent's `LifecycleCommands`/`Diagnostics` read
-  shows neither record.
+  agent-private `[q]` boundary-conflicting with a task-wide restatement),
+  then asserts the SEC-3.2 redaction property with a third pair in the same
+  test (a hidden vs. a merely missing Unpin target): a different agent's
+  `LifecycleCommands`/`Diagnostics` read is structurally identical for the
+  hidden and the missing case — one redacted command record and the same
+  diagnostics either way — while the source actor's own read still shows
+  the full resolution.
 - **DUR-2.1: bounded-lookup and bounded-cursor work, addressing part of
   SPEC-2.1's remaining store-side gaps (refines §26, F1; completed by
   SPEC-3.1, §30 below).** Two of three fixes in this batch landed here:
@@ -2221,8 +2241,13 @@ fixed.
   4000 derived items from one transcript: x65.5 before, x8.0 after (linear
   in item count, not transcript size too); end-to-end SQLite ingest of one
   event, 500 vs. 4000 Pinned items: x32 before (0.40s/12.8s), x9.1 after
-  (0.12s/1.06s). Test: `TestDerivedLinksLoadTranscriptOnce`
-  (`internal/store/sqlite/scaling_test.go`).
+  (0.12s/1.06s). Tests: `TestDerivedLinksLoadTranscriptOnce`
+  (`internal/store/sqlite/scaling_test.go`, the store-level bytes-loaded
+  check); `TestOneLargeEventScalesLinearly`
+  (`internal/store/sqlite/event_scaling_test.go`, **SPEC-4.2: previously
+  uncited** — the same property end to end through `Ingester.Ingest`,
+  asserting about x8 for 4000 items vs. 500, not the roughly x32 a
+  per-item transcript reload costs).
 - **SPEC-3.1 item 3: the memory ordered-index commit is now proportional
   to the change, not the key's existing size (refines DUR-2.1 above,
   which this supersedes).** `orderedIndex.commit` previously rebuilt each
@@ -2279,11 +2304,20 @@ fixed.
   `scanLookup` now also returns the cursor position of every unverified
   row it skipped; `SourceItems` keeps only those at or before its actual
   `Next` (via the new `after` cursor-order helper) and defers the rest to
-  the next page, which will see them again starting from `Next`. Test:
+  the next page, which will see them again starting from `Next`. Tests:
   `TestSourceItemsReportsUnverifiedOnce`
   (`internal/store/sqlite/access_lookups_test.go` — pages one at a time
   through sources interleaved with altered rows and asserts each
-  unverified ID is reported exactly once across every page).
+  unverified ID is reported exactly once across every page); **(SPEC-4.2:
+  previously uncited)** `internal/ingest`'s complementary, ingest-level
+  half of the same fix — `r.unverified map[string]bool` (`run.go`) records
+  each unverified ID once per event, for both lookups
+  (`reportUnverified`) and Working snapshots (`workingSection`), so even a
+  store that (like SQLite's page lookahead, or a future store) reports the
+  same ID from more than one call still yields one `ItemUnverified`
+  diagnostic in the receipt, not one per sighting. Test:
+  `TestUnverifiedReportedOncePerEvent_DUR31`
+  (`internal/ingest/lookups_test.go`).
 - **SPEC-3.2: regression guards for every SPEC-2.1 read, closing the gaps
   the second review found (refines §29).** Four gaps, each now caught by a
   test that fails on the specific mutation the review reproduced: (1)
@@ -2301,10 +2335,13 @@ fixed.
   `SUPERSEDES` graph but still *report* only the nodes it walked (which
   the prior guard, trusting the function's own `visited` count, could not
   catch) now fails on rows actually read. (3) `CurrentVersions` gets its
-  own named builder (`currentVersionsQuery`) and joins
-  `ObligationsBySource` in `TestHotReadsUseTheirBuilders`'s per-item-read
-  guard, so reverting either to an ad hoc query fails there even if a
-  separate plan test would not catch it. (4)
+  own named builder (`currentVersionsQuery`), a plan guard
+  (`TestCurrentVersionsUseIndex`, **SPEC-4.2: previously uncited** —
+  `internal/store/sqlite/access_lookups_test.go`, locking the read to its
+  `(session_id, task_id, namespace, directive_id)` primary-key prefix),
+  and joins `ObligationsBySource` in `TestHotReadsUseTheirBuilders`'s
+  per-item-read guard, so reverting either to an ad hoc query fails there
+  even if the plan test alone would not catch it. (4)
   `TestUpgradeOrderedGraphIndexes` (`internal/store/sqlite/upgrade_test.go`)
   is the missing migrated-layout parity fixture for 0014→0015: a
   relationship and items stored before 0015 are read back correctly
