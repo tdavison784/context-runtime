@@ -14,28 +14,9 @@ var errUnsupported = domain.ErrUnsupportedSchema
 
 // Declarations and semantic changes.
 
-func (r semRead) LifecycleByTarget(domain.TargetKind, string, store.Page) (store.ResultPage[domain.LifecycleEvent], error) {
-	return store.ResultPage[domain.LifecycleEvent]{}, errUnsupported
-}
-func (r semRead) CreationDeclaration(string) (domain.CreationDeclaration, error) {
-	return domain.CreationDeclaration{}, errUnsupported
-}
-func (r semRead) SnapshotDeclaration(string) (domain.SnapshotDeclaration, error) {
-	return domain.SnapshotDeclaration{}, errUnsupported
-}
-func (r semRead) GrantsFor(domain.Action, domain.GrantTarget, int) ([]domain.MutationGrant, error) {
-	return nil, errUnsupported
-}
 func (r semRead) OpenGoalsByTaskOwner(string, store.Page) (store.ResultPage[domain.ContextItem], error) {
 	return store.ResultPage[domain.ContextItem]{}, errUnsupported
 }
-func (r semRead) SemanticChanges(domain.Principal, domain.GrantTarget, store.Page) (store.ResultPage[domain.SemanticChange], error) {
-	return store.ResultPage[domain.SemanticChange]{}, errUnsupported
-}
-func (t *semTx) InsertCreationDeclaration(domain.CreationDeclaration) error { return errUnsupported }
-func (t *semTx) InsertSnapshotDeclaration(domain.SnapshotDeclaration) error { return errUnsupported }
-func (t *semTx) SetCurrentVersion(string, string) error                     { return errUnsupported }
-func (t *semTx) InsertSemanticChange(domain.SemanticChange) error           { return errUnsupported }
 
 // Obligation proofs.
 

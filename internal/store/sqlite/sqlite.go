@@ -267,6 +267,9 @@ func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) er
 	if err != nil {
 		return err
 	}
+	if err = tx.runDeferred(); err != nil {
+		return err
+	}
 	if err = ctx.Err(); err != nil {
 		return err
 	}
@@ -364,6 +367,8 @@ type transaction struct {
 	// transcript is not reloaded per derived item.
 	itemCache       *itemCache
 	itemBytesLoaded uint64
+	// deferred are Phase 3 reference checks run at commit (semantic.go).
+	deferred []func() error
 }
 
 var _ store.TxBase = (*transaction)(nil)
@@ -488,6 +493,9 @@ func (t *transaction) noteSequence(value any) {
 		semantic(v.Seq)
 	case domain.UnresolvedReference:
 		semantic(v.Seq)
+	case interface{ SemanticSeq() uint64 }:
+		// Every Phase 3 companion (P3-1).
+		semantic(v.SemanticSeq())
 	case domain.LifecycleEvent:
 		if v.TargetKind == domain.TargetCall {
 			if t.ledgerSeqs == nil {

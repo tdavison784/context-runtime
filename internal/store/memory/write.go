@@ -189,7 +189,7 @@ func (t *tx) UpdateItem(id string, expectedVersion uint64, change domain.ItemCha
 		return domain.ContextItem{}, err
 	}
 	t.items.put(id, next)
-	t.lifecycle.put(event.ID, event)
+	t.putLifecycle(event)
 	t.markSequenced()
 	return next, nil
 }
@@ -369,7 +369,7 @@ func (t *tx) RetireObligationVersion(obligationID string, version, expectedRevis
 		return domain.ObligationVersion{}, err
 	}
 	t.obligations.put(key, next)
-	t.lifecycle.put(event.ID, event)
+	t.putLifecycle(event)
 	t.markSequenced()
 	return next.Clone(), nil
 }
@@ -442,6 +442,7 @@ func (t *tx) InsertGrant(g domain.MutationGrant) error {
 		return fmt.Errorf("grant %s: %w", g.ID, domain.ErrImmutable)
 	}
 	t.grants.put(g.ID, g)
+	t.indexGrant(g)
 	t.markSequenced()
 	return nil
 }
@@ -462,7 +463,7 @@ func (t *tx) RevokeGrant(id string, event domain.LifecycleEvent) (domain.Mutatio
 	}
 	g.RevokedSeq = event.Seq
 	t.grants.put(id, g)
-	t.lifecycle.put(event.ID, event)
+	t.putLifecycle(event)
 	t.markSequenced()
 	return g, nil
 }
@@ -486,7 +487,7 @@ func (t *tx) PutTask(ts domain.TaskState, expectedVersion uint64, event domain.L
 	if err := t.checkTargetEvent(event, domain.TargetTask, ts.TaskID); err != nil {
 		return domain.TaskState{}, err
 	}
-	t.lifecycle.put(event.ID, event)
+	t.putLifecycle(event)
 	t.tasks.put(ts.TaskID, ts)
 	t.markSequenced()
 	return ts, nil
@@ -525,7 +526,7 @@ func (t *tx) AppendLifecycleEvent(e domain.LifecycleEvent) error {
 	if err := t.checkLifecycleEvent(e); err != nil {
 		return err
 	}
-	t.lifecycle.put(e.ID, e)
+	t.putLifecycle(e)
 	// TargetCall events belong to the call ledger, which is not semantic
 	// state.
 	if e.TargetKind != domain.TargetCall {

@@ -103,6 +103,11 @@ var suite = []testCase{
 	{"SemanticMembershipFrontier", testSemanticMembershipFrontier},
 	{"SemanticCheckpoints", testSemanticCheckpoints},
 	{"SemanticReceipts", testSemanticReceipts},
+	{"SemanticCreationDeclarations", testSemanticCreationDeclarations},
+	{"SemanticSnapshotDeclarations", testSemanticSnapshotDeclarations},
+	{"SemanticCurrentPointerCAS", testSemanticCurrentPointerCAS},
+	{"SemanticGrantsFor", testSemanticGrantsFor},
+	{"SemanticChanges", testSemanticChanges},
 
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},

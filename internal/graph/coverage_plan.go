@@ -85,7 +85,7 @@ func planDerivedCoverage(tx store.Tx, actor domain.Principal, derivedID string, 
 			if err != nil {
 				return plan, err
 			}
-			member.ID = deriveID("member", "context-runtime/graph/coverage-member-id/v1", plan.coverage.ID, key)
+			member.ID = key
 			plan.members = append(plan.members, member)
 		}
 	}
