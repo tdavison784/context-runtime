@@ -1,6 +1,10 @@
 package directive
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+)
 
 // The SDD v0.8 FR-DIR-006 example is intentionally verbatim.
 const canonicalExample = `## Goal
@@ -87,5 +91,18 @@ func TestT18PastedDocumentAndWorkingSections(t *testing.T) {
 				t.Fatal(item)
 			}
 		}
+	}
+}
+
+func TestCanonicalExampleTypedAttributes(t *testing.T) {
+	r := Parse([]byte(canonicalExample), Options{Authority: domain.AuthorityUser, DirectiveCapable: true})
+	if r.Err != nil || len(r.Items) != 11 || len(r.Lifecycle) != 1 {
+		t.Fatalf("%+v", r)
+	}
+	if r.Items[2].Obligation != "tests_pass" || r.Items[7].Kind != domain.KindDecision || r.Items[10].TTLTurns != 2 || r.Items[0].Kind != "" || r.Items[0].Scope != "" || r.Items[0].TTLTurns != 0 {
+		t.Fatalf("%+v", r.Items)
+	}
+	if c := r.Lifecycle[0]; c.Action != domain.LifecycleUnpin || c.TargetID != "architecture" || c.Authority != domain.AuthorityUser {
+		t.Fatal(c)
 	}
 }

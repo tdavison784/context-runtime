@@ -89,6 +89,13 @@ type Item struct {
 	Attributes   []Attribute
 	Range        ByteRange
 	TextRanges   []ByteRange
+	// Typed effective values of the validated Attributes (FR-DIR-004); the
+	// zero value means "not specified, apply defaults". TTLTurns is in
+	// 1..MaxTTLTurns when set.
+	Kind       domain.Kind
+	Scope      domain.Scope
+	TTLTurns   int
+	Obligation string
 }
 
 // Result retains source ordering in all slices. Recoverable malformed syntax
