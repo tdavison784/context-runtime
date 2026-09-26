@@ -299,3 +299,66 @@ func TestResourceInvalidationPagingAndLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterResource(t *testing.T) {
+	f := newFixture(t)
+	session := domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: testSession}
+	reg := func(actor domain.Principal, in domain.RegisterResourceIntent) (domain.ResourceBinding, error) {
+		var b domain.ResourceBinding
+		err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+			sem, err := begin(tx, actor, tx.NextSeq())
+			if err != nil {
+				return err
+			}
+			b, err = f.s.registerResource(tx, sem, actor, in, tx.LastSeq())
+			return err
+		})
+		return b, err
+	}
+	rep := sessionReporter()
+	b, err := reg(rep, domain.RegisterResourceIntent{RequestID: "reg1", ResourceID: "repo3", Reporter: rep, Access: session})
+	if err != nil || b.Reporter != rep || b.Owner != rep {
+		t.Fatalf("register = %+v %v", b, err)
+	}
+	// Registration sets no baseline: the first ordinary report is refused.
+	if _, err := f.s.report(t, f.st, rep, domain.ReportResourceChangeIntent{RequestID: "x", ResourceID: "repo3", ExpectedAuthoritativeRevision: 0, ResultingAuthoritativeRevision: 1, WorkspaceFingerprint: hashOf("W1")}); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("report before baseline: %v", err)
+	}
+	for name, c := range map[string]struct {
+		actor domain.Principal
+		in    domain.RegisterResourceIntent
+		want  error
+	}{
+		"re-registration":        {rep, domain.RegisterResourceIntent{RequestID: "reg2", ResourceID: "repo3", Reporter: rep, Access: session}, domain.ErrInvalidTransition},
+		"designate other":        {f.system, domain.RegisterResourceIntent{RequestID: "reg3", ResourceID: "repo4", Reporter: rep, Access: session}, domain.ErrInvalidAuthorityPromotion},
+		"USER registrar":         {f.userP, domain.RegisterResourceIntent{RequestID: "reg4", ResourceID: "repo5", Reporter: f.userP, Access: session}, domain.ErrInvalidAuthorityPromotion},
+		"boundary excludes self": {rep, domain.RegisterResourceIntent{RequestID: "reg5", ResourceID: "repo6", Reporter: rep, Access: taskBoundary()}, domain.ErrInvalidRecord},
+	} {
+		if _, err := reg(c.actor, c.in); !errors.Is(err, c.want) {
+			t.Errorf("%s: %v, want %v", name, err, c.want)
+		}
+	}
+}
+
+func TestRegisterResourceReceipt(t *testing.T) {
+	if (domain.RecordResult{Kind: resultResourceBinding, IDs: []string{"x"}}).Validate() != nil {
+		t.Skipf("RecordResult kind %s not yet accepted by W1", resultResourceBinding)
+	}
+	f := newFixture(t)
+	rep := sessionReporter()
+	in := domain.RegisterResourceIntent{RequestID: "reg1", ResourceID: "repo3", Reporter: rep, Access: domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: testSession}}
+	var first, again domain.MutationResult
+	mustUpdate(t, f.st, func(tx store.Tx) error {
+		var err error
+		first, err = f.s.RegisterResourceTx(tx, rep, in, tx.NextSeq())
+		return err
+	})
+	mustUpdate(t, f.st, func(tx store.Tx) error {
+		var err error
+		again, err = f.s.RegisterResourceTx(tx, rep, in, tx.NextSeq())
+		return err
+	})
+	if first.Records.IDs[0] != again.Records.IDs[0] {
+		t.Errorf("replay = %+v, want %+v", again, first)
+	}
+}
