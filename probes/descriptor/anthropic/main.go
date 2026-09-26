@@ -58,6 +58,7 @@ func main() {
 		}
 	}
 	run("models", func() error { return probeModels(ctx, rec) })
+	run("threshold-edit", func() error { return probeThresholdEdit(ctx, rec, ms[0], *fixtures) })
 	for i, m := range ms {
 		flagship := i == 0
 		run("reasoning", func() error { return probeReasoning(ctx, rec, m, ms, flagship) })
