@@ -291,6 +291,54 @@ func TestSupersedeSnapshot_TaskMismatch(t *testing.T) {
 	}
 }
 
+// TestSupersedeSnapshot_NewItemNotWorking is SPEC-2.1/AUTH-2.2: a new
+// "snapshot" item that was not itself written as part of a Working section
+// (Section != WORKING, e.g. a PINNED directive) must never be allowed to
+// retire a current Working item, and nothing may be written before that
+// check runs.
+func TestSupersedeSnapshot_NewItemNotWorking(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess, taskID = "sess-spec21", "task"
+	actor := principal(sess, domain.AuthorityUser)
+
+	var oldWorking, notWorking domain.ContextItem
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		oldWorking = workingItem(sess, "old-working", tx.NextSeq(), domain.AuthorityUser)
+		notWorking = storetest.NewDirective(sess, "pinned-not-working", "some-pin", tx.NextSeq(), "text")
+		mustInsert(t, tx, oldWorking, notWorking)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	err = s.Update(ctx, sess, func(tx store.Tx) error {
+		_, err := SupersedeSnapshot(tx, actor, []string{notWorking.ID}, taskID, "evt")
+		return err
+	})
+	if !errors.Is(err, ErrSnapshotNotWorking) {
+		t.Fatalf("err = %v, want ErrSnapshotNotWorking", err)
+	}
+
+	err = s.View(ctx, sess, func(tx store.ReadTx) error {
+		if ok, err := IsCurrent(tx, oldWorking.ID); err != nil || !ok {
+			t.Errorf("IsCurrent(old-working) = %v, %v; want true, nil (must not have been superseded)", ok, err)
+		}
+		rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: notWorking.ID})
+		if err != nil {
+			return err
+		}
+		if len(rels) != 0 {
+			t.Errorf("relationships from %s = %d, want 0", notWorking.ID, len(rels))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+}
+
 // TestSupersede_MissingAndInaccessibleErrorsAreIndistinguishable is AUTH-1.3:
 // a genuinely missing item and one that exists but is inaccessible must
 // fail with the identical bare domain.ErrNotFound, not merely
@@ -351,8 +399,11 @@ func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			it := storetest.NewDirective(sess, "d1", dirID, tx.NextSeq(), "text")
-			it.Authority = domain.AuthorityTool
+			// No Section: Validate now requires SYSTEM/HARNESS/USER authority
+			// for a directive section (AUTH-2.2), which would mask the actor
+			// rule this test targets. A directive ID alone doesn't need one.
+			it := taskItem(sess, "d1", tx.NextSeq(), domain.AuthorityTool)
+			it.DirectiveID = dirID
 			mustInsert(t, tx, it)
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityTool), taskID, dirID, it.ID, "evt")
 			return err
@@ -366,9 +417,10 @@ func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			// AGENT authority but not a keyed "agent.<key>" directive ID.
-			it := storetest.NewDirective(sess, "d2", dirID, tx.NextSeq(), "text")
-			it.Authority = domain.AuthorityAgent
+			// AGENT authority but not a keyed "agent.<key>" directive ID; no
+			// Section, for the same reason as ToolActorRejected above.
+			it := taskItem(sess, "d2", tx.NextSeq(), domain.AuthorityAgent)
+			it.DirectiveID = dirID
 			mustInsert(t, tx, it)
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityAgent), taskID, dirID, it.ID, "evt")
 			return err
@@ -411,6 +463,98 @@ func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
 		})
 		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 			t.Fatalf("err = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+	})
+}
+
+// TestReplaceDirective_VisibleBoundaryConflict is AUTH-2.1: reusing a
+// directive ID at a boundary the actor can already see, while a different
+// current version at another boundary is also visible, is a scope change
+// and must be rejected (previously it silently forked a second current
+// version).
+func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
+	t.Run("VisibleOtherBoundaryRejected", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		const sess, taskID, dirID = "sess-auth21-visible", "task", "policy"
+
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			h := taskItem(sess, "h", tx.NextSeq(), domain.AuthorityHarness)
+			h.DirectiveID = dirID
+			mustInsert(t, tx, h)
+			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityHarness), taskID, dirID, h.ID, "evt-h")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("filing h: %v", err)
+		}
+
+		err = s.Update(ctx, sess, func(tx store.Tx) error {
+			// Same session and task, but TURN-scoped instead of TASK-scoped:
+			// a different boundary, visible to the same USER principal.
+			u := taskItem(sess, "u", tx.NextSeq(), domain.AuthorityUser)
+			u.DirectiveID = dirID
+			u.Scope = domain.ScopeTurn
+			u.Access = domain.AccessBoundary{Scope: domain.ScopeTurn, SessionID: sess, TaskID: u.TaskID}
+			mustInsert(t, tx, u)
+			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityUser), taskID, dirID, u.ID, "evt-u")
+			return err
+		})
+		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Fatalf("err = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+
+		// h must remain the only current version; the rejected write left
+		// nothing behind.
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			versions, err := tx.CurrentDirectives(taskID, dirID)
+			if err != nil {
+				return err
+			}
+			if len(versions) != 1 || versions[0] != "h" {
+				t.Errorf("CurrentDirectives(%s) = %v, want [h]", dirID, versions)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("view: %v", err)
+		}
+	})
+
+	t.Run("HiddenOtherBoundaryStaysIndependent", func(t *testing.T) {
+		// The round-1 property AUTH-2.1 must not regress: a version at a
+		// boundary the actor cannot see never blocks (or reveals) a first
+		// version at the actor's own, different boundary.
+		s := memory.New()
+		defer s.Close()
+		const sess, taskID, dirID = "sess-auth21-hidden", "task", "shared-id"
+
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			hidden := agentScopedItem(sess, "hidden-v", tx.NextSeq(), "agent-b")
+			hidden.DirectiveID = dirID
+			mustInsert(t, tx, hidden)
+			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-b"), taskID, dirID, hidden.ID, "evt-hidden")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("filing hidden version: %v", err)
+		}
+
+		err = s.Update(ctx, sess, func(tx store.Tx) error {
+			visible := agentScopedItem(sess, "visible-v", tx.NextSeq(), "agent-a")
+			visible.DirectiveID = dirID
+			mustInsert(t, tx, visible)
+			prev, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID, visible.ID, "evt-visible")
+			if err != nil {
+				return err
+			}
+			if prev != "" {
+				t.Errorf("prev = %q, want empty (agent-a's boundary is a first version)", prev)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("filing visible version: %v", err)
 		}
 	})
 }
@@ -827,6 +971,7 @@ func TestLinkDerived_And_Provenance_HappyPath(t *testing.T) {
 	var derivedID, s1ID, s2ID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		derived := taskItem(sess, "derived", tx.NextSeq(), domain.AuthorityAgent)
+		derived.EventID = "evt-link" // LinkDerived only runs in the creating event (AUTH-2.4)
 		s1 := taskItem(sess, "src1", tx.NextSeq(), domain.AuthorityUser)
 		s2 := taskItem(sess, "src2", tx.NextSeq(), domain.AuthorityUser)
 		derivedID, s1ID, s2ID = derived.ID, s1.ID, s2.ID
@@ -972,6 +1117,105 @@ func TestProvenance_RootMustBeAccessible(t *testing.T) {
 	}
 }
 
+// -- LinkDerived actor-authority and creation-event gates (TEST-2.2, AUTH-2.4) --
+
+// TestLinkDerived_ActorAuthorityRequired is TEST-2.2 (the missing
+// regression test for AUTH-1.1): a TOOL actor, a RETRIEVED_CONTENT actor,
+// and an under-authority AGENT actor must each be rejected with
+// ErrInvalidAuthorityPromotion, against an otherwise-valid call (accessible
+// derived item, accessible source, satisfied boundary, matching creation
+// event) so only the actor-authority gate is under test.
+func TestLinkDerived_ActorAuthorityRequired(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		actorAuthority   domain.Authority
+		derivedAuthority domain.Authority
+	}{
+		{"ToolActor", domain.AuthorityTool, domain.AuthorityAgent},
+		{"RetrievedContentActor", domain.AuthorityRetrievedContent, domain.AuthorityAgent},
+		{"UnderAuthorityAgentActor", domain.AuthorityAgent, domain.AuthorityUser},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := memory.New()
+			defer s.Close()
+			sess := "sess-linkderived-authority-" + tc.name
+			actor := principal(sess, tc.actorAuthority)
+
+			err := s.Update(ctx, sess, func(tx store.Tx) error {
+				derived := taskItem(sess, "derived", tx.NextSeq(), tc.derivedAuthority)
+				derived.EventID = "evt"
+				src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser)
+				mustInsert(t, tx, derived, src)
+				_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, "evt")
+				return err
+			})
+			if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+				t.Fatalf("err = %v, want ErrInvalidAuthorityPromotion", err)
+			}
+		})
+	}
+}
+
+// TestLinkDerived_MustBeCreationEvent is AUTH-2.4: LinkDerived may only run
+// in the transaction/event that created the derived item.
+func TestLinkDerived_MustBeCreationEvent(t *testing.T) {
+	t.Run("DifferentEventRejected", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		const sess = "sess-auth24-diff-event"
+		actor := principal(sess, domain.AuthorityAgent)
+
+		var derivedID string
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			derived := taskItem(sess, "note", tx.NextSeq(), domain.AuthorityAgent)
+			derived.EventID = "evt-created-note"
+			src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser)
+			derivedID = derived.ID
+			mustInsert(t, tx, derived, src)
+			// A later, different event tries to attach provenance
+			// post-hoc.
+			_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, "evt-later-and-different")
+			return err
+		})
+		if !errors.Is(err, ErrDerivedLinkNotAtCreation) {
+			t.Fatalf("err = %v, want ErrDerivedLinkNotAtCreation", err)
+		}
+
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDerivedFrom, FromID: derivedID})
+			if err != nil {
+				return err
+			}
+			if len(rels) != 0 {
+				t.Errorf("relationships from %s = %d, want 0", derivedID, len(rels))
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("view: %v", err)
+		}
+	})
+
+	t.Run("SameEventAllowed", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		const sess, eventID = "sess-auth24-same-event", "evt-created-note"
+		actor := principal(sess, domain.AuthorityAgent)
+
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			derived := taskItem(sess, "note", tx.NextSeq(), domain.AuthorityAgent)
+			derived.EventID = eventID
+			src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser)
+			mustInsert(t, tx, derived, src)
+			_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, eventID)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 // -- derived boundary rejection and all-or-nothing writes ------------------
 
 func TestLinkDerived_BoundaryRejection(t *testing.T) {
@@ -985,6 +1229,7 @@ func TestLinkDerived_BoundaryRejection(t *testing.T) {
 		src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser) // TASK-scoped
 		derived := storetest.NewItem(sess, "derived", tx.NextSeq(), "summary")
 		derived.Authority = domain.AuthorityAgent // passes the actor-authority gate (AUTH-1.1); SESSION scope still trips the boundary check
+		derived.EventID = "evt"                   // passes the same-event gate (AUTH-2.4)
 		derivedID = derived.ID
 		mustInsert(t, tx, src, derived)
 		_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, "evt")
@@ -1018,6 +1263,7 @@ func TestLinkDerived_CoverageMismatchWritesNothing(t *testing.T) {
 	var derivedID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		derived := taskItem(sess, "derived-cm", tx.NextSeq(), domain.AuthorityAgent)
+		derived.EventID = "evt"
 		src := taskItem(sess, "src-cm", tx.NextSeq(), domain.AuthorityUser)
 		derivedID = derived.ID
 		mustInsert(t, tx, derived, src)
@@ -1056,6 +1302,7 @@ func TestLinkDerived_InaccessibleSourceWritesNothing(t *testing.T) {
 	var derivedID, visibleID, hiddenID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		derived := taskItem(sess, "note", tx.NextSeq(), domain.AuthorityAgent)
+		derived.EventID = "evt-note"
 		visible := taskItem(sess, "x9", tx.NextSeq(), domain.AuthorityTool)
 		hidden := agentScopedItem(sess, "other-session-item", tx.NextSeq(), "agent-b")
 		derivedID, visibleID, hiddenID = derived.ID, visible.ID, hidden.ID
@@ -1099,6 +1346,7 @@ func TestLinkDerived_AllOrNothing(t *testing.T) {
 	var derivedID, s1ID, s2ID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		derived := taskItem(sess, "derived2", tx.NextSeq(), domain.AuthorityAgent)
+		derived.EventID = eventID
 		s1 := taskItem(sess, "s1", tx.NextSeq(), domain.AuthorityUser)
 		s2 := taskItem(sess, "s2", tx.NextSeq(), domain.AuthorityUser)
 		derivedID, s1ID, s2ID = derived.ID, s1.ID, s2.ID
@@ -1141,6 +1389,202 @@ func TestLinkDerived_AllOrNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("view: %v", err)
 	}
+}
+
+// -- ResolveLifecycleTarget (SPEC-2.2) --------------------------------------
+
+func TestResolveLifecycleTarget_LiteralItemID(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess, taskID = "sess-resolve-literal", "task"
+	actor := principal(sess, domain.AuthorityUser)
+
+	var itemID string
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		it := taskItem(sess, "plain-item", tx.NextSeq(), domain.AuthorityUser)
+		itemID = it.ID
+		return tx.InsertItem(it)
+	})
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	err = s.View(ctx, sess, func(tx store.ReadTx) error {
+		got, err := ResolveLifecycleTarget(tx, actor, taskID, itemID)
+		if err != nil {
+			return err
+		}
+		if got != itemID {
+			t.Errorf("got %q, want %q", got, itemID)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+}
+
+func TestResolveLifecycleTarget_LiteralItemNotCurrentOrInaccessible(t *testing.T) {
+	const sess, taskID = "sess-resolve-literal-bad", "task"
+
+	t.Run("Superseded", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		actor := principal(sess, domain.AuthorityUser)
+		var oldID string
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			oldItem := taskItem(sess, "old", tx.NextSeq(), domain.AuthorityUser)
+			newItem := taskItem(sess, "new", tx.NextSeq(), domain.AuthorityUser)
+			oldID = oldItem.ID
+			mustInsert(t, tx, oldItem, newItem)
+			_, err := Supersede(tx, actor, newItem.ID, oldItem.ID, "evt", "")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			_, err := ResolveLifecycleTarget(tx, actor, taskID, oldID)
+			return err
+		})
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("Inaccessible", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		var hiddenID string
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			hidden := agentScopedItem(sess, "hidden", tx.NextSeq(), "agent-b")
+			hiddenID = hidden.ID
+			return tx.InsertItem(hidden)
+		})
+		if err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			_, err := ResolveLifecycleTarget(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, hiddenID)
+			return err
+		})
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
+	const taskID, dirID = "task", "g"
+
+	t.Run("SingleAccessibleVersion", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		const sess = "sess-resolve-single"
+		actor := principal(sess, domain.AuthorityUser)
+		var goalID string
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			g := storetest.NewGoal(sess, "goal1", tx.NextSeq(), "Ship it")
+			g.DirectiveID = dirID
+			goalID = g.ID
+			mustInsert(t, tx, g)
+			_, err := ReplaceDirective(tx, actor, taskID, dirID, g.ID, "evt")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			got, err := ResolveLifecycleTarget(tx, actor, taskID, dirID)
+			if err != nil {
+				return err
+			}
+			if got != goalID {
+				t.Errorf("got %q, want %q", got, goalID)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("view: %v", err)
+		}
+	})
+
+	t.Run("NoAccessibleVersion", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		const sess = "sess-resolve-none"
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			hidden := agentScopedItem(sess, "hidden-goal", tx.NextSeq(), "agent-b")
+			hidden.DirectiveID = dirID
+			mustInsert(t, tx, hidden)
+			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-b"), taskID, dirID, hidden.ID, "evt")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			_, err := ResolveLifecycleTarget(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID)
+			return err
+		})
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	})
+
+	// AmbiguousAcrossBoundaries reproduces AUTH-2.1's own residual case: a
+	// private AGENT-scoped version is filed first; a task-wide version is
+	// filed second by a principal who genuinely cannot see the private one
+	// (so rejectVisibleBoundaryConflict correctly does not, and must not,
+	// block that second write — doing so would require disclosing the
+	// hidden version's existence to the task-wide filer). The two versions
+	// are now both current, and both visible to the private version's own
+	// agent, who must get ErrAmbiguousDirective rather than an arbitrary
+	// pick.
+	t.Run("AmbiguousAcrossBoundaries", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		const sess = "sess-resolve-ambiguous"
+
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			private := agentScopedItem(sess, "d-private", tx.NextSeq(), "agent-a")
+			private.DirectiveID = dirID
+			mustInsert(t, tx, private)
+			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID, private.ID, "evt-private")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("setup private version: %v", err)
+		}
+
+		err = s.Update(ctx, sess, func(tx store.Tx) error {
+			taskWide := taskItem(sess, "d-task-wide", tx.NextSeq(), domain.AuthorityHarness)
+			taskWide.DirectiveID = dirID
+			mustInsert(t, tx, taskWide)
+			// A HARNESS/task-wide principal cannot see agent-a's private
+			// version, so this must succeed (round-1 AUTH-2.1 property: a
+			// hidden boundary never blocks or is revealed).
+			prev, err := ReplaceDirective(tx, principal(sess, domain.AuthorityHarness), taskID, dirID, taskWide.ID, "evt-task-wide")
+			if err != nil {
+				return err
+			}
+			if prev != "" {
+				t.Errorf("prev = %q, want empty (agent-a's private version must stay invisible)", prev)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("setup task-wide version: %v", err)
+		}
+
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			_, err := ResolveLifecycleTarget(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID)
+			return err
+		})
+		if !errors.Is(err, ErrAmbiguousDirective) {
+			t.Fatalf("err = %v, want ErrAmbiguousDirective", err)
+		}
+	})
 }
 
 // -- deep chain -------------------------------------------------------------
