@@ -39,11 +39,14 @@ var (
 	// SectionWorking): only a Working section can retire other Working
 	// items (SPEC-2.1).
 	ErrSnapshotNotWorking = errors.New("graph: new snapshot item's section is not WORKING")
-	// ErrDerivedLinkNotAtCreation reports a LinkDerived call whose eventID
-	// does not match the derived item's own creating EventID (AUTH-2.4):
-	// provenance may only be attached by the event that writes the derived
-	// item, never post-hoc by a later, possibly lower-authority, actor.
-	ErrDerivedLinkNotAtCreation = errors.New("graph: derived item's provenance can only be linked by the event that created it")
+	// ErrDerivedLinkNotAtCreation reports a LinkDerived call running outside
+	// the transaction that inserted the derived item (AUTH-2.4, tightened
+	// by AUTH-3.1 to check tx.Allocated rather than a caller-supplied
+	// EventID string, which anyone who can access the item can read and
+	// replay): provenance may only be attached by the transaction that
+	// writes the derived item, never post-hoc by a later, possibly
+	// lower-authority, actor.
+	ErrDerivedLinkNotAtCreation = errors.New("graph: derived item's provenance can only be linked in the transaction that created it")
 	// ErrAmbiguousDirective reports a lifecycle target (SDD section 8, v0.8)
 	// that names more than one directive version the actor can currently
 	// see: FR-DIR-002 keys a directive by (task, directive ID, access
@@ -105,7 +108,10 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 // scope change, which FR-DIR-002 requires to go through an explicit
 // authorized replacement, not a silent fork into two current versions.
 // Boundaries actor cannot access are never consulted for this check, so it
-// discloses nothing beyond what the actor could already see.
+// discloses nothing beyond what the actor could already see. A version
+// tx.CurrentDirectives still names but that has since been superseded is
+// not a conflict (AUTH-3.2): the pointer is stale, not a second live
+// version, and must never block a legitimate write.
 func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, taskID, directiveID string) error {
 	ids, err := tx.CurrentDirectives(taskID, directiveID)
 	if err != nil {
@@ -119,7 +125,14 @@ func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, task
 			}
 			return err
 		}
-		if it.Access.Permits(actor) {
+		if !it.Access.Permits(actor) {
+			continue
+		}
+		cur, err := IsCurrent(tx, id)
+		if err != nil {
+			return err
+		}
+		if cur {
 			return domain.ErrInvalidAuthorityPromotion
 		}
 	}
@@ -389,7 +402,19 @@ func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id 
 			}
 			return "", err
 		}
-		if it.Access.Permits(actor) {
+		if !it.Access.Permits(actor) {
+			continue
+		}
+		// tx.CurrentDirectives points at the current-directive record, but
+		// that record can go stale the moment the item it names is
+		// superseded outside the directive map (e.g. by a Working
+		// snapshot, AUTH-3.2): a lifecycle command must never resolve to a
+		// version that is no longer current.
+		cur, err := IsCurrent(tx, versionID)
+		if err != nil {
+			return "", err
+		}
+		if cur {
 			candidates = append(candidates, versionID)
 			seen[versionID] = true
 		}
@@ -487,10 +512,12 @@ func CheckDerivedBoundary(derived domain.AccessBoundary, sources []domain.Contex
 // out of context. TOOL and RETRIEVED_CONTENT actors are always rejected,
 // mirroring AuthorizeSupersession.
 //
-// eventID must equal derived.EventID (AUTH-2.4, ErrDerivedLinkNotAtCreation
-// otherwise): provenance may only be attached by the very event that wrote
-// the derived item, never post-hoc by a later, possibly lower-authority
-// actor reaching into an existing item's history.
+// derived.Seq must have been allocated by NextSeq in tx itself
+// (tx.Allocated, AUTH-3.1, ErrDerivedLinkNotAtCreation otherwise):
+// provenance may only be attached in the very transaction that inserted the
+// derived item, never post-hoc from a later transaction, even one that
+// supplies the item's own EventID (a string on the item, readable by
+// anyone who can access it, and not proof of when the caller is running).
 func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) ([]domain.Relationship, error) {
 	if err := actor.Validate(); err != nil {
 		return nil, err
@@ -503,7 +530,7 @@ func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceID
 		!actor.Authority.AtLeast(derived.Authority) {
 		return nil, domain.ErrInvalidAuthorityPromotion
 	}
-	if derived.EventID == "" || derived.EventID != eventID {
+	if !tx.Allocated(derived.Seq) {
 		return nil, ErrDerivedLinkNotAtCreation
 	}
 
