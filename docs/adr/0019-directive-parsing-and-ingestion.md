@@ -171,7 +171,8 @@ T01/T02/T18; ADR 6.
 Each span produces exactly one immutable transcript item (verbatim span
 content; kind by span authority: USER→`user_message`, AGENT→
 `assistant_message`, TOOL→`tool_result`, RETRIEVED_CONTENT→`evidence`,
-SYSTEM/HARNESS→`instruction`) plus zero or more directive items, each
+SYSTEM/HARNESS→`conversation` — corrected below, SPEC-2.6) plus zero or
+more directive items, each
 `DERIVED_FROM` its transcript item with `Coverage` naming that item —
 byte-level ranges live on the directive item's own `SourceRef`/diagnostics,
 not on the `Relationship`. A directive-bearing transcript is an
@@ -1240,7 +1241,7 @@ each with its own fix and test.
   the poison first and short-circuits with it, and reads/`NextSeq`/
   `Allocated` keep working. Poisoning never poisons the `EventID` itself —
   nothing committed, so the same `EventID` remains retryable — only the
-  in-flight transaction. `domain.ErrPoisoned` is the sentinel for
+  in-flight transaction. `store.ErrPoisoned` is the sentinel for
   `Poison(nil)`. Tests: `TestApplyFailureAtomic_DUR13`
   (`internal/ingest/fixes_r1_test.go`); store-level `TestConformance
   /PoisonRollsBack`, `.../PoisonFirstErrorWins`, `.../PoisonBlocksEveryWrite`
