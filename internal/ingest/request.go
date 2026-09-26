@@ -74,35 +74,3 @@ func ceilingPolicy(pol *domain.Phase3Policy) *domain.Phase3Policy {
 	c.MaxMetadataBytes = max(c.MaxMetadataBytes, hardMaxOperationBytes)
 	return &c
 }
-
-// newSemanticEnvelope snapshots a v3 request the way domain.NewEventEnvelope
-// snapshots a v2 one: supplied blob bytes become verified references, and
-// the recorded hash schema, limits and policy travel with it.
-func newSemanticEnvelope(p domain.Principal, occurrence string, e domain.Event, limits domain.Limits, pol domain.Phase3Policy) (domain.EventEnvelope, error) {
-	hash, err := e.PayloadHashFor(domain.RequestHashV3, p, limits, pol)
-	if err != nil {
-		return domain.EventEnvelope{}, err
-	}
-	e = e.Clone()
-	for i := range e.Spans {
-		for j, part := range e.Spans[i].Parts {
-			if part.Data != nil {
-				snap := part.Snapshot()
-				e.Spans[i].Parts[j] = domain.InputPart{Type: part.Type, MediaType: part.MediaType, BlobHash: snap.BlobHash, BlobSize: snap.BlobSize}
-			}
-		}
-	}
-	env := domain.EventEnvelope{
-		RequestHashVersion: domain.RequestHashV3,
-		SemanticPolicy:     &pol,
-		Limits:             limits,
-		SessionID:          p.SessionID,
-		OccurrenceID:       occurrence,
-		EventID:            e.EventID,
-		Principal:          p,
-		Event:              e,
-		PayloadHash:        hash,
-		SchemaVersion:      domain.EventEnvelopeSchemaV2,
-	}
-	return env, env.Validate()
-}

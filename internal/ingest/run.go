@@ -346,7 +346,7 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 	)
 	if r.pol != nil {
 		rc.SchemaVersion, rc.RequestHashVersion, rc.Operations, rc.MutationReceiptIDs = domain.IngestReceiptSchemaV2, domain.RequestHashV3, r.opResults, r.mutationReceipts
-		env, err = newSemanticEnvelope(r.p, r.occurrence, r.e, r.limits, *r.pol)
+		env, err = domain.NewSemanticEventEnvelope(r.p, r.occurrence, r.e, r.limits, *r.pol)
 	} else {
 		env, err = domain.NewEventEnvelope(r.p, r.occurrence, r.e)
 	}
