@@ -41,6 +41,27 @@ preserve valid state.
   `store.ItemFilter`/`RelationshipFilter`/`CallFilter` filters or orders by
   (FR-PER-002's structured fields — session/task/agent ID, kind, residency,
   Seq, PreparedSeq) is a real column.
+- **Typed-column schema, no opaque payload copy** (`internal/store/sqlite
+  /schema.go`, migration reworked in place in commit `361a293` while still
+  pre-release): each record kind gets its own `rec_*` table keyed on
+  `(session_id, id, subkey)`; every other scalar or nested field occupies
+  its own typed column (e.g. `rec_item` has one column per `ContextItem`
+  field, including `f_access_scope`/`f_access_session_id`/... for the
+  embedded `AccessBoundary`). A `_present` column distinguishes a nil
+  pointer from a zero-valued nested record, and a parallel nil-marker
+  column distinguishes a nil byte slice from an empty BLOB, so no record is
+  ever stored as a second, opaque serialized copy alongside its columns —
+  every column is independently inspectable and indexable.
+  `TestEmbeddedSchemaMatchesTypes` asserts the compiled column set for
+  every Go struct field against the migration's actual `PRAGMA
+  table_info`, so the schema and the struct cannot drift silently.
+- Connection settings are concrete, not placeholders: WAL mode,
+  `foreign_keys=ON`, `synchronous=FULL`, and a `busy_timeout` defaulting to
+  5 seconds (`Store` option `WithBusyTimeout`, `internal/store/sqlite
+  /sqlite.go`) — resolving this ADR's earlier open question.
+- Migrations are tracked in `schema_migrations(version INTEGER PRIMARY KEY,
+  name TEXT, checksum TEXT)`; `Open` compares each applied version's stored
+  checksum against the embedded file's and fails to open on any mismatch.
 
 ## Alternatives considered
 
@@ -91,34 +112,57 @@ preserve valid state.
 
 ## Tests that lock the behavior
 
-- `internal/store/storetest` (already the shared conformance suite used by
-  `builders.go`/`storetest.go`) must run against both the memory store and
-  the SQLite store from the same test table, so any SQLite-specific
-  transaction behavior is caught by the same assertions as the memory store.
-- Required: an SQLite-specific test that starts a migration, kills the
-  process mid-migration (or simulates it by truncating the WAL), and asserts
-  a restart replays cleanly to a consistent `schema_migrations` state
-  (T10-style crash recovery, generalized to schema setup rather than calls).
-- Required: a test asserting a checksum mismatch on a previously-applied
-  migration fails startup with a descriptive error rather than proceeding.
-- Required: a file-permission test asserting a freshly created database file
-  has mode `0600` on the platforms CI runs (skip or adapt on Windows).
-- Required: a concurrency test under `-race` that runs `Update` against two
-  or more *different* session IDs concurrently and asserts **correctness**
-  (each session's writes commit atomically and are all present afterward,
-  with no corruption or lost update) rather than asserting the sessions
-  serialize or don't — bounded contention from SQLite's single writer is
-  expected and is not itself a failure.
+- `internal/store/storetest.Run` is the shared conformance suite
+  (`internal/store/storetest/storetest.go`); `internal/store/sqlite
+  /sqlite_test.go:TestConformance` and `internal/store/memory
+  /memory_test.go:TestConformance` both run it, so every assertion below
+  applies identically to both stores.
+  - `TestConformance/ConcurrentUpdatesDense` (`storetest/transactions.go`)
+    is the correctness-under-concurrency test this ADR calls for: 16
+    workers write concurrently to each of two different sessions (with
+    every fifth transaction deliberately rolled back), and the test asserts
+    each session's committed sequence numbers are dense and gapless and its
+    stored items match exactly — never that the sessions ran in parallel or
+    serialized. Run under `go test -race`, this is the assertion that
+    matters, not a timing observation.
+  - `TestConformance/SessionIsolation` and `.../ForeignSessionRecords`
+    assert cross-session data never leaks regardless of write ordering.
+- `internal/store/sqlite/durability_test.go`:
+  - `TestRestartPreservesRecords` closes and reopens the store and asserts
+    identical logical state (FR-PER-003).
+  - `TestMigrationChecksumMismatch` asserts a hand-altered applied migration
+    fails `Open` rather than proceeding silently.
+  - `TestEmbeddedSchemaMatchesTypes` asserts the typed-column schema matches
+    every Go struct field, locking the no-opaque-copy design above.
+  - `TestFileCreatedPrivate` asserts a freshly created database file is mode
+    `0600`.
+  - `TestConcurrentSequenceDensity` asserts dense, gapless sequence
+    allocation under 24 concurrent writers to one session.
+  - `TestCallTransitionsRequireAttemptEvidence`, `TestObligationTransitionCAS`,
+    and `TestAuditedGrantAndTaskMutations` are SQLite-specific
+    reconfirmations of the store contract rules ADRs 16 and 17 describe
+    (evidence-gated `UpdateCall`, obligation-transition CAS, atomic audit
+    writes) — genuinely SQLite-specific because they exercise the typed-
+    column write path, not just the in-memory one.
+- The full `internal/store/sqlite` package runs in about 5-6s under
+  `go test -race ./... -count=1` (measured on this branch), consistent with
+  a real SQLite file per test rather than a mocked backend.
 
 ## Open questions
 
-- Exact `busy_timeout` value; needs a number before the SQLite store lands,
-  not just "a busy_timeout".
+None remaining for this ADR's original scope; `busy_timeout` (5s default,
+`WithBusyTimeout` to override) is now decided in code.
 
 ## Review
 
-Scrutinized by Codex gpt-6-sol xhigh (`codex-decision-review-out.md`,
-finding 14/low). Changed: the "assert no serialization" test framing (which
-conflicted with SQLite's single-writer design) is replaced with a
-correctness-under-concurrency test, and the consequences section no longer
-treats single-writer contention as a gap to be engineered away.
+First pass (Codex gpt-6-sol xhigh, `codex-decision-review-out.md`, finding
+14/low): the "assert no serialization" test framing conflicted with
+SQLite's single-writer design; replaced with a correctness-under-
+concurrency test, and the consequences section stopped treating
+single-writer contention as a gap to engineer away.
+
+Verified against the integrated `internal/store/sqlite` implementation
+(commits `361a293`, `70d169e`, and the full durability/conformance suite):
+the typed-column schema, concrete connection settings, and the specific
+tests above replace what were "Required" placeholders in the first-pass
+version of this ADR. No further Codex finding is open against this ADR.
