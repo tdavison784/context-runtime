@@ -131,7 +131,9 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 // anonymous occurrence ID when e has no EventID and must be empty
 // otherwise; the caller generates it once per attempt, outside any retried
 // transaction callback. Apply revalidates e, so it is safe to call
-// directly. On error the caller must abort tx.
+// directly. It is failure-atomic: an error after its first write poisons
+// tx (store.Tx.Poison), so the caller's transaction commits nothing even if
+// the error is ignored; an error before any write leaves tx usable.
 //
 // Every error Ingest and Apply return is a bare public sentinel (or a join
 // of them): never text naming an item or other record (R20.1).
@@ -180,7 +182,18 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	}
 
 	r := &run{g: g, tx: tx, p: p, e: e, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
-	return r.apply()
+	rc, err := r.apply()
+	if err != nil {
+		// Everything above only read; from here the core has written. Any
+		// failure poisons the caller's transaction, so no partial result
+		// can commit even if the caller ignores the error, and the EventID
+		// stays retryable (DUR-1.3). The poison carries only the public
+		// sentinel, never item details (R20.1).
+		err = sanitize(err)
+		tx.Poison(err)
+		return domain.IngestReceipt{}, err
+	}
+	return rc, nil
 }
 
 // lookupReceipt returns the stored receipt of a caller EventID (keyed by its
