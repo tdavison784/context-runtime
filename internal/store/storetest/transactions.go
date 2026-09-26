@@ -504,3 +504,54 @@ func testForeignSessionRecords(t *testing.T, s store.Store) {
 		})
 	}
 }
+
+// testAllocated checks Tx.Allocated: true exactly for sequence numbers
+// NextSeq allocated in the same transaction.
+func testAllocated(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		if tx.Allocated(0) || tx.Allocated(1) {
+			t.Errorf("Allocated before any NextSeq = true")
+		}
+		n := seqs(tx, 2)
+		for _, seq := range n {
+			if !tx.Allocated(seq) {
+				t.Errorf("Allocated(%d) = false for a number allocated in this transaction", seq)
+			}
+		}
+		if tx.Allocated(0) || tx.Allocated(n[1]+1) {
+			t.Errorf("Allocated reports a number never allocated")
+		}
+		return nil
+	})
+	// A rolled-back transaction's numbers are reused; allocated again they
+	// belong to the new transaction.
+	err := s.Update(ctx, sessA, func(tx store.Tx) error {
+		if got := tx.NextSeq(); got != 3 || !tx.Allocated(3) {
+			t.Errorf("NextSeq = %d, Allocated(3) = %v; want 3, true", got, tx.Allocated(3))
+		}
+		return errRollback
+	})
+	wantErr(t, err, errRollback)
+	update(t, s, sessA, func(tx store.Tx) error {
+		for _, seq := range []uint64{1, 2, 3} {
+			if tx.Allocated(seq) {
+				t.Errorf("Allocated(%d) = true in a later transaction", seq)
+			}
+		}
+		if seq := tx.NextSeq(); seq != 3 || !tx.Allocated(3) || tx.Allocated(2) {
+			t.Errorf("after NextSeq = %d: Allocated(3) = %v, Allocated(2) = %v; want 3, true, false",
+				seq, tx.Allocated(3), tx.Allocated(2))
+		}
+		return nil
+	})
+	// Allocation is per session.
+	update(t, s, sessB, func(tx store.Tx) error {
+		if tx.Allocated(1) {
+			t.Errorf("Allocated(1) = true in another session before NextSeq")
+		}
+		if seq := tx.NextSeq(); seq != 1 || !tx.Allocated(1) {
+			t.Errorf("session B NextSeq = %d, Allocated(1) = %v; want 1, true", seq, tx.Allocated(1))
+		}
+		return nil
+	})
+}

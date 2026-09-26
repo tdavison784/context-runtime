@@ -67,10 +67,15 @@ func (t *tx) own(sessionID string) error {
 	return nil
 }
 
+// Allocated implements store.Tx.
+func (t *tx) Allocated(seq uint64) bool {
+	return !t.done && seq > t.baseSeq && seq <= t.lastSeq
+}
+
 // fresh enforces the sequence rule: seq must have been allocated by NextSeq
 // in this transaction.
 func (t *tx) fresh(what string, seq uint64) error {
-	if seq <= t.baseSeq || seq > t.lastSeq {
+	if !t.Allocated(seq) {
 		return invalid("%s: sequence %d was not allocated in this transaction", what, seq)
 	}
 	return nil
