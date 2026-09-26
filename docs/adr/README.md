@@ -72,5 +72,9 @@ directory.
   FR-DIR-007 requires same authority *and* access boundary.
 
 Independent review: Codex gpt-6-sol xhigh reviewed all seven Phase 1 ADRs
-against the committed code and the SDD (`scratchpad/codex-decision-review-out.md`);
-findings that changed a decision are noted in that ADR's Review section.
+against the committed code and the SDD in two passes — the initial review
+(`scratchpad/codex-decision-review-out.md`) and a verification pass after
+contract v2 landed (`scratchpad/codex-contract-v2-review.md`), which found
+several of the first pass's fixes PARTIAL and one (ADR 6's temporal-
+eligibility deferral) DEFERRED-WRONG. Findings that changed a decision are
+noted in that ADR's Review section, labeled by pass.
