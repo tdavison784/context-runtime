@@ -1,0 +1,146 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_astra_r1_replay",
+  "request": {
+    "input": [
+      {
+        "content_length": 145,
+        "role": "user"
+      },
+      {
+        "encrypted_content": {
+          "length": 1356,
+          "sha256": "0ad327ee1bfccd89f06dcf98a66b1577ca3c99d16b07d19fc1569357b0a1d78a"
+        },
+        "type": "reasoning"
+      },
+      {
+        "name": "lookup",
+        "type": "function_call"
+      },
+      {
+        "type": "function_call_output"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-astra",
+    "reasoning": {
+      "effort": "medium"
+    },
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790426943,
+    "created_at": 1790426941,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "ce649c40999f8e5289b9d1b95dc1ba7292f00c4743e6a493f78aa208401bd99e"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 160,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-astra",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1292,
+          "sha256": "7b71e7e6b941c67eacdeb848fb80074964071562f4dfedc4b36fe1526eb4fdf2"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "9f45f1ca30be6df40d0ae1156429d558a34461f998b570f0f09e8c08ed22e56e"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "cobalt",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "c290cde5fd5c0c232df522665caa4477a21563ef2dd7c8862ab68d3cbf9ea6b3"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 118,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 26,
+      "output_tokens_details": {
+        "reasoning_tokens": 18
+      },
+      "total_tokens": 144
+    },
+    "user": "[redacted]"
+  }
+}

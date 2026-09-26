@@ -1,0 +1,121 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_c3_repeat",
+  "request": {
+    "input": [
+      {
+        "content_length": 8270,
+        "role": "developer"
+      },
+      {
+        "content": "Reply with the marker.",
+        "content_length": 22,
+        "role": "user"
+      }
+    ],
+    "max_output_tokens": 32,
+    "model": "gpt-6-luna",
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790427080,
+    "created_at": 1790427079,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "c89a7f75944a220274381729353df6958c185c4164a650e71095a1e078fc04b5"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 32,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "BLUE",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "9884828ac6ac60a527a8c7e159c92fa1156f26613fed51df66ace8c7b8649cdd"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 1645,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 1642
+      },
+      "output_tokens": 5,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 1650
+    },
+    "user": "[redacted]"
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_r4_edit_earlier",
+  "request": {
+    "input": [
+      {
+        "content": "Use lookup with code B, then answer with the word returned.",
+        "content_length": 59,
+        "role": "user"
+      },
+      {
+        "encrypted_content": {
+          "length": 1484,
+          "sha256": "391649d40e58e85077fd0613f7a7293f4e2a57b0fa5574baefd4ea171215a54e"
+        },
+        "type": "reasoning"
+      },
+      {
+        "name": "lookup",
+        "type": "function_call"
+      },
+      {
+        "type": "function_call_output"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-luna",
+    "reasoning": {
+      "effort": "medium"
+    },
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790426958,
+    "created_at": 1790426958,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "3ca4e4d2e905a2156f41fbd4b064f2d3719dae23ddb81a10ed56b1ed04162e38"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 160,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1252,
+          "sha256": "22fd42867e8f4320f835b07af580b63642d83b1c490ed5ef9246e50f53ba03e3"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "e0762a01d3332d798b39a0c026223d2c3f030077feb2323aed82beeea7fe44c5"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "cobalt",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "f63ce166ac3a2d3a98b548ec7308c7ce81f0ba8443ea0566b0141b6e886cdde7"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 131,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 18,
+      "output_tokens_details": {
+        "reasoning_tokens": 10
+      },
+      "total_tokens": 149
+    },
+    "user": "[redacted]"
+  }
+}

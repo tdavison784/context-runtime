@@ -1,0 +1,139 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_astra_r2_drop",
+  "request": {
+    "input": [
+      {
+        "content_length": 145,
+        "role": "user"
+      },
+      {
+        "name": "lookup",
+        "type": "function_call"
+      },
+      {
+        "type": "function_call_output"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-astra",
+    "reasoning": {
+      "effort": "medium"
+    },
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790426945,
+    "created_at": 1790426943,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "4cbc28b4e84483785d2b2455a8d1b82470240efcf9f44b38517f8ba3a2f5cbc0"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 160,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-astra",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1444,
+          "sha256": "9edf0fcd70a080860a28407416d0e7d3206dfd8cb15b3fc9349d7daee38cd572"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "3b7443d78fc53bd64c0cb955792b9739611cfa29361b0be5e2bf749bd508b423"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "cobalt",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "15e498622a6e03327f992584a6d40727e414e9c59706a33bb593abe2b01503ac"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 71,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 60,
+      "output_tokens_details": {
+        "reasoning_tokens": 52
+      },
+      "total_tokens": 131
+    },
+    "user": "[redacted]"
+  }
+}

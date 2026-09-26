@@ -1,0 +1,147 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_astra_r4_edit_earlier",
+  "request": {
+    "input": [
+      {
+        "content": "Use lookup with code B, then answer with the word returned.",
+        "content_length": 59,
+        "role": "user"
+      },
+      {
+        "encrypted_content": {
+          "length": 1356,
+          "sha256": "0ad327ee1bfccd89f06dcf98a66b1577ca3c99d16b07d19fc1569357b0a1d78a"
+        },
+        "type": "reasoning"
+      },
+      {
+        "name": "lookup",
+        "type": "function_call"
+      },
+      {
+        "type": "function_call_output"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-astra",
+    "reasoning": {
+      "effort": "medium"
+    },
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790426947,
+    "created_at": 1790426945,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "e81a7617b1edb2c6fd42bf76e594420d3da4b53a5b04ad46d0e6b0210686830b"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 160,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-astra",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1252,
+          "sha256": "082eebfa9be6094dc85b26d96f2b6eb1a7aa86e285852ac7d6aa77838af9d1a4"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "5eef1f26d04504b4c6f5434c06bfa1f777c93520f0abc00138cec0d19d175598"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "cobalt",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "f251fc3f824e0d9cdb23af1098910423352595774fa9dda787ef352cc3bebf4a"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 96,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 22,
+      "output_tokens_details": {
+        "reasoning_tokens": 14
+      },
+      "total_tokens": 118
+    },
+    "user": "[redacted]"
+  }
+}

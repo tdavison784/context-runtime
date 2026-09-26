@@ -1,0 +1,151 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_r5_keep_older",
+  "request": {
+    "input": [
+      {
+        "content_length": 145,
+        "role": "user"
+      },
+      {
+        "encrypted_content": {
+          "length": 1484,
+          "sha256": "391649d40e58e85077fd0613f7a7293f4e2a57b0fa5574baefd4ea171215a54e"
+        },
+        "type": "reasoning"
+      },
+      {
+        "name": "lookup",
+        "type": "function_call"
+      },
+      {
+        "type": "function_call_output"
+      },
+      {
+        "content": "What was the lookup word? One word.",
+        "content_length": 35,
+        "role": "user"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-luna",
+    "reasoning": {
+      "effort": "medium"
+    },
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790426959,
+    "created_at": 1790426958,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "66a5eae0575800e43f1f1fb670faff10637347fb780f179c5cd40261da96ab5e"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 160,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1252,
+          "sha256": "fb1d78b2ec680091ba7eab943e29b73013b2d747a628c5014c9177b994b67640"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "b94cc4e0dcdb702e69746994c1e6cb6c585b1228f14ed66637574ef19f562b89"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "cobalt",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "be2fb79ed4fece2603e57ce57e81aba5bc8b7132672e947cecb2b2a3be5a5d10"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 166,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 24,
+      "output_tokens_details": {
+        "reasoning_tokens": 16
+      },
+      "total_tokens": 190
+    },
+    "user": "[redacted]"
+  }
+}

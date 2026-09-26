@@ -1,0 +1,165 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_r2_drop",
+  "request": {
+    "input": [
+      {
+        "content_length": 145,
+        "role": "user"
+      },
+      {
+        "name": "lookup",
+        "type": "function_call"
+      },
+      {
+        "type": "function_call_output"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-luna",
+    "reasoning": {
+      "effort": "medium"
+    },
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790426957,
+    "created_at": 1790426956,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "63eaa01c940cbee4c90e31083652b35dd2075af7d4e507c5bf2ffd05e7078dda"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 160,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1592,
+          "sha256": "79c89bbdc9d3bcfb57081f31768d63a9143dccf3dfd7b00d11f6aa83ec9bfac2"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "e3a0f418109370b0a6d7fe262bb154d1263d58bff0d62fe1a3060ddea6748b4d"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1208,
+          "sha256": "6ccecacae0da46d7e91b38109f09f56e720ff08e4ce4e90be1cf69903002e324"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "6a6958b5aadb73a56148e465c2b8587a41c0663319604bb84c2f0534fc35edb1"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1228,
+          "sha256": "3b73a6ff9aab79104360139acf16c967ec88b00ab3e36f594925773fc2c37f33"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "814f915124a9b4606cdcbb74887e7c0f48ca009a798462a8986f4bf205483a9b"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "13 is odd, so the correct code is B. I called A by mistake, and the lookup result was “cobalt.”",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "7721b6614cd7f38c5f5a132e97348c631c6c0eae2e36f34f6062457513ffc2bb"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 71,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 145,
+      "output_tokens_details": {
+        "reasoning_tokens": 113
+      },
+      "total_tokens": 216
+    },
+    "user": "[redacted]"
+  }
+}

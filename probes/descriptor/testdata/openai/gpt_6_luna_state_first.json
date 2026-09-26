@@ -1,0 +1,127 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_state_first",
+  "request": {
+    "input": {
+      "kind": "string",
+      "length": 11
+    },
+    "max_output_tokens": 80,
+    "model": "gpt-6-luna",
+    "store": true
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790426961,
+    "created_at": 1790426961,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "acfdec0fff7d41da0894c049aa735da3bdb40bf38872017ab58b1af5a7f8058c"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 80,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1228,
+          "sha256": "62cc2b215ae5849d946f2ec65b998cc9bc970ab6311568208d7d1dcbc573de6d"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "265255b23ac2fc2b07d7e0236db9e84c5be2328ee497fffbc5661aa2a814ce24"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "cobalt",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "05268a522d3fefb722dd250d0049afb51b9e4c618096739323904e57d221d7d2"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": true,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 9,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 18,
+      "output_tokens_details": {
+        "reasoning_tokens": 10
+      },
+      "total_tokens": 27
+    },
+    "user": "[redacted]"
+  }
+}

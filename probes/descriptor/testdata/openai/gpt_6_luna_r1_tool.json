@@ -1,0 +1,175 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_r1_tool",
+  "request": {
+    "input": [
+      {
+        "content_length": 145,
+        "role": "user"
+      }
+    ],
+    "max_output_tokens": 512,
+    "model": "gpt-6-luna",
+    "reasoning": {
+      "effort": "high"
+    },
+    "store": false,
+    "tool_choice": {
+      "name": "lookup",
+      "type": "function"
+    },
+    "tools": [
+      {
+        "description": "Return the secret word for a code",
+        "name": "lookup",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        },
+        "strict": true,
+        "type": "function"
+      }
+    ]
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790426955,
+    "created_at": 1790426953,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "aaf0ffcd2f8bac8e034e53c52a6bd59c64bc87d918a04b825c6567f6e3fd6726"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 512,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1484,
+          "sha256": "391649d40e58e85077fd0613f7a7293f4e2a57b0fa5574baefd4ea171215a54e"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "38a2b9d0cf2737769dfd0494896d3226622405f1d066770f8e43a2ebd4d5bb18"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "arguments": "{\"code\":\"B\"}",
+        "call_id": {
+          "length": 29,
+          "sha256": "cc77fc10c7a2b602f4af782256b7e7c5a8f35791b66225e33a1c396f7734afdb"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "2c263468ef2135f7a9abed306137b790caa0b597fbdb1c1715e9d713871a1f58"
+        },
+        "name": "lookup",
+        "status": "completed",
+        "type": "function_call"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "high",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": {
+      "name": "lookup",
+      "type": "function"
+    },
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [
+      {
+        "description": "Return the secret word for a code",
+        "name": "lookup",
+        "output_schema": null,
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        },
+        "strict": true,
+        "type": "function"
+      }
+    ],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 78,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 99,
+      "output_tokens_details": {
+        "reasoning_tokens": 80
+      },
+      "total_tokens": 177
+    },
+    "user": "[redacted]"
+  }
+}
