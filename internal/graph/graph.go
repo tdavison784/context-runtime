@@ -293,7 +293,8 @@ func applySupersession(tx store.Tx, p supersessionPlan) (domain.Relationship, er
 // a silent fork into two current versions. Both writes commit atomically
 // within the caller's transaction. previousID is "" when newItemID is the
 // directive's first version at that boundary.
-func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string) (string, error) {
+func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string) (result string, err error) {
+	defer poisonGraphError(tx, &err)
 	newItem, err := loadAccessible(tx, actor, newItemID)
 	if err != nil {
 		return "", err
@@ -657,7 +658,8 @@ func CheckDerivedBoundary(derived domain.AccessBoundary, sources []domain.Contex
 // derived item, never post-hoc from a later transaction, even one that
 // supplies the item's own EventID (a string on the item, readable by
 // anyone who can access it, and not proof of when the caller is running).
-func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) ([]domain.Relationship, error) {
+func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) (result []domain.Relationship, err error) {
+	defer poisonGraphError(tx, &err)
 	if err := actor.Validate(); err != nil {
 		return nil, err
 	}

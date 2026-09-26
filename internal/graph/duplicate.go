@@ -134,7 +134,8 @@ func sameContentOccurrence(a, b domain.ContextItem) bool {
 // ruleVersion names the deterministic deduplication rule (FR-REL-007).
 // claim is the obligation claim the duplicate declares ("" for none); it
 // must match the canonical's declaration (SameDirective, R11).
-func LinkDuplicate(tx store.Tx, actor domain.Principal, dupID, canonicalID, eventID, ruleVersion, claim string) (domain.Relationship, error) {
+func LinkDuplicate(tx store.Tx, actor domain.Principal, dupID, canonicalID, eventID, ruleVersion, claim string) (result domain.Relationship, err error) {
+	defer poisonGraphError(tx, &err)
 	if err := actor.Validate(); err != nil {
 		return domain.Relationship{}, err
 	}
