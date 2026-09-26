@@ -1153,34 +1153,42 @@ the code at this ADR's final-pass head.
 ### 27. PR #5 review round 1 rulings: SPEC-1.10, SPEC-1.11
 
 - **SPEC-1.11 ruling: CommonMark-heading-shaped lines close but never open
-  a section (refines §4, D5/D6/R17 — decided, fix not yet landed).** Parser
-  v1 previously treated a bare ATX line (`#` through `######` alone) or a
-  tab-separated one (`#\tOther`) as ordinary content: it neither opened nor
-  closed a section, and inside a list body counted as stray prose (marking
-  the section malformed). SPEC-1.11 flagged this as the one deliberate
-  deviation that leaves *more* text inside a section than CommonMark would,
-  and asked for a ruling rather than leaving it an open deviation forever.
-  **Ruling:** a line matching CommonMark's ATX heading *shape* (0-3 leading
-  spaces, 1-6 `#`, then SP, HTAB, or end of line — the same shape D5
-  already requires for a real directive heading, just without a valid
-  keyword) closes an open section of the same or higher level exactly as a
-  valid directive heading would (D6), but never opens a new section, since
-  it has no keyword to open one with. A line that is not heading-shaped at
-  all — seven or more `#`, 4+ space or tab indentation before the `#`,
-  fenced/quoted/commented, or a bare `#` immediately followed by non-space
-  text like `#5` — is unaffected and stays body or ordinary content. The
-  parser has no list-container model, so a heading-shaped line indented
-  inside a list item also closes its section; closing early only drops
-  directive text, never fabricates any. This is locked by
-  `TestHeadingShapedLinesClose` (`internal/directive/scan_test.go`,
-  replacing the pre-ruling `TestBareAndTabATXLines`), covering both the
-  closing cases (bare `#`, `#\tOther`, `##`, a heading-shaped line with
-  indentation) and the still-not-heading-shaped cases (7 `#`, `#5 bolt`,
-  tab-indented, fenced/quoted/commented). The test is committed as a red
-  regression (`p2fix/parser`); the parser fix implementing the ruling is
-  not yet landed as of this revision, and `internal/directive/doc.go`'s
-  deviation list still describes the pre-ruling behavior and needs
-  updating once it does.
+  a section (refines §4, D5/D6/R17 — landed).** Parser v1 previously
+  treated a bare ATX line (`#` through `######` alone) or a tab-separated
+  one (`#\tOther`) as ordinary content: it neither opened nor closed a
+  section, and inside a list body counted as stray prose (marking the
+  section malformed). SPEC-1.11 flagged this as the one deliberate
+  deviation that leaves *more* text inside a section than CommonMark
+  would, and asked for a ruling rather than leaving it an open deviation
+  forever. **Ruling:** a line matching CommonMark's ATX heading *shape*
+  (0-3 leading spaces, 1-6 `#`, then SP, HTAB, or end of line — the same
+  shape D5 already requires for a real directive heading, just without a
+  valid keyword) closes an open section of the same or higher level
+  exactly as a valid directive heading would (D6), but never opens a new
+  section, since it has no keyword to open one with. A line that is not
+  heading-shaped at all — seven or more `#`, 4+ space or tab indentation
+  before the `#`, fenced/quoted/commented, or a bare `#` immediately
+  followed by non-space text like `#5` — is unaffected and stays body or
+  ordinary content. The parser has no list-container model, so a
+  heading-shaped line indented inside a list item also closes its
+  section; closing early only drops directive text, never fabricates any.
+  **Landed:** `internal/directive/scan.go`'s heading-recognition loop —
+  when a candidate line is heading-shaped (`atxShape(b) > 0`) but is not
+  itself a valid directive heading (`blocked != ""` or no capable
+  keyword) and its shape level is at or above the open section's, the
+  section closes (`p.sections[active].end = line.start; active = -1`)
+  without ever opening a new one; the code comment cites "SPEC-1.11
+  ruling" directly. `internal/directive/doc.go`'s deviation list is
+  updated to match. Locked by `TestHeadingShapedLinesClose`
+  (`internal/directive/scan_test.go`, replacing the pre-ruling
+  `TestBareAndTabATXLines`) and four canonical goldens:
+  `testdata/directives/form-heading-shaped-close` (a bare `#\tOther`
+  mid-list closes the open Pinned section), `form-heading-shaped-indented`
+  (an indented `  ## Notes` inside a list also closes),
+  `form-heading-shaped-inert` (4-space/tab indentation, seven `#`, and
+  `#5 bolt` are not heading-shaped and stay body text), and
+  `form-heading-shaped-never-opens` (the same heading-shaped line closes
+  the prior section but never itself opens a new one).
 - **SPEC-1.10 ruling: parser/policy version-bump replay is covered by the
   general verbatim-receipt property; a real upgrade test is deferred
   (refines §10, D14).** SPEC-1.10 listed "replay after a policy/parser-
@@ -1199,6 +1207,20 @@ the code at this ADR's final-pass head.
   policy version are compile-time constants, not an injectable seam; a
   dedicated test for that exact case is deferred until the first real
   version bump, when introducing the seam is no longer speculative.
+
+  SPEC-1.10's other missing-test clauses are also landed now, each in
+  `internal/ingest/clauses_test.go` unless noted:
+  `TestCompletedTaskNeverReactivated` (ADR §14, D18); `TestRetrievedBeforeFirstTurn`
+  (R19: RETRIEVED_CONTENT before the first turn, matching the TOOL case
+  §23 already covered); `TestToolCallIDCreatesNoEdge` (ADR §16: a TOOL
+  span's `ToolCallID` lands in `SourceRef` only); `TestTruncationPersistedAndReplayed`
+  (the 256-plus-one diagnostic cap, D16/D17); `TestAmbiguousLifecycleTarget`
+  (FR-DIR-005 at the ingest layer, not only graph); `TestDefaultLimitValues`
+  (`internal/domain/limits_test.go` — D17's 8 MiB/4096-item defaults);
+  `TestReplaceDirective_ObligationFanOut` (`internal/graph/fanout_test.go`
+  — R9's large-fan-out obligation retirement); `TestRetryIdentity_SessionScopedRich`
+  (`internal/ingest/retry_test.go` — TEST-1.2's session-scoped rich-event
+  retry, alongside the existing `_RichReceipt` case).
 
 ## Alternatives considered
 
