@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -166,6 +167,37 @@ func TestRecordsNeverRevealHiddenVersions_SEC22(t *testing.T) {
 		if !hasDiag(r, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict) {
 			t.Fatalf("setup: no boundary conflict: %+v", r.Diagnostics)
 		}
+
+		// Hidden versus missing (SEC-3.2): A unpins its private [solo] and
+		// an ID that names nothing. Agent B, who can read both transcripts,
+		// must see identical records for the two: one per command, with
+		// no target-dependent detail, and the same diagnostics.
+		f.mustIngest(agentA, userEvent("a5", "## Pinned [solo] scope=AGENT\nA's private solo.\n", true))
+		hidden := f.mustIngest(agentA, userEvent("a6", "## Unpin [solo]\n", true))
+		missing := f.mustIngest(agentA, userEvent("a7", "## Unpin [nothing]\n", true))
+		f.view(func(tx store.ReadTx) error {
+			shape := func(occ string) string {
+				cs, err := tx.LifecycleCommands(store.CommandFilter{Viewer: agentB, OccurrenceID: occ})
+				ds, derr := tx.Diagnostics(store.DiagnosticFilter{Viewer: agentB, OccurrenceID: occ})
+				if err != nil || derr != nil {
+					t.Fatalf("reads: %v %v", err, derr)
+				}
+				out := fmt.Sprintf("commands=%d diagnostics=%d", len(cs), len(ds))
+				for _, c := range cs {
+					out += fmt.Sprintf(" status=%s resolution=%s item=%q v=%d", c.Status, c.Resolution, c.ResolvedItemID, c.ResolvedVersion)
+				}
+				return out
+			}
+			if h, m := shape(hidden.OccurrenceID), shape(missing.OccurrenceID); h != m {
+				t.Errorf("agent B tells a hidden target from a missing one:\n hidden:  %s\n missing: %s", h, m)
+			}
+			// The source actor still reads the full resolution.
+			cs, err := tx.LifecycleCommands(store.CommandFilter{Viewer: agentA, OccurrenceID: hidden.OccurrenceID})
+			if err != nil || len(cs) != 1 || cs[0].Resolution != domain.TargetResolved || cs[0].ResolvedItemID == "" {
+				t.Errorf("agent A's own record = %+v, %v", cs, err)
+			}
+			return nil
+		})
 
 		f.view(func(tx store.ReadTx) error {
 			cs, err := tx.LifecycleCommands(store.CommandFilter{Viewer: agentB})
