@@ -96,6 +96,15 @@ func testCalls(t *testing.T, s store.Store) {
 		badProposal := NewCall(sessA, "call-d", "conv9", n[2])
 		badProposal.Epoch = 5 // not resealed
 		wantErr(t, tx.InsertCall(badProposal), domain.ErrInvalidRecord)
+		// A call enters the ledger PREPARED with no attempts, so it cannot
+		// skip UpdateCall's evidence gates.
+		sent := NewCall(sessA, "call-d", "conv9", n[2])
+		sent.State, sent.Attempts = domain.CallSent, 1
+		wantErr(t, tx.InsertCall(sent), domain.ErrInvalidTransition)
+		retried := NewCall(sessA, "call-d", "conv9", n[2])
+		retried.Attempts = 1
+		wantErr(t, tx.InsertCall(retried), domain.ErrInvalidTransition)
+		wantErr(t, tx.InsertCall(Finish(NewCall(sessA, "call-d", "conv9", n[2]), domain.CallFailed, n[2])), domain.ErrInvalidTransition)
 		return nil
 	})
 	// A new call's PreparedSeq must be allocated in its transaction.
@@ -238,7 +247,7 @@ func testCalls(t *testing.T, s store.Store) {
 		next.PreparedSeq = tx.NextSeq()
 		return errOf(tx.UpdateCall(next, 1))
 	})
-	oneOf(t, "changing prepared seq", err, domain.ErrImmutable, domain.ErrInvalidRecord)
+	wantErr(t, err, domain.ErrImmutable)
 	err = s.Update(ctx, sessA, func(tx store.Tx) error {
 		return errOf(tx.UpdateCall(NewCall(sessA, "missing", "conv1", 1), 1))
 	})
@@ -391,7 +400,7 @@ func testCallAttempts(t *testing.T, s store.Store) {
 		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call1", 0, n[1])), domain.ErrInvalidRecord)
 		unknown := NewAttempt(sessA, "call1", 1, n[1])
 		unknown.State = domain.AttemptUnknown
-		oneOf(t, "new attempt in UNKNOWN", tx.PutCallAttempt(unknown), domain.ErrInvalidTransition, domain.ErrInvalidRecord)
+		wantErr(t, tx.PutCallAttempt(unknown), domain.ErrInvalidTransition)
 		bad := NewAttempt(sessA, "call1", 1, n[1])
 		bad.State = "LOST"
 		wantErr(t, tx.PutCallAttempt(bad), domain.ErrInvalidRecord)
@@ -414,8 +423,7 @@ func testCallAttempts(t *testing.T, s store.Store) {
 		c, err = tx.UpdateCall(c, c.Revision)
 		noErr(t, err)
 		// No new attempt while the call is not PREPARED.
-		oneOf(t, "new attempt for a SENT call", tx.PutCallAttempt(NewAttempt(sessA, "call1", 2, tx.NextSeq())),
-			domain.ErrInvalidTransition, domain.ErrInvalidRecord)
+		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call1", 2, tx.NextSeq())), domain.ErrInvalidTransition)
 
 		// Open attempts move only along the attempt table, and only the
 		// state, outcome, and finish fields change.
@@ -464,8 +472,8 @@ func testCallAttempts(t *testing.T, s store.Store) {
 		noErr(t, err)
 		assertEqual(t, "CallAttempts", got, []domain.CallAttempt{a1})
 		missing, err := tx.CallAttempts("missing")
-		if (err != nil && !errors.Is(err, domain.ErrNotFound)) || len(missing) != 0 {
-			t.Errorf("CallAttempts(missing) = %v, %v; want empty or ErrNotFound", missing, err)
+		if err != nil || len(missing) != 0 {
+			t.Errorf("CallAttempts(missing) = %v, %v; want empty and nil", missing, err)
 		}
 		return nil
 	})

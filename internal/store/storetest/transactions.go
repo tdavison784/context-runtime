@@ -111,10 +111,12 @@ func assertAbsent(t *testing.T, tx store.ReadTx) {
 			t.Errorf("%s: error = %v, want ErrNotFound", what, err)
 		}
 	}
-	emptyOrNotFound := func(what string, n int, err error) {
+	// List methods return empty results and no error, even for a missing
+	// parent.
+	empty := func(what string, n int, err error) {
 		t.Helper()
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			t.Errorf("%s: error = %v, want nil or ErrNotFound", what, err)
+		if err != nil {
+			t.Errorf("%s: error = %v, want nil", what, err)
 		}
 		if n != 0 {
 			t.Errorf("%s: %d records, want 0", what, n)
@@ -142,23 +144,23 @@ func assertAbsent(t *testing.T, tx store.ReadTx) {
 	notFound("Call", err)
 
 	items, err := tx.Items(store.ItemFilter{})
-	emptyOrNotFound("Items", len(items), err)
+	empty("Items", len(items), err)
 	rels, err := tx.Relationships(store.RelationshipFilter{})
-	emptyOrNotFound("Relationships", len(rels), err)
+	empty("Relationships", len(rels), err)
 	vers, err := tx.ObligationVersions("o1")
-	emptyOrNotFound("ObligationVersions", len(vers), err)
+	empty("ObligationVersions", len(vers), err)
 	obls, err := tx.Obligations("")
-	emptyOrNotFound("Obligations", len(obls), err)
+	empty("Obligations", len(obls), err)
 	trs, err := tx.ObligationTransitions("o1")
-	emptyOrNotFound("ObligationTransitions", len(trs), err)
+	empty("ObligationTransitions", len(trs), err)
 	grants, err := tx.Grants()
-	emptyOrNotFound("Grants", len(grants), err)
+	empty("Grants", len(grants), err)
 	evs, err := tx.LifecycleEvents(store.LifecycleFilter{})
-	emptyOrNotFound("LifecycleEvents", len(evs), err)
+	empty("LifecycleEvents", len(evs), err)
 	calls, err := tx.Calls(store.CallFilter{})
-	emptyOrNotFound("Calls", len(calls), err)
+	empty("Calls", len(calls), err)
 	atts, err := tx.CallAttempts("call1")
-	emptyOrNotFound("CallAttempts", len(atts), err)
+	empty("CallAttempts", len(atts), err)
 }
 
 func testRollbackOnError(t *testing.T, s store.Store) {

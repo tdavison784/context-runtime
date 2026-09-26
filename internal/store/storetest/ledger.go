@@ -91,9 +91,7 @@ func testObligationVersions(t *testing.T, s store.Store) {
 		edited = v1.Clone()
 		edited.EvidenceIDs = []string{"ev1"}
 		_, err = tx.UpdateObligationVersion(edited, 1)
-		if err == nil {
-			t.Errorf("UpdateObligationVersion changed EvidenceIDs; want an error")
-		}
+		wantErr(t, err, domain.ErrImmutable)
 		// A retirement seq must be allocated in this transaction.
 		edited = v1.Clone()
 		edited.Current, edited.RetiredSeq = false, 1
@@ -121,14 +119,23 @@ func testObligationVersions(t *testing.T, s store.Store) {
 		return nil
 	})
 	// Fields outside Current, RetiredSeq, and MaterializationDisabled are
-	// never stored: the update is rejected or they are ignored.
-	_ = s.Update(ctx, sessA, func(tx store.Tx) error {
-		edited := v2.Clone()
-		edited.Description = "rewritten"
-		edited.SourceItemID = "elsewhere"
-		_, err := tx.UpdateObligationVersion(edited, 1)
-		return err
-	})
+	// immutable.
+	for name, edit := range map[string]func(o *domain.ObligationVersion){
+		"description": func(o *domain.ObligationVersion) { o.Description = "rewritten" },
+		"source item": func(o *domain.ObligationVersion) { o.SourceItemID = "elsewhere" },
+		"task":        func(o *domain.ObligationVersion) { o.TaskID, o.Access.TaskID = "task2", "task2" },
+		"matcher":     func(o *domain.ObligationVersion) { o.Matcher = nil },
+		"created seq": func(o *domain.ObligationVersion) { o.CreatedSeq++ },
+	} {
+		err := s.Update(ctx, sessA, func(tx store.Tx) error {
+			edited := v2.Clone()
+			edit(&edited)
+			return errOf(tx.UpdateObligationVersion(edited, 1))
+		})
+		if !errors.Is(err, domain.ErrImmutable) {
+			t.Errorf("changing an obligation's %s: error = %v, want ErrImmutable", name, err)
+		}
+	}
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		got, err := tx.Obligation("o1")
 		noErr(t, err)
@@ -415,7 +422,7 @@ func testTasks(t *testing.T, s store.Store) {
 		{"stale version", func(uint64) domain.TaskState { return next }, 2,
 			func(uint64) *domain.LifecycleEvent { return nil }, []error{domain.ErrVersionConflict}},
 		{"missing task", func(uint64) domain.TaskState { return NewTask(sessA, "other") }, 1,
-			func(uint64) *domain.LifecycleEvent { return nil }, []error{domain.ErrVersionConflict, domain.ErrNotFound}},
+			func(uint64) *domain.LifecycleEvent { return nil }, []error{domain.ErrVersionConflict}},
 		{"completed without seq", func(uint64) domain.TaskState { return completed(0) }, 1,
 			func(seq uint64) *domain.LifecycleEvent { return taskEvent("lx", seq) }, []error{domain.ErrInvalidRecord}},
 		{"completed at an earlier seq", func(uint64) domain.TaskState { return completed(1) }, 1,
@@ -551,7 +558,7 @@ func testConversations(t *testing.T, s store.Store) {
 	}{
 		{"create existing", c, 0, []error{domain.ErrVersionConflict}},
 		{"stale revision", next, 2, []error{domain.ErrVersionConflict}},
-		{"missing", NewConversation(sessA, "c2"), 1, []error{domain.ErrVersionConflict, domain.ErrNotFound}},
+		{"missing", NewConversation(sessA, "c2"), 1, []error{domain.ErrVersionConflict}},
 		{"version 0", func() domain.Conversation { x := next; x.Version = 0; return x }(), 1, []error{domain.ErrInvalidRecord}},
 	}
 	for _, tc := range cases {
