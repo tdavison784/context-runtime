@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"fmt"
+
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
@@ -101,4 +103,47 @@ func (r semRead) SnapshotDeclaration(id string) (domain.SnapshotDeclaration, err
 		return sd, notFound("snapshot declaration", id)
 	}
 	return sd, nil
+}
+
+// SetCurrentVersion is the Phase 3 current-pointer write (P3-3): it points
+// the item's current key at the item only if the pointer still names
+// expectedPriorItemID (empty for the key's first filing), so two writers
+// that read the same prior cannot both advance it. The item must carry an
+// explicit namespace, and a duplicate occurrence or a superseded item never
+// becomes current.
+func (t *semTx) SetCurrentVersion(itemID, expectedPriorItemID string) error {
+	if err := t.r.check(); err != nil {
+		return err
+	}
+	it, ok := t.r.items.peek(itemID)
+	if !ok {
+		return notFound("item", itemID)
+	}
+	if err := it.ValidateSemantic(); err != nil {
+		return invalid("item %s: %v", itemID, err)
+	}
+	key, ok := it.CurrentKey()
+	if !ok {
+		return invalid("item %s has no current key", itemID)
+	}
+	if err := key.Validate(); err != nil {
+		return invalid("item %s: %v", itemID, err)
+	}
+	if expectedPriorItemID == itemID {
+		return transition("item %s is already its expected prior", itemID)
+	}
+	if _, superseded := iterFirst(t.r.supersededBy.lookup(itemID)); superseded {
+		return transition("item %s is superseded", itemID)
+	}
+	if _, dup := iterFirst(t.r.relsFrom.lookup(relKey{domain.RelDuplicateOf, itemID})); dup {
+		return transition("item %s is a duplicate occurrence", itemID)
+	}
+	dk := directiveKey{key.TaskID, key.ID, key.Access, key.Namespace}
+	if cur, _ := t.r.directives.peek(dk); cur != expectedPriorItemID {
+		return fmt.Errorf("current version of %s: pointer names %q, expected %q: %w", key.ID, cur, expectedPriorItemID, domain.ErrVersionConflict)
+	}
+	t.r.directives.put(dk, itemID)
+	t.r.currentIDs.add(currentIDKey{key.TaskID, key.Namespace, key.ID}, key.Access)
+	t.t.markSemantic()
+	return nil
 }

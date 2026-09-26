@@ -26,7 +26,6 @@ func (r semRead) OpenGoalsByTaskOwner(string, store.Page) (store.ResultPage[doma
 func (r semRead) SemanticChanges(domain.Principal, domain.GrantTarget, store.Page) (store.ResultPage[domain.SemanticChange], error) {
 	return store.ResultPage[domain.SemanticChange]{}, errUnsupported
 }
-func (t *semTx) SetCurrentVersion(string, string) error           { return errUnsupported }
 func (t *semTx) InsertSemanticChange(domain.SemanticChange) error { return errUnsupported }
 
 // Obligation proofs.
