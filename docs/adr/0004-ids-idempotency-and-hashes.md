@@ -220,20 +220,24 @@ restricting what a directive's boundary may be.
   `TestConformance/Events` covers `InsertEvent` idempotency (trace T10 step
   1); `TestConformance/ItemBlobIntegrity` and `.../Blobs` cover session-
   scoped blob existence, including a blob stored only in another session.
-- Required (round 1, memstore/sqlite-worker in progress as of this writing):
-  a `storetest` case for boundary-keyed `CurrentDirective` — two directive
-  items with the same `(task, directiveID)` but different access
-  boundaries are independent current pointers, and resolving one in the
-  wrong boundary returns exactly the same `ErrNotFound` as an unused ID
-  (not a different error revealing the other boundary's version exists).
-  `internal/store/storetest` does not compile as of this ADR's last check
-  because `CurrentDirective`/`SetCurrentDirective`'s callers haven't
-  adopted the new boundary parameter yet; this is the other workers'
-  in-flight fix for the store contract change already merged.
-- Required (round 1, domain-tests-worker in progress): a
-  `domain/item_test.go` case for `ContextItem.Validate` rejecting a
-  non-empty `Section` without a `DirectiveID`, and accepting every valid
-  `DirectiveSection` value.
+- `internal/store/storetest/semantic.go:testDirectiveBoundaries`
+  (`TestConformance/DirectiveBoundaries`) is the exact boundary-keyed-
+  identity test: two directive items with the same `(task, directiveID)`
+  but different access boundaries resolve independently; every boundary
+  field (`AgentID`, `WorkflowID`, `Scope`, `SessionID`, `TaskID`) is part of
+  the key, and a boundary that doesn't match returns exactly the same
+  `ErrNotFound` as an unused ID. **This subtest currently fails on
+  `internal/store/sqlite` only** (passes on `internal/store/memory`):
+  querying with a boundary from a different session than the transaction's
+  returns `invalid record: record belongs to another session` instead of
+  `ErrNotFound` — the same existence-disclosure pattern AUTH-1.3 fixed
+  elsewhere in `internal/graph`, not yet applied to this new SQLite code
+  path. See ADR 17's Tests section for the full reproduction; this is a
+  `sqlite-worker` implementation gap, not a gap in the decision above.
+- `internal/domain/item_test.go`: `TestDirectiveSectionValid`,
+  `TestContextItemValidate_SectionNoneWithoutDirectiveIDPasses`,
+  `TestContextItemValidate_EachSectionWithDirectiveIDPasses` lock
+  `Section`'s validation rules exactly.
 
 ## Open questions
 
@@ -280,3 +284,9 @@ boundary, recorded above and in the new "SDD amendment (applied in v0.7)"
 section. Also recorded `ContextItem.Section` (SPEC-1.1), which this ADR
 covers because it is new immutable per-item identity data, even though its
 consuming rule (Working-snapshot selection) is ADR 16's.
+
+Verified against the merged `memstore-worker`/`sqlite-worker`/
+`domain-tests-worker` branches: `TestConformance/DirectiveBoundaries` and
+the `Section`-validation tests exist and pass — except the SQLite-only
+`DirectiveBoundaries` failure recorded in Tests above, which is a store
+implementation gap, not a gap in this ADR's decision.
