@@ -47,6 +47,11 @@ var (
 	// writes the derived item, never post-hoc by a later, possibly
 	// lower-authority, actor.
 	ErrDerivedLinkNotAtCreation = errors.New("graph: derived item's provenance can only be linked in the transaction that created it")
+	// ErrAlreadySuperseded reports a Supersede whose old item is already
+	// superseded: retired state is no longer current truth (FR-REL-003),
+	// so it is never retired a second time, by the same event or another
+	// (D11). Callers retire only current items.
+	ErrAlreadySuperseded = errors.New("graph: item is already superseded")
 	// ErrAmbiguousDirective reports a lifecycle target (SDD section 8, v0.8)
 	// that names more than one directive version the actor can currently
 	// see: FR-DIR-002 keys a directive by (task, directive ID, access
@@ -130,7 +135,9 @@ func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, task
 // SUPERSEDES relationship (the store rejects a cycle with
 // domain.ErrSupersessionCycle), and appends a LifecycleEvent recording the
 // change. It never creates a SUPERSEDES edge when newID is itself recorded
-// as a DUPLICATE_OF some other item (FR-ING-005).
+// as a DUPLICATE_OF some other item (FR-ING-005), and never retires an
+// oldID that is already superseded (ErrAlreadySuperseded, D11). The audit
+// record's ID names the successor, so it is unique per retirement.
 //
 // ruleVersion names the deterministic rule that produced the edge (FR-REL-
 // 007); pass "" for an edge created directly from an authorized event, such
@@ -154,6 +161,13 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 	if len(dup) > 0 {
 		return domain.Relationship{}, ErrDuplicateSupersession
 	}
+	retired, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: oldID})
+	if err != nil {
+		return domain.Relationship{}, err
+	}
+	if len(retired) > 0 {
+		return domain.Relationship{}, ErrAlreadySuperseded
+	}
 
 	rel := domain.Relationship{
 		ID:          relationshipID(actor.SessionID, domain.RelSupersedes, newID, oldID, eventID),
@@ -171,7 +185,7 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 	}
 
 	ev := domain.LifecycleEvent{
-		ID:         lifecycleEventID(actor.SessionID, oldID, "superseded", eventID),
+		ID:         lifecycleEventID(actor.SessionID, oldID, "superseded", eventID, newID),
 		SessionID:  actor.SessionID,
 		Seq:        tx.NextSeq(),
 		TargetKind: domain.TargetItem,

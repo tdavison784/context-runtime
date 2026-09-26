@@ -9,8 +9,11 @@ import "github.com/tdavison784/context-runtime/internal/domain"
 // distinct domain tags so their hashes never collide even over identical
 // inputs.
 const (
-	relationshipIDTag   = "context-runtime/graph/relationship-id/v1"
-	lifecycleEventIDTag = "context-runtime/graph/lifecycle-event-id/v1"
+	relationshipIDTag = "context-runtime/graph/relationship-id/v1"
+	// v2 adds the counterpart (for a retirement, the successor) to the
+	// audit identity, so two audit records about one target in one event
+	// can never alias (D11). v1 IDs already stored are left as they are.
+	lifecycleEventIDTag = "context-runtime/graph/lifecycle-event-id/v2"
 	idHashDisplayLength = 32
 )
 
@@ -33,7 +36,8 @@ func relationshipID(sessionID string, relType domain.RelationshipType, fromID, t
 }
 
 // lifecycleEventID derives the ID of the audit record for one action on
-// targetID raised by eventID.
-func lifecycleEventID(sessionID, targetID, action, eventID string) string {
-	return deriveID("evt", lifecycleEventIDTag, sessionID, targetID, action, eventID)
+// targetID raised by eventID, whose other party is counterpartID (for a
+// retirement, the successor).
+func lifecycleEventID(sessionID, targetID, action, eventID, counterpartID string) string {
+	return deriveID("evt", lifecycleEventIDTag, sessionID, targetID, action, eventID, counterpartID)
 }
