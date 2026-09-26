@@ -204,32 +204,48 @@ performs a Resolve in V1.
   text attached.
 - **`internal/graph.rejectVisibleBoundaryConflict`, called from
   `ReplaceDirective`'s first-version path, rejects a write that would
-  smuggle a boundary change through visible ID reuse (round 2, AUTH-2.1).**
-  Boundary-keyed identity (ADR 4) means an actor can legally create a new
-  current version of a directive ID in a boundary where none currently
-  exists — but if that same actor can *also* access a current version of
-  the identical ID in a *different* boundary, writing the new one is not
-  "a fresh directive," it is the boundary change FR-DIR-002 requires go
-  through "an explicit authorized replacement policy," attempted through ID
-  reuse instead. `rejectVisibleBoundaryConflict` calls
-  `store.ReadTx.CurrentDirectives(taskID, directiveID)` (ADR 4), and for
-  each returned item ID the actor can access, fails
+  smuggle a boundary change through visible ID reuse (round 2, AUTH-2.1;
+  round 3, AUTH-3.2).** Boundary-keyed identity (ADR 4) means an actor can
+  legally create a new current version of a directive ID in a boundary
+  where none currently exists — but if that same actor can *also* access a
+  current version of the identical ID in a *different* boundary, writing
+  the new one is not "a fresh directive," it is the boundary change
+  FR-DIR-002 requires go through "an explicit authorized replacement
+  policy," attempted through ID reuse instead. `rejectVisibleBoundaryConflict`
+  calls `store.ReadTx.CurrentDirectives(taskID, directiveID)` (ADR 4), and
+  for each returned item ID the actor can access, fails
   `domain.ErrInvalidAuthorityPromotion` — while versions the actor cannot
   see are skipped entirely, never entering the decision or the error,
-  preserving round 1's non-disclosure property.
+  preserving round 1's non-disclosure property. **AUTH-3.2:** a version
+  `CurrentDirectives` still names but that has since been superseded
+  (through some path other than the current-directive map, e.g. a Working
+  snapshot) is a stale pointer, not a live second version, and must never
+  block a legitimate write — the check now also calls `IsCurrent` on each
+  accessible candidate and only fails on one that is genuinely still
+  current.
 - **`ResolveLifecycleTarget(tx, actor, taskID, id) (itemID string, err
-  error)` resolves a Resolve/Unpin target unambiguously (round 2,
-  SPEC-2.2).** `id` may name an item directly (resolved if accessible and
-  *current* — an inaccessible or superseded item is `ErrNotFound`, never
-  distinguished from a missing one) or a directive ID; in the latter case
-  the function filters `CurrentDirectives` to the actor's accessible
-  versions and requires **exactly one** — zero is `ErrNotFound`, and more
-  than one is the new exported `ErrAmbiguousDirective` (SDD v0.8, §8),
-  mutating nothing in either case. This is the FR-DIR-005 amendment's exact
-  target-resolution rule, given its own function so Resolve/Unpin (and any
-  future lifecycle command over the same identity space) share one
-  implementation rather than each reimplementing the accessible-current-
-  version filter.
+  error)` resolves a Resolve/Unpin target unambiguously (round 2, SPEC-2.2;
+  round 3, SPEC-3.1/AUTH-3.2).** `id` is tried both ways — as a literal item
+  ID and as a directive ID — and **both namespaces are gathered into one
+  candidate set before any decision is made** (SPEC-3.1): every candidate
+  from either namespace that is accessible to `actor` *and* currently
+  current (via `IsCurrent`, closing the same stale-pointer gap AUTH-3.2
+  fixes in `rejectVisibleBoundaryConflict`) is collected; an inaccessible or
+  noncurrent candidate in either namespace is dropped silently, exactly
+  like a missing one. Checking the literal item first and returning
+  immediately on any failure there — the round-2 shape — would let a hidden
+  item that merely happens to share an ID with an accessible directive
+  change the result: that ordering is an existence oracle (whether the
+  literal-ID branch failed "not found" vs. "inaccessible" leaks through to
+  whether the directive branch even runs) and could block an otherwise-
+  authorized Resolve/Unpin. Zero candidates is `ErrNotFound`; exactly one is
+  the answer; more than one — whether two directive versions, or an item ID
+  and a directive ID that happen to collide — is `ErrAmbiguousDirective`
+  (SDD v0.8, §8), mutating nothing in any case. This is the FR-DIR-005
+  amendment's exact target-resolution rule, given its own function so
+  Resolve/Unpin (and any future lifecycle command over the same identity
+  space) share one implementation rather than each reimplementing the
+  accessible-current-candidate filter.
 - **`SupersedeSnapshot` rejects any new item whose `Section != SectionWorking`
   (`ErrSnapshotNotWorking`) before writing anything (round 2, SPEC-2.1).**
   Round 1 fixed *which old items* the selector could retire (by `Section`,
@@ -243,18 +259,27 @@ performs a Resolve in V1.
   and validates each new item (before any candidate scan or edge write), so
   a non-Working new item leaves every existing Working snapshot untouched
   and the call fails outright rather than partially retiring state.
-- **`LinkDerived` requires `derived.EventID != "" && derived.EventID ==
-  eventID` (`ErrDerivedLinkNotAtCreation` otherwise, round 2, AUTH-2.4).**
-  AUTH-1.1 (round 1) restricted *who* may call `LinkDerived`; this
-  restricts *when*, closing a residual version of the same laundering risk:
-  without it, an authorized actor could attach `DERIVED_FROM` provenance to
-  an item at any later point, from any event, not only the event that
-  created it — letting provenance be backfilled or reassigned well after
-  the fact, which is a form of the same "rewrite this item's basis
-  retroactively" problem AUTH-1.1 restricted by authority alone. Requiring
-  the derived item's own recorded `EventID` to equal the event under which
-  `LinkDerived` is being called means provenance can only ever be attached
-  by the one event that brought the item into existence.
+- **`LinkDerived` requires `tx.Allocated(derived.Seq)` (`ErrDerivedLinkNotAtCreation`
+  otherwise, round 3, AUTH-3.1 — replaces round 2's AUTH-2.4).** AUTH-1.1
+  (round 1) restricted *who* may call `LinkDerived`; AUTH-2.4/3.1 restrict
+  *when*, closing a residual version of the same laundering risk: without
+  it, an authorized actor could attach `DERIVED_FROM` provenance to an item
+  at any later point, from any transaction, not only the one that created
+  it — letting provenance be backfilled or reassigned well after the fact.
+  Round 2's mechanism for "when" — comparing the derived item's own
+  `EventID` field to the caller-supplied `eventID` argument — turned out to
+  prove nothing: `EventID` is a plain string stored on the item, readable by
+  *anyone* who can access it, so a later, unrelated transaction could simply
+  read it off the record and replay it verbatim as its own `eventID`
+  argument, passing the check while being exactly the retroactive-provenance
+  case AUTH-2.4 was meant to close. **AUTH-3.1's fix:** a new
+  `store.Tx.Allocated(seq uint64) bool` method reports whether `seq` was
+  allocated by `NextSeq` *in this transaction* — a fact no caller can forge,
+  since sequence numbers are the store's own per-transaction bookkeeping,
+  not data on the record. `LinkDerived` now requires
+  `tx.Allocated(derived.Seq)`: provenance can only be attached in the very
+  transaction that inserted the derived item, never from a later one, even
+  one that supplies the item's own `EventID` correctly.
 
 ## SDD amendment (applied in v0.6)
 
@@ -367,6 +392,23 @@ ADR implements the authorization/resolution consequences —
   silently preferring one is a policy decision this ADR has no basis to
   make on the caller's behalf, and would resolve or unpin state the caller
   never named.
+- **Comparing `derived.EventID` to a caller-supplied `eventID` string
+  (round 2's AUTH-2.4 mechanism).** Rejected in round 3 (AUTH-3.1): `EventID`
+  is ordinary data on the item, not a capability — anyone who can read the
+  item can read its `EventID` and hand it back to `LinkDerived` later,
+  which defeats the entire point of restricting *when* provenance can be
+  attached. Only the store's own transaction-scoped sequence bookkeeping
+  (`tx.Allocated`) cannot be forged by a caller, because it isn't derived
+  from anything the caller can read off a record.
+- **`ResolveLifecycleTarget` trying the literal-item branch first and
+  returning immediately on failure, falling through to the directive
+  branch only on `ErrNotFound` (round 2's shape).** Rejected in round 3
+  (SPEC-3.1): whether the literal-ID branch fails `ErrNotFound` or succeeds
+  becomes observable through whether the directive branch's result can
+  still change the outcome, which is an existence oracle for the literal
+  ID. Gathering both namespaces into one unordered candidate set before
+  applying the zero/one/many decision removes the ordering dependency
+  entirely.
 
 - `AuthorizeGrantIssuance` and `AuthorizeGrantRevocation` are required call
   sites for every grant-issuing/revoking path; any Phase 3+ code that calls
@@ -405,11 +447,17 @@ ADR implements the authorization/resolution consequences —
   `CurrentDirective`/`CurrentDirectives` directly instead of calling it
   would silently reintroduce SPEC-2.2's ambiguity gap.
 - The `Section != SectionWorking` precondition on `SupersedeSnapshot` and
-  the `EventID` check on `LinkDerived` are both breaking changes to their
-  existing call sites and test fixtures: any caller/test constructing a
-  new item for `SupersedeSnapshot` without `Section = SectionWorking`, or
-  calling `LinkDerived` under an event ID that doesn't match the derived
-  item's own `EventID`, must be updated once these land.
+  the `tx.Allocated(derived.Seq)` check on `LinkDerived` are both breaking
+  changes to their existing call sites and test fixtures: any caller/test
+  constructing a new item for `SupersedeSnapshot` without `Section =
+  SectionWorking`, or calling `LinkDerived` in a transaction other than the
+  one that inserted the derived item, must be updated.
+- `store.Tx.Allocated` (ADR 17 territory for its store-contract wording;
+  cited here because `LinkDerived` is its first consumer) is a new
+  required method on every `store.Tx` implementation — any future store
+  backend must track which sequence numbers `NextSeq` allocated within the
+  current transaction (and forget them on rollback/commit) to implement it
+  correctly, not just return a constant or approximate answer.
 - AUTH-2.2 (`Section` requires `CanHoldLifecycleAuthority()`, ADR 4) is a
   precondition every `internal/graph` test fixture that constructs a
   Working/directive item under an AGENT/TOOL/RETRIEVED_CONTENT authority
@@ -575,8 +623,36 @@ and tests are all merged and passing (`go test -race ./... ` green):
   exactly, including the ambiguous-target `ErrAmbiguousDirective` case.
   `TestSupersedeSnapshot_NewItemNotWorking` locks SPEC-2.1: a non-Working
   new item is rejected before any existing Working snapshot is touched.
-  `TestLinkDerived_MustBeCreationEvent` (subtests `DifferentEventRejected`,
-  `SameEventAllowed`) locks AUTH-2.4 exactly.
+
+### Round 3 additions (findings SPEC-3.1, AUTH-3.1, AUTH-3.2) — landed
+
+- `internal/store/storetest/transactions.go:testAllocated`
+  (`TestConformance/Allocated`, run on both stores) locks `Tx.Allocated`
+  exactly: false before any `NextSeq` call, true for every number
+  allocated by `NextSeq` in the current transaction, false again once that
+  transaction ends (a rolled-back transaction's numbers are reused by the
+  next one and only then report `true`), and independent per session.
+- `internal/graph/graph_test.go:TestLinkDerived_MustBeCreationEvent`
+  (subtests `SameTransactionAllowed`, `LaterTransactionRejectedEvenWithMatchingEventID`)
+  locks AUTH-3.1 exactly — the second subtest is the regression itself: a
+  later transaction reads the derived item's own `EventID` back off the
+  stored record and replays it verbatim to `LinkDerived`, which the old
+  string comparison could not tell apart from "the transaction that
+  created it," and which `tx.Allocated` correctly rejects
+  (`ErrDerivedLinkNotAtCreation`).
+- `TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective` (subtests
+  `AccessibleItemAndAccessibleDirectiveCollideAmbiguous`,
+  `NoncurrentLiteralItemTreatedAsAbsent`) locks SPEC-3.1's unified-
+  candidate-gathering fix directly: an inaccessible/noncurrent literal-ID
+  candidate never short-circuits or blocks the directive-ID branch, and a
+  literal item plus a directive version that both resolve is
+  `ErrAmbiguousDirective`, not a silent pick of one.
+  `TestResolveLifecycleTarget_StaleDirectivePointerNotReturned` and
+  `TestReplaceDirective_StalePointerDoesNotBlockNewBoundary` lock AUTH-3.2
+  in `ResolveLifecycleTarget` and `rejectVisibleBoundaryConflict`
+  respectively: a `CurrentDirectives` entry that has since been superseded
+  through another path is treated as absent, never as a live conflict or a
+  valid resolution target.
 
 ## Open questions
 
@@ -676,3 +752,22 @@ SDD v0.8 amendment (`ErrAmbiguousDirective`). All findings above, including
 merged and tested; verified against `graph-worker`'s round-2 commits
 (`85a5317`/`043626b`) and the domain/store round-2 commits
 (`485472b` and others) with a full `go test -race ./...` pass.
+
+**Round 3 review** (PR #2; all four reviewers — DUR, SPEC, AUTH, TEST —
+returned NO FURTHER WORK NEEDED after this round). AUTH-3.1: round 2's
+AUTH-2.4 fix (comparing `derived.EventID` to a caller-supplied `eventID`)
+proved not to be a real constraint — `EventID` is readable data on the
+item, so a later transaction could just read it back and replay it;
+replaced with `store.Tx.Allocated(derived.Seq)`, a fact about the current
+transaction no caller can forge, since it isn't derived from anything on
+the record. SPEC-3.1: `ResolveLifecycleTarget`'s round-2 shape (try the
+literal item, fall through to the directive lookup only on `ErrNotFound`)
+was itself an existence oracle — fixed by gathering both namespaces into
+one candidate set before deciding. AUTH-3.2: both `ResolveLifecycleTarget`
+and `rejectVisibleBoundaryConflict` could be blocked or misled by a
+`CurrentDirectives` entry that had gone stale through a path other than
+the directive map (e.g. Working-snapshot supersession); both now confirm
+`IsCurrent` before treating a candidate as live. Verified against the
+merged round-3 commits (store `894d81a`/memory `05c3de9`/sqlite `7b5eda7`
+for `Tx.Allocated`; graph `f48c919`/`6cd2371`/`621700a`/`755ca45`) with a
+full `go test -race ./...` pass and every cited test run individually.

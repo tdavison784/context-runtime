@@ -212,6 +212,18 @@ distinct from the frozen inference principal.
   explicitly exempt: they are the ledger's own bookkeeping and legitimately
   share a `TargetCall` event's sequence number by design (every ledger
   transition already allocates and consumes exactly one).
+- **`store.Tx.Allocated(seq uint64) bool` (round 3, AUTH-3.1) is a new
+  primitive in the same sequence-number discipline this ADR already
+  relies on for `semanticStale` and DUR-2.1.** It reports whether `seq` was
+  allocated by `NextSeq` in the *current* transaction — the same
+  per-transaction sequence bookkeeping the store already needs to keep
+  `NextSeq` dense and reuse numbers on rollback. `internal/graph.LinkDerived`
+  is its first consumer (ADR 16): it requires `tx.Allocated(derived.Seq)`
+  before attaching provenance, so an item's own recorded `EventID` (mutable
+  data readable by anyone with access) is never mistaken for proof of
+  which transaction is currently running. This ADR notes it because it is
+  a store-contract addition adjacent to `NextSeq`/sequence allocation, even
+  though its only consumer so far is outside the call ledger.
 - No database transaction is held across transport: `Prepare`, `MarkSent`,
   `RecordOutcome` are separate `store.Update` calls.
 - **Service grant deferred; the owner-match floor is now applied on every
@@ -359,7 +371,12 @@ distinct from the frozen inference principal.
   `TestConformance/LedgerSeqIsolation` is the exact DUR-2.1 regression — a
   semantic write reusing a `TargetCall` event's `Seq` fails
   `ErrInvalidRecord`, while a call/attempt legitimately sharing that same
-  `Seq` commits normally.
+  `Seq` commits normally. `TestConformance/Allocated`
+  (`storetest/transactions.go:testAllocated`, run on both stores) locks
+  `Tx.Allocated`: false before any `NextSeq`, true for every number
+  allocated in the current transaction, false again in a later transaction
+  (including after a rollback reuses the number), and independent per
+  session.
 - `internal/store/sqlite/durability_test.go:TestCallTransitionsRequireAttemptEvidence`
   reconfirms the evidence-gating rule specifically against the SQLite
   typed-column write path (ADR 3).
@@ -518,3 +535,12 @@ which legitimately share it) from a `TargetCall` `Seq`;
 `spec-pr-comment-round2.md`, finding SPEC-2.3 (LOW): reconfirmed this ADR's
 SPEC-1.2 account already read correctly as of the round-1 reconciliation
 pass — no further change needed here.
+
+**Round 3 review** (PR #2; AUTH-3.1, all four reviewers returned NO FURTHER
+WORK NEEDED after this round). Not a finding against this ADR directly,
+but `store.Tx.Allocated` — the new primitive AUTH-3.1 added to
+`internal/graph.LinkDerived` (ADR 16) — sits in the same sequence-number
+discipline this ADR already documents for `semanticStale` and DUR-2.1, so
+it's recorded here too. Verified against the merged commits (store
+`894d81a`, memory `05c3de9`, sqlite `7b5eda7`) with `TestConformance
+/Allocated` passing on both stores.
