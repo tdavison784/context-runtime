@@ -13,6 +13,9 @@ import (
 type index[K comparable] struct {
 	base map[K][]string
 	over map[K][]string // nil in a read-only transaction
+	// yields counts IDs lookup has yielded, so tests can assert a keyed
+	// read walks only its key (SPEC-3.2).
+	yields int
 }
 
 func newIndex[K comparable](base map[K][]string, writable bool) index[K] {
@@ -30,6 +33,7 @@ func (x *index[K]) lookup(k K) iter.Seq[string] {
 	return func(yield func(string) bool) {
 		for _, ids := range [][]string{x.base[k], x.over[k]} {
 			for _, id := range ids {
+				x.yields++
 				if !yield(id) {
 					return
 				}

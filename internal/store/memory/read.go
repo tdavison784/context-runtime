@@ -25,8 +25,8 @@ type readTx struct {
 	rels         table[string, domain.Relationship]
 	supersedes   index[string] // SUPERSEDES successors: FromID -> ToIDs
 	supersededBy index[string] // SUPERSEDES predecessors: ToID -> FromIDs
-	relsFrom     index[string]
-	relsTo       index[string]
+	relsFrom     index[relKey]
+	relsTo       index[relKey]
 	relsByType   index[domain.RelationshipType]
 	events       table[string, domain.EventRecord]
 	blobs        table[string, domain.Blob]
@@ -167,11 +167,26 @@ func (r *readTx) Relationships(f store.RelationshipFilter) ([]domain.Relationshi
 	}
 	// Scan the narrowest index the filter allows.
 	var ids iter.Seq[string]
+	endpoint := func(x *index[relKey], id string) iter.Seq[string] {
+		types := relationshipTypes
+		if f.Type != "" {
+			types = []domain.RelationshipType{f.Type}
+		}
+		return func(yield func(string) bool) {
+			for _, typ := range types {
+				for rid := range x.lookup(relKey{typ, id}) {
+					if !yield(rid) {
+						return
+					}
+				}
+			}
+		}
+	}
 	switch {
 	case f.FromID != "":
-		ids = r.relsFrom.lookup(f.FromID)
+		ids = endpoint(&r.relsFrom, f.FromID)
 	case f.ToID != "":
-		ids = r.relsTo.lookup(f.ToID)
+		ids = endpoint(&r.relsTo, f.ToID)
 	case f.Type != "":
 		ids = r.relsByType.lookup(f.Type)
 	default:

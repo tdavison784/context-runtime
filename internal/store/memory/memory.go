@@ -57,6 +57,17 @@ type currentIDKey struct {
 	id        string
 }
 
+// relKey keys relationships by type and one endpoint (SPEC-3.1 item 5), so
+// a typed read never walks another type's edges at the same endpoint.
+type relKey struct {
+	typ domain.RelationshipType
+	id  string
+}
+
+// relationshipTypes lists every type, for endpoint reads without a type.
+var relationshipTypes = []domain.RelationshipType{domain.RelDerivedFrom, domain.RelSupersedes, domain.RelDependsOn,
+	domain.RelReferences, domain.RelSatisfies, domain.RelDuplicateOf}
+
 type obligationKey struct {
 	id      string
 	version uint64
@@ -74,8 +85,8 @@ type state struct {
 	rels         map[string]domain.Relationship
 	supersedes   map[string][]string // SUPERSEDES successors: FromID -> ToIDs
 	supersededBy map[string][]string // SUPERSEDES predecessors: ToID -> FromIDs
-	relsFrom     map[string][]string // relationship IDs by FromID
-	relsTo       map[string][]string // relationship IDs by ToID
+	relsFrom     map[relKey][]string // relationship IDs by (Type, FromID)
+	relsTo       map[relKey][]string // relationship IDs by (Type, ToID)
 	relsByType   map[domain.RelationshipType][]string
 	events       map[string]domain.EventRecord
 	blobs        map[string]domain.Blob
@@ -114,8 +125,8 @@ func newState() *state {
 		rels:         map[string]domain.Relationship{},
 		supersedes:   map[string][]string{},
 		supersededBy: map[string][]string{},
-		relsFrom:     map[string][]string{},
-		relsTo:       map[string][]string{},
+		relsFrom:     map[relKey][]string{},
+		relsTo:       map[relKey][]string{},
 		relsByType:   map[domain.RelationshipType][]string{},
 		events:       map[string]domain.EventRecord{},
 		blobs:        map[string]domain.Blob{},
