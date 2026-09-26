@@ -289,6 +289,10 @@ func testSemanticWorkspaceBindings(t *testing.T, s store.Store) {
 			t.Errorf("%s: error = %v, want %v", tc.name, err, tc.want)
 		}
 	}
+	// A later version needs a later sequence.
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+		return semantic(t, tx).InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 2, 2))
+	})
 	update(t, s, sessA, func(tx store.Tx) error {
 		return semantic(t, tx).InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 2, tx.NextSeq()))
 	})
