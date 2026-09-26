@@ -190,7 +190,10 @@ func blobItem(sess, id string, seq uint64, b domain.Blob, size uint64) domain.Co
 func testItemBlobIntegrity(t *testing.T, s store.Store) {
 	b := NewBlob(sessA, []byte("document bytes"))
 	size := uint64(len(b.Data))
-	update(t, s, sessB, func(tx store.Tx) error { return tx.InsertBlob(NewBlob(sessB, b.Data)) })
+	update(t, s, sessB, func(tx store.Tx) error {
+		noErr(t, tx.InsertBlob(NewBlob(sessB, b.Data)))
+		return audited(tx)
+	})
 	cases := []struct {
 		name      string
 		storeBlob bool
@@ -222,7 +225,10 @@ func testItemBlobIntegrity(t *testing.T, s store.Store) {
 		}
 	}
 	// A blob committed by an earlier transaction satisfies the part.
-	update(t, s, sessA, func(tx store.Tx) error { return tx.InsertBlob(b) })
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertBlob(b))
+		return audited(tx)
+	})
 	update(t, s, sessA, func(tx store.Tx) error {
 		return tx.InsertItem(blobItem(sessA, "doc", tx.NextSeq(), b, size))
 	})
@@ -601,7 +607,7 @@ func testBlobs(t *testing.T, s store.Store) {
 		noErr(t, tx.InsertBlob(b))
 		noErr(t, tx.InsertBlob(b)) // identical bytes: no-op
 		noErr(t, tx.InsertBlob(empty))
-		return nil
+		return audited(tx)
 	})
 	update(t, s, sessA, func(tx store.Tx) error {
 		noErr(t, tx.InsertBlob(b))
@@ -611,6 +617,8 @@ func testBlobs(t *testing.T, s store.Store) {
 		malformed := NewBlob(sessA, []byte("x"))
 		malformed.Hash = "sha256:XYZ"
 		wantErr(t, tx.InsertBlob(malformed), domain.ErrInvalidRecord)
+		// Re-inserting identical bytes writes nothing, so this transaction
+		// needs no sequenced record.
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
@@ -631,7 +639,10 @@ func testBlobs(t *testing.T, s store.Store) {
 		wantErr(t, err, domain.ErrNotFound)
 		return nil
 	})
-	update(t, s, sessB, func(tx store.Tx) error { return tx.InsertBlob(NewBlob(sessB, b.Data)) })
+	update(t, s, sessB, func(tx store.Tx) error {
+		noErr(t, tx.InsertBlob(NewBlob(sessB, b.Data)))
+		return audited(tx)
+	})
 	view(t, s, sessB, func(tx store.ReadTx) error {
 		got, err := tx.Blob(b.Hash)
 		noErr(t, err)
@@ -667,7 +678,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
-		cur, err := tx.CurrentDirective("task", "dep")
+		cur, err := tx.CurrentDirective("task", "dep", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "p2" {
 			t.Errorf("CurrentDirective = %q, want p2", cur)
@@ -702,14 +713,14 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		wantErr(t, tx.SetCurrentDirective("task2", "dep", "p2"), domain.ErrInvalidRecord)
 		wantErr(t, tx.SetCurrentDirective("", "dep", "p2"), domain.ErrInvalidRecord)
 		wantErr(t, tx.SetCurrentDirective("task", "", "p2"), domain.ErrInvalidRecord)
-		_, err := tx.CurrentDirective("task", "other")
+		_, err := tx.CurrentDirective("task", "other", DirectiveBoundary(sessA))
 		wantErr(t, err, domain.ErrNotFound)
-		_, err = tx.CurrentDirective("task2", "dep")
+		_, err = tx.CurrentDirective("task2", "dep", DirectiveBoundary(sessA))
 		wantErr(t, err, domain.ErrNotFound)
 		// Moving the pointer back is permitted; the store does not judge
 		// which version is current.
 		noErr(t, tx.SetCurrentDirective("task", "dep", "p1"))
-		cur, err := tx.CurrentDirective("task", "dep")
+		cur, err := tx.CurrentDirective("task", "dep", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "p1" {
 			t.Errorf("CurrentDirective = %q, want p1", cur)

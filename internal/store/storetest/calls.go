@@ -147,14 +147,24 @@ func testCalls(t *testing.T, s store.Store) {
 			}
 			return errOf(tx.UpdateCall(next, cur.Revision))
 		})
-		wantErr(t, err, domain.ErrInvalidTransition)
+		wantErr(t, err, domain.ErrImmutable)
+	}
+	// Terminal calls are immutable (DUR-1.1): no annotation, no identical
+	// rewrite, and no rewritten outcome.
+	rewritten := cur.Clone()
+	o := *rewritten.Outcome
+	o.Response = []byte("a different response")
+	o.ResponseHash = domain.HashBytes(o.Response)
+	rewritten.Outcome, rewritten.OutcomeHash = &o, o.OutcomeHash()
+	annotated := cur.Clone()
+	annotated.Reason = "annotated"
+	for name, next := range map[string]domain.CallRecord{"identical": cur, "annotated": annotated, "rewritten outcome": rewritten} {
+		err := s.Update(ctx, sessA, func(tx store.Tx) error { return errOf(tx.UpdateCall(next, cur.Revision)) })
+		if !errors.Is(err, domain.ErrImmutable) {
+			t.Errorf("updating a COMPLETED call (%s): error = %v, want ErrImmutable", name, err)
+		}
 	}
 	update(t, s, sessA, func(tx store.Tx) error {
-		next := cur.Clone()
-		next.Reason = "annotated"
-		var err error
-		cur, err = tx.UpdateCall(next, cur.Revision)
-		noErr(t, err)
 		// c1 no longer reserves conv1, so a new call may.
 		c3 = NewCall(sessA, "call-c", "conv1", tx.NextSeq())
 		noErr(t, tx.InsertCall(c3))
