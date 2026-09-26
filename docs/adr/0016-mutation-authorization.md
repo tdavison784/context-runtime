@@ -426,24 +426,22 @@ green).
   the boundary-keyed directive pointer end-to-end (ADR 4's decision) — two
   versions of the same `(task, directiveID)` in different boundaries
   resolve independently, and every boundary field (`AgentID`, `WorkflowID`,
-  `Scope`, `SessionID`, `TaskID`) is part of the key. **This subtest
-  currently fails on `internal/store/sqlite` only** — see ADR 17's Tests
-  section for the reproduction; it is a store-implementation gap, not a
-  gap in this ADR's decision or in the test itself (the memory store
-  passes the identical test).
-- **Genuine remaining gap, not blocked on anything:** no test directly
-  exercises `LinkDerived` rejecting an AGENT/TOOL/RETRIEVED_CONTENT actor
-  whose authority is below the derived item's — the code fix for AUTH-1.1
-  is landed (`internal/graph/graph.go`: `actor.Authority
-  .CanHoldLifecycleAuthority() || actor.Authority == AuthorityAgent`, plus
-  `actor.Authority.AtLeast(derived.Authority)`), and one existing test
-  comment (`graph_test.go:987`) notes in passing that a case deliberately
-  sets `derived.Authority = AuthorityAgent` "to pass the actor-authority
-  gate (AUTH-1.1)" while testing something else, but no test asserts the
-  gate itself rejects an under-authority or TOOL/RETRIEVED_CONTENT actor.
-  Required: a `TestLinkDerived_ActorAuthorityBelowDerived`-shaped case
-  reproducing the original finding directly (a SYSTEM item, a low-authority
-  actor, asserting `ErrInvalidAuthorityPromotion`).
+  `Scope`, `SessionID`, `TaskID`) is part of the key. Passes on both
+  stores (a brief SQLite-only failure was fixed in `a8e895f`; see ADR 4/17).
+- **Genuine remaining gap, assigned to `graph-worker` for round 2:** no
+  test directly exercises `LinkDerived` rejecting an AGENT/TOOL/
+  RETRIEVED_CONTENT actor whose authority is below the derived item's —
+  the code fix for AUTH-1.1 is landed (`internal/graph/graph.go`:
+  `actor.Authority.CanHoldLifecycleAuthority() || actor.Authority ==
+  AuthorityAgent`, plus `actor.Authority.AtLeast(derived.Authority)`), and
+  one existing test comment (`graph_test.go:987`) notes in passing that a
+  case deliberately sets `derived.Authority = AuthorityAgent` "to pass the
+  actor-authority gate (AUTH-1.1)" while testing something else, but no
+  test asserts the gate itself rejects an under-authority or TOOL/
+  RETRIEVED_CONTENT actor. Required: a
+  `TestLinkDerived_ActorAuthorityBelowDerived`-shaped case reproducing the
+  original finding directly (a SYSTEM item, a low-authority actor,
+  asserting `ErrInvalidAuthorityPromotion`).
 
 ## Open questions
 
@@ -519,8 +517,7 @@ unchanged by this round.
 Verified against the merged `graph-worker`/`domain-tests-worker` branches
 (`go test -race ./internal/domain/... ./internal/graph/...` green): every
 finding above has a passing test, cited in the "Round 1 additions"
-subsection, with two exceptions flagged there rather than silently
-claimed done — AUTH-1.1 (`LinkDerived` actor-authority gate) has the code
-fix but no direct test, and `TestConformance/DirectiveBoundaries` fails on
-`internal/store/sqlite` only (a `sqlite-worker` implementation gap, cited
-in full in ADR 17).
+subsection. `TestConformance/DirectiveBoundaries`'s brief SQLite-only
+failure is fixed (`a8e895f`; see ADR 17). One exception remains
+intentionally open: AUTH-1.1 (`LinkDerived` actor-authority gate) has the
+code fix but no direct test — assigned to `graph-worker` for round 2.
