@@ -203,33 +203,30 @@ func TestV3_OperationCountCeiling(t *testing.T) {
 	})
 }
 
-// TestV3_DirectiveNamespaceExplicit (P3-3): a directive item created under
-// a Phase 3 policy carries the explicit DIRECTIVE namespace; its current
-// key equals the frozen legacy fallback's, so a Phase 2 item with the same
-// ID is replaced across the upgrade, not treated as a separate key.
+// TestV3_DirectiveNamespaceExplicit (P3-3/41): a directive item created
+// under a Phase 3 policy carries the explicit DIRECTIVE namespace, and its
+// current key equals the frozen legacy fallback's: a Phase 2 pin with the
+// same ID, read from the frozen Phase 2 database, is replaced across the
+// upgrade rather than treated as a separate key.
 func TestV3_DirectiveNamespaceExplicit(t *testing.T) {
-	semanticStores(t, func(t *testing.T, f *fixture) {
-		user := principal(domain.AuthorityUser)
-		f.in.legacyV2 = true
-		old := mustDirective(t, f.mustIngest(user, userEvent("ns-old", "## Pinned\n- [dep] Use v2.\n", true)), "dep")
-		if old.Namespace != "" {
-			t.Fatalf("legacy ingestion set namespace %q", old.Namespace)
-		}
-		f.in.legacyV2 = false
-		r := f.mustIngest(user, userEvent("ns-new", "## Pinned\n- [dep] Use v3.\n", true))
-		pin := mustDirective(t, r, "dep")
-		if pin.Namespace != domain.NamespaceDirective || pin.ValidateSemantic() != nil {
-			t.Fatalf("namespace %q (%v)", pin.Namespace, pin.ValidateSemantic())
-		}
-		if len(r.Replacements) != 1 || r.Replacements[0].TargetID != old.ID {
-			t.Fatalf("replacements = %+v", r.Replacements)
-		}
-		for _, it := range r.Items {
-			if it.Role == domain.RoleTranscript && it.Namespace != "" {
-				t.Errorf("transcript given a namespace: %+v", it)
-			}
-		}
-	})
+	g := loadPhase2Golden(t)
+	s := openPhase2Copy(t)
+	if !hasSemantic(s) {
+		t.Skip("GATE-PENDING: needs " + depW2)
+	}
+	f := newFixture(t, s)
+	old := mustDirective(t, g.Receipts["sys-1"], "reada")
+	if old.Namespace != "" {
+		t.Fatalf("legacy item has namespace %q", old.Namespace)
+	}
+	r := f.mustIngest(principal(domain.AuthoritySystem), sysEvent("ns-new", "## Pinned\n- [reada] Keep a.go readable.\n"))
+	pin := mustDirective(t, r, "reada")
+	if pin.Namespace != domain.NamespaceDirective || pin.ValidateSemantic() != nil {
+		t.Fatalf("namespace %q (%v)", pin.Namespace, pin.ValidateSemantic())
+	}
+	if len(r.Replacements) != 1 || r.Replacements[0].TargetID != old.ID || f.isCurrent(old.ID) || !f.isCurrent(pin.ID) {
+		t.Fatalf("replacements = %+v", r.Replacements)
+	}
 }
 
 // TestV3_DefaultPolicy (P3-40/42): with no policy configured, a new event

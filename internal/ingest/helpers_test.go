@@ -51,12 +51,35 @@ func newFixture(t *testing.T, s store.Store) *fixture {
 // errProbe rolls back the semantic-facet probe.
 var errProbe = errors.New("probe")
 
-// hasSemantic reports whether s implements the Phase 3 semantic facet.
+// hasSemantic reports whether s implements the parts of the Phase 3
+// semantic facet every graph write needs: creation declarations (and with
+// them current-pointer CAS and semantic changes, which W2 ships together).
 func hasSemantic(s store.Store) bool {
+	return probeSemantic(s, func(r store.SemanticReader) error {
+		_, err := r.CreationDeclaration("probe")
+		return err
+	})
+}
+
+// hasObligations reports whether s also implements the obligation and
+// workspace records W4's services write (declarations, proofs, bindings).
+func hasObligations(s store.Store) bool {
+	return hasSemantic(s) && probeSemantic(s, func(r store.SemanticReader) error {
+		if _, err := r.ExactObligation(domain.ObligationRef{SessionID: sess, ObligationID: "probe", Version: 1}); err != nil {
+			return err
+		}
+		_, err := r.WorkspaceBindingsByContext("probe", "", "", store.Page{Limit: 1})
+		return err
+	})
+}
+
+// probeSemantic reports whether read returns anything but
+// ErrUnsupportedSchema, in a transaction it rolls back.
+func probeSemantic(s store.Store, read func(store.SemanticReader) error) bool {
 	supported := false
 	_ = s.Update(ctx, sess, func(tx store.Tx) error {
-		_, err := store.Semantic(tx)
-		supported = err == nil
+		sem, err := store.Semantic(tx)
+		supported = err == nil && !errors.Is(read(sem), domain.ErrUnsupportedSchema)
 		return errProbe
 	})
 	return supported

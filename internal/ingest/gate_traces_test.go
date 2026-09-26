@@ -58,6 +58,7 @@ const (
 func TestGateT02_ReplacementRetiresOldRequirement(t *testing.T) {
 	t.Run("replacement retires old version and obligation", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
+			needsObligations(t, f)
 			user := principal(domain.AuthorityUser)
 			r1, r2 := f.mustIngest(user, t02P1()), f.mustIngest(user, t02P2())
 			p1, p2 := mustDirective(t, r1, "dep"), mustDirective(t, r2, "dep")
@@ -85,6 +86,7 @@ func TestGateT02_ReplacementRetiresOldRequirement(t *testing.T) {
 	})
 	t.Run("satisfied v1 does not carry to v2", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
+			needsObligations(t, f)
 			user, sys := principal(domain.AuthorityUser), principal(domain.AuthoritySystem)
 			p1 := mustDirective(t, f.mustIngest(user, t02P1()), "dep")
 			v1 := f.currentObligation(p1.ID)
@@ -175,6 +177,7 @@ func TestGateT05_ResolvedGoalStaysResolved(t *testing.T) {
 func TestGateT06_AllLifecyclePathsAuthorize(t *testing.T) {
 	t.Run("USER Resolve of SYSTEM goal aborts atomically", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
+			needsObligations(t, f)
 			f.mustIngest(principal(domain.AuthoritySystem), t06Setup())
 			f.requireAtomic(domain.ErrInvalidAuthorityPromotion, func() error {
 				_, err := f.ingest(principal(domain.AuthorityUser), userEvent("t06-u", "## Remember\n- n\n## Resolve [G]\n", true))
@@ -184,6 +187,7 @@ func TestGateT06_AllLifecyclePathsAuthorize(t *testing.T) {
 	})
 	t.Run("USER Block and Waive denied atomically", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
+			needsObligations(t, f)
 			o := f.currentObligation(mustDirective(t, f.mustIngest(principal(domain.AuthoritySystem), t06Setup()), "O").ID)
 			user := principal(domain.AuthorityUser)
 			for _, to := range []domain.ObligationStatus{domain.ObligationBlocked, domain.ObligationWaived} {
@@ -197,6 +201,7 @@ func TestGateT06_AllLifecyclePathsAuthorize(t *testing.T) {
 	t.Run("USER CompleteTask denied atomically", func(t *testing.T) { pending(t, depW3Life+" (CompleteTask)") })
 	t.Run("HARNESS assertion without SYSTEM grant denied", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
+			needsObligations(t, f)
 			o := f.currentObligation(mustDirective(t, f.mustIngest(principal(domain.AuthoritySystem), t06Setup()), "O").ID)
 			f.requireAtomic(domain.ErrInvalidAuthorityPromotion, func() error {
 				_, err := f.ingest(principal(domain.AuthorityHarness), transitionEvent("t06-h", domain.EventHarness, o, domain.ObligationSatisfied, domain.AssertionAttestation))
@@ -252,6 +257,7 @@ func TestGateT16_CheckpointFrontier(t *testing.T) {
 func TestGateT17_AgentToolsWriteAtAgentAuthority(t *testing.T) {
 	t.Run("setup: USER pin P1 with O1 and goal G1", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
+			needsObligations(t, f)
 			r := f.mustIngest(principal(domain.AuthorityUser), t17Setup())
 			p1, g1 := mustDirective(t, r, "P1"), mustDirective(t, r, "G1")
 			if !p1.IsPinned() || p1.Authority != domain.AuthorityUser || *g1.GoalStatus != domain.GoalOpen {

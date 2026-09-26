@@ -61,7 +61,7 @@ func (f *fixture) requireAtomic(want error, fn func() error) {
 // turn it would have opened.
 func TestRequireAtomic_T06Denial(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
-		f.mustIngest(principal(domain.AuthoritySystem), t06Setup())
+		f.mustIngest(principal(domain.AuthoritySystem), sysEvent("t06-g", "## Goal [G]\nShip the release.\n"))
 		user := principal(domain.AuthorityUser)
 		f.requireAtomic(domain.ErrInvalidAuthorityPromotion, func() error {
 			_, err := f.ingest(user, userEvent("t06-u1", "## Remember\n- noted\n## Resolve [G]\n", true))

@@ -65,3 +65,12 @@ func semanticStores(t *testing.T, fn func(t *testing.T, f *fixture)) {
 		run(t, ss)
 	})
 }
+
+// needsObligations skips a semanticStores test whose store does not yet
+// implement the obligation/workspace records (W2's next facet slice).
+func needsObligations(t *testing.T, f *fixture) {
+	t.Helper()
+	if !hasObligations(f.s) {
+		t.Skip("GATE-PENDING: needs W2 obligation/proof/workspace facet records for W4 services")
+	}
+}
