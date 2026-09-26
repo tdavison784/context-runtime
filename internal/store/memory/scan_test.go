@@ -105,12 +105,14 @@ func TestRelationshipsReadTheirTypedKey(t *testing.T) {
 			{Type: domain.RelSupersedes, FromID: "d7"},
 		} {
 			r.rels.scanned = 0
-			yieldsBefore := r.relsTo.yields + r.relsFrom.yields
+			// Every relationship index counts, so neither a full scan nor a
+			// type-only index can stand in for (type, endpoint) (SPEC-3.2).
+			yieldsBefore := r.relsTo.yields + r.relsFrom.yields + r.relsByType.yields
 			rels, err := rtx.Relationships(f)
 			if err != nil || len(rels) != 0 {
 				t.Errorf("Relationships(%+v) = %v, %v", f, rels, err)
 			}
-			if n := r.relsTo.yields + r.relsFrom.yields - yieldsBefore; n > 1 || r.rels.scanned != 0 {
+			if n := r.relsTo.yields + r.relsFrom.yields + r.relsByType.yields - yieldsBefore; n > 1 || r.rels.scanned != 0 {
 				t.Errorf("Relationships(%+v) walked %d index entries and scanned %d edges", f, n, r.rels.scanned)
 			}
 		}

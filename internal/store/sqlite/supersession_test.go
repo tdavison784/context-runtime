@@ -42,7 +42,16 @@ func TestSupersessionCycleCheckIsLocal(t *testing.T) {
 	}
 	if err := s.Update(ctx, "s", func(tx store.Tx) error {
 		inner := tx.(*store.Guard).TxBase.(*transaction)
-		for _, e := range [][2]string{{"v2", "v1"}, {"v3", "v2"}} {
+		// Measured from outside the check (SPEC-3.2): the rows every query
+		// of the insert read, not the walk's own count.
+		inner.rowsRead = 0
+		if err := tx.InsertRelationship(storetest.NewRelationship("s", "probe", domain.RelSupersedes, "v2", "v1", tx.NextSeq())); err != nil {
+			return err
+		}
+		if inner.rowsRead > 2 {
+			t.Errorf("inserting a new version's SUPERSEDES edge read %d rows, want at most 2", inner.rowsRead)
+		}
+		for _, e := range [][2]string{{"v3", "v2"}} {
 			cycle, visited, err := inner.closesSupersessionCycle(e[0], e[1])
 			if err != nil || cycle || visited != 0 {
 				t.Errorf("%s -> %s: cycle=%v visited=%d err=%v; want no cycle and no walk", e[0], e[1], cycle, visited, err)

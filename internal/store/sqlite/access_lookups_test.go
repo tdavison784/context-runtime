@@ -156,6 +156,14 @@ func TestGraphReadsUseIndex(t *testing.T) {
 	assertIndexed(t, s, []string{"session_id", "f_task_id"}, q, args...)
 }
 
+// TestCurrentVersionsUseIndex locks the current-version read by (task,
+// namespace, ID) to its primary-key prefix (SPEC-2.1, SPEC-3.2).
+func TestCurrentVersionsUseIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	q, args := currentVersionsQuery("s", "task", domain.NamespaceDirective, "d")
+	assertIndexed(t, s, []string{"session_id", "task_id", "namespace", "directive_id"}, q, args...)
+}
+
 // TestObligationReadsUseIndex locks obligation reads to their keys
 // (SPEC-2.1): versions of one obligation by primary key, versions bound to
 // a source by the 0006 index. Ingest reads the latest version once per
