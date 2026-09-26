@@ -59,11 +59,17 @@ const (
 	ReasonAmbiguousTarget      DiagnosticReason = "ambiguous_target"
 	ReasonLimit                DiagnosticReason = "limit"
 	ReasonDerivedID            DiagnosticReason = "derived_id"
+	// Parser-v1 reasons for repeated metadata and headings nested inside an
+	// open section (D6, M4). Like all reasons they are fixed content-free tokens.
+	ReasonDuplicateAttribute DiagnosticReason = "duplicate_attribute"
+	ReasonDuplicateID        DiagnosticReason = "duplicate_id"
+	ReasonNestedHeading      DiagnosticReason = "nested_heading"
 )
 
 func (r DiagnosticReason) Valid() bool {
 	switch r {
-	case ReasonNone, ReasonSourceNotCapable, ReasonIndented, ReasonFencedCode, ReasonBlockQuote, ReasonHTMLComment, ReasonInvalidSyntax, ReasonInvalidID, ReasonEmptyItem, ReasonHeadingIDOnList, ReasonUnknownAttribute, ReasonDisallowedAttribute, ReasonInvalidAttribute, ReasonScopeWidening, ReasonUnsupportedLifecycle, ReasonUnknownTarget, ReasonAmbiguousTarget, ReasonLimit, ReasonDerivedID:
+	case ReasonNone, ReasonSourceNotCapable, ReasonIndented, ReasonFencedCode, ReasonBlockQuote, ReasonHTMLComment, ReasonInvalidSyntax, ReasonInvalidID, ReasonEmptyItem, ReasonHeadingIDOnList, ReasonUnknownAttribute, ReasonDisallowedAttribute, ReasonInvalidAttribute, ReasonScopeWidening, ReasonUnsupportedLifecycle, ReasonUnknownTarget, ReasonAmbiguousTarget, ReasonLimit, ReasonDerivedID,
+		ReasonDuplicateAttribute, ReasonDuplicateID, ReasonNestedHeading:
 		return true
 	}
 	return false
