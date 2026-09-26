@@ -175,20 +175,29 @@ preserve valid state.
   migration file's SHA-256 checksum, and `TestCommittedMigrationsUnchanged`
   fails if a committed file's bytes — or the set of embedded files —
   changes; a schema change can only ever land as a new numbered file added
-  to that map, never an edit to an existing entry. **This checksum covers
-  only the `.sql` bytes (`sqlite.go:142`) — SPEC-1.9/DUR-1.8/F5 flag that
-  migration 0011's registered Go step (`migrationSteps[11]`,
-  `steps.go:14-16`) is outside that protection: an edit to
-  `backfillItemSources` or to the live `domain.LocatorKey` it calls would
-  be caught by neither `TestCommittedMigrationsUnchanged` nor
-  `TestMigrationChecksumMismatch`, despite `steps.go`'s own "never edited
-  once committed" comment.** F5's ruling requires either inlining a frozen,
-  versioned copy of the transform (never importing live domain code a
-  committed migration depends on) or making it pure SQL, and including the
-  step's content in checksum protection — a checksummed Go-step registry
-  keyed by migration version, for example. This is `p2-store`'s
-  outstanding work (assignment table, PR #5 review round 1); it is not yet
-  landed as of this revision.
+  to that map, never an edit to an existing entry. **A Go migration step's
+  identity is now part of that checksum too (F5: DUR-1.8/SPEC-1.9,
+  landed).** The checksum originally covered only the `.sql` bytes
+  (`sqlite.go:142` in the pre-fix build), leaving migration 0011's
+  registered Go step outside protection and dependent on live
+  `domain.LocatorKey` — an edit to either would have been caught by
+  neither `TestCommittedMigrationsUnchanged` nor
+  `TestMigrationChecksumMismatch`. `p2-store` fixed this: migration
+  0011's backfill now lives in `steps_0011.go` as a frozen, private copy
+  of locator rule v1 (no import of `internal/domain`'s live rule), keyed
+  by a stable step identity (`"0011/item-sources/reference-locator-v1"`,
+  `steps.go`'s `migrationSteps` map); `migrationChecksum(sqlBytes, number)`
+  appends a step's identity to its migration's SQL bytes before hashing
+  when one exists, so `TestCommittedMigrationsUnchanged`'s pinned checksum
+  for 0011 now covers the step too, and `TestCommittedStepsUnchanged`
+  separately pins each step's identity and the SHA-256 of the file holding
+  its frozen code. A migration with no Go step keeps its plain SQL
+  checksum, unaffected. **This changed migration 0011's stored checksum
+  value: a pre-release database that applied 0011 under the earlier build
+  fails the checksum check on open and must be recreated** — acceptable
+  before V1 release, since no production data exists yet (this ADR's own
+  "no production data to migrate" precedent for prior breaking ID-scheme
+  changes, ADR 4).
 - **Lossless leaf-list encoding (D3, R8).** `internal/store/sqlite/lossless.go`
   replaces the plain-JSON leaf-list encoding this ADR originally specified
   ("JSON columns are used only for leaf value lists," above) with a form
