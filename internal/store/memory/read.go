@@ -43,13 +43,13 @@ type readTx struct {
 	receipts     table[string, domain.IngestReceipt]
 	envelopes    table[string, domain.EventEnvelope]
 	references   table[string, domain.UnresolvedReference]
-	blobOwners   index[blobKey]
-	canonical    liveIndex[canonicalKey, string]
-	working      liveIndex[workingKey, string]
-	sources      liveIndex[sourceKey, string]
+	blobOwners   orderedIndex[blobKey]
+	canonical    orderedIndex[canonicalKey]
+	working      orderedIndex[workingKey]
+	sources      orderedIndex[sourceKey]
 	currentIDs   liveIndex[currentIDKey, domain.AccessBoundary]
 	oblsBySource liveIndex[string, obligationKey]
-	refOwners    index[sourceKey]
+	refOwners    orderedIndex[sourceKey]
 	itemsByTask  index[string]
 }
 
@@ -81,13 +81,13 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		receipts:     newTable(st.receipts, writable, domain.IngestReceipt.Clone),
 		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
 		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
-		blobOwners:   newIndex(st.blobOwners, writable),
-		canonical:    newLiveIndex(st.canonical, writable),
-		working:      newLiveIndex(st.working, writable),
-		sources:      newLiveIndex(st.sources, writable),
+		blobOwners:   newOrderedIndex(st.blobOwners, writable),
+		canonical:    newOrderedIndex(st.canonical, writable),
+		working:      newOrderedIndex(st.working, writable),
+		sources:      newOrderedIndex(st.sources, writable),
 		currentIDs:   newLiveIndex(st.currentIDs, writable),
 		oblsBySource: newLiveIndex(st.oblsBySource, writable),
-		refOwners:    newIndex(st.refOwners, writable),
+		refOwners:    newOrderedIndex(st.refOwners, writable),
 		itemsByTask:  newIndex(st.itemsByTask, writable),
 	}
 }

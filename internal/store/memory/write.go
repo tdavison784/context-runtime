@@ -229,9 +229,9 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	// A superseded or duplicate item is no longer live (F1).
 	switch r.Type {
 	case domain.RelSupersedes:
-		t.retireLookups(r.ToID)
+		t.retireLookups(r.ToID, false)
 	case domain.RelDuplicateOf:
-		t.retireLookups(r.FromID)
+		t.retireLookups(r.FromID, true)
 	}
 	t.markSequenced()
 	return nil
@@ -852,7 +852,7 @@ func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
 		return fmt.Errorf("unresolved reference %s: %w", r.ID, domain.ErrImmutable)
 	}
 	t.references.put(r.ID, r)
-	t.refOwners.add(sourceKey{r.LocatorKey, ownersOf(r.Access)}, r.ID)
+	t.refOwners.add(sourceKey{r.LocatorKey, ownersOf(r.Access)}, seqRef{r.Seq, r.ID})
 	t.markSequenced()
 	return nil
 }

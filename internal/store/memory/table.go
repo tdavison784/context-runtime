@@ -11,9 +11,10 @@ type table[K comparable, V any] struct {
 	base  map[K]V
 	over  map[K]V // nil in a read-only transaction
 	clone func(V) V
-	// scanned counts records all has yielded, so tests can assert that a
-	// keyed read never scans the table (SPEC-2.1).
-	scanned int
+	// scanned counts records all has yielded and gets counts get calls, so
+	// tests can assert that keyed reads never scan and lookups load a
+	// bounded number of records (SPEC-2.1, DUR-2.1).
+	scanned, gets int
 }
 
 func newTable[K comparable, V any](base map[K]V, writable bool, clone func(V) V) table[K, V] {
@@ -38,6 +39,7 @@ func (t *table[K, V]) has(k K) bool {
 }
 
 func (t *table[K, V]) get(k K) (V, bool) {
+	t.gets++
 	v, ok := t.peek(k)
 	if ok {
 		v = t.clone(v)
