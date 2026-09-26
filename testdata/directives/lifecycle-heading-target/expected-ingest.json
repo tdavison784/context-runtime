@@ -1,0 +1,85 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_e676181e4ac0bb36d3490bfebd845cea",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Resolve [upgrade]\n\n## Unpin [api]\n   \n"
+        }
+      ],
+      "content_hash": "sha256:4a8b3134aa0f714fda2769a8f8323c0dbe825821eadd2d459aec6b05b2ffd854"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [
+    {
+      "action": "RESOLVE",
+      "target_id": "upgrade",
+      "authority": "USER",
+      "actor_authority": "USER",
+      "status": "PARSED_NOT_EXECUTED",
+      "resolution": "NOT_FOUND",
+      "range": [
+        0,
+        22
+      ]
+    },
+    {
+      "action": "UNPIN",
+      "target_id": "api",
+      "authority": "USER",
+      "actor_authority": "USER",
+      "status": "PARSED_NOT_EXECUTED",
+      "resolution": "NOT_FOUND",
+      "range": [
+        22,
+        41
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrNotFound",
+      "reason": "unknown_target",
+      "section": "RESOLVE",
+      "range": [
+        0,
+        22
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrNotFound",
+      "reason": "unknown_target",
+      "section": "UNPIN",
+      "range": [
+        22,
+        41
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

@@ -1,0 +1,149 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_9a3bb04709d4e90e84ea2ed8efc2d2f3",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Goal\n- first goal\n- [g2] second goal\n"
+        }
+      ],
+      "content_hash": "sha256:68a81466ff9df8cd85e63dbe9c7d6efe4eee15ce0fa848e5406b53e0cb194bbf"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_ae3e16bfe7f98ba1efd25885fb6f36db",
+      "kind": "goal",
+      "section": "GOAL",
+      "directive_id": "goal-d6105aaf5ae99c77706f986ab539e282a326d5c106ca3da92abaa4b26cb5a8c3",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "goal_status": "OPEN",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "first goal"
+        }
+      ],
+      "content_hash": "sha256:d6105aaf5ae99c77706f986ab539e282a326d5c106ca3da92abaa4b26cb5a8c3",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            8,
+            21
+          ],
+          "slices": [
+            [
+              10,
+              20
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_50e6a693021e3059c6f1ac8e3384dafe",
+      "kind": "goal",
+      "section": "GOAL",
+      "directive_id": "g2",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "goal_status": "OPEN",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "second goal"
+        }
+      ],
+      "content_hash": "sha256:b12cc36720bc6f002742573a8df460186d56da427584898607c2c4380b3166f8",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            21,
+            40
+          ],
+          "slices": [
+            [
+              28,
+              39
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "GOAL",
+      "directive_id": "goal-d6105aaf5ae99c77706f986ab539e282a326d5c106ca3da92abaa4b26cb5a8c3",
+      "range": [
+        8,
+        21
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

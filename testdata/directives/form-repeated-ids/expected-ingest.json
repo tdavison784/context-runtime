@@ -1,0 +1,136 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_6dda1a5c7ef7301d6fcbfc1498720a41",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Working\n- [a] one\n- [b] two\n- [a] three\n- same\n- same\n## Working\n- [b] again\n"
+        }
+      ],
+      "content_hash": "sha256:cf9a0653630e5eaa1847d5b61845a42c3bdbbe5927ee31fcf9db1d9d76aa00e5"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_98c9ab7a991cad341da26147d403aa97",
+      "kind": "task_state",
+      "section": "WORKING",
+      "directive_id": "b",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "again"
+        }
+      ],
+      "content_hash": "sha256:ab2bbcf13163c6b6e263e9cb1f01e16c8104903c525ab04bd521efbc90a899a7",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            68,
+            80
+          ],
+          "slices": [
+            [
+              74,
+              79
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_id",
+      "section": "WORKING",
+      "range": [
+        11,
+        21
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_id",
+      "section": "WORKING",
+      "range": [
+        31,
+        43
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_id",
+      "section": "WORKING",
+      "range": [
+        43,
+        50
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_id",
+      "section": "WORKING",
+      "range": [
+        50,
+        57
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}
