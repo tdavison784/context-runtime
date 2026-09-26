@@ -1,0 +1,105 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        68
+      ],
+      "heading_range": [
+        0,
+        10
+      ],
+      "body_range": [
+        10,
+        68
+      ],
+      "items": [
+        0,
+        1
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "pinned-cd83eddaf8f90a1c68d4b0471d70439f5fa93749b597f36fd10a90c3582d22fb",
+      "authority": "SYSTEM",
+      "text": "a\n```\n- [x] code\n```\n\u003e quoted",
+      "content_hash": "sha256:cd83eddaf8f90a1c68d4b0471d70439f5fa93749b597f36fd10a90c3582d22fb",
+      "range": [
+        10,
+        50
+      ],
+      "text_ranges": [
+        [
+          12,
+          14
+        ],
+        [
+          16,
+          20
+        ],
+        [
+          22,
+          33
+        ],
+        [
+          35,
+          39
+        ],
+        [
+          41,
+          49
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "pinned-38304263ec28209627ed21b9ede70a1df320690fdd757fce2a29e71a327988cd",
+      "authority": "SYSTEM",
+      "text": "b \u003c!-- note --\u003e",
+      "content_hash": "sha256:38304263ec28209627ed21b9ede70a1df320690fdd757fce2a29e71a327988cd",
+      "range": [
+        50,
+        68
+      ],
+      "text_ranges": [
+        [
+          52,
+          67
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-cd83eddaf8f90a1c68d4b0471d70439f5fa93749b597f36fd10a90c3582d22fb",
+      "range": [
+        10,
+        50
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-38304263ec28209627ed21b9ede70a1df320690fdd757fce2a29e71a327988cd",
+      "range": [
+        50,
+        68
+      ]
+    }
+  ]
+}

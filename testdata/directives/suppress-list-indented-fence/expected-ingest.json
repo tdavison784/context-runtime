@@ -1,0 +1,107 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_9f642c528a715422412abe647ae2b467",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Pinned\n- a\n  ```\n- [evil2] fenced\n  ```\n"
+        }
+      ],
+      "content_hash": "sha256:877487e11586010084d76f6dc3f946c8a1565529110b2cf8e92952f244746e39"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_7d3eda826bd142a426bbd6f080650df3",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Pinned\n- a\n  ```\n- [evil2] fenced\n  ```\n"
+        }
+      ],
+      "content_hash": "sha256:b00d09ab9c2b9f3c68874fa811a88056f3ffbacf8dca555090c435b746398df6",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            43
+          ],
+          "slices": [
+            [
+              0,
+              43
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        20,
+        42
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "fenced_code",
+      "section": "PINNED",
+      "range": [
+        20,
+        36
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

@@ -43,7 +43,8 @@
 // # Section extent (D6)
 //
 // A section ends at the next unsuppressed heading of the same or higher
-// level, or at the unit end. Deeper headings, keyword or not, are body text
+// level (including a CommonMark-heading-shaped line that is not a directive
+// heading), or at the unit end. Deeper headings, keyword or not, are body text
 // (with a nested_heading diagnostic for keywords). A malformed keyword
 // heading or an unsupported lifecycle word still opens a region that grants
 // no directive semantics until the next same-or-higher heading. Every such
@@ -62,9 +63,12 @@
 // endings and trailing whitespace are kept. A single body keeps everything
 // between its first and last non-blank lines. In a list, blank and indented
 // lines continue an item, trailing blank lines are structure, and unindented
-// prose is malformed content through the next bullet. Blankness is ASCII
-// SP/HTAB only. These drop the item (ErrMalformedDirective) and mark the
-// section Malformed: an invalid or over-long [id], an explicit ID in the
+// prose is malformed content through the next bullet. A line that starts
+// inside a fence or comment, delimits a fence, is a quote line, or opens a
+// comment at column 0 never starts an item or target; such a line at column
+// 0 drops every item and target of the section (R17, SPEC-1.1). Blankness
+// is ASCII SP/HTAB only. These drop the item (ErrMalformedDirective) and
+// mark the section Malformed: an invalid or over-long [id], an explicit ID in the
 // derived-ID shape (D20), a missing separator, attribute syntax errors or an
 // unterminated '{', empty text, and an ID that repeats within one list
 // (every member under it is dropped). A heading ID on a list is diagnosed and
@@ -99,4 +103,39 @@
 // Whole-event limits are ingestion's job. At most MaxDiagnosticsPerSpan
 // diagnostics, the earliest in source order, are kept, followed by one
 // DiagnosticsTruncated marker. The cap never changes a parse decision.
+//
+// # Deliberate deviations (R17, SPEC-1.11)
+//
+// Parser v1 departs from CommonMark and the literal FR-DIR-006 ABNF in these
+// ways, each locked by a test or canonical example:
+//   - Any run of three or more '`' or '~' opens a fence, even with an info
+//     string CommonMark rejects (suppress-fence-info-backtick).
+//   - A fence closer needs an SP/HTAB-only tail; Unicode spaces keep the
+//     fence open (suppress-fence-closer-unicode-space).
+//   - A line that opens, closes or lies inside an HTML comment is never a
+//     heading, even where CommonMark would keep the heading
+//     (suppress-html-comment).
+//   - Closing ATX hashes make a heading malformed (form-closing-atx-hashes).
+//   - Trailing SP/HTAB after heading metadata is tolerated, although the
+//     ABNF ends with *(SP attr) EOL; it carries no payload
+//     (form-closing-atx-hashes, TestIDAndAttributeLexing).
+//   - Setext headings never open or close a section (suppress-heading-shape).
+//   - A line shaped like a CommonMark ATX heading that is not a directive
+//     heading (bare "#" to "######", '#' plus a tab, or indented 1-3
+//     spaces) closes an open section of the same or higher level and never
+//     opens one. With no list-container model this also applies inside a
+//     list item, where CommonMark would keep the heading in the item:
+//     closing early only removes directive text (TestHeadingShapedLinesClose,
+//     form-heading-shaped-close; SPEC-1.11 ruling).
+//   - Lazy quote continuation lines are ordinary lines; only explicit quote
+//     lines are suppressed (suppress-block-quote).
+//   - In a list body, unindented prose is malformed content rather than a
+//     lazy continuation (form-stray-prose), a suppressed line never starts an
+//     item or target, and a column-0 fence, quote or comment line drops every
+//     item and target of the section (suppress-list-*, SPEC-1.1).
+//   - An ID repeated within one list drops every member under it
+//     (form-repeated-ids).
+//   - The D20 derived-ID shape covers the six content-section keywords, the
+//     only ones that derive IDs; "resolve-" or "unpin-" plus 64 hex digits is
+//     an ordinary explicit ID and cannot collide (d20-derived-shaped-ids).
 package directive

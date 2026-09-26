@@ -1,0 +1,11 @@
+{
+  "description": "A heading-shaped line never opens a directive section, even when its word is a keyword.",
+  "requirements": [
+    "FR-DIR-006",
+    "D6",
+    "SPEC-1.11"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

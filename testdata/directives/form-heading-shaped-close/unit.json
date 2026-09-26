@@ -1,0 +1,10 @@
+{
+  "description": "A tab-separated or bare ATX line closes a same-or-higher section like any heading; text under it is ordinary content, never part of the directive (SPEC-1.11 ruling).",
+  "requirements": [
+    "FR-DIR-006",
+    "D6",
+    "SPEC-1.11"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

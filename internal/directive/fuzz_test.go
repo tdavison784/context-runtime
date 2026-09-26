@@ -116,6 +116,21 @@ func FuzzParse(f *testing.F) {
 			}
 			assertResultRanges(t, r, len(wrapped))
 		}
+		// SPEC-1.1: the same bytes embedded in a list body, inside a fence
+		// (column-0 or indented opener) or a comment opened after a bullet,
+		// yield nothing but the leading item "a" itself.
+		listWrapped := [][]byte{
+			[]byte("## Pinned\n- a\n" + string(fenced)),
+			[]byte("## Pinned\n- a\n  " + fence + "\n" + string(input) + "\n  " + fence),
+			[]byte("## Pinned\n- a <!--\n" + strings.ReplaceAll(string(input), "-->", "-- >") + "\n-->"),
+		}
+		for _, wrapped := range listWrapped {
+			r := Parse(wrapped, Options{Authority: domain.AuthoritySystem})
+			if r.Err != nil || len(r.Lifecycle) != 0 || len(r.Items) > 1 || len(r.Items) == 1 && (r.Items[0].SectionIndex != 0 || !strings.HasPrefix(r.Items[0].Text, "a")) {
+				t.Fatalf("list-body suppression bypass: %+v", r)
+			}
+			assertResultRanges(t, r, len(wrapped))
+		}
 		// Deterministic work accounting avoids scheduler-sensitive timing assertions
 		// during parallel fuzzing; benchmark scaling separately measures wall time.
 		p := scanner(string(input), true)

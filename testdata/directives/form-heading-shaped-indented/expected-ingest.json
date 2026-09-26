@@ -1,0 +1,161 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_06ee4b8fca8c9ea0018b3cc2f91997c9",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Pinned\n- a\n  ## Notes\n- b stays ordinary\n## Remember\nr\n # Notes\nafter\n"
+        }
+      ],
+      "content_hash": "sha256:a23b02e32e09281bfbb8f1b27e4e20e0d38ebf3cd159642d8e13ec779f815eda"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_c103e24de801d4864f83224841657432",
+      "kind": "constraint",
+      "section": "PINNED",
+      "directive_id": "pinned-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "generation": "PINNED",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "a"
+        }
+      ],
+      "content_hash": "sha256:7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            10,
+            14
+          ],
+          "slices": [
+            [
+              12,
+              13
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_06bc981f32aa6d615901e34101f10cf1",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-652dfddf7a858cf68757f513de754f2c09ae1016fb22aeb7b2ac45dbdba22369",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "r"
+        }
+      ],
+      "content_hash": "sha256:652dfddf7a858cf68757f513de754f2c09ae1016fb22aeb7b2ac45dbdba22369",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            44,
+            58
+          ],
+          "slices": [
+            [
+              56,
+              57
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "range": [
+        10,
+        14
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-652dfddf7a858cf68757f513de754f2c09ae1016fb22aeb7b2ac45dbdba22369",
+      "range": [
+        44,
+        58
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

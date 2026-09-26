@@ -287,3 +287,47 @@ func TestD10_CurrentVersionsDeterministicAndFiltered(t *testing.T) {
 		})
 	})
 }
+
+// TestD10_MappedDuplicateNeverCurrent (TEST-1.1) covers the
+// defense-in-depth branch of isCurrentItem: even if the current-version map
+// names an item (filed directly, bypassing ReplaceDirective's refusal),
+// an outgoing DUPLICATE_OF edge keeps it from being current or a lifecycle
+// target by literal ID.
+func TestD10_MappedDuplicateNeverCurrent(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess, dirID = "sess-d10-mapped", "ship"
+		actor := principal(sess, domain.AuthorityUser)
+		var canonical, dup domain.ContextItem
+		update(t, s, sess, func(tx store.Tx) error {
+			canonical = fileGoal(t, tx, actor, "g1", dirID, "Ship it")
+			return nil
+		})
+		update(t, s, sess, func(tx store.Tx) error {
+			dup = storetest.NewGoal(sess, "g2", tx.NextSeq(), "Ship it")
+			dup.DirectiveID = dirID
+			dup.Section = domain.SectionGoal
+			dup.Scope = domain.ScopeTask
+			dup.Access = storetest.DirectiveBoundary(sess)
+			mustInsert(t, tx, dup)
+			rawDuplicateOf(t, tx, dup.ID, canonical.ID)
+			// Bypass ReplaceDirective: point the map at the duplicate.
+			if err := tx.SetCurrentVersion(dup.ID); err != nil {
+				t.Fatalf("SetCurrentVersion: %v", err)
+			}
+			return nil
+		})
+		view(t, s, sess, func(tx store.ReadTx) error {
+			key, _ := dup.CurrentKey()
+			if mapped, err := tx.CurrentVersion(key); err != nil || mapped != dup.ID {
+				t.Fatalf("precondition: map names %q (%v), want the duplicate", mapped, err)
+			}
+			if ok, err := IsCurrent(tx, dup.ID); err != nil || ok {
+				t.Errorf("IsCurrent(mapped duplicate) = %v, %v; want false, nil", ok, err)
+			}
+			if got, err := ResolveLifecycleTarget(tx, actor, "task", dup.ID); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("Resolve(literal mapped duplicate) = %q, %v; want ErrNotFound", got, err)
+			}
+			return nil
+		})
+	})
+}

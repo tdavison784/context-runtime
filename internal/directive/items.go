@@ -32,7 +32,7 @@ func (p *coreParser) extract() {
 			lines = lines[:len(lines)-1]
 		}
 		lifecycle := h.section == "Resolve" || h.section == "Unpin"
-		if len(lines) > 0 && bulletPrefix(p.lineBytes(lines[0])) > 0 {
+		if len(lines) > 0 && p.startsItem(lines[0]) {
 			if h.id != "" && lifecycle {
 				// D7: a heading target and target list together are ambiguous;
 				// the whole section creates no command.
@@ -50,6 +50,7 @@ func (p *coreParser) extract() {
 			// continue the preceding item. Unindented prose is malformed
 			// content through the next bullet, never an implicit item (M4).
 			first := len(p.items)
+			var poison *sourceLine
 			for i := 0; i < len(lines); {
 				j := i + 1
 				for j < len(lines) && continuation(p.lineBytes(lines[j])) {
@@ -57,13 +58,25 @@ func (p *coreParser) extract() {
 				}
 				p.listItem(si, lines[i:j])
 				k := j
-				for k < len(lines) && bulletPrefix(p.lineBytes(lines[k])) == 0 {
+				for k < len(lines) && !p.startsItem(lines[k]) {
+					// R17: a column-0 fence, quote or comment line inside a
+					// list body makes the whole section malformed.
+					if l := lines[k]; poison == nil && l.suppressed != "" && !continuation(p.lineBytes(l)) {
+						poison = &lines[k]
+					}
 					k++
 				}
 				if k > j {
 					p.reject(si, "unexpected list prose", byteRange{lines[j].start, lines[k-1].end})
 				}
 				i = k
+			}
+			if poison != nil {
+				// SPEC-1.1: no item or target of such a section survives,
+				// so suppressed text can never become a directive.
+				p.reject(si, poison.suppressed, poison.byteRange)
+				p.items = p.items[:first]
+				continue
 			}
 			p.dropRepeatedIDs(si, first)
 		} else {
@@ -99,6 +112,12 @@ func (p *coreParser) dropRepeatedIDs(si, first int) {
 	p.items = kept
 }
 func (p *coreParser) lineBytes(l sourceLine) []byte { return p.data[l.start:l.end] }
+
+// startsItem reports whether l is a top-level bullet outside every D5
+// suppression state (SPEC-1.1).
+func (p *coreParser) startsItem(l sourceLine) bool {
+	return l.suppressed == "" && bulletPrefix(p.lineBytes(l)) > 0
+}
 func continuation(b []byte) bool {
 	return bulletPrefix(b) == 0 && (blank(b) || b[0] == ' ' || b[0] == '\t')
 }

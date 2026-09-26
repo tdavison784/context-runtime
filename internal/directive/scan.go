@@ -13,6 +13,12 @@ type byteRange struct{ start, end int }
 type sourceLine struct {
 	byteRange
 	next int
+	// suppressed names the D5 state the line starts in: it lies inside or
+	// delimits a fence, is an explicit quote line, starts inside a comment,
+	// or opens one at column 0. Such a line never starts an item or target
+	// (SPEC-1.1). A comment opened later on the line does not suppress the
+	// bullet that precedes it.
+	suppressed string
 }
 type rawAttribute struct {
 	name, value string
@@ -144,7 +150,7 @@ func (p *coreParser) scan(capable bool) {
 				pos++
 			}
 		}
-		line := sourceLine{byteRange{start, end}, pos}
+		line := sourceLine{byteRange: byteRange{start, end}, next: pos}
 		if start == 0 && bytes.HasPrefix(p.data, []byte{0xef, 0xbb, 0xbf}) {
 			start = 3
 		}
@@ -155,6 +161,7 @@ func (p *coreParser) scan(capable bool) {
 			indent++
 		}
 		quote := indent < 4 && indent < len(b) && b[indent] == '>'
+		startComment := comment
 		blocked := ""
 		if fence != 0 {
 			blocked = "fenced code"
@@ -199,6 +206,14 @@ func (p *coreParser) scan(capable bool) {
 				}
 			}
 		}
+		switch {
+		case blocked == "fenced code":
+			line.suppressed = "fenced code"
+		case quote:
+			line.suppressed = "block quote"
+		case startComment || bytes.HasPrefix(b, []byte("<!--")):
+			line.suppressed = "HTML comment"
+		}
 		candidate := b
 		candidateStart := start
 		if blocked != "" || len(b) > 0 && (b[0] == ' ' || b[0] == '\t') {
@@ -222,6 +237,19 @@ func (p *coreParser) scan(capable bool) {
 				reason = "source is not directive-capable"
 			}
 			p.diagnostic("DirectiveNotParsed", reason, section, "", byteRange{candidateStart, end})
+		}
+		if capable && active >= 0 && (blocked == "" && level == 0 || blocked == "indented heading") {
+			// SPEC-1.11 ruling: a line CommonMark renders as an ATX heading
+			// but that is no directive heading (bare, tab-separated, or
+			// indented 1-3 spaces) still ends a same-or-higher section, so
+			// text the author sees under another heading never stays inside
+			// a directive. It never opens a section. Fenced, quoted and
+			// commented lines are never heading-shaped here.
+			if n := atxShape(b); n > 0 && n <= p.sections[active].heading.level {
+				p.sections[active].end = line.start
+				active = -1
+				continue
+			}
 		}
 		if capable && blocked == "" && level > 0 {
 			// D6/FR-DIR-006: only a same-or-higher heading ends a section. A
@@ -283,6 +311,24 @@ func fenceRun(b []byte) (byte, int, []byte) {
 		j++
 	}
 	return ch, j - i, b[j:]
+}
+
+// atxShape returns the level of a CommonMark ATX heading shape: 0-3
+// spaces, 1-6 '#', then SP, HTAB or end of line; 0 otherwise. Tabs and
+// four or more spaces of indentation make indented code, not a heading.
+func atxShape(b []byte) int {
+	i := 0
+	for i < len(b) && i < 3 && b[i] == ' ' {
+		i++
+	}
+	n := 0
+	for i+n < len(b) && b[i+n] == '#' {
+		n++
+	}
+	if n < 1 || n > 6 || i+n < len(b) && b[i+n] != ' ' && b[i+n] != '\t' {
+		return 0
+	}
+	return n
 }
 func headingPrefix(b []byte) (int, []byte, []byte) {
 	i := 0
