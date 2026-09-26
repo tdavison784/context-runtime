@@ -1702,11 +1702,30 @@ not an unwritten placeholder for the whole section.
   creates its residual instruction item, if any, after every directive
   item and lifecycle command the unit produced, never ordered by the
   residual's own byte position (R21, amending M3's creation order).
-- **§26 (F2, SEC-1.5):** `internal/domain`/`internal/ingest` — a repeated
+- **§26 (F1-F6, all landed):** `TestAccessLookupsUseIndex`,
+  `TestUpgradeAccessLookups`, `TestGraphReadsUseIndex`,
+  `TestLegacyLookupsDropped`, `TestLegacyUnverifiedNeverBlocks` (SQLite,
+  F1/DUR-1.1/DUR-1.4); storetest `BlobReferrerAccess`/`CanonicalCandidates`/
+  `CurrentWorking`/`SourceItems`/`VisibleReferences`; `TestLookupsNeverLockOut_F1`,
+  `TestUnverifiedMatchesNeverBlock_DUR14`, `TestRetryAfterLimitsChange_F3`,
+  `TestRelationshipLimitOnReplaceAndDuplicate_DUR16`,
+  `TestRecordsAtNarrowerBoundary_F6` (`internal/ingest`); a repeated
   `EventID` from a different principal fails `domain.ErrEventIDConflict`
-  and the returned error is the bare sentinel: no ID, principal, or
-  session detail is present in its text or wrapped chain
-  (`p2-contract`'s verification test for this finding).
+  as a bare sentinel, no ID/principal/session detail in its text or
+  wrapped chain (F2). Full citations and mechanisms are in each finding's
+  own §26 paragraph above, not repeated here.
+- **§27-§28 (further round 1 rulings and findings, all landed):** see each
+  finding's own paragraph above for its exact test name(s) —
+  `TestHeadingShapedLinesClose` and its four canonical goldens (SPEC-1.11);
+  `TestReplayNeverRecomputes` plus SPEC-1.10's other named clauses;
+  `TestApplyFailureAtomic_DUR13` and the `storetest/poison.go` conformance
+  rows (DUR-1.3); `TestWorking_DerivedIDAcrossAuthorities_DUR15` (DUR-1.5);
+  `TestSnapshot_DeterministicFailure_DUR17` (DUR-1.7);
+  `TestEventMetadataBounds_SEC14`/`TestEventMetadataCharsets_SEC14`/
+  `TestMaxReferenceLinks` (SEC-1.4); `TestSuppressedListContent`(`_Ingest`)
+  (SPEC-1.1); `TestLinkDuplicate_ComparesObligationClaim` (SPEC-1.12);
+  `TestD10_MappedDuplicateNeverCurrent`/`TestDiagnosticsCapTruncates`
+  (TEST-1.1/1.3).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
@@ -1791,17 +1810,29 @@ commander rulings R1-R8 (`phase2-amendments.md`) overriding eight of them,
 followed by seven further rounds of worker questions and rulings (R9-R21)
 as recorded above.
 
-**(SPEC-1.4, 2026-09-27) Phase 2 code has since landed** across
-`internal/domain`, `internal/policy`, `internal/directive`,
-`internal/store` (memory and SQLite), `internal/graph`, and
-`internal/ingest`, and the decision groups above have been re-verified and
-corrected against it in place (each correction marked "SPEC-1.4" or
-"landed" inline) rather than left describing a pre-implementation state.
-A first external review of the resulting PR (`round1-p5-fixes.md`, §26-§27
-above) found further gaps — some already fixed and reconciled here (F2,
-F5, SPEC-1.5, SPEC-1.8, SPEC-1.9, SPEC-1.10, SPEC-1.11, SPEC-1.13), others
-(F1, F3, F4, F6, SPEC-1.3, SPEC-1.6, SPEC-1.11's parser fix) still landing
-on other workers' branches as of this revision. This ADR's status remains
-Proposed; it moves to Accepted once a final reconciliation pass confirms
-every statement in it matches the code at Phase 2's actual exit head, not
-before.
+**(SPEC-1.4, 2026-09-27) Phase 2 code landed** across `internal/domain`,
+`internal/policy`, `internal/directive`, `internal/store` (memory and
+SQLite), `internal/graph`, and `internal/ingest`, and the decision groups
+above were re-verified and corrected against it in place (each correction
+marked "SPEC-1.4" or "landed" inline) rather than left describing a
+pre-implementation state. A first external review of the resulting PR
+(`round1-p5-fixes.md`, §26-§28 above) found further gaps, all now fixed by
+their owning workers and merged into this ADR's final-pass head
+(`p2fix/adr` at commit `dd9813d`, integrating every `p2fix/*` branch):
+F1-F6, every named DUR/SEC/SPEC/TEST finding, and the SPEC-1.10/SPEC-1.11
+rulings are all landed and recorded above with grep-verified test
+citations, not intended designs.
+
+**(2026-09-27) Final reconciliation pass complete.** Every statement in
+this ADR was checked against the code at the merged integration head, not
+assumed from a commit message or an earlier draft; three genuine drift
+points were caught and fixed in the process — F1's access-filtered lookup
+redesign superseded the R19 lookups this ADR (and ADR 3) had described as
+current (§7/§9/§13/§15/§16/§23, §26); SPEC-1.6's diagnostic/reason pairing
+is now mechanically enforced by a `reasonCode` map, not merely a call-site
+convention (§13/§28); and SPEC-1.11's fix, R21's fix, and R20's fix had
+all landed since this ADR's previous revision described them as pending.
+This ADR is ready for the commander to move from Proposed to Accepted at
+Phase 2 exit, pending only the open questions recorded above (§ Open
+questions) and the SDD §11/§15 amendment SPEC-1.13 flagged as still
+outstanding.
