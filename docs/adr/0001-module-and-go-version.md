@@ -1,6 +1,6 @@
 # 1. Go module path and minimum Go version
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
 ## Context
@@ -70,11 +70,20 @@ No behavior test locks a version string; this is enforced structurally:
 
 ## Open questions
 
+### Resolved at acceptance (2026-09-26)
+
 - Whether to publish a stability promise (e.g. semver tags) before Phase 5's
   vertical slice, or keep the module pre-v1 (`v0.x`) through Phase 10.
+  **Decision:** the module stays pre-v1 (v0.x tags only) through Phase 10; a
+  stability promise is decided with ADR 14 at Phase 11 (release).
 - Whether `cmd/context-runtime` (§6, optional inspection CLI) ships in the
   same module or as a separate `tools/` module to avoid pulling its
   dependencies into library consumers' builds.
+  **Decision:** `cmd/context-runtime` ships in this module as long as it
+  imports only this module's packages and the standard library; any command
+  needing third-party dependencies goes in a nested module (precedent:
+  `probes/descriptor` has its own `go.mod` so the root module gains no
+  dependencies).
 
 ## Review
 

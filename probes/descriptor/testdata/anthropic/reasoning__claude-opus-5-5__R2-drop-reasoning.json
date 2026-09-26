@@ -1,0 +1,125 @@
+{
+  "betas": [],
+  "model": "claude-opus-5-5",
+  "probe": "reasoning/claude-opus-5-5/R2-drop-reasoning",
+  "question": "R2 drop open-round reasoning (DROP_ALL_REASONING)",
+  "request": {
+    "max_tokens": 4096,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "First work out the key: it is the lowercase English name of the Greek letter whose 1-based position in the Greek alphabet equals the number of primes below 20. Then call the lookup tool with that key. Afterwards compute (value * 17 + 3) mod 23, showing the arithmetic in one line.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Primes below 20: 2, 3, 5, 7, 11, 13, 17, 19. That makes 8, and the 8th Greek letter is theta.",
+            "type": "text"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01Lt6eBP83usdhdJMSzuGJzc",
+            "input": {
+              "key": "theta"
+            },
+            "name": "lookup",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "41",
+                "type": "text"
+              }
+            ],
+            "is_error": false,
+            "tool_use_id": "toolu_01Lt6eBP83usdhdJMSzuGJzc",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-opus-5-5",
+    "output_config": {
+      "effort": "medium"
+    },
+    "system": [
+      {
+        "text": "You are a terse probe assistant. When asked for a key's value, call the lookup tool; never guess values.",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "display": "summarized",
+      "type": "adaptive"
+    },
+    "tools": [
+      {
+        "description": "Look up the integer value stored under a key.",
+        "input_schema": {
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "lookup"
+      }
+    ]
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "signature": "CAQSxAQKEAgSGAI4…[len=784 sha256=1dd5c08ad9d06e06]",
+        "thinking": "Computing 41*17+3, then finding that mod 23 gives a remainder of 10.\n\n",
+        "type": "thinking"
+      },
+      {
+        "text": "The key is \"theta\" and lookup returned 41.\n\n41 × 17 + 3 = 697 + 3 = 700; 700 mod 23 = 700 − 690 = **10**",
+        "type": "text"
+      }
+    ],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "model": "claude-opus-5-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 604,
+      "output_tokens": 95,
+      "output_tokens_details": {
+        "thinking_tokens": 34
+      },
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}
