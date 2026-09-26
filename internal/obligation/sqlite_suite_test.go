@@ -105,6 +105,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"ResourceInvalidationPagingAndLimit", TestResourceInvalidationPagingAndLimit, false},
 		{"RegisterRun", TestRegisterRun, false},
 		{"ReportObservation", TestReportObservation, false},
+		{"TurnScopedEvidence", TestTurnScopedEvidence, true},
 		{"ObservationStateChain", TestObservationStateChain, true},
 		{"ObservationStateGating", TestObservationStateGating, true},
 		{"MatcherGrantT06", TestMatcherGrantT06, true},

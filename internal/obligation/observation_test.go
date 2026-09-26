@@ -2,6 +2,8 @@ package obligation
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -214,5 +216,52 @@ func TestRunAndObservationReceipts(t *testing.T) {
 	changed.Outcome = domain.OutcomeFail
 	if _, err := report(changed); !errors.Is(err, domain.ErrEventIDConflict) {
 		t.Errorf("changed typed field under same request: %v", err)
+	}
+}
+
+// TestTurnScopedEvidence follows the commander ruling on W7's T07 work: TOOL
+// evidence whose boundary is the run's task boundary with TURN scope is
+// accepted. TURN narrows only its lifetime, not its ownership. The
+// observation keeps the evidence's TURN boundary; derived state stays TASK.
+// Any change of ownership is still rejected.
+func TestTurnScopedEvidence(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g-sys", f.sysTests, TestsPassV1, f.system)
+	turn := domain.AccessBoundary{Scope: domain.ScopeTurn, SessionID: testSession, TaskID: "task"}
+	ev := seedEvidence(t, f.st, "ev-turn", turn)
+	runN++
+	run, err := f.registerRun(t, f.harness, runIntent(fmt.Sprintf("run-%d", runN), "exec-turn", f.target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, err := f.observe(t, f.harness, obsIntent("obs-turn", run, ev.ID, domain.OutcomePass, hashOf("W1")))
+	if err != nil {
+		t.Fatalf("TURN-scoped evidence in the run's task rejected: %v", err)
+	}
+	if obs.Access != turn {
+		t.Errorf("observation boundary = %+v, want the evidence's TURN boundary", obs.Access)
+	}
+	st, ok := f.subject(t, f.target)
+	if !ok || st.ObservationID != obs.ID || st.Access != taskBoundary() {
+		t.Fatalf("derived state = %+v", st)
+	}
+	if it := f.item(t, st.CurrentItemID); it.Scope != domain.ScopeTask || it.Access != taskBoundary() {
+		t.Errorf("derived task_state not TASK: %+v", it.Access)
+	}
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Errorf("TURN evidence did not back the task obligation: %+v", o)
+	}
+
+	for name, access := range map[string]domain.AccessBoundary{
+		"other task":        {Scope: domain.ScopeTurn, SessionID: testSession, TaskID: "other"},
+		"agent-narrowed":    {Scope: domain.ScopeTurn, SessionID: testSession, TaskID: "task", AgentID: "agent"},
+		"agent scope":       {Scope: domain.ScopeAgent, SessionID: testSession, TaskID: "task", AgentID: "agent"},
+		"workflow-narrowed": {Scope: domain.ScopeTask, SessionID: testSession, TaskID: "task", WorkflowID: "wf"},
+		"session scope":     {Scope: domain.ScopeSession, SessionID: testSession},
+	} {
+		bad := seedEvidenceAs(t, f.st, "ev-"+strings.ReplaceAll(name, " ", "-"), access)
+		if _, err := f.observe(t, f.harness, obsIntent("obs-"+strings.ReplaceAll(name, " ", "-"), run, bad.ID, domain.OutcomePass, hashOf("W1"))); !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Errorf("%s evidence: %v, want ErrInvalidRecord", name, err)
+		}
 	}
 }

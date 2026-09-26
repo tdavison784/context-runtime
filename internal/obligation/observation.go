@@ -154,7 +154,7 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 		return domain.ObservationRecord{}, domain.ErrInvalidRecord
 	}
 	ev, err := tx.Item(in.EvidenceItemID)
-	if err != nil || ev.Authority != domain.AuthorityTool || ev.Access != run.Access || ev.TaskID != run.TaskID {
+	if err != nil || !evidenceInRun(ev, run) {
 		return domain.ObservationRecord{}, domain.ErrInvalidRecord
 	}
 	m, ok := s.reg.ForClaim(string(run.Subject.Family))
@@ -170,7 +170,7 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 		EvidenceItemID:               ev.ID,
 		Binding:                      run.Binding,
 		Reporter:                     actor,
-		Access:                       run.Access,
+		Access:                       ev.Access, // evidence keeps its own (possibly TURN) boundary
 		ObservedWorkspaceFingerprint: in.ObservedWorkspaceFingerprint,
 		ObservedContentHash:          in.ObservedContentHash,
 		Outcome:                      in.Outcome,
@@ -193,4 +193,21 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 		return domain.ObservationRecord{}, w.fail(err)
 	}
 	return obs, nil
+}
+
+// evidenceInRun reports whether a TOOL occurrence may evidence a run: same
+// session and task, TASK or TURN scope, and exactly the run's ownership.
+// TURN narrows only the evidence's lifetime, never its ownership, so derived
+// TASK state publishes nothing narrower (commander ruling on T07). Any change
+// of workflow, agent, task, or session ownership is rejected.
+func evidenceInRun(ev domain.ContextItem, run domain.ObservationRun) bool {
+	if ev.Authority != domain.AuthorityTool || ev.SessionID != run.SessionID || ev.TaskID != run.TaskID {
+		return false
+	}
+	if ev.Access.Scope != domain.ScopeTask && ev.Access.Scope != domain.ScopeTurn {
+		return false
+	}
+	owners := ev.Access
+	owners.Scope = run.Access.Scope
+	return owners == run.Access
 }
