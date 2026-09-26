@@ -59,10 +59,6 @@ var (
 	// domain.ErrInvalidAuthorityPromotion, so ingestion rejects only the
 	// offending item with a boundary_conflict diagnostic.
 	ErrBoundaryConflict = errors.New("graph: directive ID is current at another visible boundary")
-	// ErrNamespaceConflict reports a write whose current-version slot is
-	// held by a current version of the other namespace (M6, R6): a parsed
-	// directive and a keyed agent write never replace each other.
-	ErrNamespaceConflict = errors.New("graph: current-version slot belongs to another namespace")
 	// ErrAmbiguousDirective reports a lifecycle target (SDD section 8, v0.8)
 	// that names more than one directive version the actor can currently
 	// see: FR-DIR-002 keys a directive by (task, directive ID, access
@@ -127,7 +123,7 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 // authorized replacement, not a silent fork into two current versions.
 // Boundaries actor cannot access are never consulted for this check, so it
 // discloses nothing beyond what the actor could already see. A version
-// tx.CurrentDirectives still names but that has since been superseded is
+// the current-version map still names but that has since been superseded is
 // not a conflict (AUTH-3.2): the pointer is stale, not a second live
 // version, and must never block a legitimate write.
 func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, taskID string, ns domain.DirectiveNamespace, directiveID string) error {
@@ -299,7 +295,7 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 		}
 	}
 
-	if err := tx.SetCurrentDirective(taskID, directiveID, newItemID); err != nil {
+	if err := tx.SetCurrentVersion(newItemID); err != nil {
 		return "", err
 	}
 	return previousID, nil
@@ -339,7 +335,8 @@ func isCurrentItem(tx store.ReadTx, it domain.ContextItem) (bool, error) {
 	if it.DirectiveID == "" {
 		return true, nil
 	}
-	mapped, err := tx.CurrentDirective(it.TaskID, it.DirectiveID, it.Access)
+	key, _ := it.CurrentKey()
+	mapped, err := tx.CurrentVersion(key)
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		return false, nil
@@ -366,12 +363,11 @@ func isDuplicateFree(tx store.ReadTx, itemID string) (bool, error) {
 // entry naming an item that is no longer current under IsCurrent (a stale
 // pointer left behind when the item was retired outside the map) is treated
 // exactly like a missing entry, so a stale pointer is never superseded a
-// second time or reported as a previous version (D10). A current version in
-// the other namespace (M6, R6) is never a previous version of ns: the slot
-// fails with ErrNamespaceConflict rather than being overwritten, which
-// would silently retire the other namespace's version.
+// second time or reported as a previous version (D10). The key is typed by
+// namespace (M6, R6), so a parsed directive and keyed agent state of the
+// same ID never see each other.
 func currentVersionAt(tx store.ReadTx, taskID string, ns domain.DirectiveNamespace, directiveID string, boundary domain.AccessBoundary) (string, error) {
-	id, err := tx.CurrentDirective(taskID, directiveID, boundary)
+	id, err := tx.CurrentVersion(domain.CurrentKey{SessionID: tx.SessionID(), TaskID: taskID, Access: boundary, Namespace: ns, ID: directiveID})
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return "", domain.ErrNotFound
@@ -392,9 +388,6 @@ func currentVersionAt(tx store.ReadTx, taskID string, ns domain.DirectiveNamespa
 	if !cur {
 		return "", domain.ErrNotFound
 	}
-	if got, _ := it.DirectiveNamespace(); got != ns {
-		return "", ErrNamespaceConflict
-	}
 	return id, nil
 }
 
@@ -402,8 +395,7 @@ func currentVersionAt(tx store.ReadTx, taskID string, ns domain.DirectiveNamespa
 // key (its task, namespace, directive ID, and access boundary), as actor
 // sees it: the version a write of it would replace or duplicate. It fails
 // with domain.ErrNotFound when there is none, when the map entry is a stale
-// pointer, or when actor cannot access the version, and with
-// ErrNamespaceConflict when the slot holds the other namespace's version.
+// pointer, or when actor cannot access the version.
 func CurrentVersionFor(tx store.ReadTx, actor domain.Principal, it domain.ContextItem) (domain.ContextItem, error) {
 	ns, ok := it.DirectiveNamespace()
 	if !ok {
@@ -426,7 +418,7 @@ func CurrentVersionFor(tx store.ReadTx, actor domain.Principal, it domain.Contex
 // actor cannot see, a stale map pointer, and a duplicate are never
 // returned and never influence the result.
 func CurrentVersions(tx store.ReadTx, actor domain.Principal, taskID string, ns domain.DirectiveNamespace, directiveID string) ([]domain.ContextItem, error) {
-	ids, err := tx.CurrentDirectives(taskID, directiveID)
+	ids, err := tx.CurrentVersions(taskID, ns, directiveID)
 	if err != nil {
 		return nil, err
 	}

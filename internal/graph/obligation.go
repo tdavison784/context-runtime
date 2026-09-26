@@ -12,28 +12,28 @@ type obligationRetirement struct {
 	grantID string
 }
 
+// maxBoundObligations bounds the obligation versions one source may carry
+// (D17, R9). A Pinned directive declares at most one obligation slot, so a
+// real source never approaches it; exceeding it fails the replacement
+// (store.ErrLimitExceeded) rather than retiring only some.
+const maxBoundObligations = 256
+
 // planObligationRetirement finds every current obligation version bound to
-// the source oldID (FR-OBL-006, D13) and authorizes retiring each as an
-// indirect effect of replacing that source (FR-AUTH-001): actor must access
-// it and hold authority at least its source authority, or an in-force
-// replace_directive grant naming it. It writes nothing, so a denial fails
-// the replacement before anything is written. Every version is considered,
-// not only the latest, since an older version may still be current.
+// the source oldID (FR-OBL-006, D13) through the store's bounded
+// by-source lookup (R9), and authorizes retiring each as an indirect effect
+// of replacing that source (FR-AUTH-001): actor must access it and hold
+// authority at least its source authority, or an in-force replace_directive
+// grant naming it. It writes nothing, so a denial fails the replacement
+// before anything is written.
 func planObligationRetirement(tx store.ReadTx, actor domain.Principal, oldID string) ([]obligationRetirement, error) {
-	latest, err := tx.Obligations("")
+	versions, err := tx.ObligationsBySource(oldID, maxBoundObligations)
 	if err != nil {
 		return nil, err
 	}
 	var bound []domain.ObligationVersion
-	for _, l := range latest {
-		versions, err := tx.ObligationVersions(l.ObligationID)
-		if err != nil {
-			return nil, err
-		}
-		for _, v := range versions {
-			if v.Current && v.SourceItemID == oldID {
-				bound = append(bound, v)
-			}
+	for _, v := range versions {
+		if v.Current {
+			bound = append(bound, v)
 		}
 	}
 	if len(bound) == 0 {
@@ -61,24 +61,18 @@ func planObligationRetirement(tx store.ReadTx, actor domain.Principal, oldID str
 	return plan, nil
 }
 
-// retireObligations marks each planned version noncurrent at a fresh
-// sequence number and appends its audit record, preserving its status,
+// retireObligations retires each planned version with its audit record in
+// one store write (RetireObligationVersion), preserving its status,
 // evidence, and transition history (FR-OBL-006). Nothing replaces it here:
 // a new UNRESOLVED version exists only if the new source declares one, and
-// that is the ingesting caller's decision (D13).
+// that is the ingesting caller's decision (D13, R9).
 func retireObligations(tx store.Tx, actor domain.Principal, plan []obligationRetirement, oldID, newID, eventID string) error {
 	for _, r := range plan {
-		seq := tx.NextSeq()
-		o := r.version.Clone()
-		o.Current = false
-		o.RetiredSeq = seq
-		if _, err := tx.UpdateObligationVersion(o, r.version.Revision); err != nil {
-			return err
-		}
+		o := r.version
 		ev := domain.LifecycleEvent{
 			ID:         obligationAuditID(actor.SessionID, o.ObligationID, o.Version, "retired", eventID, newID),
 			SessionID:  actor.SessionID,
-			Seq:        seq,
+			Seq:        tx.NextSeq(),
 			TargetKind: domain.TargetObligation,
 			TargetID:   o.ObligationID,
 			Action:     "retired",
@@ -89,7 +83,7 @@ func retireObligations(tx store.Tx, actor domain.Principal, plan []obligationRet
 			EventID:    eventID,
 			Reason:     "source directive superseded",
 		}
-		if err := tx.AppendLifecycleEvent(ev); err != nil {
+		if _, err := tx.RetireObligationVersion(o.ObligationID, o.Version, o.Revision, ev); err != nil {
 			return err
 		}
 	}

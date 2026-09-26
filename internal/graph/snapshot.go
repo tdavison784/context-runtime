@@ -163,7 +163,7 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 		res.Supersedes = append(res.Supersedes, rel)
 	}
 	for _, n := range filed {
-		if err := tx.SetCurrentDirective(taskID, n.DirectiveID, n.ID); err != nil {
+		if err := tx.SetCurrentVersion(n.ID); err != nil {
 			return SnapshotResult{}, err
 		}
 	}

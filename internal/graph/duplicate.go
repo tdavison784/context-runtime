@@ -159,7 +159,8 @@ func LinkDuplicate(tx store.Tx, actor domain.Principal, dupID, canonicalID, even
 			return domain.Relationship{}, ErrNotDuplicate
 		}
 	} else {
-		mapped, err := tx.CurrentDirective(dup.TaskID, dup.DirectiveID, dup.Access)
+		key, _ := dup.CurrentKey()
+		mapped, err := tx.CurrentVersion(key)
 		switch {
 		case err == nil && mapped == dup.ID:
 			return domain.Relationship{}, ErrNotDuplicate

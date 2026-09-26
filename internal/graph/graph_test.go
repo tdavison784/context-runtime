@@ -137,8 +137,8 @@ func mustInsert(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
 func mustFile(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
 	t.Helper()
 	for _, it := range items {
-		if err := tx.SetCurrentDirective(it.TaskID, it.DirectiveID, it.ID); err != nil {
-			t.Fatalf("SetCurrentDirective(%s): %v", it.ID, err)
+		if err := tx.SetCurrentVersion(it.ID); err != nil {
+			t.Fatalf("SetCurrentVersion(%s): %v", it.ID, err)
 		}
 	}
 }
