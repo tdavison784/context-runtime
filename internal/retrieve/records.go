@@ -1,6 +1,9 @@
 package retrieve
 
 import (
+	"cmp"
+	"slices"
+
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/policy"
 )
@@ -19,6 +22,7 @@ type recordInput struct {
 	Allowance    uint64
 	AllowStub    bool
 	Existing     *domain.RetrievalLease
+	Inherited    *domain.ProjectionRecord
 	Seqs         recordSeqs
 }
 
@@ -27,6 +31,7 @@ type retrievalRecords struct {
 	NewLease   bool
 	Coverage   domain.CoverageRecord
 	Member     domain.CoverageMember
+	Members    []domain.CoverageMember
 	Item       domain.ContextItem
 	Projection domain.ProjectionRecord
 	Result     domain.RetrievalResult
@@ -55,6 +60,16 @@ func buildRetrievalRecords(in recordInput) (retrievalRecords, error) {
 		in.Seqs.Projection == 0 || in.Seqs.Result == 0 || in.Seqs.Event == 0 || in.Seqs.Receipt == 0 {
 		return out, domain.ErrInvalidRecord
 	}
+	if in.Source.Role == domain.RoleProjection {
+		if in.Inherited == nil || in.Inherited.Validate() != nil || in.Inherited.ItemID != in.Source.ID ||
+			in.Inherited.Access != in.Source.Access || in.Inherited.Origin.Holder != in.Actor ||
+			in.Source.Source == nil || in.Source.Source.Kind != domain.SourceItem ||
+			in.Source.Source.Locator != in.Inherited.Source.ItemID || in.Source.Source.ContentHash != in.Inherited.Source.ContentHash {
+			return out, domain.ErrIncompleteCoverage
+		}
+	} else if in.Inherited != nil {
+		return out, domain.ErrInvalidRecord
+	}
 	session, request := in.Actor.SessionID, in.Intent.Rehydrate.RequestID
 	if in.Existing != nil {
 		if in.Seqs.Lease != 0 || !policy.LeaseLive(*in.Existing, policy.LeaseSnapshot{Seq: in.Seqs.Coverage, Source: in.Observed.Source, Task: in.Task, Conversation: in.Conversation}, in.Actor, in.Task.TurnID) {
@@ -78,11 +93,26 @@ func buildRetrievalRecords(in recordInput) (retrievalRecords, error) {
 	}
 	out.Item = item
 	out.Coverage = domain.CoverageRecord{SemanticMeta: retrievalMeta("coverage", session, request, in.Seqs.Coverage),
-		Purpose: domain.CoverageLeaseDependency, Access: item.Access, ConversationID: in.Conversation.ConversationID, MemberCount: 1}
+		Purpose: domain.CoverageLeaseDependency, Access: item.Access, ConversationID: in.Conversation.ConversationID}
 	source := in.Observed.Source
 	out.Member = domain.CoverageMember{SemanticMeta: retrievalMeta("member", session, request, in.Seqs.Coverage),
 		CoverageID: out.Coverage.ID, Source: &source, LeaseID: out.Lease.ID}
-	out.Coverage.Signature, err = domain.CoverageSignature(out.Coverage, []domain.CoverageMember{out.Member})
+	out.Members = []domain.CoverageMember{out.Member}
+	if in.Inherited != nil {
+		oldSource := in.Inherited.Source
+		out.Members = append(out.Members,
+			domain.CoverageMember{SemanticMeta: retrievalMeta("original-member", session, request, in.Seqs.Coverage),
+				CoverageID: out.Coverage.ID, Source: &oldSource, LeaseID: in.Inherited.LeaseID},
+			domain.CoverageMember{SemanticMeta: retrievalMeta("nested-member", session, request, in.Seqs.Coverage),
+				CoverageID: out.Coverage.ID, NestedCoverageID: in.Inherited.DependencyCoverageID})
+	}
+	slices.SortFunc(out.Members, func(a, b domain.CoverageMember) int {
+		x, _ := a.Key()
+		y, _ := b.Key()
+		return cmp.Compare(x, y)
+	})
+	out.Coverage.MemberCount = uint64(len(out.Members))
+	out.Coverage.Signature, err = domain.CoverageSignature(out.Coverage, out.Members)
 	if err != nil {
 		return retrievalRecords{}, err
 	}
@@ -119,6 +149,11 @@ func buildRetrievalRecords(in recordInput) (retrievalRecords, error) {
 	for _, validate := range []func() error{out.Lease.Validate, out.Coverage.Validate, out.Member.Validate, out.Item.ValidateSemantic,
 		out.Projection.Validate, out.Result.Validate, out.Event.Validate, out.Receipt.Validate} {
 		if err := validate(); err != nil {
+			return retrievalRecords{}, err
+		}
+	}
+	for _, member := range out.Members {
+		if err := member.Validate(); err != nil {
 			return retrievalRecords{}, err
 		}
 	}
