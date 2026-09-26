@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -128,5 +129,37 @@ func TestItemCacheLRU(t *testing.T) {
 	c.remove("c")
 	if entries, bytes := c.footprint(); entries != 1 || bytes != 10 {
 		t.Errorf("footprint = %d entries, %d bytes; want 1, 10", entries, bytes)
+	}
+}
+
+// TestRolledBackMethodClearsItemCache: a store method whose savepoint rolls
+// back clears the item cache, so no entry refreshed inside the rolled-back
+// method can outlive it (SPEC-4.3).
+func TestRolledBackMethodClearsItemCache(t *testing.T) {
+	s, _ := openTemp(t)
+	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		inner := tx.(*store.Guard).TxBase.(*transaction)
+		if err := tx.InsertItem(storetest.NewItem("s", "x", tx.NextSeq(), "x")); err != nil {
+			return err
+		}
+		if _, err := tx.Item("x"); err != nil {
+			return err
+		}
+		if entries, _ := inner.itemCacheFootprint(); entries != 1 {
+			t.Fatalf("cache holds %d entries after a read, want 1", entries)
+		}
+		boom := errors.New("boom")
+		if err := inner.atomic(func() error { return boom }); err != boom {
+			t.Fatalf("atomic = %v", err)
+		}
+		if entries, _ := inner.itemCacheFootprint(); entries != 0 {
+			t.Errorf("cache holds %d entries after a rolled-back method, want 0", entries)
+		}
+		if it, err := tx.Item("x"); err != nil || it.ID != "x" {
+			t.Errorf("re-read after rollback = %v, %v", it.ID, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
