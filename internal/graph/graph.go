@@ -647,104 +647,28 @@ func CheckDerivedBoundary(derived domain.AccessBoundary, sources []domain.Contex
 	return nil
 }
 
-// LinkDerived records that the item derivedID was derived from every item in
-// sourceIDs (FR-REL-008, FR-TOOL-002): every source must be accessible to
-// actor, or nothing is written and the call fails with domain.ErrNotFound;
-// derived's own access boundary must be within every source's boundary
-// (CheckDerivedBoundary); only then does it insert one DERIVED_FROM edge per
-// source, all carrying the same coverage. Run inside store.Store.Update so a
-// failure partway through (an inaccessible source, or a boundary violation)
-// leaves nothing committed.
-//
-// coverage's ItemIDs must be complete for dispatch to recheck eligibility
-// later (see domain.Coverage): if coverage is given with ItemIDs unset,
-// LinkDerived populates it with sourceIDs, sorted and deduplicated; if the
-// caller already set ItemIDs, they must name exactly the same set of sources
-// or the call fails with ErrCoverageMismatch and nothing is written.
-//
-// actor must be able to hold lifecycle authority (SYSTEM, HARNESS, or USER)
-// or be AGENT, and actor's authority must be at least derived's (AUTH-1.1):
-// otherwise a low-authority actor could attach DERIVED_FROM edges, and the
-// coverage that comes with them, to an item it does not own, rewriting that
-// item's provenance and, under ADR 6's eligibility recheck, later forcing it
-// out of context. TOOL and RETRIEVED_CONTENT actors are always rejected,
-// mirroring AuthorizeSupersession.
-//
-// derived.Seq must have been allocated by NextSeq in tx itself
-// (tx.Allocated, AUTH-3.1, ErrDerivedLinkNotAtCreation otherwise):
-// provenance may only be attached in the very transaction that inserted the
-// derived item, never post-hoc from a later transaction, even one that
-// supplies the item's own EventID (a string on the item, readable by
-// anyone who can access it, and not proof of when the caller is running).
+// LinkDerived is the compatibility entry point for automatic PROVENANCE only.
+// New semantic producers use LinkDerivedCoverage with an explicit purpose and
+// their recorded finite limit. Legacy range/frontier metadata remains readable
+// under its old schema, but cannot assert new membership or coverage semantics.
 func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) (result []domain.Relationship, err error) {
 	defer poisonGraphError(tx, &err)
-	if err := actor.Validate(); err != nil {
-		return nil, err
+	const legacySourceLimit = 16384
+	if len(sourceIDs) > legacySourceLimit {
+		return nil, store.ErrLimitExceeded
 	}
-	derived, err := loadAccessible(tx, actor, derivedID)
-	if err != nil {
-		return nil, err
-	}
-	if !(actor.Authority.CanHoldLifecycleAuthority() || actor.Authority == domain.AuthorityAgent) ||
-		!actor.Authority.AtLeast(derived.Authority) {
-		return nil, domain.ErrInvalidAuthorityPromotion
-	}
-	if !tx.Allocated(derived.Seq) {
-		return nil, ErrDerivedLinkNotAtCreation
-	}
-
-	sources := make([]domain.ContextItem, 0, len(sourceIDs))
-	for _, id := range sourceIDs {
-		src, err := loadAccessible(tx, actor, id)
-		if err != nil {
-			return nil, err
-		}
-		sources = append(sources, src)
-	}
-	if err := CheckDerivedBoundary(derived.Access, sources); err != nil {
-		return nil, err
-	}
-
-	var covTemplate *domain.Coverage
 	if coverage != nil {
-		wantIDs := sortedUniqueIDs(sourceIDs)
-		c := *coverage
-		switch {
-		case len(c.ItemIDs) == 0:
-			c.ItemIDs = wantIDs
-		case !slices.Equal(sortedUniqueIDs(c.ItemIDs), wantIDs):
+		if coverage.ConversationID != "" || coverage.FromSeq != 0 || coverage.ToSeq != 0 {
+			return nil, domain.ErrUnsupportedSchema
+		}
+		if len(coverage.ItemIDs) > legacySourceLimit {
+			return nil, store.ErrLimitExceeded
+		}
+		if len(coverage.ItemIDs) > 0 && !slices.Equal(sortedUniqueIDs(coverage.ItemIDs), sortedUniqueIDs(sourceIDs)) {
 			return nil, ErrCoverageMismatch
-		default:
-			c.ItemIDs = wantIDs // canonicalize to the sorted/unique form Relationship.Validate requires
 		}
-		covTemplate = &c
 	}
-
-	rels := make([]domain.Relationship, 0, len(sources))
-	for _, src := range sources {
-		var cov *domain.Coverage
-		if covTemplate != nil {
-			c := *covTemplate
-			c.ItemIDs = slices.Clone(covTemplate.ItemIDs)
-			cov = &c
-		}
-		rel := domain.Relationship{
-			ID:        relationshipID(actor.SessionID, domain.RelDerivedFrom, derivedID, src.ID, eventID),
-			SessionID: actor.SessionID,
-			Type:      domain.RelDerivedFrom,
-			FromID:    derivedID,
-			ToID:      src.ID,
-			Seq:       tx.NextSeq(),
-			Authority: actor.Authority,
-			EventID:   eventID,
-			Coverage:  cov,
-		}
-		if err := tx.InsertRelationship(rel); err != nil {
-			return nil, err
-		}
-		rels = append(rels, rel.Clone())
-	}
-	return rels, nil
+	return LinkDerivedCoverage(tx, actor, derivedID, sourceIDs, domain.CoverageProvenance, eventID, legacySourceLimit)
 }
 
 // sortedUniqueIDs returns ids sorted and deduplicated, as
