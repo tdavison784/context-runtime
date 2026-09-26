@@ -46,6 +46,15 @@ func (f *membershipFaultWriter) InsertMutationReceipt(r domain.MutationReceipt) 
 	return f.after(f.SemanticTx.InsertMutationReceipt(r))
 }
 
+func (f *membershipFaultWriter) InsertExchangeAcknowledgment(a domain.ExchangeAcknowledgment) error {
+	return f.after(f.SemanticTx.InsertExchangeAcknowledgment(a))
+}
+
+func (f *membershipFaultWriter) PutLogicalExchange(x domain.LogicalExchange, revision uint64) (domain.LogicalExchange, error) {
+	got, err := f.SemanticTx.PutLogicalExchange(x, revision)
+	return got, f.after(err)
+}
+
 func TestMembershipRegistrationPoisonsEveryPartialWrite(t *testing.T) {
 	for failAt := 1; failAt <= 3; failAt++ {
 		s, service, actor, intent := membershipTestStore(t)
