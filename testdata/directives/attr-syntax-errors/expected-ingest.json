@@ -1,0 +1,152 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_bc28e27b653a15870ad948e447c031dd",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Pinned kind=\nhidden\n## Working\n- {kind=a=b} x\n- {} x\n- { kind=task_state} x\n- {kind=task_state  ttl=2} x\n- {kind=task_state}x\n- {kind=task_state x\n- {kind=+x} x\n- {kind=task_state} kept\n"
+        }
+      ],
+      "content_hash": "sha256:95a015fcccf036b29daf98c099a09c5575e4b5c00ef6fa2d753ed7b06a6e61e6"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        0,
+        15
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        34,
+        49
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        49,
+        56
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        56,
+        79
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 4,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        79,
+        108
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 5,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        108,
+        129
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 6,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        129,
+        150
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 7,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        150,
+        164
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 8,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        164,
+        189
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}
