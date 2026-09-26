@@ -39,6 +39,12 @@ func TestBuildRetrievalRecordsPreservesSourceAndExactLease(t *testing.T) {
 			t.Fatalf("invalid record: %v", err)
 		}
 	}
+	for _, member := range records.Members {
+		key, err := member.Key()
+		if err != nil || member.ID != key {
+			t.Fatalf("noncanonical coverage member ID %q, key %q: %v", member.ID, key, err)
+		}
+	}
 }
 
 func TestBuildRetrievalRecordsInheritsOldProjectionLease(t *testing.T) {
@@ -65,6 +71,10 @@ func TestBuildRetrievalRecordsInheritsOldProjectionLease(t *testing.T) {
 	}
 	oldPair, nested := false, false
 	for _, m := range r.Members {
+		key, err := m.Key()
+		if err != nil || m.ID != key {
+			t.Fatalf("noncanonical nested member ID %q, key %q: %v", m.ID, key, err)
+		}
 		oldPair = oldPair || m.Source != nil && *m.Source == old.Source && m.LeaseID == old.LeaseID
 		nested = nested || m.NestedCoverageID == old.DependencyCoverageID
 	}

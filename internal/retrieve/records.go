@@ -95,17 +95,27 @@ func buildRetrievalRecords(in recordInput) (retrievalRecords, error) {
 	out.Coverage = domain.CoverageRecord{SemanticMeta: retrievalMeta("coverage", session, request, in.Seqs.Coverage),
 		Purpose: domain.CoverageLeaseDependency, Access: item.Access, ConversationID: in.Conversation.ConversationID}
 	source := in.Observed.Source
-	out.Member = domain.CoverageMember{SemanticMeta: retrievalMeta("member", session, request, in.Seqs.Coverage),
+	memberMeta := retrievalMeta("member", session, request, in.Seqs.Coverage)
+	memberMeta.ID = ""
+	out.Member = domain.CoverageMember{SemanticMeta: memberMeta,
 		CoverageID: out.Coverage.ID, Source: &source, LeaseID: out.Lease.ID}
 	out.Members = []domain.CoverageMember{out.Member}
 	if in.Inherited != nil {
 		oldSource := in.Inherited.Source
 		out.Members = append(out.Members,
-			domain.CoverageMember{SemanticMeta: retrievalMeta("original-member", session, request, in.Seqs.Coverage),
+			domain.CoverageMember{SemanticMeta: memberMeta,
 				CoverageID: out.Coverage.ID, Source: &oldSource, LeaseID: in.Inherited.LeaseID},
-			domain.CoverageMember{SemanticMeta: retrievalMeta("nested-member", session, request, in.Seqs.Coverage),
+			domain.CoverageMember{SemanticMeta: memberMeta,
 				CoverageID: out.Coverage.ID, NestedCoverageID: in.Inherited.DependencyCoverageID})
 	}
+	for n := range out.Members {
+		key, err := out.Members[n].Key()
+		if err != nil {
+			return retrievalRecords{}, err
+		}
+		out.Members[n].ID = key
+	}
+	out.Member = out.Members[0]
 	slices.SortFunc(out.Members, func(a, b domain.CoverageMember) int {
 		x, _ := a.Key()
 		y, _ := b.Key()
