@@ -24,30 +24,30 @@ func testObligationVersions(t *testing.T, s store.Store) {
 	})
 	cases := []struct {
 		name string
-		o    func() domain.ObligationVersion
+		o    func(seq uint64) domain.ObligationVersion
 		want error
 	}{
-		{"version reused", func() domain.ObligationVersion { return NewObligation(sessA, "o1", 1, 1, "src") }, domain.ErrVersionConflict},
-		{"version skipped", func() domain.ObligationVersion { return NewObligation(sessA, "o1", 3, 1, "src") }, domain.ErrVersionConflict},
-		{"first version not 1", func() domain.ObligationVersion { return NewObligation(sessA, "new", 2, 1, "src") }, domain.ErrVersionConflict},
-		{"revision not 1", func() domain.ObligationVersion {
-			o := NewObligation(sessA, "o1", 2, 1, "src")
+		{"version reused", func(seq uint64) domain.ObligationVersion { return NewObligation(sessA, "o1", 1, seq, "src") }, domain.ErrVersionConflict},
+		{"version skipped", func(seq uint64) domain.ObligationVersion { return NewObligation(sessA, "o1", 3, seq, "src") }, domain.ErrVersionConflict},
+		{"first version not 1", func(seq uint64) domain.ObligationVersion { return NewObligation(sessA, "new", 2, seq, "src") }, domain.ErrVersionConflict},
+		{"revision not 1", func(seq uint64) domain.ObligationVersion {
+			o := NewObligation(sessA, "o1", 2, seq, "src")
 			o.Revision = 2
 			return o
 		}, domain.ErrInvalidRecord},
-		{"retired but current", func() domain.ObligationVersion {
-			o := NewObligation(sessA, "o1", 2, 1, "src")
-			o.RetiredSeq = 1
+		{"retired but current", func(seq uint64) domain.ObligationVersion {
+			o := NewObligation(sessA, "o1", 2, seq, "src")
+			o.RetiredSeq = seq
 			return o
 		}, domain.ErrInvalidRecord},
-		{"invalid status", func() domain.ObligationVersion {
-			o := NewObligation(sessA, "o1", 2, 1, "src")
+		{"invalid status", func(seq uint64) domain.ObligationVersion {
+			o := NewObligation(sessA, "o1", 2, seq, "src")
 			o.Status = "DONE"
 			return o
 		}, domain.ErrInvalidRecord},
 	}
 	for _, tc := range cases {
-		err := s.Update(ctx, sessA, func(tx store.Tx) error { return tx.InsertObligationVersion(tc.o()) })
+		err := s.Update(ctx, sessA, func(tx store.Tx) error { return tx.InsertObligationVersion(tc.o(tx.NextSeq())) })
 		if !errors.Is(err, tc.want) {
 			t.Errorf("%s: error = %v, want %v", tc.name, err, tc.want)
 		}
@@ -276,6 +276,8 @@ func testTasks(t *testing.T, s store.Store) {
 	})
 	next := task
 	next.Turn, next.TurnID, next.Version = 2, "turn-2", 2
+	// A Version other than expectedVersion+1 is a malformed replacement;
+	// stores may report it as ErrInvalidRecord or ErrVersionConflict.
 	cases := []struct {
 		name     string
 		t        domain.TaskState
@@ -284,9 +286,9 @@ func testTasks(t *testing.T, s store.Store) {
 	}{
 		{"create existing", task, 0, []error{domain.ErrVersionConflict}},
 		{"stale version", func() domain.TaskState { x := next; x.Version = 3; return x }(), 2, []error{domain.ErrVersionConflict}},
-		{"version not expected+1", func() domain.TaskState { x := next; x.Version = 3; return x }(), 1, []error{domain.ErrInvalidRecord}},
+		{"version not expected+1", func() domain.TaskState { x := next; x.Version = 3; return x }(), 1, []error{domain.ErrInvalidRecord, domain.ErrVersionConflict}},
 		{"missing task", NewTask(sessA, "other"), 1, []error{domain.ErrVersionConflict, domain.ErrNotFound}},
-		{"create at version 2", func() domain.TaskState { x := NewTask(sessA, "other"); x.Version = 2; return x }(), 0, []error{domain.ErrInvalidRecord}},
+		{"create at version 2", func() domain.TaskState { x := NewTask(sessA, "other"); x.Version = 2; return x }(), 0, []error{domain.ErrInvalidRecord, domain.ErrVersionConflict}},
 		{"completed without seq", func() domain.TaskState { x := next; x.Status = domain.TaskCompleted; return x }(), 1, []error{domain.ErrInvalidRecord}},
 	}
 	for _, tc := range cases {
@@ -296,9 +298,10 @@ func testTasks(t *testing.T, s store.Store) {
 		}
 	}
 	done := next
-	done.Version, done.Status, done.CompletedSeq = 3, domain.TaskCompleted, 5
+	done.Version, done.Status = 3, domain.TaskCompleted
 	update(t, s, sessA, func(tx store.Tx) error {
 		noErr(t, tx.PutTask(next, 1))
+		done.CompletedSeq = tx.NextSeq()
 		noErr(t, tx.PutTask(done, 2))
 		return nil
 	})
@@ -367,6 +370,8 @@ func testConversations(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error { return tx.PutConversation(c, 0) })
 	next := c
 	next.Revision, next.InFlightCallID, next.Epoch = 2, "call1", 1
+	// As for tasks, a Revision other than expectedRevision+1 may be reported
+	// as ErrInvalidRecord or ErrVersionConflict.
 	cases := []struct {
 		name     string
 		c        domain.Conversation
@@ -375,7 +380,7 @@ func testConversations(t *testing.T, s store.Store) {
 	}{
 		{"create existing", c, 0, []error{domain.ErrVersionConflict}},
 		{"stale revision", func() domain.Conversation { x := next; x.Revision = 3; return x }(), 2, []error{domain.ErrVersionConflict}},
-		{"revision not expected+1", func() domain.Conversation { x := next; x.Revision = 3; return x }(), 1, []error{domain.ErrInvalidRecord}},
+		{"revision not expected+1", func() domain.Conversation { x := next; x.Revision = 3; return x }(), 1, []error{domain.ErrInvalidRecord, domain.ErrVersionConflict}},
 		{"missing", NewConversation(sessA, "c2"), 1, []error{domain.ErrVersionConflict, domain.ErrNotFound}},
 		{"version 0", func() domain.Conversation { x := next; x.Version = 0; return x }(), 1, []error{domain.ErrInvalidRecord}},
 	}
@@ -403,21 +408,21 @@ func testConversations(t *testing.T, s store.Store) {
 }
 
 func testCalls(t *testing.T, s store.Store) {
+	// Test data keeps at most one reserving call per conversation
+	// (FR-CALL-005), so stores may enforce that invariant.
 	var c1, c2, c3 domain.CallRecord
 	update(t, s, sessA, func(tx store.Tx) error {
 		n := seqs(tx, 3)
 		c1 = NewCall(sessA, "call-b", "conv1", n[0])
 		c2 = NewCall(sessA, "call-a", "conv2", n[1])
 		c2.Operation = domain.OperationCompaction
-		c3 = NewCall(sessA, "call-c", "conv1", n[1])
-		for _, c := range []domain.CallRecord{c3, c2, c1} {
-			noErr(t, tx.InsertCall(c))
-		}
-		wantErr(t, tx.InsertCall(c1), domain.ErrImmutable)
-		r2 := NewCall(sessA, "call-d", "conv1", n[2])
+		noErr(t, tx.InsertCall(c2))
+		noErr(t, tx.InsertCall(c1))
+		wantErr(t, tx.InsertCall(NewCall(sessA, "call-a", "conv9", n[2])), domain.ErrImmutable)
+		r2 := NewCall(sessA, "call-d", "conv9", n[2])
 		r2.Revision = 2
 		wantErr(t, tx.InsertCall(r2), domain.ErrInvalidRecord)
-		badHash := NewCall(sessA, "call-d", "conv1", n[2])
+		badHash := NewCall(sessA, "call-d", "conv9", n[2])
 		badHash.Request = []byte("tampered")
 		wantErr(t, tx.InsertCall(badHash), domain.ErrInvalidRecord)
 		return nil
@@ -473,6 +478,8 @@ func testCalls(t *testing.T, s store.Store) {
 		next.CancelReason = "annotated"
 		noErr(t, tx.UpdateCall(next, cur.Revision))
 		cur = next
+		c3 = NewCall(sessA, "call-c", "conv1", tx.NextSeq())
+		noErr(t, tx.InsertCall(c3))
 		return nil
 	})
 
@@ -499,8 +506,7 @@ func testCalls(t *testing.T, s store.Store) {
 	}
 	for _, tc := range transitions {
 		err := s.Update(ctx, sessA, func(tx store.Tx) error {
-			c := c2.Clone()
-			c.CallID = "tt"
+			c := NewCall(sessA, "tt", "conv-tt", tx.NextSeq())
 			noErr(t, tx.InsertCall(c))
 			for _, st := range reach[tc.from] {
 				next := c.Clone()

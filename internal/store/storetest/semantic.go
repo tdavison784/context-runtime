@@ -79,7 +79,7 @@ func testItemInsertRules(t *testing.T, s store.Store) {
 		{"invalid kind", func(it *domain.ContextItem) { it.Kind = "bogus" }, domain.ErrInvalidRecord},
 		{"goal without status", func(it *domain.ContextItem) { it.Kind = domain.KindGoal }, domain.ErrInvalidRecord},
 		{"reused ID", func(it *domain.ContextItem) { it.ID = "i1" }, domain.ErrImmutable},
-		{"reused ID, identical record", func(it *domain.ContextItem) { *it = NewItem(sessA, "i1", 1, "one") }, domain.ErrImmutable},
+		{"reused ID, identical content", func(it *domain.ContextItem) { *it = NewItem(sessA, "i1", it.Seq, "one") }, domain.ErrImmutable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
