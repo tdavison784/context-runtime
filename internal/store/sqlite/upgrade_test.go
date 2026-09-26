@@ -657,3 +657,35 @@ func TestUpgradeReconcilesLegacyMatcherSatisfaction(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeCurrentVersionNamespaces checks migration 0027 on a database
+// migrated through 0026: existing DIRECTIVE and AGENT_KEY pointers survive
+// the table rebuild unchanged, and an OBSERVATION pointer can be filed.
+func TestUpgradeCurrentVersionNamespaces(t *testing.T) {
+	l := openLegacy(t, 26)
+	if _, err := l.db.Exec("INSERT INTO sessions(session_id,last_seq,committed) VALUES('s',10,1)"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ns := range []string{"DIRECTIVE", "AGENT_KEY"} {
+		if _, err := l.db.Exec(`INSERT INTO directives(session_id,task_id,namespace,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id)
+VALUES('s','task',?,'dep','TASK','s','','task','',?)`, ns, "item-"+ns); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		for _, ns := range []domain.DirectiveNamespace{domain.NamespaceDirective, domain.NamespaceAgentKey} {
+			id, err := tx.CurrentVersion(domain.CurrentKey{SessionID: "s", TaskID: "task", Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, Namespace: ns, ID: "dep"})
+			if err != nil || id != "item-"+string(ns) {
+				t.Errorf("%s pointer after rebuild = %q, %v", ns, id, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO directives(session_id,task_id,namespace,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id)
+VALUES('s','task','OBSERVATION','sub','TASK','s','','task','','obs')`); err != nil {
+		t.Errorf("OBSERVATION pointer after 0027: %v", err)
+	}
+}
