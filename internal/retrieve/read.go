@@ -22,49 +22,56 @@ func (s *Service) Get(ctx context.Context, p domain.Principal, itemID string) (d
 	}
 	var out domain.GetResult
 	err := s.store.View(ctx, p.SessionID, func(tx store.ReadTx) error {
-		it, err := tx.Item(itemID)
-		if errors.Is(err, domain.ErrNotFound) {
-			return domain.ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		if !it.Access.Permits(p) {
-			return domain.ErrNotFound
-		}
-		currentness := domain.ItemUnkeyed
-		dups, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: it.ID})
-		if err != nil {
-			return err
-		}
-		if len(dups) != 0 {
-			currentness = domain.ItemDuplicate
-		} else if _, keyed := it.CurrentKey(); keyed {
-			currentness = domain.ItemHistorical
-			current, err := graph.IsCurrent(tx, it.ID)
-			if err != nil {
-				return err
-			}
-			if current {
-				currentness = domain.ItemCurrent
-			}
-		}
-		out = domain.GetResult{Item: it, SnapshotSeq: tx.LastSeq(), Observed: domain.ObservedItemState{
-			Source:      domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash},
-			Version:     it.Version,
-			Currentness: currentness,
-			GoalStatus:  it.GoalStatus,
-			Generation:  it.Generation,
-			Residency:   it.Residency,
-			Authority:   it.Authority,
-			Expiry:      itemExpiry(tx, it, p),
-		}}
-		return nil
+		var err error
+		out, err = readGet(tx, p, itemID)
+		return err
 	})
 	if err != nil {
 		return domain.GetResult{}, err
 	}
 	return out.Clone(), nil
+}
+
+// readGet shares Get's access and status checks with transaction-scoped
+// rehydration. It never opens a second Store transaction.
+func readGet(tx store.ReadTx, p domain.Principal, itemID string) (domain.GetResult, error) {
+	it, err := tx.Item(itemID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.GetResult{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.GetResult{}, err
+	}
+	if !it.Access.Permits(p) {
+		return domain.GetResult{}, domain.ErrNotFound
+	}
+	currentness := domain.ItemUnkeyed
+	dups, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: it.ID})
+	if err != nil {
+		return domain.GetResult{}, err
+	}
+	if len(dups) != 0 {
+		currentness = domain.ItemDuplicate
+	} else if _, keyed := it.CurrentKey(); keyed {
+		currentness = domain.ItemHistorical
+		current, err := graph.IsCurrent(tx, it.ID)
+		if err != nil {
+			return domain.GetResult{}, err
+		}
+		if current {
+			currentness = domain.ItemCurrent
+		}
+	}
+	return domain.GetResult{Item: it, SnapshotSeq: tx.LastSeq(), Observed: domain.ObservedItemState{
+		Source:      domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash},
+		Version:     it.Version,
+		Currentness: currentness,
+		GoalStatus:  it.GoalStatus,
+		Generation:  it.Generation,
+		Residency:   it.Residency,
+		Authority:   it.Authority,
+		Expiry:      itemExpiry(tx, it, p),
+	}}, nil
 }
 
 // itemExpiry is descriptive metadata for Get, never an admission decision.
