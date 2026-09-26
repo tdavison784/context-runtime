@@ -25,6 +25,9 @@ const (
 	DiagnosticsTruncated    DiagnosticCode = "DiagnosticsTruncated"
 	DirectiveIDDerived      DiagnosticCode = "DirectiveIDDerived"
 	DiagnosticNotFound      DiagnosticCode = "ErrNotFound"
+	// ItemUnverified reports a lookup match ingestion excluded because its
+	// stored content failed verification (DUR-1.4). It never names the item.
+	ItemUnverified DiagnosticCode = "ItemUnverified"
 )
 
 func (c DiagnosticCode) Valid() bool { return c.Severity() != "" }
@@ -45,7 +48,7 @@ func (c DiagnosticCode) Severity() DiagnosticSeverity {
 	switch c {
 	case DirectiveNotParsed, DirectiveIDDerived:
 		return SeverityInfo
-	case DiagnosticsTruncated:
+	case DiagnosticsTruncated, ItemUnverified:
 		return SeverityWarning
 	case ErrUnsupportedDirective, ErrMalformedDirective, ErrAmbiguousDirective, DiagnosticNotFound:
 		return SeverityError
@@ -87,7 +90,7 @@ const (
 func (r DiagnosticReason) Valid() bool {
 	switch r {
 	case ReasonNone, ReasonSourceNotCapable, ReasonIndented, ReasonFencedCode, ReasonBlockQuote, ReasonHTMLComment, ReasonInvalidSyntax, ReasonInvalidID, ReasonEmptyItem, ReasonHeadingIDOnList, ReasonUnknownAttribute, ReasonDisallowedAttribute, ReasonInvalidAttribute, ReasonScopeWidening, ReasonUnsupportedLifecycle, ReasonUnknownTarget, ReasonAmbiguousTarget, ReasonLimit, ReasonDerivedID,
-		ReasonDuplicateAttribute, ReasonDuplicateID, ReasonNestedHeading:
+		ReasonDuplicateAttribute, ReasonDuplicateID, ReasonNestedHeading, ReasonUnverifiedItem:
 		return true
 	}
 	return r == ReasonBoundaryConflict || r == ReasonTargetMismatch
@@ -124,9 +127,13 @@ func (d Diagnostic) Validate() error {
 	if d.DirectiveID != "" && !ValidDirectiveID(d.DirectiveID) {
 		return invalid("diagnostic: invalid directive ID")
 	}
-	// Each ingestion reason has exactly one code (R19, SPEC-1.6).
+	// Each ingestion reason has exactly one code (R19, SPEC-1.6), and an
+	// unverified-item report carries only that reason and no ID (DUR-1.4).
 	if want, ok := reasonCode[d.Reason]; ok && d.Code != want {
 		return invalid("diagnostic: reason %s requires code %s", d.Reason, want)
+	}
+	if d.Code == ItemUnverified && (d.Reason != ReasonUnverifiedItem || d.DirectiveID != "") {
+		return invalid("diagnostic: %s requires reason %s and no ID", ItemUnverified, ReasonUnverifiedItem)
 	}
 	return d.Range.Validate()
 }
@@ -135,6 +142,7 @@ func (d Diagnostic) Validate() error {
 var reasonCode = map[DiagnosticReason]DiagnosticCode{
 	ReasonBoundaryConflict: ErrMalformedDirective,
 	ReasonTargetMismatch:   DiagnosticNotFound,
+	ReasonUnverifiedItem:   ItemUnverified,
 }
 
 // Message is the diagnostic's fixed template. It never echoes source text,
@@ -153,6 +161,8 @@ func (d Diagnostic) Message() string {
 const (
 	ReasonBoundaryConflict DiagnosticReason = "boundary_conflict"
 	ReasonTargetMismatch   DiagnosticReason = "target_mismatch"
+	// ReasonUnverifiedItem pairs with ItemUnverified (DUR-1.4).
+	ReasonUnverifiedItem DiagnosticReason = "unverified_item"
 )
 
 // DiagnosticSchemaVersion versions the persisted DiagnosticRecord layout.
