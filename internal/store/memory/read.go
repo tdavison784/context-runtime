@@ -202,6 +202,20 @@ func (r *readTx) CurrentDirective(taskID, directiveID string, boundary domain.Ac
 	return id, nil
 }
 
+func (r *readTx) CurrentDirectives(taskID, directiveID string) ([]string, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	var out []string
+	for k, id := range r.directives.all() {
+		if k.taskID == taskID && k.directiveID == directiveID {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 func (r *readTx) Obligation(obligationID string) (domain.ObligationVersion, error) {
 	if err := r.check(); err != nil {
 		return domain.ObligationVersion{}, err
