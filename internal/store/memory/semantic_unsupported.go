@@ -18,37 +18,6 @@ func (r semRead) OpenGoalsByTaskOwner(string, store.Page) (store.ResultPage[doma
 	return store.ResultPage[domain.ContextItem]{}, errUnsupported
 }
 
-// Retrieval.
-
-func (r semRead) RetrievalLease(string) (domain.RetrievalLease, error) {
-	return domain.RetrievalLease{}, errUnsupported
-}
-func (r semRead) RetrievalResult(string) (domain.RetrievalResult, error) {
-	return domain.RetrievalResult{}, errUnsupported
-}
-func (r semRead) RetrievalEvent(string) (domain.RetrievalEvent, error) {
-	return domain.RetrievalEvent{}, errUnsupported
-}
-func (r semRead) Projection(string) (domain.ProjectionRecord, error) {
-	return domain.ProjectionRecord{}, errUnsupported
-}
-func (r semRead) ProjectionByItem(string) (domain.ProjectionRecord, error) {
-	return domain.ProjectionRecord{}, errUnsupported
-}
-func (r semRead) LeasesByHolder(domain.Principal, string, string, store.Page) (store.ResultPage[domain.RetrievalLease], error) {
-	return store.ResultPage[domain.RetrievalLease]{}, errUnsupported
-}
-func (r semRead) LeasesBySource(domain.ItemContentRef, store.Page) (store.ResultPage[domain.RetrievalLease], error) {
-	return store.ResultPage[domain.RetrievalLease]{}, errUnsupported
-}
-func (r semRead) RetrievalEventsByRequest(domain.Principal, string, store.Page) (store.ResultPage[domain.RetrievalEvent], error) {
-	return store.ResultPage[domain.RetrievalEvent]{}, errUnsupported
-}
-func (t *semTx) InsertRetrievalLease(domain.RetrievalLease) error   { return errUnsupported }
-func (t *semTx) InsertRetrievalResult(domain.RetrievalResult) error { return errUnsupported }
-func (t *semTx) InsertRetrievalEvent(domain.RetrievalEvent) error   { return errUnsupported }
-func (t *semTx) InsertProjection(domain.ProjectionRecord) error     { return errUnsupported }
-
 // GC receipts.
 
 func (r semRead) GCRequest(string) (domain.GCRequest, error) {

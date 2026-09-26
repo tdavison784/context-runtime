@@ -118,6 +118,7 @@ var suite = []testCase{
 	{"SemanticInvalidation", testSemanticInvalidation},
 	{"SemanticAttestation", testSemanticAttestation},
 	{"SemanticMaterialization", testSemanticMaterialization},
+	{"SemanticRetrieval", testSemanticRetrieval},
 
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},
