@@ -65,6 +65,18 @@ func makeSchemas() map[string]*recordSchema {
 		{"diagnostic", domain.DiagnosticRecord{}, "ID", ""},
 		{"command", domain.LifecycleCommandRecord{}, "ID", ""},
 		{"reference", domain.UnresolvedReference{}, "ID", ""},
+		// Phase 3 companions (semantic_*.go).
+		{"owner", domain.OwnerRegistration{}, "ID", ""},
+		{"coverage", domain.CoverageRecord{}, "ID", ""},
+		{"coverage_member", coverageMemberRow{}, "CoverageID", "Ordinal"},
+		{"exchange", domain.LogicalExchange{}, "ID", ""},
+		{"exchange_member", domain.ExchangeMember{}, "ID", ""},
+		{"exchange_ack", domain.ExchangeAcknowledgment{}, "ID", ""},
+		{"admission", domain.AdmissionManifest{}, "ID", ""},
+		{"membership", domain.ConversationMembershipState{}, "ConversationID", ""},
+		{"checkpoint", domain.Checkpoint{}, "ID", ""},
+		{"mutation_receipt", domain.MutationReceipt{}, "ID", ""},
+		{"tool_receipt", domain.ToolExecutionReceipt{}, "ID", ""},
 	}
 	out := make(map[string]*recordSchema, len(definitions))
 	for _, d := range definitions {
@@ -200,7 +212,9 @@ func (c recordColumn) sqlType() string {
 
 // recordTables lists every record table in creation order.
 var recordTables = []string{"item", "relationship", "event", "obligation", "obligation_transition", "grant", "task", "lifecycle", "conversation", "call", "attempt",
-	"envelope", "receipt", "receipt_item", "diagnostic", "command", "reference"}
+	"envelope", "receipt", "receipt_item", "diagnostic", "command", "reference",
+	"owner", "coverage", "coverage_member", "exchange", "exchange_member", "exchange_ack", "admission", "membership",
+	"checkpoint", "mutation_receipt", "tool_receipt"}
 
 // typedColumns is the column layout (name -> declared type) the Go record
 // types require of each rec_* table. Migrations are forward-only and never
