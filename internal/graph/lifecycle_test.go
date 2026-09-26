@@ -170,8 +170,9 @@ func TestD1_AuthorizeLifecycleCommand_Targets(t *testing.T) {
 				command(domain.LifecycleUnpin, "user-goal-1", domain.AuthorityUser),
 				command(domain.LifecycleResolve, "done-goal", domain.AuthorityUser),
 			} {
-				if _, err := AuthorizeLifecycleCommand(tx, user, "task", c); !errors.Is(err, ErrLifecycleTargetMismatch) {
-					t.Errorf("%s %s: err = %v, want ErrLifecycleTargetMismatch", c.Action, c.TargetID, err)
+				got, err := AuthorizeLifecycleCommand(tx, user, "task", c)
+				if !errors.Is(err, ErrLifecycleTargetMismatch) || got.ResolvedItemID == "" || got.TargetVersion == 0 {
+					t.Errorf("%s %s: %+v, %v; want the resolved target with ErrLifecycleTargetMismatch", c.Action, c.TargetID, got, err)
 				}
 			}
 			return nil

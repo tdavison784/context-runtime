@@ -54,7 +54,8 @@ type LifecycleAuthorization struct {
 //     Callers report these as diagnostics; they do not abort the event.
 //   - The target must be of the action's kind and state
 //     (ErrLifecycleTargetMismatch), which is also a diagnostic, not an
-//     abort (R14).
+//     abort (R14). With that error only, the result still names the
+//     resolved target and its version.
 //   - The action is authorized with domain.AuthorizeMutation for the
 //     source actor, against the session's grants, at the next sequence
 //     number. Failure is domain.ErrInvalidAuthorityPromotion, which aborts
@@ -79,16 +80,19 @@ func AuthorizeLifecycleCommand(tx store.ReadTx, caller domain.Principal, taskID 
 		return LifecycleAuthorization{}, err
 	}
 
+	// A mismatch names the resolved target (it is visible to the source
+	// actor), so the caller can record it (R14).
+	mismatch := LifecycleAuthorization{Command: cmd, ResolvedItemID: target.ID, SourceActor: actor, TargetVersion: target.Version}
 	var action domain.Action
 	switch cmd.Action {
 	case domain.LifecycleResolve:
 		if target.Kind != domain.KindGoal || target.GoalStatus == nil || *target.GoalStatus != domain.GoalOpen {
-			return LifecycleAuthorization{}, ErrLifecycleTargetMismatch
+			return mismatch, ErrLifecycleTargetMismatch
 		}
 		action = domain.ActionResolve
 	case domain.LifecycleUnpin:
 		if target.Generation != domain.GenerationPinned {
-			return LifecycleAuthorization{}, ErrLifecycleTargetMismatch
+			return mismatch, ErrLifecycleTargetMismatch
 		}
 		action = domain.ActionUnpin
 	default:
