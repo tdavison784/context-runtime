@@ -21,7 +21,7 @@ import (
 type object = map[string]any
 
 var out = flag.String("out", "testdata/openai", "sanitized fixture directory")
-var section = flag.String("section", "all", "probe section: all, reasoning, cache, or compaction")
+var section = flag.String("section", "all", "probe section: all, reasoning, cache, ttl, or compaction")
 
 func main() {
 	flag.Parse()
@@ -43,6 +43,9 @@ func main() {
 		}
 		if *section == "all" || *section == "cache" {
 			p.cache(model)
+		}
+		if *section == "all" || *section == "ttl" {
+			p.ttl(model)
 		}
 		if *section == "all" || *section == "compaction" {
 			p.compaction(model)
@@ -189,6 +192,16 @@ func (p *probe) cache(model string) {
 	p.call(base+"_c3_repeat", "/responses", makeReq("The marker is BLUE.\n"+words, "Reply with the marker."))
 	p.call(base+"_c3_append", "/responses", makeReq("The marker is BLUE.\n"+words, "Reply with the marker, then stop."))
 	p.call(base+"_c3_edit", "/responses", makeReq("The marker is RED.\n"+words, "Reply with the marker."))
+}
+
+func (p *probe) ttl(model string) {
+	base := strings.ReplaceAll(model, "-", "_")
+	for _, ttl := range []string{"30m", "24h"} {
+		p.call(base+"_c4_ttl_"+ttl, "/responses", object{
+			"model": model, "store": false, "input": "Reply OK.", "max_output_tokens": 32,
+			"prompt_cache_options": object{"ttl": ttl},
+		})
+	}
 }
 
 func (p *probe) compaction(model string) {
