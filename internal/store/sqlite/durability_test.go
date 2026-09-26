@@ -30,6 +30,10 @@ func TestRestartPreservesRecords(t *testing.T) {
 		Parts: parts, ContentHash: domain.ContentHash(parts), SemanticBytes: domain.SemanticBytes(parts),
 		CreatedAt: time.Date(2026, 9, 25, 12, 0, 0, 123, time.UTC), Tags: []string{"tag"}, Version: 1,
 	}
+	ttl := 3
+	item.TTLTurns = &ttl
+	item.Source = &domain.SourceRef{Kind: domain.SourcePath, Locator: "/tmp/evidence", ContentHash: item.ContentHash}
+	expected := map[string]any{}
 	if err := s.Update(ctx, "s", func(tx store.Tx) error {
 		blob := domain.Blob{SessionID: "s", Hash: domain.HashBytes([]byte("blob")), MediaType: "text/plain", Data: []byte("blob")}
 		if err := tx.InsertBlob(blob); err != nil {
@@ -43,52 +47,102 @@ func TestRestartPreservesRecords(t *testing.T) {
 		second.ID = "i2"
 		second.DirectiveID = ""
 		second.Seq = tx.NextSeq()
+		second.Kind = domain.KindGoal
+		open := domain.GoalOpen
+		second.GoalStatus = &open
 		if err := tx.InsertItem(second); err != nil {
 			return err
 		}
+		expected["items"] = []domain.ContextItem{item, second}
+		expected["blob"] = blob
 		if err := tx.SetCurrentDirective("task", "d1", "i1"); err != nil {
 			return err
 		}
+		expected["directive"] = "i1"
 		rel := domain.Relationship{ID: "r1", SessionID: "s", Type: domain.RelDerivedFrom, FromID: "i2", ToID: "i1", Seq: tx.NextSeq(), Authority: domain.AuthorityUser,
 			Coverage: &domain.Coverage{ConversationID: "c1", FromSeq: 1, ToSeq: 2, ItemIDs: []string{"i1", "i2"}}}
 		if err := tx.InsertRelationship(rel); err != nil {
 			return err
 		}
+		expected["relationships"] = []domain.Relationship{rel}
 		event := domain.EventRecord{SessionID: "s", EventID: "e1", Principal: principal, PayloadHash: domain.HashBytes([]byte("event")), Seq: tx.NextSeq(), ItemIDs: []string{"i1"}, CommittedAt: item.CreatedAt}
 		if _, _, err := tx.InsertEvent(event); err != nil {
 			return err
 		}
-		ob := domain.ObligationVersion{ObligationID: "o1", Version: 1, SessionID: "s", TaskID: "task", SourceItemID: "i1", SourceAuthority: domain.AuthorityUser, Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, Status: domain.ObligationUnresolved, Current: true, CreatedSeq: tx.NextSeq(), Revision: 1}
+		expected["event"] = event
+		ob := domain.ObligationVersion{ObligationID: "o1", Version: 1, SessionID: "s", TaskID: "task", SourceItemID: "i1", SourceAuthority: domain.AuthorityUser, Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, Matcher: &domain.MatcherRef{Name: "matcher", Version: "1"}, Status: domain.ObligationUnresolved, Current: true, CreatedSeq: tx.NextSeq(), Revision: 1}
 		if err := tx.InsertObligationVersion(ob); err != nil {
 			return err
 		}
 		tr := domain.ObligationTransition{ID: "tr1", SessionID: "s", ObligationID: "o1", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Actor: harness, EvidenceIDs: []string{"i2"}}
-		if _, err := tx.AppendObligationTransition(tr, 1); err != nil {
+		updated, err := tx.AppendObligationTransition(tr, 1)
+		if err != nil {
 			return err
 		}
+		expected["obligation"] = updated
+		expected["transitions"] = []domain.ObligationTransition{tr}
 		grant := domain.MutationGrant{ID: "g1", SessionID: "s", Action: domain.ActionResolve, TargetIDs: []string{"i1"}, Issuer: harness, Grantee: &principal, IssuedSeq: tx.NextSeq()}
 		if err := tx.InsertGrant(grant); err != nil {
 			return err
 		}
+		expected["grant"] = grant
 		taskEvent := domain.LifecycleEvent{ID: "task-created", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "create", Actor: harness}
-		if _, err := tx.PutTask(domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive, Version: 999}, 0, &taskEvent); err != nil {
+		task, err := tx.PutTask(domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive, Version: 999}, 0, &taskEvent)
+		if err != nil {
 			return err
 		}
+		expected["task"] = task
 		life := domain.LifecycleEvent{ID: "l1", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetItem, TargetID: "i1", Action: "test", Actor: harness}
 		if err := tx.AppendLifecycleEvent(life); err != nil {
 			return err
 		}
-		if _, err := tx.PutConversation(domain.Conversation{SessionID: "s", ConversationID: "c1", TaskID: "task", AgentID: "agent", Version: 1}, 0); err != nil {
+		expected["lifecycle"] = []domain.LifecycleEvent{taskEvent, life}
+		conversation, err := tx.PutConversation(domain.Conversation{SessionID: "s", ConversationID: "c1", TaskID: "task", AgentID: "agent", Version: 1}, 0)
+		if err != nil {
 			return err
 		}
+		expected["conversation"] = conversation
 		request := []byte("request")
 		call := domain.CallRecord{CallID: "c1-call", SessionID: "s", ConversationID: "c1", Operation: domain.OperationInference, State: domain.CallPrepared, Principal: principal, ServiceActor: harness, Request: request, RequestHash: domain.HashBytes(request), PreparedSeq: tx.NextSeq(), Revision: 1}
 		call.ProposalHash = domain.CallProposalHash(call)
 		if err := tx.InsertCall(call); err != nil {
 			return err
 		}
+		expected["call"] = call
 		attempt := domain.CallAttempt{CallID: call.CallID, SessionID: "s", Attempt: 1, State: domain.AttemptSent, SentSeq: tx.NextSeq()}
-		return tx.PutCallAttempt(attempt)
+		if err := tx.PutCallAttempt(attempt); err != nil {
+			return err
+		}
+		sent := call.Clone()
+		sent.State = domain.CallSent
+		sent.Attempts = 1
+		sent, err = tx.UpdateCall(sent, 1)
+		if err != nil {
+			return err
+		}
+		response := []byte("response")
+		tokens := int64(17)
+		outcome := domain.CallOutcome{Attempt: 1, State: domain.CallCompleted, Response: response, ResponseHash: domain.HashBytes(response), Usage: []domain.UsageIteration{{Iteration: 1, InputTokens: &tokens}}}
+		attempt.State = domain.AttemptCompleted
+		attempt.OutcomeHash = outcome.OutcomeHash()
+		attempt.FinishedSeq = tx.NextSeq()
+		attempt.FinishedAt = item.CreatedAt
+		if err := tx.PutCallAttempt(attempt); err != nil {
+			return err
+		}
+		completed := sent.Clone()
+		completed.State = domain.CallCompleted
+		completed.Outcome = &outcome
+		completed.OutcomeHash = outcome.OutcomeHash()
+		completed.FinishedSeq = tx.NextSeq()
+		completed, err = tx.UpdateCall(completed, sent.Revision)
+		if err != nil {
+			return err
+		}
+		expected["call"] = completed
+		expected["attempts"] = []domain.CallAttempt{attempt}
+		expected["last"] = tx.LastSeq()
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +200,13 @@ func TestRestartPreservesRecords(t *testing.T) {
 		return out
 	}
 	before := snapshot(s)
+	want, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(want) {
+		t.Fatalf("stored state differs from inserted records:\nwant %s\ngot %s", want, before)
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
