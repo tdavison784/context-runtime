@@ -263,7 +263,7 @@ func TestEventIDRejectsReservedPrefixes(t *testing.T) {
 	for _, d := range idDomains {
 		generated["domain "+string(d)] = DerivedArtifactID(d, "s", "o", 0)
 	}
-	for _, prefix := range []string{"evc_", "eva_", "dgn_", "cmd_", "sec_", "ref_", "turn_", "obl_", "itm_", "call_", "rel_", "evt_"} {
+	for _, prefix := range []string{"evc_", "eva_", "dgn_", "cmd_", "sec_", "ref_", "turn_", "obl_", "itm_", "call_", "rel_", "evt_", "lce_"} {
 		generated["prefix "+prefix] = prefix + "x"
 		generated["bare "+prefix] = prefix
 	}
