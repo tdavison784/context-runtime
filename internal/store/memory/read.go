@@ -46,6 +46,7 @@ type readTx struct {
 	itemsByBlob  index[string]
 	duplicates   index[duplicateKey]
 	refsByKey    index[string]
+	itemsByKey   index[string]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -79,6 +80,7 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		itemsByBlob:  newIndex(st.itemsByBlob, writable),
 		duplicates:   newIndex(st.duplicates, writable),
 		refsByKey:    newIndex(st.refsByKey, writable),
+		itemsByKey:   newIndex(st.itemsByKey, writable),
 	}
 }
 
@@ -559,6 +561,16 @@ func (r *readTx) ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, 
 		return nil, invalid("items by blob: positive limit and valid hash required")
 	}
 	return r.indexedItems(r.itemsByBlob.lookup(blobHash), limit)
+}
+
+func (r *readTx) ItemsBySourceKey(locatorKey string, limit int) ([]domain.ContextItem, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || locatorKey == "" || len(locatorKey) > domain.MaxLocatorKeyBytes {
+		return nil, invalid("items by source key: positive limit and a locator key required")
+	}
+	return r.indexedItems(r.itemsByKey.lookup(locatorKey), limit)
 }
 
 func (r *readTx) DuplicateCandidates(f store.DuplicateFilter) ([]domain.ContextItem, error) {

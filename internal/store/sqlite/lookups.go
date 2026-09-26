@@ -76,3 +76,17 @@ func (t *transaction) DuplicateCandidates(f store.DuplicateFilter) ([]domain.Con
 // column.
 const duplicateSQL = "SELECT id FROM rec_item WHERE session_id=? AND f_content_hash=? AND f_task_id=? AND f_section=? AND f_role=? AND f_authority=?" +
 	" AND f_access_scope=? AND f_access_session_id=? AND f_access_workflow_id=? AND f_access_task_id=? AND f_access_agent_id=? AND subkey=0 LIMIT ?"
+
+func (t *transaction) ItemsBySourceKey(locatorKey string, limit int) ([]domain.ContextItem, error) {
+	if limit <= 0 || locatorKey == "" || len(locatorKey) > domain.MaxLocatorKeyBytes {
+		return nil, fmt.Errorf("%w: items by source key: positive limit and a locator key required", domain.ErrInvalidRecord)
+	}
+	ids, err := t.boundedIDs(limit, sourceKeySQL, t.session, domain.LocatorRuleVersion, locatorKey, limit+1)
+	if err != nil {
+		return nil, err
+	}
+	return t.itemsByID(ids)
+}
+
+// sourceKeySQL matches the item_sources primary key (migration 0011).
+const sourceKeySQL = "SELECT item_id FROM item_sources WHERE session_id=? AND rule_version=? AND locator_key=? LIMIT ?"
