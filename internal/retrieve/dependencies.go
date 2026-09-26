@@ -1,27 +1,31 @@
 package retrieve
 
-import "github.com/tdavison784/context-runtime/internal/domain"
+import (
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/policy"
+)
 
 // DependencySnapshot is the complete immutable input for one projection's
 // dispatch check. Missing members, sources, leases or coverage fail closed.
 type DependencySnapshot struct {
-	Principal  domain.Principal
-	Projection domain.ProjectionRecord
-	Coverages  map[string]domain.CoverageRecord
-	Members    map[string][]domain.CoverageMember
-	Sources    map[string]domain.ContextItem
-	Leases     map[string]domain.RetrievalLease
-	MaxMembers int
+	Principal    domain.Principal
+	Projection   domain.ProjectionRecord
+	Coverages    map[string]domain.CoverageRecord
+	Members      map[string][]domain.CoverageMember
+	Sources      map[string]domain.ContextItem
+	Leases       map[string]domain.RetrievalLease
+	MaxMembers   int
+	SnapshotSeq  uint64
+	DispatchTurn string
+	Task         domain.TaskState
+	Conversation domain.Conversation
 }
 
 // CheckProjectionDependencies verifies every nested source and exact lease.
-// leaseLive is W3's pure policy predicate; a nil predicate never admits text.
-func CheckProjectionDependencies(d DependencySnapshot, leaseLive func(domain.RetrievalLease) bool) error {
+// W3's single pure policy predicate decides temporal lease liveness.
+func CheckProjectionDependencies(d DependencySnapshot) error {
 	if err := d.Principal.Validate(); err != nil {
 		return err
-	}
-	if leaseLive == nil {
-		return domain.ErrLeaseExpired
 	}
 	if d.MaxMembers <= 0 {
 		return domain.ErrResourceLimit
@@ -85,7 +89,10 @@ func CheckProjectionDependencies(d DependencySnapshot, leaseLive func(domain.Ret
 				if !ok || lease.Validate() != nil || lease.ID != m.LeaseID || lease.SessionID != p.SessionID || lease.Source != *m.Source {
 					return domain.ErrIncompleteCoverage
 				}
-				if lease.Holder != d.Principal || lease.ConversationID != p.Invocation.ConversationID || lease.TurnID != p.Invocation.TurnID || !leaseLive(lease) {
+				live := policy.LeaseLive(lease, policy.LeaseSnapshot{
+					Seq: d.SnapshotSeq, Source: *m.Source, Task: d.Task, Conversation: d.Conversation,
+				}, d.Principal, d.DispatchTurn)
+				if lease.Holder != d.Principal || lease.ConversationID != p.Invocation.ConversationID || lease.TurnID != p.Invocation.TurnID || !live {
 					return domain.ErrLeaseExpired
 				}
 				if root && *m.Source == p.Source && m.LeaseID == p.LeaseID {

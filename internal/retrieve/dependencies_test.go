@@ -42,25 +42,29 @@ func dependencyFixture(t *testing.T) DependencySnapshot {
 		Invocation: invocation, Access: item.Access, DeliveryPolicyVersion: "delivery",
 	}
 	return DependencySnapshot{
-		Principal: p, Projection: projection, MaxMembers: 4,
-		Coverages: map[string]domain.CoverageRecord{"coverage": coverage},
-		Members:   map[string][]domain.CoverageMember{"coverage": {member}},
-		Sources:   map[string]domain.ContextItem{"source": item},
-		Leases:    map[string]domain.RetrievalLease{"lease": lease},
+		Principal: p, Projection: projection, MaxMembers: 4, SnapshotSeq: 4, DispatchTurn: "turn-1",
+		Task:         domain.TaskState{SessionID: "s", TaskID: "task", WorkflowID: "wf", Status: domain.TaskActive, Turn: 1, TurnID: "turn-1", Version: 1},
+		Conversation: domain.Conversation{SessionID: "s", ConversationID: lease.ConversationID, TaskID: "task", AgentID: "agent", Version: 1, Revision: 1},
+		Coverages:    map[string]domain.CoverageRecord{"coverage": coverage},
+		Members:      map[string][]domain.CoverageMember{"coverage": {member}},
+		Sources:      map[string]domain.ContextItem{"source": item},
+		Leases:       map[string]domain.RetrievalLease{"lease": lease},
 	}
 }
 
 func TestProjectionRequiresOriginalLiveLease(t *testing.T) {
 	d := dependencyFixture(t)
-	if err := CheckProjectionDependencies(d, func(domain.RetrievalLease) bool { return true }); err != nil {
+	if err := CheckProjectionDependencies(d); err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckProjectionDependencies(d, func(domain.RetrievalLease) bool { return false }); !errors.Is(err, domain.ErrLeaseExpired) {
+	d.Conversation.LogicalCalls = 2
+	if err := CheckProjectionDependencies(d); !errors.Is(err, domain.ErrLeaseExpired) {
 		t.Fatalf("expired original lease: %v", err)
 	}
+	d.Conversation.LogicalCalls = 0
 	delete(d.Leases, "lease")
 	d.Leases["new-lease"] = domain.RetrievalLease{SemanticMeta: domain.SemanticMeta{ID: "new-lease"}}
-	if err := CheckProjectionDependencies(d, func(domain.RetrievalLease) bool { return true }); !errors.Is(err, domain.ErrIncompleteCoverage) {
+	if err := CheckProjectionDependencies(d); !errors.Is(err, domain.ErrIncompleteCoverage) {
 		t.Fatalf("new lease substituted for old: %v", err)
 	}
 }
@@ -68,14 +72,14 @@ func TestProjectionRequiresOriginalLiveLease(t *testing.T) {
 func TestProjectionRejectsMissingOrChangedSource(t *testing.T) {
 	d := dependencyFixture(t)
 	d.Members["coverage"] = nil
-	if err := CheckProjectionDependencies(d, func(domain.RetrievalLease) bool { return true }); !errors.Is(err, domain.ErrIncompleteCoverage) {
+	if err := CheckProjectionDependencies(d); !errors.Is(err, domain.ErrIncompleteCoverage) {
 		t.Fatalf("missing member: %v", err)
 	}
 	d = dependencyFixture(t)
 	source := d.Sources["source"]
 	source.ContentHash = domain.HashBytes([]byte("different"))
 	d.Sources["source"] = source
-	if err := CheckProjectionDependencies(d, func(domain.RetrievalLease) bool { return true }); !errors.Is(err, domain.ErrIncompleteCoverage) {
+	if err := CheckProjectionDependencies(d); !errors.Is(err, domain.ErrIncompleteCoverage) {
 		t.Fatalf("changed content: %v", err)
 	}
 }
@@ -87,6 +91,11 @@ func TestNestedOldLeaseCannotBeRenewedByNewRootLease(t *testing.T) {
 	ref := domain.ItemContentRef{ItemID: old.ID, ContentHash: old.ContentHash}
 	lease := d.Leases["lease"]
 	lease.ID, lease.Source, lease.Seq = "old-lease", ref, 5
+	lease.CallAllowance = 1
+	rootLease := d.Leases["lease"]
+	rootLease.IssuedCompletedInferenceIndex = 1
+	d.Leases["lease"] = rootLease
+	d.Conversation.LogicalCalls, d.SnapshotSeq = 1, 6
 	d.Sources[old.ID], d.Leases[lease.ID] = old, lease
 	childMember := domain.CoverageMember{SemanticMeta: domain.SemanticMeta{ID: "old-member", SessionID: "s", Seq: 6, SchemaVersion: domain.SemanticSchemaV1}, CoverageID: "old-coverage", Source: &ref, LeaseID: lease.ID}
 	child := domain.CoverageRecord{SemanticMeta: domain.SemanticMeta{ID: "old-coverage", SessionID: "s", Seq: 6, SchemaVersion: domain.SemanticSchemaV1}, Purpose: domain.CoverageLeaseDependency, Access: old.Access, MemberCount: 1}
@@ -99,10 +108,12 @@ func TestNestedOldLeaseCannotBeRenewedByNewRootLease(t *testing.T) {
 	root.MemberCount = uint64(len(members))
 	root.Signature, _ = domain.CoverageSignature(root, members)
 	d.Coverages[root.ID], d.Members[root.ID] = root, members
-	if err := CheckProjectionDependencies(d, func(l domain.RetrievalLease) bool { return l.ID != "old-lease" }); !errors.Is(err, domain.ErrLeaseExpired) {
+	if err := CheckProjectionDependencies(d); !errors.Is(err, domain.ErrLeaseExpired) {
 		t.Fatalf("expired nested lease with new root lease = %v", err)
 	}
-	if err := CheckProjectionDependencies(d, func(domain.RetrievalLease) bool { return true }); err != nil {
+	lease.CallAllowance = 2
+	d.Leases[lease.ID] = lease
+	if err := CheckProjectionDependencies(d); err != nil {
 		t.Fatalf("both leases live: %v", err)
 	}
 }
