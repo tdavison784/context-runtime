@@ -4,13 +4,11 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/tdavison784/context-runtime/internal/graph"
+
 	"github.com/tdavison784/context-runtime/internal/directive"
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
-
-// errNotYet marks parsed directive output this build cannot apply yet; it
-// fails closed rather than silently dropping semantics.
-var errNotYet = errors.New("ingest: directive semantics not implemented")
 
 // step is one unit of derived work at a source position, so items,
 // Working snapshots, and lifecycle commands apply in source order (M3).
@@ -144,11 +142,108 @@ func residualSlices(text string, sections []directive.Section) []domain.ByteRang
 	return out
 }
 
-func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error { return errNotYet }
-
+// workingSection applies one Working section as a single snapshot
+// operation (FR-DIR-007, D11, R12). A section the parser marked malformed
+// (a dropped member, stray prose, an empty body) replaces nothing, so a
+// parse error can never retire an omitted member; its bytes stay in the
+// transcript and its problems in diagnostics. A member whose ID is current
+// at another visible boundary is dropped with boundary_conflict and makes
+// the section partially malformed too (R13): no member is written. Every
+// other failure, including a denied replacement, aborts the event.
 func (r *run) workingSection(c unitCtx, si int) error {
-	if c.res.Sections[si].Malformed || len(c.res.Sections[si].ItemIndexes) == 0 {
+	sec := c.res.Sections[si]
+	if sec.Malformed || len(sec.ItemIndexes) == 0 {
 		return nil
 	}
-	return errNotYet
+	members := make([]domain.ContextItem, 0, len(sec.ItemIndexes))
+	conflict := false
+	for _, ii := range sec.ItemIndexes {
+		item := c.res.Items[ii]
+		it, err := r.buildDirective(c, item)
+		if err != nil {
+			return err
+		}
+		if err := graph.CheckBoundaryConflict(r.tx, c.actor, it); err != nil {
+			if !errors.Is(err, graph.ErrBoundaryConflict) {
+				return err
+			}
+			r.diagnose(c, item, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
+			conflict = true
+		}
+		members = append(members, it)
+	}
+	if conflict {
+		return nil
+	}
+	ids := make([]string, 0, len(members))
+	for _, m := range members {
+		it, err := r.newItem(m)
+		if err != nil {
+			return err
+		}
+		if err := r.linkDerived(c, it); err != nil {
+			return err
+		}
+		ids = append(ids, it.ID)
+	}
+	res, err := graph.SupersedeSnapshot(r.tx, c.actor, ids, r.p.TaskID, r.graphEventID())
+	if err != nil {
+		return err
+	}
+	for _, rel := range res.Supersedes {
+		r.repls = append(r.repls, domain.IngestLink{ItemID: rel.FromID, TargetID: rel.ToID})
+	}
+	for _, rel := range res.Duplicates {
+		r.dups = append(r.dups, domain.IngestLink{ItemID: rel.FromID, TargetID: rel.ToID})
+	}
+	r.rels += len(res.Supersedes) + len(res.Duplicates)
+	if r.rels > r.limits.MaxRelationships {
+		return errLimit("MaxRelationships")
+	}
+	return nil
+}
+
+// lifecycle records one parsed Resolve/Unpin at its position in event
+// order (D1, R7, R14). The target is resolved and authorized read-only for
+// the span's source actor; nothing is executed, and the record says
+// PARSED_NOT_EXECUTED. Missing and inaccessible targets are the same
+// NOT_FOUND diagnostic, several are AMBIGUOUS, and a target of the wrong
+// kind or state is MISMATCH (naming the target); none of these abort. An unauthorized command
+// aborts the event (R7).
+func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
+	ordinal := len(r.commands)
+	rec := domain.LifecycleCommandRecord{
+		ID:               domain.LifecycleCommandRecordID(r.p.SessionID, r.occurrence, ordinal),
+		SessionID:        r.p.SessionID,
+		OccurrenceID:     r.occurrence,
+		EventID:          r.e.EventID,
+		Ordinal:          ordinal,
+		Actor:            c.actor,
+		Access:           c.span.Access,
+		ParserVersion:    directive.ParserVersion,
+		SchemaVersion:    domain.LifecycleCommandSchemaVersion,
+		Status:           domain.CommandParsedNotExecuted,
+		LifecycleCommand: cmd,
+	}
+	diag := func(code domain.DiagnosticCode, reason domain.DiagnosticReason) {
+		r.diags.add(domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range})
+	}
+	auth, err := graph.AuthorizeLifecycleCommand(r.tx, r.p, r.p.TaskID, cmd)
+	switch {
+	case err == nil:
+		rec.Resolution, rec.ResolvedItemID, rec.ResolvedVersion = domain.TargetResolved, auth.ResolvedItemID, auth.TargetVersion
+	case isNotFound(err):
+		rec.Resolution = domain.TargetNotFound
+		diag(domain.DiagnosticNotFound, domain.ReasonUnknownTarget)
+	case errors.Is(err, graph.ErrAmbiguousDirective):
+		rec.Resolution = domain.TargetAmbiguous
+		diag(domain.ErrAmbiguousDirective, domain.ReasonAmbiguousTarget)
+	case errors.Is(err, graph.ErrLifecycleTargetMismatch):
+		rec.Resolution, rec.ResolvedItemID, rec.ResolvedVersion = domain.TargetMismatch, auth.ResolvedItemID, auth.TargetVersion
+		diag(domain.ErrUnsupportedDirective, domain.ReasonTargetMismatch)
+	default:
+		return err
+	}
+	r.commands = append(r.commands, rec)
+	return nil
 }
