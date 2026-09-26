@@ -39,13 +39,9 @@ func (s *Service) writeCompletion(tx store.Tx, sem store.SemanticTx, p domain.Pr
 		return out, err
 	}
 	out.AfterVersion = after.Version
-	requestID := "gc_" + domain.NewCanonicalEncoder("context-runtime/task-completion-gc/v1").String(p.SessionID).String(i.RequestID).Hash()
-	gc := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: gcRequestID(p.SessionID, requestID), SessionID: p.SessionID, Seq: tx.NextSeq(), SchemaVersion: domain.SemanticSchemaV1}, CollectIntent: domain.CollectIntent{RequestID: requestID, Scope: domain.CollectTask, TaskID: task.TaskID, Trigger: domain.GCTaskCompletion}, Origin: p, PolicyVersion: s.policy.Version}
-	if err = sem.InsertGCRequest(gc); err != nil {
-		return out, err
-	}
-	out.GCRequestID = gc.ID
-	return out, nil
+	// A task completes once, so its ID is the trigger identity.
+	out.GCRequestID, err = s.enqueueGC(tx, sem, p, domain.GCTaskCompletion, domain.CollectTask, task.TaskID, task.TaskID)
+	return out, err
 }
 
 func gcRequestID(session, request string) string {

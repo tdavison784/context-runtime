@@ -17,6 +17,9 @@ type rejectGC struct {
 }
 
 func (f rejectGC) InsertGCRequest(r domain.GCRequest) error { return f.check(r) }
+func (f rejectGC) GCRequest(string) (domain.GCRequest, error) {
+	return domain.GCRequest{}, domain.ErrNotFound
+}
 
 func TestCompletionGCFailureRollsBackGoalsAndTask(t *testing.T) {
 	ctx := context.Background()
