@@ -943,6 +943,63 @@ Findings from `p2-ingest`'s own test suite, appended to
   ReasonBoundaryConflict` (§23), not a per-member drop, because a Working
   snapshot is one atomic operation (D11).
 
+### 25. Round 7 ruling: R21
+
+Refines §24/R20's residual-instruction fix before it lands, plus a
+creation-order amendment to M3.
+
+- **A residue that is only a bare heading line creates no item (refines
+  §5/§24, D8/R20 — not yet landed).** Once R20's fix lands (a malformed
+  content section's bytes join residual for a SYSTEM/HARNESS span instead
+  of being excluded as claimed), an empty malformed section — a heading
+  with no body at all — would otherwise become a residual instruction
+  whose entire content is the bare heading line itself. R21 narrows R20:
+  if a unit's residual, after R20's fix, reduces to nothing but such a
+  bare malformed heading line with no other trusted body text anywhere in
+  the unit, no residual instruction item is created for it — a heading
+  alone conveys no instruction content worth preserving, and creating an
+  item for it would just be noise. This does not change R20's core fix
+  for a malformed section that *does* have body text.
+- **Malformed lifecycle sections are never residual instructions (refines
+  §5/§24 and §1/§9, D1/D8/R20 — a scoping limit on R20, not a gap).** R20's
+  fix (§24) is scoped to malformed *content* sections (Goal, Pinned,
+  Working, Remember, References, Ephemeral); it does not extend to a
+  malformed Resolve, Unpin, or unsupported-lifecycle-word section (M4's
+  closed vocabulary, §4). A malformed lifecycle heading in a trusted span
+  stays transcript-only, with its diagnostic, exactly as today — R21
+  forbids ever surfacing it as a residual *instruction* item. The reason
+  is D1's core guarantee: a lifecycle command is `PARSED_NOT_EXECUTED`
+  and must never be rendered as a trusted instruction to the model; if a
+  malformed `## Resolve`/`## Unpin`/unsupported-word heading became
+  residual instruction text, a runtime command that failed to parse would
+  reappear as ordinary trusted prose, which is worse than the diagnostic-
+  only status quo it would replace. `internal/directive`'s `Section`
+  already carries its `Keyword`, so `p2-ingest`'s R20 implementation must
+  gate on it: only a content-section keyword's malformed bytes join
+  residual; a lifecycle-section keyword's malformed bytes never do,
+  regardless of span authority.
+- **Creation order: a unit's residual instruction item is created after
+  its directive items, amending M3 (refines §10 — not yet landed).** M3
+  (§10) originally ordered a unit's items as "transcript items first, then
+  residual/directive items in source order" — treating residual and
+  directive items as one byte-position-ordered group. R21 amends this: a
+  unit's residual content, and thus its residual instruction item, can
+  only be computed *after* every section and lifecycle command in the
+  unit has been resolved, because whether a given section's bytes end up
+  in residual depends on whether ingest ultimately refused that section
+  (R20) and on that section's keyword (R21, above) — information that
+  does not exist until the whole unit has been processed. `internal/ingest
+  /derive.go`'s `applyUnit` currently sorts a single residual step into
+  its position-ordered `steps` list by `residual[0].Start` — the byte
+  offset of the first residual range — which can place it before some of
+  the unit's own directive items when residual text happens to start
+  earlier in the span than a later section. R21 requires the residual
+  step to run last for its unit unconditionally, never by byte position;
+  `p2-ingest`'s `applyUnit` must be changed accordingly, and this is the
+  amended creation-order M3 (§10) now records: transcript item, then the
+  unit's directive items and lifecycle commands in source order, then
+  finally its residual instruction item, if any.
+
 ## Alternatives considered
 
 - **D1:** the brief's read-only resolution without an explicit
@@ -1249,6 +1306,18 @@ reconciles exact names in a later round.
   Working-section member aborts the whole section's write with
   `ErrMalformedDirective`/`ReasonBoundaryConflict`, never a partial commit
   (R20, confirming §23's pinning).
+- **§25 (round 7 ruling, R21):** `internal/ingest` (once R20 lands) — a
+  unit whose only residue is a bare malformed heading with no body creates
+  no residual instruction item (R21); a malformed Resolve/Unpin/
+  unsupported-lifecycle-word section in a SYSTEM or HARNESS span never
+  produces a residual instruction, staying transcript-only with its
+  diagnostic, even though a malformed content section in the same span
+  now does (R21) — the negative case a naive "any malformed trusted
+  section becomes residual" implementation would get wrong; a unit with
+  both a refused section and an earlier-positioned trusted directive item
+  creates its residual instruction item, if any, after every directive
+  item and lifecycle command the unit produced, never ordered by the
+  residual's own byte position (R21, amending M3's creation order).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
