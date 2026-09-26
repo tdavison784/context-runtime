@@ -27,7 +27,8 @@ func (a Action) Valid() bool {
 	switch a {
 	case ActionResolve, ActionUnpin, ActionReplaceDirective, ActionChangeScope,
 		ActionAssertObligation, ActionBlockObligation, ActionUnblockObligation,
-		ActionWaiveObligation, ActionCompleteTask:
+		ActionWaiveObligation, ActionCompleteTask, ActionPromote, ActionDemote,
+		ActionArchive, ActionUnarchive, ActionDeclareObligation, ActionSetObligationMaterialization:
 		return true
 	}
 	return false
@@ -41,7 +42,8 @@ type MutationGrant struct {
 	ID        string
 	SessionID string
 	Action    Action
-	TargetIDs []string
+	TargetIDs []string      // legacy v1; never authorizes a typed obligation target
+	Targets   []GrantTarget // v2 decoded targets; mutually exclusive with TargetIDs
 	Issuer    Principal
 	// Grantee is matched on session, authority, and every non-empty task,
 	// workflow, and agent field.
@@ -55,6 +57,7 @@ type MutationGrant struct {
 // Clone returns a deep copy.
 func (g MutationGrant) Clone() MutationGrant {
 	g.TargetIDs = slices.Clone(g.TargetIDs)
+	g.Targets = slices.Clone(g.Targets)
 	if g.Grantee != nil {
 		p := *g.Grantee
 		g.Grantee = &p
@@ -75,7 +78,19 @@ func (g MutationGrant) Validate() error {
 	if !g.Action.Valid() {
 		return invalid("grant %s: invalid action %q", g.ID, g.Action)
 	}
-	if len(g.TargetIDs) == 0 {
+	if len(g.Targets) != 0 {
+		if len(g.TargetIDs) != 0 || !g.Action.Delegable() {
+			return invalid("grant: mixed schemas or reserved action")
+		}
+		seen := map[string]bool{}
+		for _, target := range g.Targets {
+			if target.Validate() != nil || target.SessionID != g.SessionID || !g.Action.ValidForTarget(target.Kind) || g.Matcher != nil && target.Kind != GrantTargetObligation || seen[target.AuthorizationKey] {
+				return invalid("grant: invalid or duplicate typed target")
+			}
+			seen[target.AuthorizationKey] = true
+		}
+	}
+	if len(g.TargetIDs) == 0 && len(g.Targets) == 0 {
 		return invalid("grant %s: at least one target is required", g.ID)
 	}
 	if err := g.Issuer.Validate(); err != nil {
@@ -139,6 +154,7 @@ func granteeMatches(g, actor Principal) bool {
 // MutationTarget is one record a mutation affects, with the source authority
 // and access boundary that govern it.
 type MutationTarget struct {
+	Ref       GrantTarget // zero only on the frozen legacy path
 	ID        string
 	Authority Authority
 	Access    AccessBoundary
@@ -183,6 +199,9 @@ func AuthorizeMutation(r MutationRequest) (Authorization, error) {
 		return auth, invalid("mutation: no targets")
 	}
 	for _, t := range r.Targets {
+		if t.Ref != (GrantTarget{}) && (t.Ref.Validate() != nil || t.Ref.SessionID != r.Actor.SessionID || r.Seq == 0 || !r.Action.ValidForTarget(t.Ref.Kind)) {
+			return Authorization{}, ErrInvalidRecord
+		}
 		if !t.Access.Permits(r.Actor) {
 			return Authorization{}, ErrNotFound
 		}
@@ -195,7 +214,7 @@ func AuthorizeMutation(r MutationRequest) (Authorization, error) {
 		if !ok {
 			return Authorization{}, ErrInvalidAuthorityPromotion
 		}
-		auth.GrantIDs[t.ID] = grantID
+		auth.GrantIDs[t.AuthorizationID()] = grantID
 	}
 	return auth, nil
 }
@@ -219,7 +238,7 @@ func findGrant(r MutationRequest, t MutationTarget) (string, bool) {
 		// The issuer must still be able to act on the target directly: a
 		// grant never carries authority its issuer lacks, including access
 		// to a target outside the issuer's boundary.
-		if !slices.Contains(g.TargetIDs, t.ID) || !g.Issuer.Authority.AtLeast(t.Authority) || !t.Access.Permits(g.Issuer) {
+		if !grantNamesTarget(g, t) || !g.Issuer.Authority.AtLeast(t.Authority) || !t.Access.Permits(g.Issuer) {
 			continue
 		}
 		switch {
@@ -283,7 +302,11 @@ func AuthorizeGrantRevocation(actor Principal, g MutationGrant, targets []Mutati
 
 func sameTargetSet(g MutationGrant, targets []MutationTarget) error {
 	named := map[string]bool{}
-	for _, id := range g.TargetIDs {
+	ids := slices.Clone(g.TargetIDs)
+	for _, target := range g.Targets {
+		ids = append(ids, target.AuthorizationKey)
+	}
+	for _, id := range ids {
 		if named[id] {
 			return invalid("grant %s: duplicate target %s", g.ID, id)
 		}
@@ -294,10 +317,13 @@ func sameTargetSet(g MutationGrant, targets []MutationTarget) error {
 	}
 	seen := map[string]bool{}
 	for _, t := range targets {
-		if !named[t.ID] || seen[t.ID] {
+		if t.Ref != (GrantTarget{}) && t.Ref.Validate() != nil {
+			return ErrInvalidRecord
+		}
+		if !named[t.AuthorizationID()] || seen[t.AuthorizationID()] {
 			return invalid("grant %s: targets do not match target IDs", g.ID)
 		}
-		seen[t.ID] = true
+		seen[t.AuthorizationID()] = true
 	}
 	return nil
 }
@@ -338,6 +364,11 @@ func AuthorizeSupersession(actor Principal, superseding, superseded ContextItem)
 	}
 	if !superseding.Access.Permits(actor) || !superseded.Access.Permits(actor) {
 		return ErrNotFound
+	}
+	if superseding.Namespace == NamespaceObservation || superseded.Namespace == NamespaceObservation {
+		if actor.Authority != AuthoritySystem && actor.Authority != AuthorityHarness || superseding.Namespace != NamespaceObservation || superseded.Namespace != NamespaceObservation || superseding.Authority != AuthorityTool || superseded.Authority != AuthorityTool || superseding.DirectiveID != superseded.DirectiveID || superseding.TaskID != superseded.TaskID {
+			return ErrInvalidAuthorityPromotion
+		}
 	}
 	switch actor.Authority {
 	case AuthoritySystem, AuthorityHarness, AuthorityUser:

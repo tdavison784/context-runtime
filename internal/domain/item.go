@@ -65,10 +65,14 @@ type ItemRole string
 const (
 	RoleSemantic   ItemRole = ""
 	RoleTranscript ItemRole = "TRANSCRIPT"
+	RoleCheckpoint ItemRole = "CHECKPOINT"
+	RoleProjection ItemRole = "PROJECTION"
 )
 
 // Valid reports whether r is a known role.
-func (r ItemRole) Valid() bool { return r == RoleSemantic || r == RoleTranscript }
+func (r ItemRole) Valid() bool {
+	return r == RoleSemantic || r == RoleTranscript || r == RoleCheckpoint || r == RoleProjection
+}
 
 // SourceKind says what a source locator names.
 type SourceKind string
@@ -99,6 +103,7 @@ type ContextItem struct {
 	ID          string
 	EventID     string
 	DirectiveID string
+	Namespace   DirectiveNamespace // empty only for frozen pre-Phase-3 records
 	// Section is the directive section that created the item, if any.
 	Section DirectiveSection
 	// Role is TRANSCRIPT for a span's verbatim snapshot (D8).
@@ -173,6 +178,11 @@ func (it ContextItem) Clone() ContextItem {
 // It verifies the content hash and SemanticBytes against the parts, so a
 // store never accepts an item whose identity disagrees with its content.
 func (it ContextItem) Validate() error {
+	if it.Namespace != "" {
+		if err := it.validateNamespace(); err != nil {
+			return err
+		}
+	}
 	if it.ID == "" {
 		return invalid("item: ID is required")
 	}

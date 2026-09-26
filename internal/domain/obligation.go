@@ -51,14 +51,23 @@ type MatcherRef struct {
 // a new one that starts UNRESOLVED. Status history lives in
 // ObligationTransition records; Status caches the latest.
 type ObligationVersion struct {
-	ObligationID    string
-	Version         uint64
-	SessionID       string
-	TaskID          string
-	SourceItemID    string
-	SourceAuthority Authority
-	Access          AccessBoundary
-	Description     string
+	TargetSpec                                             *TargetSpec
+	TargetSubjectKey, ClaimPatternVersion, DeclarationSlot string
+	DeclarationKind                                        DeclarationKind
+	DeclarationProvenance                                  DeclarationProvenance
+	WorkspaceBindingRef                                    *WorkspaceBindingRef
+	BindingState                                           ObligationBindingState
+	BindingReason                                          ObligationReasonCode
+	Legacy                                                 bool
+	DeclarationID, CurrentProofID, CurrentAssertionID      string
+	ObligationID                                           string
+	Version                                                uint64
+	SessionID                                              string
+	TaskID                                                 string
+	SourceItemID                                           string
+	SourceAuthority                                        Authority
+	Access                                                 AccessBoundary
+	Description                                            string
 	// Claim is the declared claim name from a Pinned obligation=<claim>
 	// attribute (D13). It is only a name: it is not a registry lookup, a
 	// matcher binding, or a grant. Matcher stays nil until a registered
@@ -79,6 +88,14 @@ type ObligationVersion struct {
 
 // Clone returns a deep copy.
 func (o ObligationVersion) Clone() ObligationVersion {
+	if o.TargetSpec != nil {
+		v := o.TargetSpec.Clone()
+		o.TargetSpec = &v
+	}
+	if o.WorkspaceBindingRef != nil {
+		v := *o.WorkspaceBindingRef
+		o.WorkspaceBindingRef = &v
+	}
 	o.EvidenceIDs = slices.Clone(o.EvidenceIDs)
 	if o.Matcher != nil {
 		m := *o.Matcher
@@ -89,6 +106,12 @@ func (o ObligationVersion) Clone() ObligationVersion {
 
 // Validate checks structural rules.
 func (o ObligationVersion) Validate() error {
+	if err := o.validateBinding(); err != nil {
+		return err
+	}
+	if o.Status != ObligationSatisfied && (o.CurrentProofID != "" || o.CurrentAssertionID != "") {
+		return invalid("obligation: nonsatisfied version carries current proof")
+	}
 	if o.ObligationID == "" || o.SessionID == "" || o.SourceItemID == "" {
 		return invalid("obligation: ID, session, and source item are required")
 	}
@@ -118,13 +141,19 @@ func (o ObligationVersion) Validate() error {
 
 // ObligationTransition is the append-only record of one status change.
 type ObligationTransition struct {
-	ID           string
-	SessionID    string
-	ObligationID string
-	Version      uint64
-	Seq          uint64
-	From         ObligationStatus
-	To           ObligationStatus
+	Cause                                           TransitionCause
+	AssertionMode                                   AssertionMode
+	ProofID, PriorProofID, CauseRecordID, RequestID string
+	OriginAuthorizationRef                          *OriginAuthorizationRef
+	ReasonCode                                      ObligationReasonCode
+	Rationale                                       string
+	ID                                              string
+	SessionID                                       string
+	ObligationID                                    string
+	Version                                         uint64
+	Seq                                             uint64
+	From                                            ObligationStatus
+	To                                              ObligationStatus
 	// Action is the authorized lifecycle action that produced the
 	// transition; it must be the one TransitionAction(From, To) requires,
 	// so a mutation authorized as one action cannot be stored as another.
@@ -139,6 +168,10 @@ type ObligationTransition struct {
 
 // Clone returns a deep copy.
 func (t ObligationTransition) Clone() ObligationTransition {
+	if t.OriginAuthorizationRef != nil {
+		v := *t.OriginAuthorizationRef
+		t.OriginAuthorizationRef = &v
+	}
 	t.EvidenceIDs = slices.Clone(t.EvidenceIDs)
 	t.Fingerprints = slices.Clone(t.Fingerprints)
 	if t.Matcher != nil {
@@ -171,6 +204,9 @@ func TransitionAction(from, to ObligationStatus) (Action, bool) {
 // session: AGENT, TOOL, and RETRIEVED_CONTENT never change obligation
 // status, and a matcher runs under a trusted principal (FR-OBL-002).
 func (t ObligationTransition) Validate() error {
+	if err := t.validateSemanticTransition(); err != nil {
+		return err
+	}
 	if t.ID == "" || t.SessionID == "" || t.ObligationID == "" || t.Version == 0 || t.Seq == 0 {
 		return invalid("obligation transition: ID, session, obligation, version, and sequence are required")
 	}

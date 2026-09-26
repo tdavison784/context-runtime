@@ -31,7 +31,12 @@ func TestPackageBoundaries(t *testing.T) {
 	// the internal/store interface, never a concrete store. The root package
 	// re-exports domain types and nothing else.
 	allowOnly["internal/policy"] = []string{"internal/domain"}
-	allowOnly["internal/ingest"] = []string{"internal/domain", "internal/directive", "internal/policy", "internal/store", "internal/graph"}
+	allowOnly["internal/ingest"] = []string{"internal/domain", "internal/directive", "internal/policy", "internal/store", "internal/graph", "internal/lifecycle", "internal/obligation", "internal/tools", "internal/retrieve"}
+	allowOnly["internal/graph"] = []string{"internal/domain", "internal/store"}
+	allowOnly["internal/obligation"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy"}
+	allowOnly["internal/lifecycle"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy", "internal/obligation"}
+	allowOnly["internal/tools"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy", "internal/retrieve"}
+	allowOnly["internal/retrieve"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy"}
 	allowOnly["."] = []string{"internal/domain"}
 	for pkg, allowed := range allowOnly {
 		for _, dep := range graph[pkg] {

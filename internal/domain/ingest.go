@@ -108,6 +108,8 @@ type Event struct {
 	Kind         EventKind
 	TurnBoundary bool
 	Spans        []Span
+	Operations   []SemanticOperation
+	Control      bool
 }
 
 // OpensTurn reports whether the event advances its task's turn exactly once
@@ -119,6 +121,13 @@ func (e Event) OpensTurn() bool {
 // Validate checks structure; ValidateFor additionally checks the authenticated
 // principal and resource limits before any transaction writes.
 func (e Event) Validate() error {
+	if e.Operations != nil || e.Control {
+		return ErrUnsupportedSchema
+	}
+	return e.validateShape(false)
+}
+
+func (e Event) validateShape(allowEmpty bool) error {
 	if !e.Kind.Valid() {
 		return invalid("event: unsupported kind")
 	}
@@ -136,7 +145,7 @@ func (e Event) Validate() error {
 	if e.TurnBoundary && e.Kind != EventHarness {
 		return invalid("event: only a HARNESS event may mark a turn boundary")
 	}
-	if len(e.Spans) == 0 {
+	if len(e.Spans) == 0 && !allowEmpty {
 		return invalid("event: at least one span is required")
 	}
 	for _, s := range e.Spans {
@@ -213,6 +222,10 @@ func (e Event) ValidateFor(p Principal, limits Limits) error {
 // Clone deep-copies caller-owned buffers so later caller mutation cannot
 // change what ingestion hashed, parsed, or persisted (D14).
 func (e Event) Clone() Event {
+	e.Operations = slices.Clone(e.Operations)
+	for i := range e.Operations {
+		e.Operations[i] = e.Operations[i].Clone()
+	}
 	e.Spans = slices.Clone(e.Spans)
 	for i := range e.Spans {
 		s := &e.Spans[i]
@@ -278,7 +291,11 @@ func (e Event) PayloadHash(p Principal) (string, error) {
 	if err := validateIngestPrincipal(p); err != nil {
 		return "", err
 	}
-	c := NewCanonicalEncoder("context-runtime/ingest-payload/v2")
+	return e.payloadEncoding(p, "context-runtime/ingest-payload/v2").Hash(), nil
+}
+
+func (e Event) payloadEncoding(p Principal, tag string) *CanonicalEncoder {
+	c := NewCanonicalEncoder(tag)
 	c.String(p.SessionID).String(p.WorkflowID).String(p.TaskID).String(p.AgentID).String(string(p.Authority))
 	c.String(string(e.Kind)).Uint(boolUint(e.TurnBoundary)).Uint(uint64(len(e.Spans)))
 	for _, s := range e.Spans {
@@ -295,7 +312,7 @@ func (e Event) PayloadHash(p Principal) (string, error) {
 			c.Uint(1).String(string(v.Kind)).String(v.Locator).String(v.ContentHash).String(v.ToolCallID)
 		}
 	}
-	return c.Hash(), nil
+	return c
 }
 
 func boolUint(v bool) uint64 {

@@ -33,6 +33,7 @@ type Relationship struct {
 	Authority   Authority // authority of the mutation that created the edge
 	EventID     string
 	RuleVersion string // deterministic rule that produced the edge, if any
+	CoverageID  string // normalized Phase 3 coverage; mutually exclusive with legacy Coverage
 	Coverage    *Coverage
 }
 
@@ -68,6 +69,9 @@ func (r Relationship) Validate() error {
 	}
 	if !r.Authority.Valid() {
 		return invalid("relationship %s: invalid authority %q", r.ID, r.Authority)
+	}
+	if r.CoverageID != "" && r.Coverage != nil {
+		return invalid("relationship: mixed coverage schemas")
 	}
 	if r.Coverage != nil {
 		if r.Coverage.FromSeq > r.Coverage.ToSeq {
@@ -107,14 +111,15 @@ func (b Blob) Validate() error {
 // (FR-ING-006). A repeated event ID with the same fingerprint returns the
 // original result; any difference is ErrEventIDConflict.
 type EventRecord struct {
-	SessionID   string
-	EventID     string
-	Principal   Principal
-	PayloadHash string // canonical payload hash
-	SourceHash  string // canonical source hash; empty when the event has no source
-	Seq         uint64
-	ItemIDs     []string // items the event created, in creation order
-	CommittedAt time.Time
+	RequestHashVersion string // empty is legacy v2; unknown without a replayable envelope
+	SessionID          string
+	EventID            string
+	Principal          Principal
+	PayloadHash        string // canonical payload hash
+	SourceHash         string // canonical source hash; empty when the event has no source
+	Seq                uint64
+	ItemIDs            []string // items the event created, in creation order
+	CommittedAt        time.Time
 }
 
 // SameRequest reports whether e and other describe the same logical event.
@@ -132,6 +137,9 @@ func (e EventRecord) Clone() EventRecord {
 
 // Validate checks structural rules.
 func (e EventRecord) Validate() error {
+	if e.RequestHashVersion != "" && e.RequestHashVersion != RequestHashV2 && e.RequestHashVersion != RequestHashV3 && e.RequestHashVersion != "unknown" {
+		return ErrUnsupportedSchema
+	}
 	if e.SessionID == "" || e.EventID == "" {
 		return invalid("event: session and event IDs are required")
 	}
