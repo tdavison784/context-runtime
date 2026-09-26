@@ -23,7 +23,7 @@ func TestCommandReplayUsesOriginalGrantAndFrozenResult(t *testing.T) {
 	before := storetest.NewGoal("s", "goal", 1, "original")
 	status := domain.GoalResolved
 	after, _ := (domain.ItemChange{GoalStatus: &status}).Apply(before)
-	result := (itemEffect{before: before, after: after, audit: domain.LifecycleEvent{ID: "audit"}}).result(domain.ItemCurrent)
+	result := (itemEffect{before: before, after: after, audit: domain.LifecycleEvent{ID: "audit"}, current: domain.ItemCurrent}).result()
 	r := domain.MutationReceipt{SemanticMeta: domain.SemanticMeta{ID: "receipt", Seq: 10, SessionID: "s"}, CanonicalMethod: "resolve", Result: domain.MutationResult{Item: &result}}
 	change := domain.SemanticChange{SemanticMeta: domain.SemanticMeta{ID: changeID(result.AuditID), Seq: 9, SessionID: "s"}, Target: domain.ItemGrantTarget("s", "goal"), Actor: p, Action: domain.ActionResolve, AuditID: "audit", GrantID: "original-grant", BeforeRevision: 1, AfterRevision: 2}
 	for _, corrupt := range []bool{false, true} {

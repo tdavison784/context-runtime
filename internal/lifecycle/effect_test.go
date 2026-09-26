@@ -14,8 +14,8 @@ func TestItemEffectFreezesBothLifecycleStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	effect := itemEffect{before: before, after: after, audit: domain.LifecycleEvent{ID: "audit"}}
-	r := effect.result(domain.ItemCurrent)
+	effect := itemEffect{before: before, after: after, audit: domain.LifecycleEvent{ID: "audit"}, current: domain.ItemCurrent}
+	r := effect.result()
 	if err := r.Validate(); err != nil {
 		t.Fatal(err)
 	}

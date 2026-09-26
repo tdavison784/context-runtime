@@ -11,6 +11,11 @@ import (
 type itemEffect struct {
 	before, after domain.ContextItem
 	audit         domain.LifecycleEvent
+	// current is the target's currentness, unchanged by every lifecycle
+	// effect; protectedRemoval discloses an explicit archival of a protected
+	// current requirement (P3-37).
+	current          domain.ItemCurrentness
+	protectedRemoval bool
 }
 
 // executeDirective is private: its caller must persist the effect receipt and
@@ -83,5 +88,5 @@ func (s *Service) executeDirective(tx store.Tx, p domain.Principal, i domain.Ite
 	if err != nil {
 		return itemEffect{}, err
 	}
-	return itemEffect{before: it, after: after, audit: ev}, nil
+	return itemEffect{before: it, after: after, audit: ev, current: domain.ItemCurrent}, nil
 }

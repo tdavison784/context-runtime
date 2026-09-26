@@ -18,11 +18,11 @@ func (s *Service) writeCompletion(tx store.Tx, sem store.SemanticTx, p domain.Pr
 		if err != nil {
 			return out, err
 		}
-		current := domain.ItemCurrent
+		effect.current = domain.ItemCurrent
 		if effect.before.DirectiveID == "" {
-			current = domain.ItemUnkeyed
+			effect.current = domain.ItemUnkeyed
 		}
-		if err = recordEffect(tx, sem, effect, current); err != nil {
+		if err = recordEffect(tx, sem, effect); err != nil {
 			return out, err
 		}
 		out.ResolvedGoals = append(out.ResolvedGoals, domain.ItemRevisionRef{ItemID: effect.after.ID, Version: effect.after.Version})
