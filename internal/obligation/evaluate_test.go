@@ -237,3 +237,55 @@ func TestPrivateEvidenceNotPublished(t *testing.T) {
 		t.Errorf("task-wide control did not satisfy: %+v", o)
 	}
 }
+
+func TestFileReadEndToEnd(t *testing.T) {
+	f := newEvalFixture(t)
+	declare := func(slot string, target domain.TargetSpec) domain.ObligationRef {
+		t.Helper()
+		in := domain.DeclareObligationIntent{RequestID: "d-file-" + slot, SourceItemID: "pu", DeclarationSlot: slot, Description: "read the doc",
+			ExpectedSourceVersion: 1, Target: &target, Matcher: &FileReadV1}
+		if _, err := f.s.declare(t, f.st, f.harness, in); err != nil {
+			t.Fatal(err)
+		}
+		key, _ := f.item(t, "pu").CurrentKey()
+		n, _ := harnessSlot(slot)
+		ref := domain.ObligationRef{SessionID: testSession, ObligationID: domain.DerivedObligationID(key, n), Version: 1}
+		f.matcherGrant(t, "g-file-"+slot, ref, FileReadV1, f.userP)
+		return ref
+	}
+	fixed := declare("2", fileTarget("repo1", "docs/a.md", domain.FileFixedHash, hashOf("v1")))
+	current := declare("3", fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, ""))
+	read := fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, "")
+	readAs := func(content string) {
+		runN++
+		run, err := f.registerRun(t, f.harness, runIntent(fmt.Sprintf("run-%d", runN), fmt.Sprintf("exec-%d", runN), read))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.report(t, run, domain.OutcomePass, hashOf(content), nil)
+	}
+	readAs("v0") // other content never satisfies a fixed snapshot
+	if o := f.status(t, fixed); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("wrong content satisfied: %+v", o)
+	}
+	readAs("v1")
+	o := f.status(t, fixed)
+	if o.Status != domain.ObligationSatisfied {
+		t.Fatalf("fixed read = %+v", o)
+	}
+	// A later edit of the path does not change the required snapshot.
+	f.r.n++
+	in := domain.ReportResourceChangeIntent{RequestID: "edit-doc", ResourceID: "repo1", ExpectedRevision: f.r.rev, ExpectedAuthoritativeRevision: f.r.auth,
+		ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf("W2"), ChangedPaths: []string{"docs/a.md"}}
+	if _, err := f.s.report(t, f.st, f.harness, in); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.status(t, fixed); got.Status != domain.ObligationSatisfied || got.CurrentProofID != o.CurrentProofID {
+		t.Errorf("path edit invalidated a fixed-content proof: %+v", got)
+	}
+	// Without authoritative per-path content, current-content reads never
+	// satisfy (fails closed until path content reporting lands).
+	if got := f.status(t, current); got.Status != domain.ObligationUnresolved {
+		t.Errorf("current-content read satisfied without path state: %+v", got)
+	}
+}
