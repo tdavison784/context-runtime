@@ -157,7 +157,7 @@ func (c recordColumn) sqlType() string {
 func schemaDDL() string {
 	var b strings.Builder
 	b.WriteString("-- Pre-release initial schema. Edit in place until Phase 1 is deployed.\n")
-	b.WriteString("CREATE TABLE sessions (session_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL DEFAULT 0);\n")
+	b.WriteString("CREATE TABLE sessions (session_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL DEFAULT 0, committed INTEGER NOT NULL DEFAULT 0);\n")
 	for _, kind := range []string{"item", "relationship", "event", "obligation", "obligation_transition", "grant", "task", "lifecycle", "conversation", "call", "attempt"} {
 		s := schemas[kind]
 		fmt.Fprintf(&b, "CREATE TABLE %s (\n  session_id TEXT NOT NULL,\n  id TEXT NOT NULL,\n  subkey INTEGER NOT NULL DEFAULT 0", s.table)
@@ -174,7 +174,7 @@ func schemaDDL() string {
 	b.WriteString("CREATE INDEX call_order ON rec_call(session_id,f_prepared_seq,id);\n")
 	b.WriteString("CREATE UNIQUE INDEX one_reserving_call ON rec_call(session_id,f_conversation_id) WHERE f_state IN ('PREPARED','SENT','UNKNOWN');\n")
 	b.WriteString("CREATE TABLE blobs (session_id TEXT NOT NULL, hash TEXT NOT NULL, media_type TEXT NOT NULL, data BLOB NOT NULL, data_nil INTEGER NOT NULL CHECK(data_nil IN (0,1)), PRIMARY KEY(session_id,hash), FOREIGN KEY(session_id) REFERENCES sessions(session_id));\n")
-	b.WriteString("CREATE TABLE directives (session_id TEXT NOT NULL, task_id TEXT NOT NULL, directive_id TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY(session_id,task_id,directive_id), FOREIGN KEY(session_id) REFERENCES sessions(session_id));\n")
+	b.WriteString("CREATE TABLE directives (session_id TEXT NOT NULL, task_id TEXT NOT NULL, directive_id TEXT NOT NULL, boundary_scope TEXT NOT NULL, boundary_session_id TEXT NOT NULL, boundary_workflow_id TEXT NOT NULL, boundary_task_id TEXT NOT NULL, boundary_agent_id TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id), FOREIGN KEY(session_id) REFERENCES sessions(session_id));\n")
 	return b.String()
 }
 
@@ -313,7 +313,7 @@ func (s *recordSchema) scan(row rowScanner) (reflect.Value, error) {
 			if asInt(x) != 0 {
 				f, ok := pathValue(v, c.path)
 				if !ok {
-					return reflect.Value{}, fmt.Errorf("missing parent for %s", c.name)
+					return reflect.Value{}, fmt.Errorf("%w: missing parent for %s", domain.ErrIntegrity, c.name)
 				}
 				f.Set(reflect.New(f.Type().Elem()))
 			}
@@ -340,7 +340,7 @@ func (s *recordSchema) scan(row rowScanner) (reflect.Value, error) {
 			continue
 		}
 		if err := decodeField(f, x, nilBytes[c.name]); err != nil {
-			return reflect.Value{}, fmt.Errorf("%s.%s: %w", s.kind, c.name, err)
+			return reflect.Value{}, fmt.Errorf("%w: %s.%s: %v", domain.ErrIntegrity, s.kind, c.name, err)
 		}
 	}
 	return v, nil

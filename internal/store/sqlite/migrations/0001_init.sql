@@ -1,11 +1,12 @@
 -- Pre-release initial schema. Edit in place until Phase 1 is deployed.
-CREATE TABLE sessions (session_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE sessions (session_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL DEFAULT 0, committed INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE rec_item (
   session_id TEXT NOT NULL,
   id TEXT NOT NULL,
   subkey INTEGER NOT NULL DEFAULT 0,
   f_event_id TEXT,
   f_directive_id TEXT,
+  f_section TEXT,
   f_seq INTEGER,
   f_workflow_id TEXT,
   f_task_id TEXT,
@@ -114,6 +115,7 @@ CREATE TABLE rec_obligation_transition (
   f_seq INTEGER,
   f_from TEXT,
   f_to TEXT,
+  f_action TEXT,
   f_actor_session_id TEXT,
   f_actor_workflow_id TEXT,
   f_actor_task_id TEXT,
@@ -273,4 +275,4 @@ CREATE INDEX lifecycle_order ON rec_lifecycle(session_id,f_seq,id);
 CREATE INDEX call_order ON rec_call(session_id,f_prepared_seq,id);
 CREATE UNIQUE INDEX one_reserving_call ON rec_call(session_id,f_conversation_id) WHERE f_state IN ('PREPARED','SENT','UNKNOWN');
 CREATE TABLE blobs (session_id TEXT NOT NULL, hash TEXT NOT NULL, media_type TEXT NOT NULL, data BLOB NOT NULL, data_nil INTEGER NOT NULL CHECK(data_nil IN (0,1)), PRIMARY KEY(session_id,hash), FOREIGN KEY(session_id) REFERENCES sessions(session_id));
-CREATE TABLE directives (session_id TEXT NOT NULL, task_id TEXT NOT NULL, directive_id TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY(session_id,task_id,directive_id), FOREIGN KEY(session_id) REFERENCES sessions(session_id));
+CREATE TABLE directives (session_id TEXT NOT NULL, task_id TEXT NOT NULL, directive_id TEXT NOT NULL, boundary_scope TEXT NOT NULL, boundary_session_id TEXT NOT NULL, boundary_workflow_id TEXT NOT NULL, boundary_task_id TEXT NOT NULL, boundary_agent_id TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id), FOREIGN KEY(session_id) REFERENCES sessions(session_id));

@@ -147,14 +147,24 @@ func testCalls(t *testing.T, s store.Store) {
 			}
 			return errOf(tx.UpdateCall(next, cur.Revision))
 		})
-		wantErr(t, err, domain.ErrInvalidTransition)
+		wantErr(t, err, domain.ErrImmutable)
+	}
+	// Terminal calls are immutable (DUR-1.1): no annotation, no identical
+	// rewrite, and no rewritten outcome.
+	rewritten := cur.Clone()
+	o := *rewritten.Outcome
+	o.Response = []byte("a different response")
+	o.ResponseHash = domain.HashBytes(o.Response)
+	rewritten.Outcome, rewritten.OutcomeHash = &o, o.OutcomeHash()
+	annotated := cur.Clone()
+	annotated.Reason = "annotated"
+	for name, next := range map[string]domain.CallRecord{"identical": cur, "annotated": annotated, "rewritten outcome": rewritten} {
+		err := s.Update(ctx, sessA, func(tx store.Tx) error { return errOf(tx.UpdateCall(next, cur.Revision)) })
+		if !errors.Is(err, domain.ErrImmutable) {
+			t.Errorf("updating a COMPLETED call (%s): error = %v, want ErrImmutable", name, err)
+		}
 	}
 	update(t, s, sessA, func(tx store.Tx) error {
-		next := cur.Clone()
-		next.Reason = "annotated"
-		var err error
-		cur, err = tx.UpdateCall(next, cur.Revision)
-		noErr(t, err)
 		// c1 no longer reserves conv1, so a new call may.
 		c3 = NewCall(sessA, "call-c", "conv1", tx.NextSeq())
 		noErr(t, tx.InsertCall(c3))
@@ -491,6 +501,54 @@ func testCallAttempts(t *testing.T, s store.Store) {
 		if len(got) != 2 || got[0].Attempt != 1 || got[1].Attempt != 2 || got[1].State != domain.AttemptSent {
 			t.Errorf("CallAttempts after retry = %+v, want attempt 1 closed and attempt 2 SENT", got)
 		}
+		return nil
+	})
+}
+
+// testCallAttemptBinding checks DUR-1.1: Attempts changes only by one on
+// PREPARED -> SENT, so a transition is always judged against the stored
+// current attempt and an earlier attempt's evidence can never close the
+// call.
+func testCallAttemptBinding(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		// Attempt 1 fails retryably; attempt 2 is in flight.
+		c := walk(t, tx, "c", "conv", domain.CallSent, domain.CallPrepared)
+		first := latestAttempt(t, tx, c)
+
+		// Sending must advance Attempts by exactly one.
+		noErr(t, tx.PutCallAttempt(NewAttempt(sessA, "c", 2, tx.NextSeq())))
+		for _, n := range []int{1, 3} {
+			sent := c.Clone()
+			sent.State, sent.Attempts = domain.CallSent, n
+			if err := errOf(tx.UpdateCall(sent, c.Revision)); !errors.Is(err, domain.ErrInvalidTransition) {
+				t.Errorf("PREPARED -> SENT with Attempts %d: error = %v, want ErrInvalidTransition", n, err)
+			}
+		}
+		sent := c.Clone()
+		sent.State, sent.Attempts = domain.CallSent, 2
+		c, err := tx.UpdateCall(sent, c.Revision)
+		noErr(t, err)
+
+		// Attempt 1's closed FAILED evidence cannot fail or retry the call
+		// now that attempt 2 is current.
+		stale := c.Clone()
+		stale.Attempts = 1
+		o := NewOutcome(stale, domain.CallFailed, true)
+		if o.OutcomeHash() != first.OutcomeHash {
+			t.Fatalf("test setup: attempt 1 outcome hash mismatch")
+		}
+		failed := Finish(stale, domain.CallFailed, tx.NextSeq())
+		failed.Outcome, failed.OutcomeHash = &o, o.OutcomeHash()
+		retry := stale.Clone()
+		retry.State = domain.CallPrepared
+		sameState := stale.Clone()
+		for name, next := range map[string]domain.CallRecord{"FAILED": failed, "PREPARED": retry, "SENT": sameState} {
+			if err := errOf(tx.UpdateCall(next, c.Revision)); !errors.Is(err, domain.ErrInvalidTransition) {
+				t.Errorf("SENT -> %s on attempt 1's evidence: error = %v, want ErrInvalidTransition", name, err)
+			}
+		}
+		// Attempt 2's own evidence does.
+		step(t, tx, c, domain.CallCompleted)
 		return nil
 	})
 }

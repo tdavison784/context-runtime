@@ -63,6 +63,9 @@ func (t *table[K, V]) all() iter.Seq2[K, V] {
 	}
 }
 
+// dirty reports whether the transaction wrote to the table.
+func (t *table[K, V]) dirty() bool { return len(t.over) > 0 }
+
 // commit folds the overlay into the committed records.
 func (t *table[K, V]) commit() {
 	for k, v := range t.over {
