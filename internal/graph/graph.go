@@ -52,6 +52,10 @@ var (
 	// so it is never retired a second time, by the same event or another
 	// (D11). Callers retire only current items.
 	ErrAlreadySuperseded = errors.New("graph: item is already superseded")
+	// ErrNamespaceConflict reports a write whose current-version slot is
+	// held by a current version of the other namespace (M6, R6): a parsed
+	// directive and a keyed agent write never replace each other.
+	ErrNamespaceConflict = errors.New("graph: current-version slot belongs to another namespace")
 	// ErrAmbiguousDirective reports a lifecycle target (SDD section 8, v0.8)
 	// that names more than one directive version the actor can currently
 	// see: FR-DIR-002 keys a directive by (task, directive ID, access
@@ -94,7 +98,9 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 	switch actor.Authority {
 	case domain.AuthoritySystem, domain.AuthorityHarness, domain.AuthorityUser:
 	case domain.AuthorityAgent:
-		if newItem.Authority != domain.AuthorityAgent || !strings.HasPrefix(newItem.DirectiveID, domain.AgentKeyID("")) {
+		ns, _ := newItem.DirectiveNamespace()
+		if newItem.Authority != domain.AuthorityAgent || ns != domain.NamespaceAgentKey ||
+			!strings.HasPrefix(newItem.DirectiveID, domain.AgentKeyID("")) {
 			return domain.ErrInvalidAuthorityPromotion
 		}
 	default:
@@ -117,8 +123,8 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 // tx.CurrentDirectives still names but that has since been superseded is
 // not a conflict (AUTH-3.2): the pointer is stale, not a second live
 // version, and must never block a legitimate write.
-func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, taskID, directiveID string) error {
-	versions, err := CurrentVersions(tx, actor, taskID, directiveID)
+func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, taskID string, ns domain.DirectiveNamespace, directiveID string) error {
+	versions, err := CurrentVersions(tx, actor, taskID, ns, directiveID)
 	if err != nil {
 		return err
 	}
@@ -225,7 +231,8 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 		return "", ErrDirectiveMismatch
 	}
 
-	previousID, err := currentVersionAt(tx, taskID, directiveID, newItem.Access)
+	ns, _ := newItem.DirectiveNamespace()
+	previousID, err := currentVersionAt(tx, taskID, ns, directiveID, newItem.Access)
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		// FR-DIR-002 v0.8: a boundary the actor cannot see is an
@@ -233,7 +240,7 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 		// CAN see is a scope change, which still requires an explicit
 		// authorized replacement policy (AUTH-2.1) rather than silently
 		// forking a second current version.
-		if err := rejectVisibleBoundaryConflict(tx, actor, taskID, directiveID); err != nil {
+		if err := rejectVisibleBoundaryConflict(tx, actor, taskID, ns, directiveID); err != nil {
 			return "", err
 		}
 		if err := authorizeFirstVersionDirective(actor, newItem); err != nil {
@@ -315,8 +322,11 @@ func isDuplicateFree(tx store.ReadTx, itemID string) (bool, error) {
 // entry naming an item that is no longer current under IsCurrent (a stale
 // pointer left behind when the item was retired outside the map) is treated
 // exactly like a missing entry, so a stale pointer is never superseded a
-// second time or reported as a previous version (D10).
-func currentVersionAt(tx store.ReadTx, taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
+// second time or reported as a previous version (D10). A current version in
+// the other namespace (M6, R6) is never a previous version of ns: the slot
+// fails with ErrNamespaceConflict rather than being overwritten, which
+// would silently retire the other namespace's version.
+func currentVersionAt(tx store.ReadTx, taskID string, ns domain.DirectiveNamespace, directiveID string, boundary domain.AccessBoundary) (string, error) {
 	id, err := tx.CurrentDirective(taskID, directiveID, boundary)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -338,19 +348,22 @@ func currentVersionAt(tx store.ReadTx, taskID, directiveID string, boundary doma
 	if !cur {
 		return "", domain.ErrNotFound
 	}
+	if got, _ := it.DirectiveNamespace(); got != ns {
+		return "", ErrNamespaceConflict
+	}
 	return id, nil
 }
 
-// CurrentVersions returns every current version (IsCurrent, D10) of
-// directive directiveID in taskID that actor can access, ordered by (Seq,
-// ID). FR-DIR-002 keys a directive by (task, directive ID, access
+// CurrentVersions returns every current version (IsCurrent, D10) of ID
+// directiveID in namespace ns (M6, R6) of taskID that actor can access,
+// ordered by (Seq, ID). FR-DIR-002 keys a directive by (task, directive ID, access
 // boundary), so one ID may have several current versions; this is the one
 // deterministic place a caller chooses among them (for example a
 // deduplication canonical candidate), and every access and currentness
 // filter is applied before anything is ordered or counted, so a version
 // actor cannot see, a stale map pointer, and a duplicate are never
 // returned and never influence the result.
-func CurrentVersions(tx store.ReadTx, actor domain.Principal, taskID, directiveID string) ([]domain.ContextItem, error) {
+func CurrentVersions(tx store.ReadTx, actor domain.Principal, taskID string, ns domain.DirectiveNamespace, directiveID string) ([]domain.ContextItem, error) {
 	ids, err := tx.CurrentDirectives(taskID, directiveID)
 	if err != nil {
 		return nil, err
@@ -364,7 +377,7 @@ func CurrentVersions(tx store.ReadTx, actor domain.Principal, taskID, directiveI
 			}
 			return nil, err
 		}
-		if !it.Access.Permits(actor) {
+		if got, _ := it.DirectiveNamespace(); got != ns || !it.Access.Permits(actor) {
 			continue
 		}
 		cur, err := isCurrentItem(tx, it)
@@ -399,8 +412,12 @@ func CurrentVersions(tx store.ReadTx, actor domain.Principal, taskID, directiveI
 // the result (an existence oracle) and block an otherwise-authorized
 // Resolve/Unpin.
 //
-//  1. As a literal item ID: id is a candidate if it names an item that is
-//     accessible to actor and current.
+// Only the DIRECTIVE namespace is ever considered (M6, R6): a keyed agent
+// write (FR-TOOL-002) or a plain item is never a lifecycle target, even when
+// its ID or key spells a legal directive ID such as "agent.status".
+//
+//  1. As a literal item ID: id is a candidate if it names a DIRECTIVE-
+//     namespace item that is accessible to actor and current.
 //  2. As a directive ID: id's current versions are read across every
 //     access boundary in taskID (FR-DIR-002 v0.7/v0.8: a directive's
 //     identity includes its boundary, so one bare ID can have several
@@ -418,8 +435,8 @@ func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id 
 	seen := map[string]bool{}
 
 	if it, err := tx.Item(id); err == nil {
-		if it.Access.Permits(actor) {
-			cur, err := IsCurrent(tx, id)
+		if ns, _ := it.DirectiveNamespace(); ns == domain.NamespaceDirective && it.Access.Permits(actor) {
+			cur, err := isCurrentItem(tx, it)
 			if err != nil {
 				return "", err
 			}
@@ -436,7 +453,7 @@ func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id 
 	// outside the directive map, e.g. by a Working snapshot, AUTH-3.2) and
 	// duplicates: a lifecycle command must never resolve to a version that
 	// is no longer current (D10).
-	versions, err := CurrentVersions(tx, actor, taskID, id)
+	versions, err := CurrentVersions(tx, actor, taskID, domain.NamespaceDirective, id)
 	if err != nil {
 		return "", err
 	}

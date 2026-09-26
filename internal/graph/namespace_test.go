@@ -55,3 +55,35 @@ func TestR6_LifecycleResolvesOnlyDirectiveNamespace(t *testing.T) {
 		})
 	})
 }
+
+// TestR6_NamespacesNeverReplaceEachOther: a parsed directive and a keyed
+// agent write with the same ID, task, and boundary are independent (M6).
+// Until every store keys current versions by namespace, a write that finds
+// the other namespace's current version in its slot fails closed instead
+// of overwriting it, which would silently retire that version.
+func TestR6_NamespacesNeverReplaceEachOther(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess, key = "sess-r6-slot", "agent.status"
+		update(t, s, sess, func(tx store.Tx) error {
+			keyed := agentDirective(sess, "keyed-1", key, tx.NextSeq())
+			mustInsert(t, tx, keyed)
+			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityAgent), "task", key, keyed.ID, "evt-keyed")
+			return err
+		})
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			pin := storetest.NewDirective(sess, "pin-status", key, tx.NextSeq(), "Report status")
+			mustInsert(t, tx, pin)
+			_, err := ReplaceDirective(tx, principal(sess, domain.AuthoritySystem), "task", key, pin.ID, "evt-pin")
+			return err
+		})
+		if !errors.Is(err, ErrNamespaceConflict) {
+			t.Fatalf("err = %v, want ErrNamespaceConflict", err)
+		}
+		view(t, s, sess, func(tx store.ReadTx) error {
+			if ok, _ := IsCurrent(tx, "keyed-1"); !ok {
+				t.Errorf("keyed agent write was retired by a directive in the other namespace")
+			}
+			return nil
+		})
+	})
+}

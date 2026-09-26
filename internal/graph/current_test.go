@@ -229,18 +229,21 @@ func TestD10_CurrentVersionsDeterministicAndFiltered(t *testing.T) {
 			// (Seq, ID) order must put it first.
 			private := agentScopedItem(sess, "z-private", tx.NextSeq(), "agent-a")
 			private.DirectiveID = dirID
+			private.Section = domain.SectionPinned
 			mustInsert(t, tx, private)
 			if _, err := ReplaceDirective(tx, agentA, "task", dirID, private.ID, "evt-1"); err != nil {
 				return err
 			}
 			hidden := agentScopedItem(sess, "b-hidden", tx.NextSeq(), "agent-b")
 			hidden.DirectiveID = dirID
+			hidden.Section = domain.SectionPinned
 			mustInsert(t, tx, hidden)
 			if _, err := ReplaceDirective(tx, agentB, "task", dirID, hidden.ID, "evt-2"); err != nil {
 				return err
 			}
 			taskWide := taskItem(sess, "a-task", tx.NextSeq(), domain.AuthorityHarness)
 			taskWide.DirectiveID = dirID
+			taskWide.Section = domain.SectionPinned
 			mustInsert(t, tx, taskWide)
 			_, err := ReplaceDirective(tx, harness, "task", dirID, taskWide.ID, "evt-3")
 			return err
@@ -254,7 +257,7 @@ func TestD10_CurrentVersionsDeterministicAndFiltered(t *testing.T) {
 			return out
 		}
 		view(t, s, sess, func(tx store.ReadTx) error {
-			got, err := CurrentVersions(tx, agentA, "task", dirID)
+			got, err := CurrentVersions(tx, agentA, "task", domain.NamespaceDirective, dirID)
 			if err != nil {
 				return err
 			}
@@ -273,7 +276,7 @@ func TestD10_CurrentVersionsDeterministicAndFiltered(t *testing.T) {
 			return err
 		})
 		view(t, s, sess, func(tx store.ReadTx) error {
-			got, err := CurrentVersions(tx, agentA, "task", dirID)
+			got, err := CurrentVersions(tx, agentA, "task", domain.NamespaceDirective, dirID)
 			if err != nil {
 				return err
 			}

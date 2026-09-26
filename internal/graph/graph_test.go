@@ -1444,9 +1444,13 @@ func TestResolveLifecycleTarget_LiteralItemID(t *testing.T) {
 
 	var itemID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
-		it := taskItem(sess, "plain-item", tx.NextSeq(), domain.AuthorityUser)
+		// Lifecycle targets live in the DIRECTIVE namespace (R6): a
+		// current directive item resolves by its literal item ID.
+		it := storetest.NewDirective(sess, "pinned-item", "some-pin", tx.NextSeq(), "text")
 		itemID = it.ID
-		return tx.InsertItem(it)
+		mustInsert(t, tx, it)
+		mustFile(t, tx, it)
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("setup: %v", err)
@@ -1529,6 +1533,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			g := storetest.NewGoal(sess, "goal1", tx.NextSeq(), "Ship it")
 			g.DirectiveID = dirID
+			g.Section = domain.SectionGoal
 			goalID = g.ID
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, dirID, g.ID, "evt")
@@ -1559,6 +1564,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			hidden := agentScopedItem(sess, "hidden-goal", tx.NextSeq(), "agent-b")
 			hidden.DirectiveID = dirID
+			hidden.Section = domain.SectionPinned
 			mustInsert(t, tx, hidden)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-b"), taskID, dirID, hidden.ID, "evt")
 			return err
@@ -1592,6 +1598,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			private := agentScopedItem(sess, "d-private", tx.NextSeq(), "agent-a")
 			private.DirectiveID = dirID
+			private.Section = domain.SectionPinned
 			mustInsert(t, tx, private)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID, private.ID, "evt-private")
 			return err
@@ -1603,6 +1610,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
 			taskWide := taskItem(sess, "d-task-wide", tx.NextSeq(), domain.AuthorityHarness)
 			taskWide.DirectiveID = dirID
+			taskWide.Section = domain.SectionPinned
 			mustInsert(t, tx, taskWide)
 			// A HARNESS/task-wide principal cannot see agent-a's private
 			// version, so this must succeed (round-1 AUTH-2.1 property: a
@@ -1655,6 +1663,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
+			g.Section = domain.SectionGoal
 			goalID = g.ID
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
@@ -1711,6 +1720,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
+			g.Section = domain.SectionGoal
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
 			return err
@@ -1719,11 +1729,13 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 			t.Fatalf("setup goal: %v", err)
 		}
 
-		// A second, unrelated item whose own item ID (not directive ID) is
-		// the same string, and IS accessible to actor.
+		// A second, unrelated current directive whose own item ID (not
+		// directive ID) is the same string, and IS accessible to actor.
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
-			it := taskItem(sess, sharedID, tx.NextSeq(), domain.AuthorityUser)
-			return tx.InsertItem(it)
+			it := storetest.NewDirective(sess, sharedID, "unrelated-pin", tx.NextSeq(), "text")
+			mustInsert(t, tx, it)
+			mustFile(t, tx, it)
+			return nil
 		})
 		if err != nil {
 			t.Fatalf("setup colliding item: %v", err)
@@ -1748,6 +1760,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
+			g.Section = domain.SectionGoal
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
 			return err

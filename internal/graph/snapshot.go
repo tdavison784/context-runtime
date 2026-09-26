@@ -112,10 +112,10 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 			continue
 		}
 		for _, n := range p.members {
-			prevID, err := currentVersionAt(tx, taskID, n.DirectiveID, n.Access)
+			prevID, err := currentVersionAt(tx, taskID, domain.NamespaceDirective, n.DirectiveID, n.Access)
 			switch {
 			case errors.Is(err, domain.ErrNotFound):
-				if err := rejectVisibleBoundaryConflict(tx, actor, taskID, n.DirectiveID); err != nil {
+				if err := rejectVisibleBoundaryConflict(tx, actor, taskID, domain.NamespaceDirective, n.DirectiveID); err != nil {
 					return SnapshotResult{}, err
 				}
 				if err := authorizeFirstVersionDirective(actor, n); err != nil {
