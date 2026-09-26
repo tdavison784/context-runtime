@@ -209,7 +209,8 @@ func (s *Store) writer(session string) *sync.Mutex {
 	return m
 }
 
-// Close releases the database; repeated calls are harmless.
+// Close implements store.Store. It releases the database; repeated calls are
+// harmless.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -220,7 +221,10 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// Update runs a session transaction and commits it atomically after the final cancellation check.
+// Update implements store.Store. It runs a session transaction and commits it
+// atomically after the final cancellation check. The final sequence update and
+// COMMIT use an uncancelled context, so a successful commit is reported as
+// success even if the caller cancels at the commit boundary.
 func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) error) error {
 	if session == "" {
 		return fmt.Errorf("%w: empty session ID", domain.ErrInvalidRecord)
@@ -270,7 +274,7 @@ func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) er
 	return nil
 }
 
-// View reads one committed snapshot for a session.
+// View implements store.Store. It reads one committed snapshot for a session.
 func (s *Store) View(ctx context.Context, session string, fn func(store.ReadTx) error) error {
 	if session == "" {
 		return fmt.Errorf("%w: empty session ID", domain.ErrInvalidRecord)
@@ -293,7 +297,8 @@ func (s *Store) View(ctx context.Context, session string, fn func(store.ReadTx) 
 	return fn(tx)
 }
 
-// Sessions returns session IDs with committed records in ascending order.
+// Sessions implements store.Store. It returns session IDs with committed
+// records in ascending order; an empty transaction does not add a session.
 func (s *Store) Sessions(ctx context.Context) ([]string, error) {
 	c, err := s.conn(ctx)
 	if err != nil {
