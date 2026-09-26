@@ -21,11 +21,14 @@
 // with domain.ErrInvalidRecord. This keeps commit order and audit order equal.
 //
 // Compare-and-swap rule: every Update*/Put* method except PutCallAttempt
-// takes the expected current Version or Revision (0 to create). On success the store itself writes
-// expected+1, ignoring the Version/Revision value in the argument, and
-// returns the stored record; a mismatch fails with domain.ErrVersionConflict.
-// A missing record reads as version 0, so updating one with expected > 0 is a
-// version conflict too.
+// takes the expected current Version or Revision. On success the store
+// itself writes expected+1, ignoring the Version/Revision value in the
+// argument, and returns the stored record; a mismatch fails with
+// domain.ErrVersionConflict. For the create-or-replace methods (PutTask,
+// PutConversation) a missing record reads as version 0: expected 0 creates
+// it, and expected > 0 is a version conflict. Update-only methods
+// (UpdateItem, UpdateObligationVersion, AppendObligationTransition,
+// UpdateCall) fail with domain.ErrNotFound when their target is missing.
 //
 // Errors (compared with errors.Is; implementations may wrap them):
 //
