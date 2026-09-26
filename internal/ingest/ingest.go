@@ -38,6 +38,12 @@ type Ingester struct {
 	// bound is unreachable in routine use; exceeding it still rejects the
 	// event (store.ErrLimitExceeded) rather than deciding on a partial set.
 	LookupLimit int
+	// Semantic is the recorded Phase 3 policy (P3-40/42). When set, every
+	// new event is identified by the v3 request hash and may carry a typed
+	// operation stream; its receipt and envelope record the hash schema,
+	// limits and policy. Nil keeps the frozen v2 identity and rejects typed
+	// operations and resource control as unsupported (fail closed).
+	Semantic *domain.Phase3Policy
 }
 
 // DefaultLookupLimit is the default bound on one indexed lookup.
@@ -53,7 +59,12 @@ func (g Ingester) lookupLimit() int {
 // Versions are the execution versions this ingester records in every
 // receipt (D14, M2).
 func (g Ingester) Versions() domain.ExecutionVersions {
-	return domain.ExecutionVersions{Parser: directive.ParserVersion, Policy: policy.Version, Limits: g.Limits.Effective()}
+	v := domain.ExecutionVersions{Parser: directive.ParserVersion, Policy: policy.Version, Limits: g.Limits.Effective()}
+	if g.Semantic != nil {
+		pol := *g.Semantic
+		v.Semantic = &pol
+	}
+	return v
 }
 
 func (g Ingester) now() time.Time {
@@ -91,7 +102,7 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	if err := checkSizes(e, hardSizes()); err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	if err := checkSizes(e, configuredSizes(g.Limits.Effective())); err != nil {
+	if err := checkSizes(e, configuredSizes(g.Limits.Effective(), g.Semantic)); err != nil {
 		if e.EventID == "" || p.Validate() != nil {
 			return domain.IngestReceipt{}, err
 		}
@@ -109,7 +120,7 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	e = e.Clone()
 	// Structure and authority only: configured limits apply after the
 	// idempotency lookup, to new events (F3).
-	if err := e.ValidateFor(p, retryCeiling(g.Limits)); err != nil {
+	if err := validateRequest(e, p, retryCeiling(g.Limits), ceilingPolicy(g.Semantic)); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	var anonymous string
@@ -158,18 +169,18 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	if err := checkSizes(e, hardSizes()); err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	validation := limits
-	if err := checkSizes(e, configuredSizes(limits)); err != nil {
+	validation, pol := limits, g.Semantic
+	if err := checkSizes(e, configuredSizes(limits, g.Semantic)); err != nil {
 		if e.EventID == "" || p.Validate() != nil {
 			return domain.IngestReceipt{}, err
 		}
 		if admit := admitKnownRetry(tx, p, e, err); admit != nil {
 			return domain.IngestReceipt{}, admit
 		}
-		validation = retryCeiling(g.Limits)
+		validation, pol = retryCeiling(g.Limits), ceilingPolicy(g.Semantic)
 	}
 	e = e.Clone()
-	if err := e.ValidateFor(p, validation); err != nil {
+	if err := validateRequest(e, p, validation, pol); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	if tx.SessionID() != p.SessionID {
@@ -185,23 +196,24 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	if !domain.OccurrenceMatchesEvent(p.SessionID, occurrence, e.EventID) {
 		return domain.IngestReceipt{}, domain.ErrInvalidRecord
 	}
-	payload, err := e.PayloadHash(p)
-	if err != nil {
-		return domain.IngestReceipt{}, err
-	}
 
 	// Idempotency first, before any sequence, turn, item, or diagnostic is
 	// allocated (D14): a retry returns the original receipt as stored,
-	// without reparsing or reading mutable state.
+	// without reparsing or reading mutable state, canonicalized under the
+	// request schema, limits and policy its receipt recorded (P3-40).
 	if e.EventID != "" {
-		if r, found, err := lookupReceipt(tx, p, occurrence, e.EventID, payload); found || err != nil {
+		if r, found, err := lookupReceipt(tx, p, occurrence, e); found || err != nil {
 			return r, err
 		}
 	}
-	// Only a new occurrence is held to the currently configured limits
-	// (F3, SPEC-1.7, DUR-1.2): a retry above replayed its receipt whatever
-	// the limits are now.
-	if err := e.ValidateFor(p, limits); err != nil {
+	// Only a new occurrence is held to the currently configured limits and
+	// policy (F3, SPEC-1.7, DUR-1.2): a retry above replayed its receipt
+	// whatever they are now.
+	if err := validateRequest(e, p, limits, g.Semantic); err != nil {
+		return domain.IngestReceipt{}, err
+	}
+	payload, err := newRequestHash(e, p, limits, g.Semantic)
+	if err != nil {
 		return domain.IngestReceipt{}, err
 	}
 
@@ -225,18 +237,23 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 // with no details if it does not, and found=false if the EventID is new. A
 // Phase 1 event record with no receipt cannot reproduce its original
 // result and is a conflict too.
-func lookupReceipt(tx store.Tx, p domain.Principal, occurrence, eventID, payload string) (domain.IngestReceipt, bool, error) {
+func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.Event) (domain.IngestReceipt, bool, error) {
 	r, err := tx.Receipt(occurrence)
 	switch {
 	case err == nil:
-		if r.Principal != p || r.PayloadHash != payload {
+		// Principal before detail: another principal's EventID is a bare
+		// conflict before anything of the request is canonicalized.
+		if r.Principal != p {
+			return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
+		}
+		if h, err := recordedHash(e, p, r); err != nil || h != r.PayloadHash {
 			return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
 		}
 		return r.Clone(), true, nil
 	case !isNotFound(err):
 		return domain.IngestReceipt{}, true, err
 	}
-	if _, err := tx.Event(eventID); err == nil {
+	if _, err := tx.Event(e.EventID); err == nil {
 		return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
 	} else if !isNotFound(err) {
 		return domain.IngestReceipt{}, true, err

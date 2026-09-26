@@ -45,6 +45,9 @@ type run struct {
 
 	suppliedBlobs map[string]bool // blob hashes whose bytes this event supplied
 	unverified    map[string]bool // unverified items already reported (DUR-3.1)
+
+	transcripts map[int]domain.ContextItem // span index -> its transcript item
+	opResults   []domain.OperationResult   // in operation order (P3-34)
 }
 
 func isNotFound(err error) bool { return errors.Is(err, domain.ErrNotFound) }
@@ -70,16 +73,45 @@ func (r *run) apply() (domain.IngestReceipt, error) {
 	r.suppliedBlobs = map[string]bool{}
 	r.unverified = map[string]bool{}
 	r.derived = map[int]int{}
+	r.transcripts = map[int]domain.ContextItem{}
 
-	if err := r.advanceTask(); err != nil {
-		return domain.IngestReceipt{}, err
+	// Resource control runs outside task lifecycle: it never creates a
+	// task, opens a turn, or is refused because a task completed (P3-20,
+	// P3-34).
+	if !r.e.Control {
+		if err := r.advanceTask(); err != nil {
+			return domain.IngestReceipt{}, err
+		}
 	}
-	for si := range r.e.Spans {
-		if err := r.ingestSpan(si); err != nil {
+	if r.e.Operations == nil {
+		for si := range r.e.Spans {
+			if err := r.ingestSpan(si); err != nil {
+				return domain.IngestReceipt{}, err
+			}
+		}
+	}
+	for oi, op := range r.e.Operations {
+		if err := r.operation(oi, op); err != nil {
 			return domain.IngestReceipt{}, err
 		}
 	}
 	return r.commit()
+}
+
+// operation applies the oi-th operation of the event's ordered stream
+// (P3-34). A span operation ingests its span, exactly once (ValidateV3);
+// its result is readable at the span's transcript boundary. Typed
+// operations have no executor yet and fail closed.
+func (r *run) operation(oi int, op domain.SemanticOperation) error {
+	if op.Kind != domain.OperationSpan {
+		return domain.ErrUnsupportedSchema
+	}
+	si := op.Span.Index
+	if err := r.ingestSpan(si); err != nil {
+		return err
+	}
+	r.opResults = append(r.opResults, domain.OperationResult{Index: oi, Kind: op.Kind, Alias: op.Alias, Access: r.transcripts[si].Access})
+	return nil
 }
 
 // advanceTask creates the principal's task on its first task-bound event
@@ -196,6 +228,7 @@ func (r *run) ingestSpan(si int) error {
 	if err != nil {
 		return err
 	}
+	r.transcripts[si] = transcript
 	actor, err := domain.SourceActor(r.p, span.Authority)
 	if err != nil {
 		return err
@@ -272,11 +305,20 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 	if len(rc.Diagnostics) > r.limits.MaxEventDiagnostics+len(r.e.Spans) {
 		return domain.IngestReceipt{}, errLimit("MaxEventDiagnostics")
 	}
-	if err := rc.Validate(); err != nil {
+	var (
+		env domain.EventEnvelope
+		err error
+	)
+	if r.g.Semantic != nil {
+		rc.SchemaVersion, rc.RequestHashVersion, rc.Operations = domain.IngestReceiptSchemaV2, domain.RequestHashV3, r.opResults
+		env, err = newSemanticEnvelope(r.p, r.occurrence, r.e, r.limits, *r.g.Semantic)
+	} else {
+		env, err = domain.NewEventEnvelope(r.p, r.occurrence, r.e)
+	}
+	if err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	env, err := domain.NewEventEnvelope(r.p, r.occurrence, r.e)
-	if err != nil {
+	if err := rc.Validate(); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	if err := r.tx.InsertIngestion(env, rc); err != nil {
