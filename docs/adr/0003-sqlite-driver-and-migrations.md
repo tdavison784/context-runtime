@@ -53,8 +53,9 @@ preserve valid state.
   ever stored as a second, opaque serialized copy alongside its columns —
   every column is independently inspectable and indexable.
   `TestMigratedSchemaMatchesTypes` (`internal/store/sqlite/durability_test.go`
-  — renamed from `TestEmbeddedSchemaMatchesTypes` when Phase 2 added
-  migrations 0002-0007, see below) asserts the compiled column set for
+  — renamed from `TestEmbeddedSchemaMatchesTypes` at migration 0002, commit
+  `7575a47` [SPEC-1.9: corrected from an earlier, wrong "0002-0007" span],
+  see below) asserts the compiled column set for
   every Go struct field against the migration's actual `PRAGMA
   table_info`, so the schema and the struct cannot drift silently.
 - Connection settings are concrete, not placeholders: WAL mode,
@@ -120,11 +121,12 @@ preserve valid state.
   database in a state a restart can cleanly recover from (no partial
   `schema_migrations` row, no partial `rec_*` tables); see Tests, below,
   for the test that locks it.
-- **Phase 2 reality: migrations 0002-0010, checksum pinning as a test,
+- **Phase 2 reality: migrations 0002-0011, checksum pinning as a test,
   lossless leaf-list encoding (D3, R8; M1, M5, M6, D10, D13, D14/D16, R19
-  via ADR 19).** Nine migrations have landed on top of 0001, each for a
-  decision this ADR's "forward-only, never edited" rule already covered but
-  Phase 2 is the first phase to actually exercise:
+  via ADR 19).** Ten migrations have landed on top of 0001 (SPEC-1.9:
+  corrected from an earlier, incomplete "0002-0010"/"nine migrations"
+  count), each for a decision this ADR's "forward-only, never edited" rule
+  already covered but Phase 2 is the first phase to actually exercise:
   - `0002_lossless_parts.sql` and `0003_lossless_string_lists.sql` rewrite
     every row's leaf-list columns from plain `encoding/json` (which
     silently replaced invalid UTF-8 with U+FFFD) into the lossless form
@@ -158,7 +160,14 @@ preserve valid state.
     columns to `''` (the semantic-role zero value) and adds an index on
     `(session_id, content_hash, task, section, role, authority, access
     boundary)`, the exact tuple D10's duplicate-candidate comparison uses,
-    so it is a bounded lookup rather than a session-wide scan (R19).
+    so it is a bounded lookup rather than a session-wide scan (R19);
+  - `0011_item_source_index.sql` adds `item_sources(session_id,
+    rule_version, locator_key, item_id)`, so References locator matching
+    (§16/M5/R2) is a bounded lookup (`ItemsBySourceKey`) rather than a
+    session-wide scan (R19), and registers a **Go migration step**
+    (`backfillItemSources`, `internal/store/sqlite/steps.go`) that runs
+    inside the same transaction as the SQL, indexing every pre-0011 item's
+    source locator key by calling live `domain.LocatorKey`.
 
   "Migrations are forward-only; no down migrations ship" (above) is now a
   literal test, not only documented policy: `committedMigrations`
@@ -166,7 +175,20 @@ preserve valid state.
   migration file's SHA-256 checksum, and `TestCommittedMigrationsUnchanged`
   fails if a committed file's bytes — or the set of embedded files —
   changes; a schema change can only ever land as a new numbered file added
-  to that map, never an edit to an existing entry.
+  to that map, never an edit to an existing entry. **This checksum covers
+  only the `.sql` bytes (`sqlite.go:142`) — SPEC-1.9/DUR-1.8/F5 flag that
+  migration 0011's registered Go step (`migrationSteps[11]`,
+  `steps.go:14-16`) is outside that protection: an edit to
+  `backfillItemSources` or to the live `domain.LocatorKey` it calls would
+  be caught by neither `TestCommittedMigrationsUnchanged` nor
+  `TestMigrationChecksumMismatch`, despite `steps.go`'s own "never edited
+  once committed" comment.** F5's ruling requires either inlining a frozen,
+  versioned copy of the transform (never importing live domain code a
+  committed migration depends on) or making it pure SQL, and including the
+  step's content in checksum protection — a checksummed Go-step registry
+  keyed by migration version, for example. This is `p2-store`'s
+  outstanding work (assignment table, PR #5 review round 1); it is not yet
+  landed as of this revision.
 - **Lossless leaf-list encoding (D3, R8).** `internal/store/sqlite/lossless.go`
   replaces the plain-JSON leaf-list encoding this ADR originally specified
   ("JSON columns are used only for leaf value lists," above) with a form
@@ -186,11 +208,12 @@ preserve valid state.
   silently wrong value, matching M8's "no invented executable state for a
   record that predates new metadata."
 - **Indexed lookups are asserted, not just indexed (R19).**
-  `internal/store/sqlite`'s three new bounded lookups —
+  `internal/store/sqlite`'s four new bounded lookups —
   `ItemsByBlob(blobHash, limit)` (migration 0009), `DuplicateCandidates(f
-  DuplicateFilter)` (migration 0010), and matching an unresolved reference
-  by locator key (migration 0008) — are backed by a real index, not merely
-  documented as one: `assertIndexed` (`internal/store/sqlite/lookups_test.go`)
+  DuplicateFilter)` (migration 0010), matching an unresolved reference by
+  locator key (migration 0008), and `ItemsBySourceKey` (migration 0011,
+  SPEC-1.9: added) — are backed by a real index, not merely documented as
+  one: `assertIndexed` (`internal/store/sqlite/lookups_test.go`)
   runs `EXPLAIN QUERY PLAN` on the exact query each method issues and fails
   if SQLite's plan contains an unindexed `SCAN` step or no `USING` step at
   all, so a future change that silently drops the index (rather than the
@@ -325,9 +348,10 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all seven migrations replay on a fresh database, still matches
-    every Go struct field exactly, locking the no-opaque-copy design above
-    against every migration added since Phase 1, not only 0001.
+    after all eleven migrations replay on a fresh database (SPEC-1.9:
+    corrected from an earlier, stale "seven"), still matches every Go
+    struct field exactly, locking the no-opaque-copy design above against
+    every migration added since Phase 1, not only 0001.
   - `TestFileCreatedPrivate` asserts a freshly created database file is mode
     `0600`.
   - `TestConcurrentSequenceDensity` asserts dense, gapless sequence
@@ -343,32 +367,46 @@ preserve valid state.
   `TestLosslessStringsRoundTripAndStrictDecode` assert the hex-string JSON
   form round-trips arbitrary bytes (including invalid UTF-8) exactly and
   that a malformed encoding fails decode rather than silently repairing;
-  `TestLosslessUsageMatchesPlainJSON` asserts usage-iteration columns
-  (which hold no strings) are byte-identical to what plain `encoding/json`
-  would have produced, since only string-bearing leaf lists need the
-  lossless form.
+  `TestLosslessUsageMatchesPlainJSON` (SPEC-1.9: description corrected
+  below) asserts usage-iteration encoding (which holds no strings, only
+  numbers/booleans/nulls) against an exact, alphabetically-key-ordered
+  JSON literal, and separately that a legacy encoding with Go
+  struct-declaration key order (what plain `encoding/json` actually
+  produces) decodes to an equal value \u2014 it does not claim the lossless
+  and plain-JSON *bytes* are identical, only that both forms decode to the
+  same value for a type with no strings to corrupt.
 - `internal/store/sqlite/upgrade_test.go` (Phase 2) is the migrated-layout
   suite: `openLegacy(t, upTo)` replays only the migrations up to a given
   version so a test can write a row exactly as an older binary stored it,
   then `.upgrade()` replays every remaining migration and asserts the
-  result. `TestUpgradeLosslessParts` and `TestUpgradeLosslessStringLists`
-  are the D3/R8 upgrade path: a valid legacy row survives with its
-  `ContentHash` intact, while a row `0001` had already corrupted (its hash
-  no longer matches its `\uFFFD`-repaired text) reads back
-  `domain.ErrIntegrity`, both from `Item` and from `Items` over a filter
-  that includes it, rather than a silently wrong value.
-  `TestUpgradeProvenanceColumns` and `TestUpgradeCurrentNamespace` are the
-  equivalent parity fixtures for migrations 0004 and 0005 (M8's
-  pre-existing-record handling for item role/creation-turn/source-range/
-  claim-name columns, and for the typed directive/agent-key namespace).
-  `TestUpgradeItemBlobIndex` and `TestUpgradeDuplicateIndex` are the same
-  for migrations 0009 and 0010: an item with blob parts stored before 0009
-  is found by `ItemsByBlob` after upgrade, and an item with a pre-0004 NULL
-  role is returned by `DuplicateCandidates` after upgrade, once `f_role`
-  reads as `''` rather than NULL.
-- `internal/store/sqlite/lookups_test.go` (R19): `TestItemsByBlobUsesIndex`,
-  `TestDuplicateCandidatesUseIndex`, and
-  `TestUnresolvedReferencesByKeyUseIndex` are the `assertIndexed` checks
+  result. `TestUpgradeLosslessParts` is the D3/R8 upgrade path for content
+  parts: a valid legacy row survives with its `ContentHash` intact, while a
+  row `0001` had already corrupted (its hash no longer matches its
+  `\uFFFD`-repaired text) reads back `domain.ErrIntegrity`, both from
+  `Item` and from `Items` over a filter that includes it, rather than a
+  silently wrong value. **`TestUpgradeLosslessStringLists` has no such
+  assertion (SPEC-1.9): a pre-0003 string list (tags, ID lists) that
+  `encoding/json` had already corrupted with U+FFFD is preserved as
+  stored and returned as-is \u2014 `verifyItemContent` (`read.go:16-18`) checks
+  only `Parts` against `ContentHash`/`SemanticBytes`, so integrity
+  verification for lossless leaf lists currently covers content parts
+  only, not tags or ID lists.** `TestUpgradeProvenanceColumns` and
+  `TestUpgradeCurrentNamespace` are the equivalent parity fixtures for
+  migrations 0004 and 0005 (M8's pre-existing-record handling for item
+  role/creation-turn/source-range/claim-name columns, and for the typed
+  directive/agent-key namespace).
+- `internal/store/sqlite/lookups_test.go` (R19; SPEC-1.9: these upgrade
+  fixtures live here, not in `upgrade_test.go`, despite the `TestUpgrade*`
+  name): `TestUpgradeItemBlobIndex` and `TestUpgradeDuplicateIndex` are
+  the migrated-layout parity fixtures for migrations 0009 and 0010 \u2014 an
+  item with blob parts stored before 0009 is found by `ItemsByBlob` after
+  upgrade, and an item with a pre-0004 NULL role is returned by
+  `DuplicateCandidates` after upgrade, once `f_role` reads as `''` rather
+  than NULL; `TestUpgradeItemSourceIndex` is the same for migration 0011's
+  Go step, confirming a pre-0011 item's source locator key is found by
+  `ItemsBySourceKey` after upgrade. `TestItemsByBlobUsesIndex`,
+  `TestDuplicateCandidatesUseIndex`, `TestUnresolvedReferencesByKeyUseIndex`,
+  and `TestItemsBySourceKeyUsesIndex` are the `assertIndexed` checks
   above, one per new lookup, each asserting the query plan against the
   exact SQL the method issues.
 - The full `internal/store/sqlite` package runs in about 5-6s under
