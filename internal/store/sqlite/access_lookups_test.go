@@ -18,16 +18,15 @@ var planViewer = domain.Principal{SessionID: "s", WorkflowID: "wf", TaskID: "tas
 func TestAccessLookupsUseIndex(t *testing.T) {
 	s, _ := openTemp(t)
 	clause, args, _ := ownerClause("workflow_id", "task_id", "agent_id", planViewer)
-	assertIndexed(t, s, "SELECT item_id FROM lookup_blob WHERE session_id=? AND blob_hash=? AND "+clause+" ORDER BY seq, item_id",
+	assertIndexed(t, s, []string{"session_id", "blob_hash", "workflow_id", "task_id", "agent_id"}, "SELECT item_id FROM lookup_blob WHERE session_id=? AND blob_hash=? AND "+clause+" ORDER BY seq, item_id",
 		append([]any{"s", "h"}, args...)...)
-	assertIndexed(t, s, canonicalSQL, "s", "h", "task", "", "", "fact", "", "USER", "TASK", "s", "", "task", "")
-	assertIndexed(t, s, workingSQL, "s", "task", "USER", "TASK", "s", "", "task", "")
-	assertIndexed(t, s, "SELECT item_id FROM lookup_source WHERE session_id=? AND rule_version=? AND locator_key=? AND "+clause+
+	assertIndexed(t, s, []string{"session_id", "content_hash", "task_id", "section", "directive_id", "kind", "role", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, canonicalSQL, "s", "h", "task", "", "", "fact", "", "USER", "TASK", "s", "", "task", "")
+	assertIndexed(t, s, []string{"session_id", "task_id", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, workingSQL, "s", "task", "USER", "TASK", "s", "", "task", "")
+	assertIndexed(t, s, []string{"session_id", "rule_version", "locator_key", "workflow_id", "task_id", "agent_id"}, "SELECT item_id FROM lookup_source WHERE session_id=? AND rule_version=? AND locator_key=? AND "+clause+
 		" AND (seq > ? OR seq = ? AND item_id > ?) ORDER BY seq, item_id", append(append([]any{"s", "v", "k"}, args...), 0, 0, "")...)
 	rclause, rargs, _ := ownerClause("f_access_workflow_id", "f_access_task_id", "f_access_agent_id", planViewer)
-	assertIndexed(t, s, "SELECT id FROM rec_reference WHERE session_id=? AND f_locator_key=? AND f_rule_version=? AND "+rclause+
+	assertIndexed(t, s, []string{"session_id", "f_locator_key", "f_rule_version", "f_access_workflow_id", "f_access_task_id", "f_access_agent_id"}, "SELECT id FROM rec_reference WHERE session_id=? AND f_locator_key=? AND f_rule_version=? AND "+rclause+
 		" AND (f_seq > ? OR f_seq = ? AND id > ?) ORDER BY f_seq, id LIMIT ?", append(append([]any{"s", "k", "v"}, rargs...), 0, 0, "", 2)...)
-	assertIndexed(t, s, "SELECT id FROM rec_relationship WHERE session_id=? AND f_type=? AND f_to_id=?", "s", "SUPERSEDES", "x")
 }
 
 // TestUpgradeAccessLookups checks migration 0012's backfill: live items are
@@ -115,18 +114,22 @@ func TestLegacyUnverifiedNeverBlocks(t *testing.T) {
 }
 
 // TestGraphReadsUseIndex locks the reads ingest and graph issue per item
-// to index probes (SPEC-1.3): relationships by (type, source) or (type,
-// target), and items by task.
+// to exact-key index searches through the production query builders
+// (SPEC-1.3, SPEC-2.1): relationships by (type, source) and (type, target)
+// and items by task, each still ordered by (Seq, ID).
 func TestGraphReadsUseIndex(t *testing.T) {
 	s, _ := openTemp(t)
-	for _, f := range []store.RelationshipFilter{
-		{Type: domain.RelSupersedes, ToID: "x"},
-		{Type: domain.RelDuplicateOf, FromID: "x"},
-		{Type: domain.RelDerivedFrom, FromID: "x"},
+	for _, c := range []struct {
+		f    store.RelationshipFilter
+		keys []string
+	}{
+		{store.RelationshipFilter{Type: domain.RelSupersedes, ToID: "x"}, []string{"session_id", "f_type", "f_to_id"}},
+		{store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: "x"}, []string{"session_id", "f_type", "f_from_id"}},
+		{store.RelationshipFilter{Type: domain.RelDerivedFrom, FromID: "x"}, []string{"session_id", "f_type", "f_from_id"}},
 	} {
-		q, args := relationshipQuery("s", f)
-		assertIndexed(t, s, q, args...)
+		q, args := relationshipQuery("s", c.f)
+		assertIndexed(t, s, c.keys, q, args...)
 	}
 	q, args := itemQuery("s", store.ItemFilter{TaskID: "task"})
-	assertIndexed(t, s, q, args...)
+	assertIndexed(t, s, []string{"session_id", "f_task_id"}, q, args...)
 }
