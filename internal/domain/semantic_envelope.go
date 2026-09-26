@@ -13,6 +13,7 @@ func NewSemanticEventEnvelope(p Principal, occurrence string, e Event, limits Li
 		return EventEnvelope{}, err
 	}
 	e = snapshotEventBlobs(e)
+	policy = policy.Clone()
 	env := EventEnvelope{RequestHashVersion: RequestHashV3, SemanticPolicy: &policy, Limits: limits, SessionID: p.SessionID, OccurrenceID: occurrence, EventID: e.EventID, Principal: p, Event: e, PayloadHash: hash, SchemaVersion: EventEnvelopeSchemaV2}
 	return env, env.Validate()
 }
