@@ -22,7 +22,12 @@ sections:
 
 A decision that conflicts with the current SDD text is recorded under a
 **Required SDD amendment** subsection with the exact proposed replacement
-text. The ADR does not edit SDD.md; that is a separate, reviewed change.
+text. The ADR does not edit SDD.md itself; once the amendment lands there
+(as SDD v0.6's did), the subsection is retitled **SDD amendment (applied in
+vX.Y)** and keeps the record of what changed and why.
+
+Each ADR also carries a **Review** section once an independent review (e.g.
+Codex) has scrutinized it, noting which findings changed the decision.
 
 ## Status of all 18 ADRs (SDD §15)
 
@@ -53,11 +58,23 @@ concurrency tests for the foundational event traces) is tracked in
 `internal/domain/*_test.go` and `internal/store/storetest`, not in this
 directory.
 
-## Known SDD conflicts recorded here
+## SDD conflicts found and applied (v0.6)
 
-- [0004](0004-ids-idempotency-and-hashes.md#required-sdd-amendment): the
-  directive-ID derivation (FR-DIR-002) overflows the `id` grammar's 64-char
-  cap (FR-DIR-006) once combined with a keyword prefix.
-- [0016](0016-mutation-authorization.md#required-sdd-amendment): FR-TOOL-003
-  and FR-AUTH-001 jointly make `context_resolve` a dead code path for an
-  AGENT principal.
+- [0004](0004-ids-idempotency-and-hashes.md#sdd-amendment-applied-in-v06):
+  the directive-ID derivation (FR-DIR-002) overflowed the `id` grammar's
+  64-char cap (FR-DIR-006) once combined with a keyword prefix. Applied:
+  FR-DIR-002 now specifies 64 hex digits explicitly; FR-DIR-006's cap is 80.
+- [0016](0016-mutation-authorization.md#sdd-amendment-applied-in-v06):
+  FR-TOOL-003 and FR-AUTH-001 jointly made `context_resolve` a dead code path
+  for an AGENT principal; FR-DIR-007's same-task Working-snapshot
+  supersession conflicted with the equal-boundary supersession rule. Both
+  applied: FR-TOOL-003 states `context_resolve` never resolves in V1;
+  FR-DIR-007 requires same authority *and* access boundary.
+
+Independent review: Codex gpt-6-sol xhigh reviewed all seven Phase 1 ADRs
+against the committed code and the SDD in two passes — the initial review
+(`scratchpad/codex-decision-review-out.md`) and a verification pass after
+contract v2 landed (`scratchpad/codex-contract-v2-review.md`), which found
+several of the first pass's fixes PARTIAL and one (ADR 6's temporal-
+eligibility deferral) DEFERRED-WRONG. Findings that changed a decision are
+noted in that ADR's Review section, labeled by pass.

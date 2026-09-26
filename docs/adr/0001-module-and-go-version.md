@@ -75,3 +75,9 @@ No behavior test locks a version string; this is enforced structurally:
 - Whether `cmd/context-runtime` (§6, optional inspection CLI) ships in the
   same module or as a separate `tools/` module to avoid pulling its
   dependencies into library consumers' builds.
+
+## Review
+
+Scrutinized by Codex gpt-6-sol xhigh (`codex-decision-review-out.md`):
+AGREE — the module matches the committed code, and Go 1.26/1.27 are the
+supported major releases as of 2026-09-25. No change.

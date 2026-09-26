@@ -78,15 +78,16 @@ preserve valid state.
   drift) but needs a clear startup error message pointing at the mismatched
   version.
 - One writer connection plus `BEGIN IMMEDIATE` means writer throughput is
-  bounded by SQLite's single-writer model; FR-CALL-005/§10 already require
-  per-session write serialization, so this does not add a new bottleneck
-  beyond what the domain model requires, but it does mean writes to
-  *different* sessions still contend for the single writer connection at the
-  SQLite level even though `store.Store.Update` documents them as
-  independently concurrent (`internal/store/store.go:28`) — the SQLite
-  implementation needs either a connection-pool-per-writer design or an
-  internal dispatch queue to honor that documented concurrency; this is an
-  implementation detail for the SQLite store package, not a contract change.
+  bounded by SQLite's single-writer model. `store.Store.Update`
+  (`internal/store/store.go:41-46`) now documents different sessions as
+  "independent logically but may be serialized by the implementation (the
+  SQLite store has a single writer)" — the contract requires *correctness*
+  under concurrent cross-session writes (no lost updates, no corruption), not
+  that they run in parallel at the storage layer. A single writer connection
+  satisfies that contract directly: bounded contention under SQLite's own
+  serialization is an accepted Phase 1 cost, not a bug to design around with
+  a writer-dispatch pool. Revisit only if NFR profiling (Phase 11) shows
+  contention is an actual bottleneck.
 
 ## Tests that lock the behavior
 
@@ -103,15 +104,21 @@ preserve valid state.
 - Required: a file-permission test asserting a freshly created database file
   has mode `0600` on the platforms CI runs (skip or adapt on Windows).
 - Required: a concurrency test under `-race` that runs `Update` against two
-  different session IDs concurrently and asserts no serialization beyond
-  what FR-CALL-005/§10 require (validates the writer-contention consequence
-  above once the SQLite store exists).
+  or more *different* session IDs concurrently and asserts **correctness**
+  (each session's writes commit atomically and are all present afterward,
+  with no corruption or lost update) rather than asserting the sessions
+  serialize or don't — bounded contention from SQLite's single writer is
+  expected and is not itself a failure.
 
 ## Open questions
 
-- Whether the SQLite store needs its own internal writer-dispatch goroutine
-  to give independent sessions genuinely concurrent writes, or whether
-  serializing all sessions through SQLite's single writer connection is an
-  acceptable Phase 1 simplification pending NFR data.
 - Exact `busy_timeout` value; needs a number before the SQLite store lands,
   not just "a busy_timeout".
+
+## Review
+
+Scrutinized by Codex gpt-6-sol xhigh (`codex-decision-review-out.md`,
+finding 14/low). Changed: the "assert no serialization" test framing (which
+conflicted with SQLite's single-writer design) is replaced with a
+correctness-under-concurrency test, and the consequences section no longer
+treats single-writer contention as a gap to be engineered away.

@@ -94,3 +94,11 @@ requires the SQLite file be owned by one process (0600 permissions).
 - Whether `cmd/context-runtime` ships in this module or a separate `tools/`
   module (also raised in ADR 1) — relevant here because a sidecar
   executable, if built later, would likely also live under `cmd/`.
+
+## Review
+
+Scrutinized by Codex gpt-6-sol xhigh (`codex-decision-review-out.md`):
+AGREE — the embedded-library choice does not conflict with the SDD, with
+the caveat (already covered by ADR 3's consequences) that SQLite's
+transaction constraints must still protect a database opened by more than
+one process. No change.

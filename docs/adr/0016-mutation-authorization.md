@@ -8,130 +8,216 @@ Date: 2026-09-25
 FR-AUTH-001 requires every mutation to check access to its targets and
 authority for the action; failure is atomic `ErrInvalidAuthorityPromotion`.
 FR-AUTH-002 lets a source delegate a named action to a SYSTEM/HARNESS/USER
-principal, but AGENT/TOOL/RETRIEVED_CONTENT can never issue or receive
-lifecycle grants. FR-REL-006 requires a SUPERSEDES edge to have the **same**
-access boundary on both endpoints (not merely `Within`), so a replacement
-can never hide an item from a principal who could see the original.
-FR-DOM-005 requires residency and goal status to be independent axes.
-FR-DOM-008 makes content/kind/authority/IDs/scope/access/source/sequence
-immutable. FR-TOOL-003 and FR-AUTH-001 jointly raise a conflict below.
+principal on named targets, but AGENT/TOOL/RETRIEVED_CONTENT can never issue
+or receive lifecycle grants, and a grant must not carry authority its issuer
+itself lacks over the target. FR-REL-006 requires a SUPERSEDES edge to have
+the **same** access boundary on both endpoints, and requires that tool
+output never suppress current state. FR-DIR-007 (as amended, SDD v0.6)
+scopes Working-snapshot supersession to same-authority-**and**-boundary
+items. FR-DOM-005 requires residency and goal status to be independent
+axes. FR-DOM-008 makes content/kind/authority/IDs/scope/access/source/
+sequence immutable. FR-TOOL-003 (as amended) states `context_resolve` never
+performs a Resolve in V1.
 
 ## Decision
 
-- `AuthorizeMutation` (`internal/domain/authz.go:172-196`) is the single
-  entry point for every lifecycle mutation. All-or-nothing: every target
-  must be accessible before any authority check runs, and access failure
-  returns `ErrNotFound` uniformly (§9, ADR 6). Each target is authorized
-  directly — actor holds `CanHoldLifecycleAuthority()`
-  (`internal/domain/enums.go:71-74`) and `actor.Authority.AtLeast(target
-  .Authority)` — or by an in-force `MutationGrant` for that action/target,
-  issued by a principal whose authority is at least the target's
-  (`findGrant`, `internal/domain/authz.go:198-228`).
-- `Authority.AtLeast` (`internal/domain/enums.go:32-38`): equal or strictly
-  higher rank. `AuthorityTool`/`AuthorityRetrievedContent` share rank 1 and
-  do not dominate each other.
-- `MutationGrant` validity uses session sequence numbers only —
-  `IssuedSeq`/`ExpiresAtSeq`/`RevokedSeq` (`activeAt`,
-  `internal/domain/authz.go:117-127`) — never wall-clock time (§10).
-  `MutationGrant.Validate` (`internal/domain/authz.go:73-105`) rejects
-  AGENT/TOOL/RETRIEVED_CONTENT as issuer or grantee structurally.
-- Supersession (FR-REL-006) is checked separately by
-  `AuthorizeSupersession` (`internal/domain/authz.go:237-252`): access to
-  both endpoints; superseding authority ≥ superseded (no downgrade via
-  replacement); actor's authority ≥ superseding item's own authority (no
-  laundering through a low-authority actor); and boundaries **equal**, not
-  `Within` — `Within` alone would let a narrower replacement supersede a
-  broader original, hiding it from principals who could see it before.
-  Boundary widening/narrowing requires an explicit authorized replacement
-  policy, never ID reuse (FR-DIR-002).
-- `GoalStatus` transitions only OPEN→RESOLVED; `ItemChange.Apply`
-  (`internal/domain/records.go:224-256`) rejects any other transition with
-  `ErrInvalidTransition`. Reopening requires an authorized replacement
-  creating a new OPEN item (FR-DIR-005), not a mutation. Residency changes
-  never touch `GoalStatus` (FR-DOM-005).
+- `AuthorizeMutation` (`internal/domain/authz.go`) is the single entry point
+  for every lifecycle mutation. All-or-nothing: every target must be
+  accessible before any authority check runs, and access failure returns
+  `ErrNotFound` uniformly (§9, ADR 6). Each target is authorized directly —
+  actor holds `CanHoldLifecycleAuthority()` and `actor.Authority.AtLeast
+  (target.Authority)` — or by an in-force `MutationGrant` for that
+  action/target. `findGrant` now additionally requires `t.Access.Permits
+  (g.Issuer)` alongside `g.Issuer.Authority.AtLeast(t.Authority)`: a grant
+  can authorize only what its issuer could do directly, including access —
+  an issuer scoped to task A can no longer name a target in task B and have
+  a grantee in B pass authorization on the issuer's say-so.
+- `AuthorizeGrantIssuance(g, targets)` is the check run when a grant is
+  *issued*. `sameTargetSet` first requires `g.TargetIDs` to contain no
+  duplicates and `targets` to be exactly that set, one record per ID —
+  neither a target missing from the supplied list nor a repeated ID (e.g.
+  `TargetIDs [A,B]` with `targets [A,A]`) can pass. `authorizeOver` then
+  requires the issuer to access every target (`ErrNotFound` first, so
+  issuance cannot probe for existence) and hold authority at least each
+  target's. `store.Tx.InsertGrant`'s doc comment requires callers to run
+  this check first — the store does not re-derive it, since only the caller
+  has the target records' authority/boundary in hand at issuance time.
+- `AuthorizeGrantRevocation(actor, g, targets)` is the separate check run
+  when a grant is *revoked*: it takes an explicit revoking `actor` (not the
+  original issuer), requires the same session and the same exact target set
+  as issuance, and requires the actor be SYSTEM/HARNESS/USER with access and
+  authority over every target — an actor that fails the authority test still
+  gets `ErrNotFound` first if it also lacks access, so revocation cannot
+  disclose target authority to a principal that cannot see the target.
+  `store.Tx.RevokeGrant` now takes the audit `LifecycleEvent` (`TargetGrant`)
+  and applies it atomically with the revocation, and requires callers to run
+  this check first.
+- Matcher grants are limited to `ActionAssertObligation`:
+  `MutationGrant.Validate` now rejects a matcher grantee for any other
+  action. A registered matcher evaluates its own obligation (FR-OBL-004);
+  it must not be usable to receive a `waive_obligation` or `resolve` grant,
+  which FR-AUTH-002 never contemplated for a matcher.
+- Supersession (FR-REL-006) is checked by `AuthorizeSupersession`, in this
+  order: **access first** — both endpoints' `Access.Permits(actor)` are
+  checked before any authority-kind test, so an inaccessible endpoint always
+  yields `ErrNotFound` regardless of the actor's or the endpoint's
+  authority. This ordering itself is load-bearing: checking authority kind
+  first (as v2 did) let a caller distinguish an inaccessible AGENT item
+  (`ErrNotFound` from the AGENT-kind branch) from an inaccessible USER item
+  (`ErrInvalidAuthorityPromotion` from the authority-kind branch) purely
+  from the error returned, disclosing the item's authority class without
+  ever granting access to it. After access, the actor is restricted by
+  kind: SYSTEM/HARNESS/USER may supersede as before (subject to the
+  boundary-equality and authority-ordering checks below); an AGENT actor
+  may supersede **only** a keyed agent write with the identical key
+  (FR-TOOL-002): both items must be AGENT authority **and** share the same
+  `"agent.<key>"` `DirectiveID` — not merely "both AGENT," which would let
+  one keyed write supersede an unrelated one. A TOOL or RETRIEVED_CONTENT
+  actor can never create a SUPERSEDES edge, full stop. Boundaries must
+  still be **equal**, not `Within` (narrowing would hide the original from
+  principals who could see it before); superseding authority ≥ superseded;
+  actor's authority ≥ superseding item's own authority.
+- FR-DIR-007's amendment (SDD v0.6) is implemented by the same equal-
+  boundary rule `AuthorizeSupersession` already enforces: "same authority in
+  the same task" is replaced by "same authority and access boundary,"
+  because a task-wide Working item must not silently suppress an
+  agent-restricted Working item that happens to share a task.
+- `GoalStatus` transitions only OPEN→RESOLVED (`ItemChange.Apply`);
+  reopening requires an authorized replacement creating a new OPEN item.
+  Residency changes never touch `GoalStatus`.
 - `ItemChange.Apply` bundles generation/residency/goal/retention/usage into
-  one CAS-guarded update (`store.Tx.UpdateItem` checks `expectedVersion`,
-  `internal/store/store.go:141-144`; `Apply` increments `Version`).
-  Immutable fields (FR-DOM-008) have no `ItemChange` field at all, so the
-  type system, not a runtime check, prevents mutating them.
+  one CAS-guarded, audit-atomic update: `store.Tx.UpdateItem` now takes the
+  `LifecycleEvent` and writes it in the same transaction as the change,
+  closing the gap where a caller could change an item without its required
+  audit record.
 - Obligation transitions follow `domain.ValidObligationTransition`
-  (`internal/domain/obligation.go:24-36`): UNRESOLVED↔BLOCKED,
-  UNRESOLVED↔SATISFIED, any status→WAIVED (terminal).
-  `AuthorizeMutation`/`AuthorizeSupersession` govern *who*; this table
-  governs *which* transitions exist; `ObligationTransition.Validate`
-  combines both before a transition is stored.
+  (UNRESOLVED↔BLOCKED, UNRESOLVED↔SATISFIED, any status→WAIVED terminal).
+  `store.Tx.AppendObligationTransition(t, expectedRevision)` applies the
+  transition and returns the updated version atomically, and now also takes
+  `expectedRevision` under compare-and-swap: the version's stored `Revision`
+  must equal it or the write fails `ErrVersionConflict`. This closes an ABA
+  race this ADR's authorization matrix cannot close by itself — a matcher
+  can evaluate evidence against one obligation revision, a resource change
+  can move the same obligation through SATISFIED and back to UNRESOLVED
+  (revision N+2), and without the CAS the matcher's stale transition would
+  still satisfy `From == UNRESOLVED` and apply anyway, applying proof
+  evaluated against a state the obligation is no longer in (FR-OBL-005,
+  INV-16). The applicability-fingerprint and matcher-versioning rules that
+  motivate *why* freshness matters are ADR 8's territory (Phase 3); this
+  ADR only fixes the authorization-adjacent mechanism — the transition
+  cannot commit against a revision the evaluator didn't actually see.
 
-## Required SDD amendment
+## SDD amendment (applied in v0.6)
 
-**Conflict:** FR-TOOL-003 says `context_resolve` "resolves only items the
-agent has authority over (FR-AUTH-001)." But FR-AUTH-001 requires
-SYSTEM/HARNESS/USER for Resolve, which AGENT never satisfies
-(`CanHoldLifecycleAuthority()`), and FR-TOOL-002/§9 confine the
-semantic-state tools to AGENT authority with no goal/pin/obligation
-creation. So the "agent has authority over" branch describes an empty set:
-`context_resolve` as specified can never perform a Resolve.
+FR-TOOL-003 is applied as amended (commit `78d988f`): "context_resolve never
+resolves in V1, because Resolve requires a SYSTEM, HARNESS, or USER
+principal (FR-AUTH-001) and the tools cannot create goals. For an accessible
+goal it records a completion claim ... An unknown or inaccessible ID is a
+tool error." This removes the unreachable "resolves only items the agent has
+authority over" clause entirely, rather than leaving it beside the invariant
+it appeared to soften.
 
-**Proposed replacement text**, FR-TOOL-003, first sentence:
-
-> context_resolve always records a completion claim: an evidence item
-> DERIVED_FROM the cited evidence, linked to the target goal with
-> REFERENCES, with the tool result stating the goal stays OPEN until an
-> authorized Resolve or CompleteTask. It never performs the Resolve mutation
-> itself, regardless of the target's authority.
-
-This drops the unreachable "agent has authority" clause and makes the
-completion-claim behavior (already FR-TOOL-003's second sentence for the
-higher-authority case) the only behavior.
-
-**Alternative rejected:** leaving the text as dead specification. An
-ambiguous requirement beside the invariant it appears to soften is a hazard
-even if currently unreachable — a future implementer could misread it as
-license to weaken FR-AUTH-001's gate.
+FR-DIR-007 is applied as amended: Working-section supersession now reads
+"supersedes every current Working item of the same authority and access
+boundary in the same task," matching `AuthorizeSupersession`'s equal-
+boundary rule rather than conflicting with it.
 
 ## Alternatives considered
 
-- **Reusing `AuthorizeMutation`'s loop for supersession instead of a
-  dedicated function.** Rejected: same-boundary is stricter than, and
-  structurally different from, per-target access+authority; a dedicated
-  function keeps the FR-REL-006 rationale attached to the code enforcing it.
-- **`Within` instead of equality for supersession boundaries.** Rejected:
-  permits narrowing, which FR-REL-006 forbids.
-- **Wall-clock grant expiry.** Rejected: breaks §10/FR-OBS-004 replay
-  determinism.
-- **Letting a matcher's grant lend authority to the AGENT/TOOL principal
-  running it.** Rejected: `findGrant`'s matcher branch still requires
-  `CanHoldLifecycleAuthority()` on the actor — the grant authorizes the
-  matcher version, but the transition runs under a trusted runtime
-  principal, never the tool-evidence-supplying principal itself.
+- **Checking issuer access only at grant-application time (`findGrant`),
+  not at issuance.** Rejected: the target's access boundary is exactly what
+  the grant should have been checked against when it was created; deferring
+  the check to application time still lets an out-of-boundary grant sit in
+  storage looking valid, and `AuthorizeGrantIssuance` catches the mistake at
+  the point a caller can still refuse to store it.
+- **Allowing matcher grants for any action, trusting the matcher registry to
+  self-limit.** Rejected: FR-AUTH-002 only ever describes a matcher
+  evaluating its obligation; allowing the grant type more broadly is an
+  unforced widening of what a non-principal grantee can do.
+- **Permitting a TOOL actor to supersede same-boundary TOOL content (treated
+  as symmetric with the AGENT same-key exception).** Rejected: FR-TOOL-002's
+  keyed-write exception is scoped to AGENT specifically; TOOL/RETRIEVED_
+  CONTENT superseding anything, including their own kind, is exactly the
+  "tool output suppresses state" case §9 forbids.
+- **Letting the AGENT exception match on authority alone ("both items
+  AGENT"), without requiring the same keyed `DirectiveID`.** Rejected: that
+  would let one agent key's write supersede an unrelated agent key's item as
+  long as both happen to be AGENT authority in the same boundary —
+  FR-TOOL-002 only ever describes a write to an *existing key* superseding
+  its own previous version, not cross-key suppression.
+- **Checking actor-authority kind before endpoint access in
+  `AuthorizeSupersession`.** Rejected: this is what v2 shipped, and it lets a
+  caller learn an inaccessible endpoint's authority class from which error
+  comes back (`ErrNotFound` vs. `ErrInvalidAuthorityPromotion`) — exactly
+  the disclosure §9 and ADR 6 forbid. Access must be checked first,
+  unconditionally.
+- **A single grant-authorization function reused for issuance and
+  revocation, keyed on the original issuer.** Rejected: revocation is a
+  distinct action taken by a distinct (possibly different) actor;
+  `AuthorizeGrantRevocation` takes that actor explicitly rather than
+  assuming only the original issuer may ever revoke.
+- **`Within` instead of equality for supersession/Working-snapshot
+  boundaries.** Rejected: permits narrowing, which both FR-REL-006 and the
+  amended FR-DIR-007 forbid.
+- **Splitting `UpdateItem`/`AppendObligationTransition` into a mutation call
+  plus a caller-written audit call.** Rejected: nothing then prevents a
+  transaction from committing the mutation without its audit record; atomic
+  methods make the two inseparable at the store layer instead of trusting
+  every caller to pair them.
 
 ## Consequences / compatibility impact
 
-- The FR-TOOL-003 amendment is documentation-only against Phase 1 code (no
-  path lets AGENT satisfy `AuthorizeMutation` today); it matters once Phase
-  3/5 implement `context_resolve` itself.
-- Any future relaxation of `CanHoldLifecycleAuthority()` to include AGENT
-  must revisit this ADR and the amendment together.
-- Adding a new mutable lifecycle property later requires a new `ItemChange`
-  field plus a transition rule, not a schema-level unlock — intentional,
-  per FR-DOM-008.
+- `AuthorizeGrantIssuance` and `AuthorizeGrantRevocation` are required call
+  sites for every grant-issuing/revoking path; any Phase 3+ code that calls
+  `store.Tx.InsertGrant`/`RevokeGrant` directly without them violates the
+  store's own doc comment.
+- The AGENT-same-key restriction on `AuthorizeSupersession` means any future
+  feature that wants AGENT to supersede a different key or a non-AGENT item
+  (none currently proposed) needs its own ADR, not a loosening of this
+  function.
+- `UpdateItem`/`AppendObligationTransition`/`RevokeGrant`'s new atomic-audit
+  and CAS signatures are breaking changes to the Phase 1 store interface; no
+  production data exists yet, so this is a clean signature change, not a
+  migration.
+- The FR-TOOL-003/FR-DIR-007 amendments are applied; no further SDD change
+  is pending for this ADR's scope.
 
 ## Tests that lock the behavior
 
-- `internal/domain/authz_test.go`: `AuthorizeMutation` all-or-nothing across
-  targets; direct-authority success/failure per level; grant success,
-  expired grant, revoked grant, under-authority issuer; grants naming
-  AGENT/TOOL/RETRIEVED_CONTENT rejected at `Validate`.
-- `internal/domain/authz_test.go`: `AuthorizeSupersession` equal-boundary
-  success; `Within`-but-not-equal failure (the narrowing regression);
-  authority downgrade failure; actor-under-superseding-authority failure.
+- `internal/domain/authz_test.go`: `AuthorizeMutation` all-or-nothing;
+  direct-authority success/failure per level; grant success, expired/
+  revoked grant, under-authority issuer, and now an issuer lacking access to
+  the target (must fail even with sufficient authority rank).
+- `internal/domain/authz_test.go`: `AuthorizeGrantIssuance` — issuer access
+  and authority required per target; duplicate IDs in `TargetIDs` rejected;
+  a supplied `targets` list with a repeated ID or a missing ID rejected
+  (the `TargetIDs [A,B]`/`targets [A,A]` case from finding N3).
+- `internal/domain/authz_test.go`: `AuthorizeGrantRevocation` — a
+  non-SYSTEM/HARNESS/USER actor fails; an actor lacking access to any target
+  fails `ErrNotFound` even with sufficient authority; a different-session
+  actor fails; the same exact-target-set check as issuance applies.
+- `internal/domain/authz_test.go`: `MutationGrant.Validate` rejects a
+  matcher grantee for any action other than `ActionAssertObligation`.
+- `internal/domain/authz_test.go`: `AuthorizeSupersession` — an inaccessible
+  endpoint yields `ErrNotFound` regardless of actor or endpoint authority
+  kind (the access-ordering regression from finding N4, asserted for both an
+  inaccessible AGENT item and an inaccessible USER item, confirming neither
+  disclosure path exists); equal-boundary success for SYSTEM/HARNESS/USER;
+  AGENT-AGENT success only with matching `"agent.<key>"` `DirectiveID`s, and
+  failure when the keys differ even though both items are AGENT; TOOL/
+  RETRIEVED_CONTENT actor always fails regardless of boundary or authority
+  match.
 - `internal/domain/obligation_test.go`: `ValidObligationTransition`
-  exhaustive over all `(from, to)` pairs; WAIVED has no outbound transition.
-- `internal/domain/records_test.go`: `ItemChange.Apply` OPEN→RESOLVED
-  succeeds, RESOLVED→OPEN fails, `LastUsedCall` regression fails, negative
-  `AccessDelta` fails, residency change leaves goal status independent.
-- Traces T02 and T06 (`docs/sdd-event-traces.md`) are the Phase 3
-  integration fixtures once directive replacement and CompleteTask exist
-  end-to-end; the unit tests above are the Phase-1-reachable subset.
+  exhaustive; WAIVED terminal; `AppendObligationTransition` CAS — a stale
+  `expectedRevision` fails `ErrVersionConflict` even when `From` still
+  matches the version's current status (the ABA regression from finding N2).
+- `internal/store/storetest`: `UpdateItem` fails without a matching
+  `TargetItem`/`TargetID` event allocated in the same transaction;
+  `AppendObligationTransition` returns the updated version with `Status`/
+  `EvidenceIDs` set from the transition, not a separately written value;
+  `RevokeGrant` fails without its `TargetGrant` audit event.
+- Traces T02, T06, and T18 (Working snapshots) are the Phase 3 integration
+  fixtures once directive replacement and CompleteTask exist end-to-end.
 
 ## Open questions
 
@@ -139,3 +225,29 @@ license to weaken FR-AUTH-001's gate.
   Phase 3 needs grants scoped to "any task the grantee currently owns."
 - Whether CompleteTask's same-task-ownership filter (FR-AUTH-003) needs its
   own function distinct from `AuthorizeMutation`.
+
+## Review
+
+First pass (Codex gpt-6-sol xhigh, `codex-decision-review-out.md`, findings
+1, 2, 6, 8, 10, 11, 12): `findGrant` checks issuer access to the target;
+added `AuthorizeGrantIssuance`; `AuthorizeSupersession` rejects TOOL/
+RETRIEVED_CONTENT actors and restricts AGENT to AGENT-on-AGENT; matcher
+grants limited to `ActionAssertObligation`; `UpdateItem`/
+`AppendObligationTransition` made atomic with their audit records;
+FR-DIR-007 amended to same-boundary; FR-TOOL-003's amendment reported as
+applied.
+
+Second pass (Codex gpt-6-sol xhigh, `codex-contract-v2-review.md`, findings
+N2, N3, N4, verifying PARTIAL on findings 1, 2, 8): the first pass's fixes
+were each incomplete. Changed: `AuthorizeGrantIssuance` now rejects
+duplicate/mismatched target sets via `sameTargetSet`, not just length
+equality (N3); added `AuthorizeGrantRevocation` with an explicit revoking
+actor, since the first pass never added a revocation-side check at all
+(N3); `AuthorizeSupersession` now checks both endpoints' access **before**
+the actor-authority-kind switch, closing the authority-class disclosure the
+first pass's ordering still permitted (N4); the AGENT exception now
+requires the identical `"agent.<key>"` `DirectiveID` on both items, not
+just "both AGENT" (N4, tightening finding 2's original fix);
+`AppendObligationTransition` now takes `expectedRevision` under CAS,
+closing the ABA race the first pass's atomic-but-unversioned transition
+still allowed (N2).
