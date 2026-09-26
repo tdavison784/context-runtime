@@ -36,6 +36,7 @@ func (i SpanIngestIntent) Validate() error {
 type SemanticOperation struct {
 	Kind              SemanticOperationKind
 	SourceSpanIndex   *int
+	Alias             string
 	Span              *SpanIngestIntent                   `operation:"SPAN"`
 	Grant             *GrantIntent                        `operation:"GRANT"`
 	RevokeGrant       *RevokeGrantIntent                  `operation:"REVOKE_GRANT"`
@@ -53,12 +54,15 @@ type SemanticOperation struct {
 }
 
 func (o SemanticOperation) Validate() error {
+	if o.Alias != "" && !ValidAgentKey(o.Alias) {
+		return invalid("operation: invalid local alias")
+	}
 	if o.SourceSpanIndex != nil && *o.SourceSpanIndex < 0 {
 		return invalid("operation: invalid source context")
 	}
 	v := reflect.ValueOf(o)
 	count := 0
-	for n := 2; n < v.NumField(); n++ {
+	for n := 3; n < v.NumField(); n++ {
 		f := v.Field(n)
 		if f.IsNil() {
 			continue

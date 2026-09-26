@@ -104,12 +104,12 @@ func (s Span) ParsesDirectives() bool {
 // (FR-ING-006). It is printable ASCII, at most MaxEventIDBytes, and never
 // starts with a reserved internal ID prefix (R20.1). Turn IDs are derived by ingestion, never supplied (D18).
 type Event struct {
-	EventID         string
-	Kind            EventKind
-	TurnBoundary    bool
-	Spans           []Span
-	Operations      []SemanticOperation
-	ResourceControl bool
+	EventID      string
+	Kind         EventKind
+	TurnBoundary bool
+	Spans        []Span
+	Operations   []SemanticOperation
+	Control      bool
 }
 
 // OpensTurn reports whether the event advances its task's turn exactly once
@@ -121,7 +121,7 @@ func (e Event) OpensTurn() bool {
 // Validate checks structure; ValidateFor additionally checks the authenticated
 // principal and resource limits before any transaction writes.
 func (e Event) Validate() error {
-	if e.Operations != nil || e.ResourceControl {
+	if e.Operations != nil || e.Control {
 		return ErrUnsupportedSchema
 	}
 	return e.validateShape(false)

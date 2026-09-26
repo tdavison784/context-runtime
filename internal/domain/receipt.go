@@ -146,6 +146,7 @@ const IngestReceiptSchemaV2 = "ingest-receipt/v2"
 type IngestReceipt struct {
 	RequestHashVersion string
 	MutationReceiptIDs []string
+	Operations         []OperationResult
 	SessionID          string
 	OccurrenceID       string
 	EventID            string
@@ -175,6 +176,10 @@ func (r IngestReceipt) ItemIDs() []string {
 // Clone returns a deep copy.
 func (r IngestReceipt) Clone() IngestReceipt {
 	r.MutationReceiptIDs = slices.Clone(r.MutationReceiptIDs)
+	r.Operations = slices.Clone(r.Operations)
+	for i := range r.Operations {
+		r.Operations[i] = r.Operations[i].Clone()
+	}
 	if r.Versions.Semantic != nil {
 		p := *r.Versions.Semantic
 		r.Versions.Semantic = &p
@@ -199,7 +204,7 @@ func (r IngestReceipt) Clone() IngestReceipt {
 // ordinal order, and links name items the event created.
 func (r IngestReceipt) Validate() error {
 	if r.SchemaVersion == IngestReceiptSchemaVersion {
-		if r.RequestHashVersion != "" && r.RequestHashVersion != RequestHashV2 || r.Versions.Semantic != nil || r.MutationReceiptIDs != nil {
+		if r.RequestHashVersion != "" && r.RequestHashVersion != RequestHashV2 || r.Versions.Semantic != nil || r.MutationReceiptIDs != nil || r.Operations != nil {
 			return invalid("legacy receipt: unexpected semantic metadata")
 		}
 	} else if r.RequestHashVersion != RequestHashV3 || r.Versions.Semantic == nil {
@@ -223,6 +228,14 @@ func (r IngestReceipt) Validate() error {
 	}
 	if err := r.Versions.Validate(); err != nil {
 		return err
+	}
+	for i, result := range r.Operations {
+		if err := result.Validate(); err != nil {
+			return err
+		}
+		if result.Index != i || result.Access.SessionID != r.SessionID {
+			return invalid("receipt: invalid operation order/session")
+		}
 	}
 	ids := map[string]bool{}
 	for _, it := range r.Items {

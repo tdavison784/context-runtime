@@ -4,14 +4,21 @@ func (e Event) ValidateV3() error {
 	if err := e.validateShape(len(e.Operations) > 0); err != nil {
 		return err
 	}
-	if e.ResourceControl && (len(e.Spans) != 0 || e.TurnBoundary || e.Kind != EventSystem && e.Kind != EventHarness) {
+	if e.Control && (len(e.Spans) != 0 || e.TurnBoundary || e.Kind != EventSystem && e.Kind != EventHarness) {
 		return invalid("resource control: trusted operation-only event required")
 	}
 	if len(e.Operations) == 0 {
 		return nil
 	}
 	seen := make([]bool, len(e.Spans))
+	aliases := map[string]bool{}
 	for _, o := range e.Operations {
+		if o.Alias != "" {
+			if aliases[o.Alias] {
+				return invalid("operation stream: duplicate alias")
+			}
+			aliases[o.Alias] = true
+		}
 		if err := o.Validate(); err != nil {
 			return err
 		}
@@ -33,7 +40,7 @@ func (e Event) ValidateV3() error {
 		if !authority.CanHoldLifecycleAuthority() || o.RequiresReporter() && authority != AuthoritySystem && authority != AuthorityHarness {
 			return ErrInvalidAuthorityPromotion
 		}
-		if e.ResourceControl && o.Kind != OperationRegisterResource && o.Kind != OperationReportResource {
+		if e.Control && o.Kind != OperationRegisterResource && o.Kind != OperationReportResource {
 			return invalid("resource control: task operation forbidden")
 		}
 		if o.Observation != nil && o.Observation.EvidenceSpanIndex != nil {
@@ -55,7 +62,7 @@ func (e Event) ValidateV3() error {
 // the receipt's recorded limits/policy, never today's tightened execution limits.
 func (e Event) PayloadHashFor(schema string, p Principal, limits Limits, policy Phase3Policy) (string, error) {
 	if schema == RequestHashV2 {
-		if e.Operations != nil || e.ResourceControl {
+		if e.Operations != nil || e.Control {
 			return "", ErrEventIDConflict
 		}
 		return e.PayloadHash(p)
@@ -86,7 +93,7 @@ func (e Event) PayloadHashFor(schema string, p Principal, limits Limits, policy 
 	}
 	base := e
 	base.Operations = nil
-	base.ResourceControl = false
+	base.Control = false
 	if len(base.Spans) > 0 {
 		if err := base.ValidateFor(p, limits); err != nil {
 			return "", err
@@ -100,5 +107,5 @@ func (e Event) PayloadHashFor(schema string, p Principal, limits Limits, policy 
 		}
 	}
 	c := e.payloadEncoding(p, "context-runtime/ingest-payload/v3")
-	return c.Uint(boolUint(e.ResourceControl)).Bytes(operations).Hash(), nil
+	return c.Uint(boolUint(e.Control)).Bytes(operations).Hash(), nil
 }

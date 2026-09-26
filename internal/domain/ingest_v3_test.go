@@ -10,7 +10,7 @@ func semanticPolicy() Phase3Policy {
 }
 func TestV3HashOrdersOperationsAndConflictsWithV2Identity(t *testing.T) {
 	p := Principal{SessionID: "s", Authority: AuthorityHarness}
-	e := Event{EventID: "event", Kind: EventHarness, ResourceControl: true, Operations: []SemanticOperation{
+	e := Event{EventID: "event", Kind: EventHarness, Control: true, Operations: []SemanticOperation{
 		{Kind: OperationRegisterResource, RegisterResource: &RegisterResourceIntent{RequestID: "register", ResourceID: "repo", Reporter: p, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}},
 		{Kind: OperationReportResource, ReportResource: &ReportResourceChangeIntent{RequestID: "report", ResourceID: "repo", ResultingAuthoritativeRevision: 1, WorkspaceFingerprint: HashBytes(nil), AllPaths: true}},
 	}}
@@ -74,5 +74,14 @@ func TestV3EnvelopeVerifiesRecordedSchemaAndClonesPolicy(t *testing.T) {
 	env.SchemaVersion = EventEnvelopeSchemaVersion
 	if env.Validate() == nil {
 		t.Fatal("v3 envelope decoded as legacy")
+	}
+}
+
+func TestV3LocalAliasesCannotBeRebound(t *testing.T) {
+	p := Principal{SessionID: "s", Authority: AuthorityHarness}
+	op := SemanticOperation{Kind: OperationRegisterResource, Alias: "repo", RegisterResource: &RegisterResourceIntent{RequestID: "r", ResourceID: "resource", Reporter: p, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}}
+	e := Event{Kind: EventHarness, Control: true, Operations: []SemanticOperation{op, op}}
+	if e.ValidateV3() == nil {
+		t.Fatal("alias rebound")
 	}
 }
