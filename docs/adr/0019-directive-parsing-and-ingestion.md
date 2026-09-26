@@ -2060,19 +2060,14 @@ Five clarifications, applied in SDD v0.9 (R4):
   membership and its members' effective metadata; equal member text in an
   otherwise changed snapshot does not by itself make that member a
   duplicate."
-- **FR-DIR-002 (derived-ID-shaped explicit ID rejection, §6/D20; wording
-  corrected, SPEC-2.7):** added: "An explicit [id] that has the derived-ID
-  shape (a lowercased content-section keyword — Goal, Pinned, Working,
-  Remember, References, or Ephemeral — a hyphen, and 64 lowercase hex
-  digits) is rejected with an ErrMalformedDirective diagnostic and the
-  item is dropped, never assigned a derived ID, so explicit and derived
-  IDs can never collide." The original v0.9 text said "a lowercased
-  keyword," which read as covering every directive keyword including
-  Resolve/Unpin; only the six content sections ever derive an ID
-  (`internal/directive/items.go`'s `derivedShaped`), so
-  `resolve-<64hex>`/`unpin-<64hex>` are ordinary explicit IDs on a
-  lifecycle command, never derived-ID-shaped rejections (§22's R17
-  bullet, SPEC-2.7).
+- **FR-DIR-002 (derived-ID-shaped explicit ID rejection, §6/D20):** added:
+  "An explicit [id] that has the derived-ID shape (a lowercased keyword, a
+  hyphen, and 64 lowercase hex digits) is rejected with an
+  ErrMalformedDirective diagnostic and the item is dropped, never assigned
+  a derived ID, so explicit and derived IDs can never collide." **(SPEC-3.4:
+  this is the original v0.9 insertion, restored verbatim — SPEC-2.7's
+  wording fix below is a separate, later amendment, not a rewrite of this
+  historical quote.)**
 - **FR-DIR-005 (unsupported-lifecycle vocabulary, §1/§4/M4):** added: "The
   unsupported-lifecycle vocabulary recognized for this diagnostic is
   Archive, Unarchive, Promote, Demote, Block, Unblock, Waive, CompleteTask,
@@ -2099,6 +2094,35 @@ itself recorded as an SDD edit. No FR/INV text changed; only the two
 phase/ADR index lists gained ADR 19's entry, keeping SDD.md internally
 consistent with an ADR that otherwise existed but was absent from both
 lists.
+
+**A seventh, later SDD.md edit (SPEC-2.7, then repaired here per
+SPEC-3.4): FR-DIR-002's derived-ID-shape wording, scoped to content-section
+keywords.** Commit `404c379` changed three FR-DIR-002 sentences (this is a
+content change, unlike the sixth edit above — the FR-DIR-002 bullet in the
+original five above is deliberately left quoting the *pre-404c379* text,
+so that historical record stays an exact substring of what v0.9 actually
+inserted). The current SDD.md FR-DIR-002 sentences, exactly:
+- "An item without an ID receives a derived ID (a lowercased
+  content-section keyword, a hyphen, and the 64 lowercase hex digits of
+  its content hash), reported in diagnostics and inspection."
+- "An explicit [id] that has the derived-ID shape (a lowercased
+  content-section keyword, a hyphen, and 64 lowercase hex digits) is
+  rejected with an ErrMalformedDirective diagnostic and the item is
+  dropped, never assigned a derived ID, so explicit and derived IDs can
+  never collide."
+- "Only the six content-section keywords (Pinned, Working, Remember,
+  Ephemeral, References, Goal) derive IDs this way; a lifecycle keyword
+  (Resolve, Unpin) never derives one, so `resolve-<64hex>`/`unpin-<64hex>`
+  are ordinary explicit IDs, not derived-ID-shaped rejections."
+
+Rationale: the original "a lowercased keyword" read as covering every
+directive keyword including Resolve/Unpin; only the six content sections
+ever derive an ID (`internal/directive/items.go`'s `derivedShaped`), so
+`resolve-<64hex>`/`unpin-<64hex>` are ordinary explicit IDs on a lifecycle
+command, never derived-ID-shaped rejections (§22's R17 bullet). SDD.md's
+header still reads `Version: 0.9` — this is recorded as a post-v0.9
+clarification rather than a version bump, consistent with the sixth edit
+above.
 
 ## Review
 
