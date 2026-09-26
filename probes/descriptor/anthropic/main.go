@@ -126,10 +126,8 @@ func writeReport(path string, rec *Recorder) error {
 		if o.Usage.Iterations != "" {
 			detail += " iterations=" + o.Usage.Iterations
 		}
-		detail = strings.ReplaceAll(detail, "|", "\\|")
-		detail = strings.ReplaceAll(detail, "\n", " ")
-		fmt.Fprintf(&b, "| %s | %s | %d | %s | %d | %d | %d | %d | %s |\n", o.ID, o.Model, o.Status, o.Stop,
-			o.Usage.Input, o.Usage.Output, o.Usage.CacheWrite, o.Usage.CacheRead, detail)
+		fmt.Fprintf(&b, "| %s | %s | %d | %s | %d | %d | %d | %d | %s |\n", mdCell(o.ID), mdCell(o.Model), o.Status, mdCell(o.Stop),
+			o.Usage.Input, o.Usage.Output, o.Usage.CacheWrite, o.Usage.CacheRead, mdCell(detail))
 	}
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return err
@@ -143,4 +141,12 @@ func writeReport(path string, rec *Recorder) error {
 		return err
 	}
 	return os.WriteFile(strings.TrimSuffix(path, ".md")+".json", j, 0o644)
+}
+
+// mdCell redacts a report cell with the fixture rules (SEC-1.6) and escapes
+// it for a markdown table row.
+func mdCell(s string) string {
+	s = sanitizeString("", s)
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return strings.ReplaceAll(s, "\n", " ")
 }
