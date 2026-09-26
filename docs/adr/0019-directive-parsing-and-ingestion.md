@@ -2108,26 +2108,25 @@ mechanisms, or new tests below had been recorded in this ADR until now.
   and asserts a different agent's `LifecycleCommands`/`Diagnostics` read
   shows neither record.
 - **DUR-2.1: bounded-lookup and bounded-cursor work, addressing part of
-  SPEC-2.1's remaining store-side gaps (refines §26, F1).** Two of three
-  fixes in this batch: (1) `internal/store/sqlite/access_lookups.go`'s
-  lookups now read `(seq, item_id)` rows in `LIMIT`-bounded batches
-  resumed from a cursor and load full items only until they have what they
-  need (one blob referrer, `limit+1` candidates, one page plus one),
-  instead of loading every matching row before stopping; each lookup's SQL
-  comes from a named builder the plan guard runs, requiring an exact-key
-  index search *and* a `LIMIT`. (2) `internal/store/memory/index.go`'s
-  `orderedIndex.commit` now merges a commit's overlay against each touched
-  key's list via a cursor instead of the prior full-list rebuild it did on
-  every touched key. **This ADR does not yet claim (2) achieves bounded
-  work independent of a key's existing size** — a later round found
-  `orderedIndex.commit` still does per-key work proportional to that key's
-  existing entry count in at least one shape, to be recorded once its fix
-  lands. (3) `internal/ingest/references.go`'s
+  SPEC-2.1's remaining store-side gaps (refines §26, F1; completed by
+  SPEC-3.1, §30 below).** Two of three fixes in this batch landed here:
+  (1) `internal/store/sqlite/access_lookups.go`'s lookups now read `(seq,
+  item_id)` rows in `LIMIT`-bounded batches resumed from a cursor and load
+  full items only until they have what they need (one blob referrer,
+  `limit+1` candidates, one page plus one), instead of loading every
+  matching row before stopping; each lookup's SQL comes from a named
+  builder the plan guard runs, requiring an exact-key index search *and*
+  a `LIMIT`. (3) `internal/ingest/references.go`'s
   `linkPageLimit()` sizes one reference-lookup page by
   `min(lookupLimit, MaxReferenceLinks-refLinks+1)` — the remaining budget
   plus one, never the full `LookupLimit` — so a dropped linkable
   candidate is still seen and reported as truncation, and a page never
-  loads thousands of items to write a handful of edges. Tests:
+  loads thousands of items to write a handful of edges. **The third
+  fix — `internal/store/memory/index.go`'s `orderedIndex.commit` — is
+  recorded in §30 below, not here:** this round's own attempt at it
+  (merging via a cursor) turned out not to be enough on its own (SPEC-3.1
+  item 3 found it still rebuilt each touched key's list), so the
+  properly-bounded version is §30's fix, not this one. Tests:
   `TestLookupsDoBoundedWork` (memory and SQLite — finding one blob
   referrer and one page of sources loads a handful of items regardless of
   session size, and a duplicate leaves the blob index);
@@ -2183,6 +2182,135 @@ mechanisms, or new tests below had been recorded in this ADR until now.
   incoming `SUPERSEDES` edge visits nothing however many unrelated chains
   the session holds, and a real cycle is still found after visiting only
   its own chain).
+
+### 30. PR #5 review round 3: SPEC-3.1 (all five items fixed), DUR-3.1, SPEC-3.2 (all landed)
+
+A third external review round (`r5-spec3.md`) found that §29's fixes left
+several reads still growing with session size, plus a paging bug and gaps
+in the regression guards §29 added. All are now fixed; per the commander's
+relay, this section supersedes §29's DUR-2.1 hedge above with the
+completed picture — no deferral entries, since every SPEC-3.1 item is
+fixed.
+
+- **SPEC-3.1 item 1: retiring an item's lookup rows no longer searches the
+  whole session (refines §26, F1/DUR-1.1).** Every `SUPERSEDES`/`DUPLICATE_OF`
+  edge deletes the retired item's rows from `lookup_canonical`,
+  `lookup_working`, `lookup_source`, and (on a duplicate) `lookup_blob`;
+  their primary keys start with the lookup key, not the item ID, so those
+  `DELETE`s searched the whole session. Migration
+  `0016_lookup_item_indexes.sql` adds a `(session_id, item_id)` index to
+  each of the four tables. Test: `TestRetireLookupsUseIndex`
+  (`internal/store/sqlite/access_lookups_test.go`, via the named
+  `retireLookupSQL` builder the plan guard runs).
+- **SPEC-3.1 item 2: one large event is no longer quadratic in SQLite
+  (refines §5/§7, D8/D10).** Every derived item's `graph.LinkDerived`
+  loaded and fully decoded its span's growing transcript item again, and
+  `InsertRelationship` did the same to check both endpoints exist — for
+  `n` derived items from one transcript, that is `O(n)` reloads of a
+  transcript whose own size is also growing, i.e. quadratic. Two changes:
+  `InsertRelationship` now checks an endpoint's existence with a
+  primary-key probe (`SELECT 1 FROM rec_item WHERE session_id=? AND id=?
+  AND subkey=0`), never a full decode; and each `*transaction` keeps an
+  `itemCache` of items it has already decoded and verified this
+  transaction (`Item` returns a clone from the cache when present,
+  populates it otherwise), so a transcript is decoded once per
+  transaction rather than once per derived item — `UpdateItem` refreshes
+  its entry, and a rolled-back store-method savepoint clears the whole
+  cache, so a cached value is never stale relative to what the
+  transaction itself has written. Store-level item bytes loaded, 500 vs.
+  4000 derived items from one transcript: x65.5 before, x8.0 after (linear
+  in item count, not transcript size too); end-to-end SQLite ingest of one
+  event, 500 vs. 4000 Pinned items: x32 before (0.40s/12.8s), x9.1 after
+  (0.12s/1.06s). Test: `TestDerivedLinksLoadTranscriptOnce`
+  (`internal/store/sqlite/scaling_test.go`).
+- **SPEC-3.1 item 3: the memory ordered-index commit is now proportional
+  to the change, not the key's existing size (refines DUR-2.1 above,
+  which this supersedes).** `orderedIndex.commit` previously rebuilt each
+  touched key's *entire* list from an iterator on every commit that
+  touched it — DUR-2.1's own "merge from a cursor" fix did not change
+  this. It now merges the per-transaction overlay into the committed list
+  in place: a removal (now located by its `Seq`, tracked in `gone
+  map[K]map[string]seqRef`) is deleted by binary search, and an addition
+  is appended when it is newest (the common case, since additions are
+  usually new) or inserted by binary search otherwise — work proportional
+  to the size of the *change*, never the key's existing entry count.
+  `Update` holds the session's write lock for the whole transaction, so an
+  in-place edit to a committed slice never races a concurrent `View`.
+  Committing one more referrer of a blob that already has 20,001: 347µs
+  before, 4.7µs after. Test: `TestOrderedIndexCommitMerges`
+  (`internal/store/memory/bounded_test.go`).
+- **SPEC-3.1 item 4: SQLite lookup cursors now seek inside the index
+  search instead of sorting a union (refines §26, F1).** A lookup's owner
+  filter was an `IN` list per owner column, combined with an `OR`
+  cursor-comparison predicate; SQLite planned this as a `TEMP B-TREE` sort
+  over every match, discarding the index's own order, so a page near
+  position 20,000 of 20,001 cost as much as scanning them all.
+  `ownerCombos` now enumerates the (at most eight) exact `(workflow, task,
+  agent)` owner combinations a viewer (or a viewer pair, for
+  `BlobReferrer`'s within-check) permits, and each lookup runs one exact
+  query per combination with a `(seq, item_id) > (?, ?)` (or `(f_seq, id)
+  > (?, ?)` for references) row-value range that SQLite applies *inside*
+  the index search, merging the combinations' batches in `(Seq, ID)` order
+  in Go. A page of 1 after a cursor near position 19,998 of 20,001: 2.68ms
+  before, within noise of the first page after. Test:
+  `TestLookupCursorsSeek` (`internal/store/sqlite/access_lookups_test.go`,
+  via `assertSeeks`, which fails unless the plan searches an index with
+  the cursor inside its constraint and sorts nothing).
+- **SPEC-3.1 item 5: memory relationship reads are keyed by `(type,
+  endpoint)`, not endpoint alone (refines §7, D10 — predates this PR, on
+  the dedup path).** `relsFrom`/`relsTo` were `map[string][]string` keyed
+  by endpoint only, so reading `SUPERSEDES` into an item with thousands of
+  unrelated `DUPLICATE_OF` edges into the same item walked all of them.
+  Both maps are now keyed by `relKey{Type, ID}`; a read by endpoint alone
+  (no type filter) probes the (fixed, six-entry) `relationshipTypes` list
+  of keys instead. `Relationships(SUPERSEDES, ToID=c)` with 8,000
+  `DUPLICATE_OF` edges into `c`: 257µs before. Test:
+  `TestRelationshipsReadTheirTypedKey`
+  (`internal/store/memory/scan_test.go` — a read by type and endpoint
+  walks at most one index entry and scans zero edges, counted via the
+  index's own yield counter, with 1,000 unrelated `DUPLICATE_OF` edges
+  into the same target present).
+- **DUR-3.1: `SourceItems` reports each unverified ID on exactly one page,
+  not once per page it happens to be skipped past (refines DUR-1.4,
+  §26).** A page reads one row past its limit only to learn whether more
+  remain; an unverified row skipped between the page's `Next` cursor and
+  that extra row was still recorded in `Unverified` on *this* page, and
+  the next page — which resumes at `Next` — read and reported it again.
+  `scanLookup` now also returns the cursor position of every unverified
+  row it skipped; `SourceItems` keeps only those at or before its actual
+  `Next` (via the new `after` cursor-order helper) and defers the rest to
+  the next page, which will see them again starting from `Next`. Test:
+  `TestSourceItemsReportsUnverifiedOnce`
+  (`internal/store/sqlite/access_lookups_test.go` — pages one at a time
+  through sources interleaved with altered rows and asserts each
+  unverified ID is reported exactly once across every page).
+- **SPEC-3.2: regression guards for every SPEC-2.1 read, closing the gaps
+  the second review found (refines §29).** Four gaps, each now caught by a
+  test that fails on the specific mutation the review reproduced: (1)
+  `TestKeyedReadsDoNotScan` (memory) is extended past `CurrentVersions`/
+  `ObligationsBySource` to also cover per-item relationship/item reads,
+  and now also fails if `Relationships` is keyed by type alone (SPEC-3.1
+  item 5), not only by a full scan — it counts both the typed index's
+  yields and the by-type index scan. (2)
+  `TestSupersessionCycleCheckIsLocal` now measures the cycle check *from
+  outside* the function it tests: every `*transaction` records `rowsRead`
+  across every multi-row query the transaction issues (a `countedRows`
+  wrapper around `*sql.Rows` behind the shared `t.query` helper every
+  multi-row `SELECT` — `queryRecords`, `listRecords`, `nextRows` — now
+  goes through), so a mutation that made the check load the whole
+  `SUPERSEDES` graph but still *report* only the nodes it walked (which
+  the prior guard, trusting the function's own `visited` count, could not
+  catch) now fails on rows actually read. (3) `CurrentVersions` gets its
+  own named builder (`currentVersionsQuery`) and joins
+  `ObligationsBySource` in `TestHotReadsUseTheirBuilders`'s per-item-read
+  guard, so reverting either to an ad hoc query fails there even if a
+  separate plan test would not catch it. (4)
+  `TestUpgradeOrderedGraphIndexes` (`internal/store/sqlite/upgrade_test.go`)
+  is the missing migrated-layout parity fixture for 0014→0015: a
+  relationship and items stored before 0015 are read back correctly
+  through the new `relationship_from_seq`/`relationship_to_seq`/
+  `item_task_seq` indexes after upgrade, and the three indexes 0015
+  replaced are confirmed gone.
 
 ## Open questions
 

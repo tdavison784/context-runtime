@@ -207,6 +207,17 @@ preserve valid state.
     dropping the key-only `relationship_from`/`relationship_to`/`item_task`
     indexes they supersede — see "The access-filtered lookup API" below
     for why the key-only indexes were not enough on their own.
+    `TestUpgradeOrderedGraphIndexes` (SPEC-3.2, previously missing) is the
+    migrated-layout parity fixture: a relationship and items stored before
+    0015 read back correctly through the new indexes after upgrade, and
+    the three superseded indexes are confirmed gone.
+  - `0016_lookup_item_indexes.sql` (SPEC-3.1 item 1) adds a `(session_id,
+    item_id)` index to each of `lookup_canonical`/`lookup_working`/
+    `lookup_source`/`lookup_blob`. Every `SUPERSEDES`/`DUPLICATE_OF` edge
+    deletes the retired item's rows from these tables by item ID, but
+    their primary keys start with the lookup key, not the item ID, so that
+    `DELETE` searched the whole session before this index existed. Test:
+    `TestRetireLookupsUseIndex` (`internal/store/sqlite/access_lookups_test.go`).
 
   **The access-filtered lookup API (F1), landed:** `store.BlobReferrer`,
   `CanonicalCandidates`, `CurrentWorking`, and `SourceItems`
