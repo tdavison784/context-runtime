@@ -81,7 +81,9 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 
 func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event) (domain.IngestReceipt, error) {
 	e = e.Clone()
-	if err := e.ValidateFor(p, g.Limits); err != nil {
+	// Structure and authority only: configured limits apply after the
+	// idempotency lookup, to new events (F3).
+	if err := e.ValidateFor(p, retryCeiling(g.Limits)); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	var anonymous string
@@ -123,7 +125,7 @@ func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
 	e = e.Clone()
 	limits := g.Limits.Effective()
-	if err := e.ValidateFor(p, limits); err != nil {
+	if err := e.ValidateFor(p, retryCeiling(g.Limits)); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	if tx.SessionID() != p.SessionID {
@@ -152,6 +154,12 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 			return r, err
 		}
 	}
+	// Only a new occurrence is held to the currently configured limits
+	// (F3, SPEC-1.7, DUR-1.2): a retry above replayed its receipt whatever
+	// the limits are now.
+	if err := e.ValidateFor(p, limits); err != nil {
+		return domain.IngestReceipt{}, err
+	}
 
 	r := &run{g: g, tx: tx, p: p, e: e, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
 	return r.apply()
@@ -179,4 +187,29 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence, eventID, payload
 		return domain.IngestReceipt{}, true, err
 	}
 	return domain.IngestReceipt{}, false, nil
+}
+
+// retryCeiling returns the version-independent limits an event is validated
+// against before its idempotency lookup (F3): every structural and
+// authority rule of ValidateFor applies, but resource limits are only a
+// fixed hard ceiling (or the configured value, if larger) that bounds
+// hashing work. A committed event's retry is therefore never rejected by a
+// later, tighter configuration; the configured limits are checked only for
+// a new occurrence.
+func retryCeiling(configured domain.Limits) domain.Limits {
+	c := configured.Effective()
+	ceil := func(v *int, hard int) { *v = max(*v, hard) }
+	ceil(&c.MaxSpanBytes, 1<<30)
+	ceil(&c.MaxItemsPerSpan, 1<<20)
+	ceil(&c.MaxAttributes, 1<<10)
+	ceil(&c.MaxAttributeBytes, 1<<20)
+	ceil(&c.MaxHeadingBytes, 1<<20)
+	ceil(&c.MaxSpans, 1<<16)
+	ceil(&c.MaxParts, 1<<20)
+	ceil(&c.MaxEventBytes, 1<<30)
+	ceil(&c.MaxBlobBytes, 1<<30)
+	ceil(&c.MaxEventItems, 1<<20)
+	ceil(&c.MaxEventDiagnostics, 1<<20)
+	ceil(&c.MaxRelationships, 1<<22)
+	return c
 }
