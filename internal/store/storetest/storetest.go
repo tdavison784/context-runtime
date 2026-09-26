@@ -71,6 +71,7 @@ var suite = []testCase{
 	{"ItemRichRoundTrip", testItemRichRoundTrip},
 	{"ItemLosslessText", testItemLosslessText},
 	{"ByteExactStringLists", testByteExactStringLists},
+	{"ItemProvenance", testItemProvenance},
 	{"ItemInsertRules", testItemInsertRules},
 	{"ItemBlobIntegrity", testItemBlobIntegrity},
 	{"ItemsFilterOrder", testItemsFilterOrder},
@@ -87,6 +88,7 @@ var suite = []testCase{
 
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
+	{"ObligationClaim", testObligationClaim},
 	{"ObligationTransitions", testObligationTransitions},
 	{"MatcherTransition", testMatcherTransition},
 	{"Grants", testGrants},

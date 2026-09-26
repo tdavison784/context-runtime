@@ -264,3 +264,55 @@ func TestUpgradeLosslessStringLists(t *testing.T) {
 		})
 	}
 }
+
+// TestUpgradeProvenanceColumns checks rows that predate migration 0004: they
+// read as semantic items with no creation turn, source ranges, or claim, and
+// a TTL item without a creation turn is recognizably unowned rather than
+// given an invented turn (M8).
+func TestUpgradeProvenanceColumns(t *testing.T) {
+	l := openLegacy(t, 3)
+	ttl := 2
+	item := storetest.NewItem("s", "old", 1, "x")
+	item.TTLTurns = &ttl
+	l.insert("item", item, nil)
+	obligation := storetest.NewObligation("s", "o", 1, 2, "old")
+	l.insert("obligation", obligation, nil)
+
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		got, err := tx.Item("old")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, item) {
+			t.Errorf("legacy item = %+v, want %+v", got, item)
+		}
+		if got.Role != domain.RoleSemantic || got.CreatedTurn != 0 || got.SourceRanges != nil {
+			t.Errorf("legacy provenance = (%q, %d, %v), want zero values", got.Role, got.CreatedTurn, got.SourceRanges)
+		}
+		if err := got.ValidateTurnOwnership(); !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Errorf("legacy TTL item without a creation turn passes turn ownership: %v", err)
+		}
+		o, err := tx.Obligation("o")
+		if err != nil || o.Claim != "" || !reflect.DeepEqual(o, obligation) {
+			t.Errorf("legacy obligation = %+v, %v", o, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// New rows use the new columns alongside the upgraded ones.
+	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		it := storetest.NewTranscript("s", "new", tx.NextSeq(), "y")
+		if err := tx.InsertItem(it); err != nil {
+			return err
+		}
+		got, err := tx.Item("new")
+		if err != nil || !reflect.DeepEqual(got, it) {
+			t.Errorf("new item = %+v, %v", got, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
