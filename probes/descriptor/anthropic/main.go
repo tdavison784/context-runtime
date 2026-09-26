@@ -64,6 +64,7 @@ func main() {
 		run("reasoning", func() error { return probeReasoning(ctx, rec, m, ms, flagship) })
 		run("cache", func() error { return probeCache(ctx, rec, m, flagship) })
 		run("compaction", func() error { return probeCompaction(ctx, rec, m, flagship) })
+		run("rewrite", func() error { return probeRewrite(ctx, rec, m) })
 	}
 	fmt.Fprintf(os.Stderr, "estimated spend: $%.4f\n", rec.Spent())
 	if *out != "" {
