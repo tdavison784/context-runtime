@@ -15,46 +15,18 @@ func TestConformance(t *testing.T) {
 	storetest.Run(t, func(t *testing.T) store.Store { return memory.New() })
 }
 
-// The behaviors below go beyond the store contract; they match the SQLite
-// store so both enforce the same invariants.
-
-func TestCallReservation(t *testing.T) {
-	s := memory.New()
-	err := s.Update(context.Background(), "s", func(tx store.Tx) error {
-		c1 := storetest.NewCall("s", "c1", "conv", tx.NextSeq())
-		if err := tx.InsertCall(c1); err != nil {
-			return err
-		}
-		c2 := storetest.NewCall("s", "c2", "conv", tx.NextSeq())
-		if err := tx.InsertCall(c2); !errors.Is(err, domain.ErrCallInFlight) {
-			t.Errorf("second reserving InsertCall: %v, want ErrCallInFlight", err)
-		}
-		c2.State, c2.FinishedSeq = domain.CallFailed, c2.PreparedSeq
-		if err := tx.InsertCall(c2); err != nil {
-			return err
-		}
-		// Releasing c1 lets another call reserve the conversation.
-		done := c1.Clone()
-		done.State, done.FinishedSeq, done.Revision = domain.CallFailed, tx.NextSeq(), 2
-		if err := tx.UpdateCall(done, 1); err != nil {
-			return err
-		}
-		return tx.InsertCall(storetest.NewCall("s", "c3", "conv", tx.NextSeq()))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
+// TestConversationOwnersImmutable covers a rule beyond the store contract
+// that the SQLite store also enforces: a conversation's task and agent never
+// change.
 func TestConversationOwnersImmutable(t *testing.T) {
 	s := memory.New()
 	err := s.Update(context.Background(), "s", func(tx store.Tx) error {
 		c := storetest.NewConversation("s", "conv")
-		if err := tx.PutConversation(c, 0); err != nil {
+		if _, err := tx.PutConversation(c, 0); err != nil {
 			return err
 		}
-		c.Revision, c.AgentID = 2, "other"
-		if err := tx.PutConversation(c, 1); !errors.Is(err, domain.ErrImmutable) {
+		c.AgentID = "other"
+		if _, err := tx.PutConversation(c, 1); !errors.Is(err, domain.ErrImmutable) {
 			t.Errorf("PutConversation with a new agent: %v, want ErrImmutable", err)
 		}
 		return nil

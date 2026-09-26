@@ -56,6 +56,9 @@ type state struct {
 	items       map[string]domain.ContextItem
 	rels        map[string]domain.Relationship
 	supersedes  map[string][]string // SUPERSEDES successors: FromID -> ToIDs
+	relsFrom    map[string][]string // relationship IDs by FromID
+	relsTo      map[string][]string // relationship IDs by ToID
+	relsByType  map[domain.RelationshipType][]string
 	events      map[string]domain.EventRecord
 	blobs       map[string]domain.Blob
 	directives  map[directiveKey]string
@@ -75,6 +78,9 @@ func newState() *state {
 		items:       map[string]domain.ContextItem{},
 		rels:        map[string]domain.Relationship{},
 		supersedes:  map[string][]string{},
+		relsFrom:    map[string][]string{},
+		relsTo:      map[string][]string{},
+		relsByType:  map[domain.RelationshipType][]string{},
 		events:      map[string]domain.EventRecord{},
 		blobs:       map[string]domain.Blob{},
 		directives:  map[directiveKey]string{},
@@ -121,7 +127,7 @@ func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) 
 	}
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
-	t := &tx{readTx: newReadTx(sessionID, sess.st, true)}
+	t := &tx{readTx: newReadTx(sessionID, sess.st, true), baseSeq: sess.st.lastSeq}
 	defer t.finish()
 	if err := fn(t); err != nil {
 		return err
