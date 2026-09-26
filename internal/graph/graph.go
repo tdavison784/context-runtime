@@ -1,0 +1,368 @@
+// Package graph implements provenance and supersession operations over a
+// store transaction (SDD section 6). It sits above internal/store and
+// internal/domain: it authorizes and wires the SUPERSEDES, DERIVED_FROM, and
+// directive-replacement edges that internal/domain's records and internal/
+// store's transactions make possible, but it holds no state of its own.
+//
+// Every exported function here takes the transaction it runs in explicitly;
+// callers are responsible for running it inside store.Store.Update (for the
+// read-write operations) so that a failure partway through leaves nothing
+// committed.
+package graph
+
+import (
+	"errors"
+	"slices"
+	"strings"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
+)
+
+// Errors specific to graph operations. Callers compare with errors.Is.
+var (
+	// ErrDuplicateSupersession reports an attempt to make a DUPLICATE_OF item
+	// the superseding side of a SUPERSEDES edge (FR-ING-005): a duplicate
+	// never supersedes anything, even when it reuses a directive ID or key.
+	ErrDuplicateSupersession = errors.New("graph: duplicate item cannot supersede")
+	// ErrDirectiveMismatch reports a directive replacement whose new item
+	// does not carry the task and directive ID it is being filed under.
+	ErrDirectiveMismatch = errors.New("graph: item does not carry the given task and directive ID")
+)
+
+// Supersede records that newID supersedes oldID (FR-REL-003, FR-REL-004,
+// FR-REL-006): it loads both items, authorizes the edge with
+// domain.AuthorizeSupersession (an inaccessible or missing endpoint fails
+// with domain.ErrNotFound), allocates a sequence number, inserts the
+// SUPERSEDES relationship (the store rejects a cycle with
+// domain.ErrSupersessionCycle), and appends a LifecycleEvent recording the
+// change. It never creates a SUPERSEDES edge when newID is itself recorded
+// as a DUPLICATE_OF some other item (FR-ING-005).
+//
+// ruleVersion names the deterministic rule that produced the edge (FR-REL-
+// 007); pass "" for an edge created directly from an authorized event, such
+// as a directive replacement.
+func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (domain.Relationship, error) {
+	newItem, err := tx.Item(newID)
+	if err != nil {
+		return domain.Relationship{}, err
+	}
+	oldItem, err := tx.Item(oldID)
+	if err != nil {
+		return domain.Relationship{}, err
+	}
+	if err := domain.AuthorizeSupersession(actor, newItem, oldItem); err != nil {
+		return domain.Relationship{}, err
+	}
+	dup, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: newID})
+	if err != nil {
+		return domain.Relationship{}, err
+	}
+	if len(dup) > 0 {
+		return domain.Relationship{}, ErrDuplicateSupersession
+	}
+
+	rel := domain.Relationship{
+		ID:          relationshipID(actor.SessionID, domain.RelSupersedes, newID, oldID, eventID),
+		SessionID:   actor.SessionID,
+		Type:        domain.RelSupersedes,
+		FromID:      newID,
+		ToID:        oldID,
+		Seq:         tx.NextSeq(),
+		Authority:   actor.Authority,
+		EventID:     eventID,
+		RuleVersion: ruleVersion,
+	}
+	if err := tx.InsertRelationship(rel); err != nil {
+		return domain.Relationship{}, err
+	}
+
+	ev := domain.LifecycleEvent{
+		ID:         lifecycleEventID(actor.SessionID, oldID, "superseded", eventID),
+		SessionID:  actor.SessionID,
+		Seq:        tx.NextSeq(),
+		TargetKind: domain.TargetItem,
+		TargetID:   oldID,
+		Action:     "superseded",
+		From:       oldID,
+		To:         newID,
+		Actor:      actor,
+		EventID:    eventID,
+	}
+	if err := tx.AppendLifecycleEvent(ev); err != nil {
+		return domain.Relationship{}, err
+	}
+	return rel, nil
+}
+
+// ReplaceDirective files newItemID as the current version of (taskID,
+// directiveID) (FR-DIR-002): if a current version already exists, it first
+// Supersedes it, then points the directive at newItemID. Both writes commit
+// atomically within the caller's transaction. previousID is "" when
+// newItemID is the directive's first version.
+func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string) (string, error) {
+	newItem, err := tx.Item(newItemID)
+	if err != nil {
+		return "", err
+	}
+	if !newItem.Access.Permits(actor) {
+		return "", domain.ErrNotFound
+	}
+	if newItem.TaskID != taskID || newItem.DirectiveID != directiveID {
+		return "", ErrDirectiveMismatch
+	}
+
+	previousID, err := tx.CurrentDirective(taskID, directiveID)
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		previousID = ""
+	case err != nil:
+		return "", err
+	default:
+		if _, err := Supersede(tx, actor, newItemID, previousID, eventID, ""); err != nil {
+			return "", err
+		}
+	}
+
+	if err := tx.SetCurrentDirective(taskID, directiveID, newItemID); err != nil {
+		return "", err
+	}
+	return previousID, nil
+}
+
+// IsCurrent reports whether itemID is not the target of any SUPERSEDES edge,
+// i.e. no other item has superseded it (FR-DOM-005).
+func IsCurrent(tx store.ReadTx, itemID string) (bool, error) {
+	if _, err := tx.Item(itemID); err != nil {
+		return false, err
+	}
+	rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: itemID})
+	if err != nil {
+		return false, err
+	}
+	return len(rels) == 0, nil
+}
+
+// SupersessionChain returns every item in the supersession chain containing
+// itemID, ordered newest to oldest: it walks up to the item nothing
+// supersedes (the current version) and then breadth-first down the items it
+// supersedes, in the deterministic (Seq, ID) order the store returns
+// relationships in. The walk is iterative, so an arbitrarily deep chain
+// never recurses.
+func SupersessionChain(tx store.ReadTx, itemID string) ([]string, error) {
+	if _, err := tx.Item(itemID); err != nil {
+		return nil, err
+	}
+
+	newest := itemID
+	for {
+		rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: newest})
+		if err != nil {
+			return nil, err
+		}
+		if len(rels) == 0 {
+			break
+		}
+		newest = rels[0].FromID // deterministic: store orders by (Seq, ID)
+	}
+
+	chain := []string{newest}
+	seen := map[string]bool{newest: true}
+	queue := []string{newest}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: cur})
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rels {
+			if seen[r.ToID] {
+				continue
+			}
+			seen[r.ToID] = true
+			chain = append(chain, r.ToID)
+			queue = append(queue, r.ToID)
+		}
+	}
+	return chain, nil
+}
+
+// CheckDerivedBoundary reports whether derived is Within every source's
+// access boundary (FR-REL-008): derived content can never be broader than
+// the intersection of what it was derived from, so a replacement or
+// derivation can never widen who can see it. It returns
+// domain.ErrInvalidAuthorityPromotion otherwise.
+func CheckDerivedBoundary(derived domain.AccessBoundary, sources []domain.ContextItem) error {
+	for _, s := range sources {
+		if !derived.Within(s.Access) {
+			return domain.ErrInvalidAuthorityPromotion
+		}
+	}
+	return nil
+}
+
+// LinkDerived records that the item derivedID was derived from every item in
+// sourceIDs (FR-REL-008, FR-TOOL-002): every source must be accessible to
+// actor, or nothing is written and the call fails with domain.ErrNotFound;
+// derived's own access boundary must be within every source's boundary
+// (CheckDerivedBoundary); only then does it insert one DERIVED_FROM edge per
+// source, all carrying the same coverage. Run inside store.Store.Update so a
+// failure partway through (an inaccessible source, or a boundary violation)
+// leaves nothing committed.
+func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) ([]domain.Relationship, error) {
+	if err := actor.Validate(); err != nil {
+		return nil, err
+	}
+	derived, err := tx.Item(derivedID)
+	if err != nil {
+		return nil, err
+	}
+	if !derived.Access.Permits(actor) {
+		return nil, domain.ErrNotFound
+	}
+
+	sources := make([]domain.ContextItem, 0, len(sourceIDs))
+	for _, id := range sourceIDs {
+		src, err := tx.Item(id)
+		if err != nil {
+			return nil, err
+		}
+		if !src.Access.Permits(actor) {
+			return nil, domain.ErrNotFound
+		}
+		sources = append(sources, src)
+	}
+	if err := CheckDerivedBoundary(derived.Access, sources); err != nil {
+		return nil, err
+	}
+
+	rels := make([]domain.Relationship, 0, len(sources))
+	for _, src := range sources {
+		var cov *domain.Coverage
+		if coverage != nil {
+			c := *coverage
+			cov = &c
+		}
+		rel := domain.Relationship{
+			ID:        relationshipID(actor.SessionID, domain.RelDerivedFrom, derivedID, src.ID, eventID),
+			SessionID: actor.SessionID,
+			Type:      domain.RelDerivedFrom,
+			FromID:    derivedID,
+			ToID:      src.ID,
+			Seq:       tx.NextSeq(),
+			Authority: actor.Authority,
+			EventID:   eventID,
+			Coverage:  cov,
+		}
+		if err := tx.InsertRelationship(rel); err != nil {
+			return nil, err
+		}
+		rels = append(rels, rel)
+	}
+	return rels, nil
+}
+
+// ProvenanceNode is one item reachable from a provenance query's root.
+type ProvenanceNode struct {
+	ID        string
+	Kind      domain.Kind
+	Authority domain.Authority
+	Current   bool
+}
+
+// ProvenanceGraph is the result of a "why do we believe this?" query
+// (FR-REL-005).
+type ProvenanceGraph struct {
+	Root      string
+	Nodes     []ProvenanceNode
+	Edges     []domain.Relationship
+	Truncated bool
+}
+
+// Provenance traverses DERIVED_FROM and DEPENDS_ON edges from itemID toward
+// evidence, breadth-first, in deterministic order. The root must be
+// accessible to principal or the call fails with domain.ErrNotFound. Any
+// other node principal cannot access is omitted from the result, along with
+// every edge touching it, and Truncated is set; its content, kind, and
+// authority never appear in the result.
+func Provenance(tx store.ReadTx, principal domain.Principal, itemID string) (ProvenanceGraph, error) {
+	if err := principal.Validate(); err != nil {
+		return ProvenanceGraph{}, err
+	}
+	root, err := tx.Item(itemID)
+	if err != nil {
+		return ProvenanceGraph{}, err
+	}
+	if !root.Access.Permits(principal) {
+		return ProvenanceGraph{}, domain.ErrNotFound
+	}
+
+	g := ProvenanceGraph{Root: itemID}
+	rootCurrent, err := IsCurrent(tx, itemID)
+	if err != nil {
+		return ProvenanceGraph{}, err
+	}
+	g.Nodes = append(g.Nodes, ProvenanceNode{ID: root.ID, Kind: root.Kind, Authority: root.Authority, Current: rootCurrent})
+
+	visited := map[string]bool{itemID: true}
+	queue := []string{itemID}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+
+		derived, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDerivedFrom, FromID: id})
+		if err != nil {
+			return ProvenanceGraph{}, err
+		}
+		depends, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDependsOn, FromID: id})
+		if err != nil {
+			return ProvenanceGraph{}, err
+		}
+		for _, r := range mergeRelationships(derived, depends) {
+			target, err := tx.Item(r.ToID)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					g.Truncated = true
+					continue
+				}
+				return ProvenanceGraph{}, err
+			}
+			if !target.Access.Permits(principal) {
+				g.Truncated = true
+				continue
+			}
+			g.Edges = append(g.Edges, r)
+			if visited[target.ID] {
+				continue
+			}
+			visited[target.ID] = true
+			cur, err := IsCurrent(tx, target.ID)
+			if err != nil {
+				return ProvenanceGraph{}, err
+			}
+			g.Nodes = append(g.Nodes, ProvenanceNode{ID: target.ID, Kind: target.Kind, Authority: target.Authority, Current: cur})
+			queue = append(queue, target.ID)
+		}
+	}
+	return g, nil
+}
+
+// mergeRelationships merges two relationship slices, each already ordered by
+// (Seq, ID) as store.ReadTx.Relationships returns them, into one slice in
+// that same deterministic order.
+func mergeRelationships(a, b []domain.Relationship) []domain.Relationship {
+	out := make([]domain.Relationship, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	slices.SortFunc(out, func(x, y domain.Relationship) int {
+		switch {
+		case x.Seq < y.Seq:
+			return -1
+		case x.Seq > y.Seq:
+			return 1
+		}
+		return strings.Compare(x.ID, y.ID)
+	})
+	return out
+}
