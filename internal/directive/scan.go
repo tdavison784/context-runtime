@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/heap"
 	"sort"
+	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
@@ -25,10 +26,11 @@ type rawHeading struct {
 	valid bool
 }
 type rawSection struct {
-	heading   rawHeading
-	body      []sourceLine
-	end       int
-	malformed bool
+	heading     rawHeading
+	body        []sourceLine
+	end         int
+	malformed   bool
+	unsupported bool // an unsupported lifecycle word; heading.valid is false
 }
 type parseDiagnostic struct {
 	code, reason, section, id string
@@ -127,7 +129,6 @@ func (p *coreParser) finish() {
 // disjoint section ranges. Newline and BOM handling never rewrite source offsets.
 func (p *coreParser) scan(capable bool) {
 	active := -1
-	inert := 0 // level of an open unsupported-lifecycle heading region
 	var fence byte
 	fenceLength := 0
 	comment := false
@@ -226,35 +227,32 @@ func (p *coreParser) scan(capable bool) {
 			// D6/FR-DIR-006: only a same-or-higher heading ends a section. A
 			// deeper heading, keyword or not, is body text of the open section
 			// (including a malformed one) and never opens a nested directive.
-			open := inert
-			if active >= 0 {
-				open = p.sections[active].heading.level
-			}
-			if open > 0 && level > open {
+			if active >= 0 && level > p.sections[active].heading.level {
 				if section != "" {
 					p.diagnostic("DirectiveNotParsed", "nested heading", section, "", byteRange{start, end})
 				}
-				if active >= 0 {
-					p.sections[active].body = append(p.sections[active].body, line)
-				}
+				p.sections[active].body = append(p.sections[active].body, line)
 				continue
 			}
 			if active >= 0 {
 				p.sections[active].end = line.start
 				active = -1
 			}
-			inert = 0
-			if (section != "" || unsupportedLifecycle(word)) && len(b) > p.limits.maxHeading {
+			unsupported := unsupportedLifecycle(word)
+			if (section != "" || unsupported != "") && len(b) > p.limits.maxHeading {
 				// D17: an interpreted heading beyond the limit rejects the
 				// unit; it is never truncated or reinterpreted as prose.
 				p.fail("heading exceeds byte limit")
 			}
-			if section == "" && unsupportedLifecycle(word) {
+			if section == "" && unsupported != "" {
 				// M4: a finite parser-v1 vocabulary is diagnosed rather than
-				// treated as prose; its body gets no directive semantics until
-				// the next same-or-higher heading. Nothing is mutated.
+				// treated as prose. It is recorded as a refused section, so its
+				// exact extent (to the next same-or-higher unsuppressed heading)
+				// comes from this scanner's fence/quote/comment state and no
+				// consumer re-scans it. Its body gets no directive semantics.
 				p.diagnostic("ErrUnsupportedDirective", "unsupported lifecycle", "", "", byteRange{start, end})
-				inert = level
+				p.sections = append(p.sections, rawSection{heading: rawHeading{section: unsupported, level: level, byteRange: byteRange{start, end}}, end: len(p.data), unsupported: true})
+				active = len(p.sections) - 1
 				continue
 			}
 			if section != "" {
@@ -336,16 +334,19 @@ func keyword(b []byte) string {
 }
 
 // unsupportedLifecycle recognizes the parser-v1 unsupported lifecycle words
-// (M4) with the same ASCII-only case folding as keywords.
-func unsupportedLifecycle(b []byte) bool {
+// (M4) with the same ASCII-only case folding as keywords, returning the
+// canonical spelling or "".
+func unsupportedLifecycle(b []byte) string {
 	if len(b) > 12 {
-		return false
+		return ""
 	}
-	switch asciiLower(string(b)) {
-	case "archive", "unarchive", "promote", "demote", "block", "unblock", "waive", "completetask", "reopen":
-		return true
+	switch w := asciiLower(string(b)); w {
+	case "archive", "unarchive", "promote", "demote", "block", "unblock", "waive", "reopen":
+		return strings.ToUpper(w[:1]) + w[1:]
+	case "completetask":
+		return "CompleteTask"
 	}
-	return false
+	return ""
 }
 func asciiValue(b []byte) bool {
 	if len(b) == 0 {

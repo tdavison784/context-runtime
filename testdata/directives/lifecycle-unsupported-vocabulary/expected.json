@@ -2,7 +2,170 @@
   "parser_version": "directive/v1",
   "sections": [
     {
+      "keyword": "ARCHIVE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        0,
+        15
+      ],
+      "heading_range": [
+        0,
+        15
+      ],
+      "body_range": [
+        15,
+        15
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "UNARCHIVE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        15,
+        32
+      ],
+      "heading_range": [
+        15,
+        32
+      ],
+      "body_range": [
+        32,
+        32
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "PROMOTE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        32,
+        47
+      ],
+      "heading_range": [
+        32,
+        47
+      ],
+      "body_range": [
+        47,
+        47
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "DEMOTE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        47,
+        57
+      ],
+      "heading_range": [
+        47,
+        57
+      ],
+      "body_range": [
+        57,
+        57
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "BLOCK",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        57,
+        76
+      ],
+      "heading_range": [
+        57,
+        70
+      ],
+      "body_range": [
+        70,
+        76
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "UNBLOCK",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        76,
+        91
+      ],
+      "heading_range": [
+        76,
+        91
+      ],
+      "body_range": [
+        91,
+        91
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "WAIVE",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        91,
+        128
+      ],
+      "heading_range": [
+        91,
+        108
+      ],
+      "body_range": [
+        108,
+        128
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "COMPLETETASK",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        128,
+        144
+      ],
+      "heading_range": [
+        128,
+        144
+      ],
+      "body_range": [
+        144,
+        144
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "REOPEN",
+      "status": "UNSUPPORTED",
+      "level": 2,
+      "range": [
+        144,
+        158
+      ],
+      "heading_range": [
+        144,
+        158
+      ],
+      "body_range": [
+        158,
+        158
+      ],
+      "malformed": true
+    },
+    {
       "keyword": "REMEMBER",
+      "status": "PARSED",
       "level": 2,
       "range": [
         187,
@@ -24,7 +187,7 @@
   "items": [
     {
       "section": "REMEMBER",
-      "section_index": 0,
+      "section_index": 9,
       "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
       "authority": "USER",
       "text": "kept",

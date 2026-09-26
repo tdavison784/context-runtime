@@ -68,15 +68,16 @@ type goldenAttr struct {
 }
 
 type goldenSection struct {
-	Keyword      directive.Keyword `json:"keyword"`
-	Level        int               `json:"level"`
-	Range        span              `json:"range"`
-	HeadingRange span              `json:"heading_range"`
-	BodyRange    span              `json:"body_range"`
-	DirectiveID  string            `json:"directive_id,omitempty"`
-	Attributes   []goldenAttr      `json:"attributes,omitempty"`
-	Items        []int             `json:"items,omitempty"`
-	Malformed    bool              `json:"malformed,omitempty"`
+	Keyword      directive.Keyword       `json:"keyword"`
+	Status       directive.SectionStatus `json:"status"`
+	Level        int                     `json:"level"`
+	Range        span                    `json:"range"`
+	HeadingRange span                    `json:"heading_range"`
+	BodyRange    span                    `json:"body_range"`
+	DirectiveID  string                  `json:"directive_id,omitempty"`
+	Attributes   []goldenAttr            `json:"attributes,omitempty"`
+	Items        []int                   `json:"items,omitempty"`
+	Malformed    bool                    `json:"malformed,omitempty"`
 }
 
 type goldenItem struct {
@@ -132,7 +133,7 @@ func golden(r directive.Result) goldenUnit {
 		g.Error = "invalid_record"
 	}
 	for _, s := range r.Sections {
-		g.Sections = append(g.Sections, goldenSection{s.Keyword, s.Level, toSpan(s.Range), toSpan(s.HeadingRange), toSpan(s.BodyRange), s.DirectiveID, attrs(s.Attributes), s.ItemIndexes, s.Malformed})
+		g.Sections = append(g.Sections, goldenSection{s.Keyword, s.Status, s.Level, toSpan(s.Range), toSpan(s.HeadingRange), toSpan(s.BodyRange), s.DirectiveID, attrs(s.Attributes), s.ItemIndexes, s.Malformed})
 	}
 	for _, it := range r.Items {
 		gi := goldenItem{Section: it.Section, SectionIdx: it.SectionIndex, DirectiveID: it.DirectiveID, ExplicitID: it.ExplicitID, Authority: it.Authority,

@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "GOAL",
+      "status": "PARSED",
       "level": 2,
       "range": [
         0,

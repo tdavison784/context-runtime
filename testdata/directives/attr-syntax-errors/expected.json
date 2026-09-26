@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "PINNED",
+      "status": "MALFORMED",
       "level": 2,
       "range": [
         0,
@@ -20,6 +21,7 @@
     },
     {
       "keyword": "WORKING",
+      "status": "PARSED",
       "level": 2,
       "range": [
         23,

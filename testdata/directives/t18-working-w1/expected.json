@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "WORKING",
+      "status": "PARSED",
       "level": 2,
       "range": [
         0,

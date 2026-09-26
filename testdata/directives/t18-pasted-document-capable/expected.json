@@ -3,6 +3,7 @@
   "sections": [
     {
       "keyword": "GOAL",
+      "status": "PARSED",
       "level": 2,
       "range": [
         18,
@@ -22,6 +23,7 @@
     },
     {
       "keyword": "PINNED",
+      "status": "PARSED",
       "level": 2,
       "range": [
         46,
@@ -41,6 +43,7 @@
     },
     {
       "keyword": "RESOLVE",
+      "status": "PARSED",
       "level": 2,
       "range": [
         100,
