@@ -23,7 +23,7 @@ func LinkDerivedCoverage(tx store.Tx, actor domain.Principal, derivedID string, 
 		return nil, err
 	}
 	for _, source := range plan.sources {
-		rel := domain.Relationship{ID: deriveID("rel", "context-runtime/graph/derived-relationship-id/v2", actor.SessionID, derivedID, source.ID, eventID, string(purpose)), SessionID: actor.SessionID, Type: domain.RelDerivedFrom, FromID: derivedID, ToID: source.ID, Seq: tx.NextSeq(), Authority: actor.Authority, EventID: eventID, RuleVersion: "derived-coverage/v1", CoverageID: plan.coverage.ID}
+		rel := domain.Relationship{ID: derivedRelationshipID(actor.SessionID, derivedID, source.ID, eventID, purpose), SessionID: actor.SessionID, Type: domain.RelDerivedFrom, FromID: derivedID, ToID: source.ID, Seq: tx.NextSeq(), Authority: actor.Authority, EventID: eventID, RuleVersion: "derived-coverage/v1", CoverageID: plan.coverage.ID}
 		if err := tx.InsertRelationship(rel); err != nil {
 			return nil, err
 		}

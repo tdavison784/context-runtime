@@ -296,7 +296,8 @@ func (r semRead) ResourcePathState(locator domain.ResourceLocator) (domain.Resou
 // --- Workspace bindings ---
 
 // InsertWorkspaceBinding stores an immutable binding version: versions of
-// one binding are dense from 1, and its resource is registered.
+// one binding are dense from 1 at increasing sequences, and its resource is
+// registered.
 func (t *semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 	if err := t.t.companion("workspace binding", b.SemanticMeta, b.Validate); err != nil {
 		return err
@@ -304,8 +305,14 @@ func (t *semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 	if t.r.sem.res.wbindings.has(wbKey{b.ID, b.Version}) {
 		return immutable("workspace binding", fmt.Sprintf("%s/%d", b.ID, b.Version))
 	}
-	if last, _ := t.r.sem.res.wbLatest.peek(b.ID); b.Version != last+1 {
+	last, _ := t.r.sem.res.wbLatest.peek(b.ID)
+	if b.Version != last+1 {
 		return invalid("workspace binding %s: version %d, want %d", b.ID, b.Version, last+1)
+	}
+	// A later version takes a later sequence, so (Seq, ID) orders a
+	// binding's versions unambiguously in every backend's pages.
+	if prev, ok := t.r.sem.res.wbindings.peek(wbKey{b.ID, last}); ok && b.Seq <= prev.Seq {
+		return invalid("workspace binding %s: version %d needs a later sequence than version %d", b.ID, b.Version, last)
 	}
 	if !t.r.sem.res.bindings.has(b.ResourceID) {
 		return invalid("workspace binding %s: resource %s is not registered", b.ID, b.ResourceID)

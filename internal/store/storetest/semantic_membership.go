@@ -184,7 +184,23 @@ func testSemanticCoverage(t *testing.T, s store.Store) {
 			[]domain.CoverageMember{{SemanticMeta: Meta(sessA, "", seq), CoverageID: "outer", NestedCoverageID: "cov"}})
 		return semantic(t, tx).InsertCoverage(c, m)
 	})
+	// An edge refers to stored normalized coverage by ID.
+	update(t, s, sessA, func(tx store.Tx) error {
+		r := NewRelationship(sessA, "derived", domain.RelDerivedFrom, "b", "a", tx.NextSeq())
+		r.CoverageID = "cov"
+		return tx.InsertRelationship(r)
+	})
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+		r := NewRelationship(sessA, "derived2", domain.RelDerivedFrom, "b", "a", tx.NextSeq())
+		r.CoverageID = "missing"
+		return tx.InsertRelationship(r)
+	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
+		rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDerivedFrom})
+		noErr(t, err)
+		if len(rels) != 1 || rels[0].CoverageID != "cov" {
+			t.Errorf("derived edge = %+v, want its coverage reference", rels)
+		}
 		got, err := readSemantic(t, tx).CoverageMembers("outer", store.Page{Limit: 5})
 		noErr(t, err)
 		if len(got.Records) != 1 || got.Records[0].NestedCoverageID != "cov" {

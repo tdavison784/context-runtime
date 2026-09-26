@@ -31,8 +31,7 @@ func TestReplaceDirective_ObligationFanOut(t *testing.T) {
 					return nil
 				})
 				replaceErr := s.Update(ctx, sess, func(tx store.Tx) error {
-					g2 := storetest.NewGoal(sess, "g2", tx.NextSeq(), "Ship it faster")
-					g2.DirectiveID, g2.Section, g2.Scope, g2.Access = "d", domain.SectionGoal, domain.ScopeTask, storetest.DirectiveBoundary(sess)
+					g2 := goalLike(sess, "g2", "d", tx.NextSeq(), "Ship it faster")
 					mustInsert(t, tx, g2)
 					_, err := ReplaceDirective(tx, actor, g2.TaskID, "d", g2.ID, "evt-g2")
 					return err

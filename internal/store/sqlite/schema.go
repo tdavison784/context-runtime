@@ -80,6 +80,26 @@ func makeSchemas() map[string]*recordSchema {
 		{"creation_declaration", domain.CreationDeclaration{}, "ItemID", ""},
 		{"snapshot_declaration", domain.SnapshotDeclaration{}, "ID", ""},
 		{"semantic_change", domain.SemanticChange{}, "ID", ""},
+		{"resource_binding", domain.ResourceBinding{}, "ResourceID", ""},
+		{"resource_update", domain.ResourceUpdate{}, "ID", ""},
+		{"resource_state", domain.ResourceState{}, "ResourceID", ""},
+		{"path_state", pathStateRow{}, "LocatorKey", ""},
+		{"workspace_binding", domain.WorkspaceBinding{}, "ID", "Version"},
+		{"observation_run", domain.ObservationRun{}, "ID", ""},
+		{"observation", domain.ObservationRecord{}, "ID", ""},
+		{"subject_state", subjectStateRow{}, "Key", ""},
+		{"obligation_declaration", obligationDeclarationRow{}, "ObligationID", "Version"},
+		{"proof", domain.ApplicabilityProof{}, "ID", ""},
+		{"proof_dependency", domain.ProofDependency{}, "ID", ""},
+		{"assertion", domain.AssertionRecord{}, "ID", ""},
+		{"transition_detail", domain.TransitionDetail{}, "TransitionID", ""},
+		{"retrieval_lease", domain.RetrievalLease{}, "ID", ""},
+		{"retrieval_result", domain.RetrievalResult{}, "ID", ""},
+		{"projection", domain.ProjectionRecord{}, "ID", ""},
+		{"retrieval_event", domain.RetrievalEvent{}, "ID", ""},
+		{"gc_request", domain.GCRequest{}, "ID", ""},
+		{"collect_receipt", domain.CollectReceipt{}, "ID", ""},
+		{"gc_result", domain.GCResult{}, "GCRequestID", ""},
 	}
 	out := make(map[string]*recordSchema, len(definitions))
 	for _, d := range definitions {
@@ -217,7 +237,10 @@ func (c recordColumn) sqlType() string {
 var recordTables = []string{"item", "relationship", "event", "obligation", "obligation_transition", "grant", "task", "lifecycle", "conversation", "call", "attempt",
 	"envelope", "receipt", "receipt_item", "diagnostic", "command", "reference",
 	"owner", "coverage", "coverage_member", "exchange", "exchange_member", "exchange_ack", "admission", "membership",
-	"checkpoint", "mutation_receipt", "tool_receipt", "creation_declaration", "snapshot_declaration", "semantic_change"}
+	"checkpoint", "mutation_receipt", "tool_receipt", "creation_declaration", "snapshot_declaration", "semantic_change",
+	"resource_binding", "resource_update", "resource_state", "path_state", "workspace_binding", "observation_run", "observation", "subject_state",
+	"obligation_declaration", "proof", "proof_dependency", "assertion", "transition_detail",
+	"retrieval_lease", "retrieval_result", "projection", "retrieval_event", "gc_request", "collect_receipt", "gc_result"}
 
 // typedColumns is the column layout (name -> declared type) the Go record
 // types require of each rec_* table. Migrations are forward-only and never
