@@ -653,8 +653,15 @@ Phase 2's `domain.IngestReceipt` (the type this decision originally called
 `IngestResult`; no `IngestResult` type exists — SPEC-2.2) is internal
 until the public service signature is settled: R3 keeps it in
 `internal/ingest` (or
-`internal/domain`), *not* aliased from the root package — the root package
-aliases only `Event`/`Span` input types (SDD §8's `Ingest(...)
+`internal/domain`), *not* aliased from the root package. **(SPEC-3.6:
+corrected)** The root package aliases plenty of ordinary domain types for
+general use (`Principal`, `ContextItem`, `AccessBoundary`, and others,
+`types.go`) — the R3 restriction is narrower than "only `Event`/`Span`":
+it is that the root package never aliases the *richer ingestion result*
+types (`domain.IngestReceipt`, diagnostics, lifecycle command records),
+only the caller-constructed `Event`/`Span` input shape, an explicit
+allowlist `TestRootAliasesOnlyIngestInputTypes` enforces (SDD §8's
+`Ingest(...)
 ([]ContextItem, error)` signature change to return items plus
 diagnostics/commands is deferred to the phase that implements
 `Runtime.Ingest`, i.e. Phase 5). Migrations for source ranges, event
@@ -1011,9 +1018,13 @@ Findings from `p2-ingest`'s own test suite, appended to
   D9/D14 — landed, SPEC-1.4).** `internal/directive` emits an
   informational `DirectiveIDDerived` diagnostic for every item it derives
   an ID for, before `internal/ingest` decides whether that item's section
-  is actually applied. `internal/ingest`'s unit loop now filters this: `if
-  d.Code == domain.DirectiveIDDerived && !r.written[d.Range] { continue
-  }` — a derived-ID notice is reported only for a range ingestion actually
+  is actually applied. `internal/ingest`'s unit loop now filters this: for
+  `d.Code == domain.DirectiveIDDerived`, `item, ok := r.written[d.Range];
+  if !ok { continue }` (**SPEC-3.6: corrected — `r.written` is
+  `map[domain.ByteRange]domain.AccessBoundary`, so the earlier bare
+  `!r.written[d.Range]` boolean negation no longer type-checks against the
+  current field; this quote was fixed only in the Tests section before**)
+  — a derived-ID notice is reported only for a range ingestion actually
   wrote, so a section ingest refuses (a Working section dropped whole on a
   boundary conflict, per the D11 item below) never leaves a
   `DirectiveIDDerived` notice for an item that does not exist.
@@ -1199,9 +1210,10 @@ the code at this ADR's final-pass head.
   a valid item ID resolves it the same way any other accessible source
   resolves (`internal/ingest/references.go`), and links it, keeping an
   inaccessible or missing item ID indistinguishable — the same rule §16
-  already specified for path/URL locators. Covered within
-  `internal/ingest/references_test.go`'s existing reference suite rather
-  than a separately named test.
+  already specified for path/URL locators. Test: `TestReferencesByItemID_F4`
+  (`internal/ingest/references_test.go`, SPEC-3.6: corrected — a
+  separately named test does exist and §16 already cites it, contradicting
+  this paragraph's earlier claim that it doesn't).
 - **F6 (SEC-1.3 — diagnostic/lifecycle-command record access, refines
   §12/§1, D16/D1; landed).** A diagnostic or lifecycle-command record's
   access is now the *narrower* of the source span's boundary and the
@@ -1210,7 +1222,7 @@ the code at this ADR's final-pass head.
   (`internal/ingest/diagnostics.go`) computed per diagnostic rather than
   defaulting to the span's transcript access, and a lifecycle command's
   record narrows via `domain.Intersect(scope, spanAccess, targetAccess)`
-  (`internal/domain/principal.go:101`, `internal/ingest/derive.go:332`)
+  (`internal/domain/principal.go:101`, `internal/ingest/derive.go:349`)
   when its target resolves to a narrower-boundary item. This closes the
   over-disclosure SEC-1.3 found: a span-boundary-only access field could
   let a principal who can see the span, but not a narrower-boundary target
@@ -1228,14 +1240,16 @@ the code at this ADR's final-pass head.
   session-wide `EventID` collision across tasks/agents/workflows lets one
   principal's guessable ID block another's identical retry and lets an
   attacker probe which IDs another principal has used (reproduced:
-  `TestSEC_EventIDCrossPrincipal`, a `wf2/T2` principal using `EventID:
+  `TestEventIDSquatIsBareConflict_F2` (`internal/ingest/f2_eventid_test.go`,
+  SPEC-3.6: corrected from a cited `TestSEC_EventIDCrossPrincipal`, which
+  does not exist), a `wf2/T2` principal using `EventID:
   "turn-2"` blocks a later, unrelated `T`-scoped event with the same ID).
   Ruling: mitigation, not redesign — FR-ING-006's session-scoped identity
   is unchanged; a different principal reusing an `EventID` still fails
   `domain.ErrEventIDConflict`
   (`errors.New("event ID conflict")`, `internal/domain/errors.go:24`),
   returned bare with no ID, principal, or session detail
-  (`internal/ingest/ingest.go:192,199`) — `p2-contract` verifies this with
+  (`internal/ingest/ingest.go:242,249`) — `p2-contract` verifies this with
   a test. **Accepted residual risk, recorded here:** an `EventID` is a
   session-wide idempotency key, not a per-principal one; a harness that
   lets predictable, cross-principal-guessable `EventID`s reach the runtime
@@ -1331,7 +1345,12 @@ the code at this ADR's final-pass head.
   (FR-DIR-005 at the ingest layer, not only graph); `TestDefaultLimitValues`
   (`internal/domain/limits_test.go` — D17's 8 MiB/4096-item defaults);
   `TestReplaceDirective_ObligationFanOut` (`internal/graph/fanout_test.go`
-  — R9's large-fan-out obligation retirement); `TestRetryIdentity_SessionScopedRich`
+  — R9's large-fan-out obligation retirement); `TestConcurrentSupersession`
+  (`internal/ingest/supersession_test.go`, SPEC-3.6: previously uncited —
+  `n` concurrent events each replacing one Working pin serialize into one
+  supersession chain on both stores: exactly one current pin, one
+  `SUPERSEDES` edge per replacement, every old version retired exactly
+  once); `TestRetryIdentity_SessionScopedRich`
   (`internal/ingest/retry_test.go` — TEST-1.2's session-scoped rich-event
   retry, alongside the existing `_RichReceipt` case).
 
@@ -1527,11 +1546,13 @@ each with its own fix and test.
   `TestD10_DuplicateDirectiveNeverCurrent`) locks that a `DUPLICATE_OF`
   item can never become current through a stale current-map pointer,
   independent of `TestD10_DuplicateDirectiveNeverCurrent`'s coverage.
-  TEST-1.2: `TestRetryIdentity_SessionScopedRich` (above). TEST-1.3:
-  `TestDiagnosticsCapTruncates` (`internal/ingest/retry_concurrency_test.go`,
-  comment cites "TEST-1.3, D17" directly) locks that a late limit
-  rejection is atomic and never poisons the `EventID` for a future retry,
-  and that the diagnostics cap truncates correctly under it.
+  TEST-1.2: `TestRetryIdentity_SessionScopedRich` (above). TEST-1.3
+  (`internal/ingest/retry_concurrency_test.go`, both comments cite
+  "TEST-1.3, D17" directly — **SPEC-3.6: corrected, split into its two
+  actual halves**): `TestLateLimitRejectionIsAtomic` locks that a late
+  limit rejection is atomic and never poisons the `EventID` for a future
+  retry; `TestDiagnosticsCapTruncates` locks that the diagnostics cap
+  truncates correctly under it.
 
 ## Alternatives considered
 
@@ -1748,8 +1769,10 @@ isn't covered), that is called out explicitly rather than left silent.
   `TestAttributeAllowList`, `TestAttributeValuesExact` (exact-case
   rejection), `TestParseTTLR1` (`ttl=0001` leading zeros;
   above-2147483647 representation-limit failure), `TestScopeExactAndWidening`
-  (USER-span WORKFLOW/SESSION widening ignored with a diagnostic; AGENT
-  scope never removes an existing constraint), `TestForDirectiveFailsClosed`;
+  (USER-span WORKFLOW/SESSION widening ignored with a diagnostic — **SPEC-3.6:
+  corrected; this test does not also assert the AGENT-scope-never-removes-an-
+  existing-constraint half, which has no dedicated test and is a genuine
+  gap for `p2-tests`**), `TestForDirectiveFailsClosed`;
   `internal/directive/items_test.go:TestTTLRepresentationLimit`;
   `internal/directive/policycheck_test.go:TestRepresentationLimitAgreement`.
 - **§9 (obligations):** `internal/graph/obligation_test.go` —
@@ -1843,9 +1866,13 @@ isn't covered), that is called out explicitly rather than left silent.
   `TestTranscriptsNeverPoseAsRequirements` is the closest existing
   evidence); no test names a relationship-shaped JSON payload specifically,
   which is a real, if narrow, gap for `p2-tests`.
-- **§19 (API shape):** `api_test.go:TestRootAliasesOnlyIngestInputTypes`;
-  `imports_test.go:TestPackageBoundaries` (static/import-boundary check —
-  the root package aliases only `Event`/`Span`, not `domain.IngestReceipt`);
+- **§19 (API shape):** `api_test.go:TestRootAliasesOnlyIngestInputTypes`
+  (**SPEC-3.6: corrected — this, not `imports_test.go:TestPackageBoundaries`,
+  is the allowlist test; `TestPackageBoundaries` checks the import/dependency
+  graph, an unrelated property**) — the root package never aliases
+  `domain.IngestReceipt`, diagnostics, or lifecycle command records, only
+  `Event`/`Span` among the ingestion-relevant types (§19's decision text
+  above, corrected the same way);
   `internal/store/sqlite/upgrade_test.go` — `TestUpgradeProvenanceColumns`,
   `TestUpgradeCurrentNamespace`, `TestUpgradeLosslessParts`,
   `TestUpgradeLosslessStringLists`, `TestUpgradeReceiptLimits` (the

@@ -393,10 +393,16 @@ preserve valid state.
 - The lossless leaf-list encoding (D3, R8) is a breaking on-disk format
   change for any pre-Phase-2 database; migrations 0002/0003 upgrade
   existing rows automatically on open, but a row `0001` had already
-  corrupted (invalid UTF-8 replaced with U+FFFD) is detected, not
-  silently repaired: it now reads back `domain.ErrIntegrity` rather than
-  the wrong value it held before. Operators restoring a pre-Phase-2 backup
-  should expect this on any row a Phase 1 binary had already corrupted.
+  corrupted a *content part* (invalid UTF-8 replaced with U+FFFD) is
+  detected, not silently repaired: it now reads back `domain.ErrIntegrity`
+  rather than the wrong value it held before. **(SPEC-3.6) This detection
+  is content-part-specific, not general** — see "The access-filtered
+  lookup API" above: a corrupted tag or ID list decodes cleanly and is
+  returned as-is, with no `ErrIntegrity`, since nothing compares it
+  against a separate hash. Operators restoring a pre-Phase-2 backup
+  should expect the `ErrIntegrity` detection only for a row whose
+  corruption was in a content part, and a silently-preserved-as-is old
+  value for one whose corruption was in a tag or ID list.
 - One writer connection plus `BEGIN IMMEDIATE` means writer throughput is
   bounded by SQLite's single-writer model. `store.Store.Update`
   (`internal/store/store.go`) now documents different sessions as
