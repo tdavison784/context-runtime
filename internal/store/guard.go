@@ -44,140 +44,180 @@ func (g *Guard) InsertEvent(e domain.EventRecord) (domain.EventRecord, bool, err
 	if g.err != nil {
 		return domain.EventRecord{}, false, g.err
 	}
-	return g.TxBase.InsertEvent(e)
+	v, existed, err := g.TxBase.InsertEvent(e)
+	g.noteWrite(err)
+	return v, existed, err
 }
 
 func (g *Guard) InsertIngestion(env domain.EventEnvelope, r domain.IngestReceipt) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.InsertIngestion(env, r)
+	err := g.TxBase.InsertIngestion(env, r)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) InsertUnresolvedReference(r domain.UnresolvedReference) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.InsertUnresolvedReference(r)
+	err := g.TxBase.InsertUnresolvedReference(r)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) InsertItem(it domain.ContextItem) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.InsertItem(it)
+	err := g.TxBase.InsertItem(it)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) UpdateItem(id string, expectedVersion uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error) {
 	if g.err != nil {
 		return domain.ContextItem{}, g.err
 	}
-	return g.TxBase.UpdateItem(id, expectedVersion, change, event)
+	v, err := g.TxBase.UpdateItem(id, expectedVersion, change, event)
+	g.noteWrite(err)
+	return v, err
 }
 
 func (g *Guard) InsertRelationship(r domain.Relationship) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.InsertRelationship(r)
+	err := g.TxBase.InsertRelationship(r)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) SetCurrentVersion(itemID string) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.SetCurrentVersion(itemID)
+	err := g.TxBase.SetCurrentVersion(itemID)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) InsertBlob(b domain.Blob) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.InsertBlob(b)
+	err := g.TxBase.InsertBlob(b)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) InsertObligationVersion(o domain.ObligationVersion) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.InsertObligationVersion(o)
+	err := g.TxBase.InsertObligationVersion(o)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) UpdateObligationVersion(o domain.ObligationVersion, expectedRevision uint64) (domain.ObligationVersion, error) {
 	if g.err != nil {
 		return domain.ObligationVersion{}, g.err
 	}
-	return g.TxBase.UpdateObligationVersion(o, expectedRevision)
+	v, err := g.TxBase.UpdateObligationVersion(o, expectedRevision)
+	g.noteWrite(err)
+	return v, err
 }
 
 func (g *Guard) RetireObligationVersion(obligationID string, version, expectedRevision uint64, event domain.LifecycleEvent) (domain.ObligationVersion, error) {
 	if g.err != nil {
 		return domain.ObligationVersion{}, g.err
 	}
-	return g.TxBase.RetireObligationVersion(obligationID, version, expectedRevision, event)
+	v, err := g.TxBase.RetireObligationVersion(obligationID, version, expectedRevision, event)
+	g.noteWrite(err)
+	return v, err
 }
 
 func (g *Guard) AppendObligationTransition(t domain.ObligationTransition, expectedRevision uint64) (domain.ObligationVersion, error) {
 	if g.err != nil {
 		return domain.ObligationVersion{}, g.err
 	}
-	return g.TxBase.AppendObligationTransition(t, expectedRevision)
+	v, err := g.TxBase.AppendObligationTransition(t, expectedRevision)
+	g.noteWrite(err)
+	return v, err
 }
 
 func (g *Guard) InsertGrant(gr domain.MutationGrant) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.InsertGrant(gr)
+	err := g.TxBase.InsertGrant(gr)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) RevokeGrant(id string, event domain.LifecycleEvent) (domain.MutationGrant, error) {
 	if g.err != nil {
 		return domain.MutationGrant{}, g.err
 	}
-	return g.TxBase.RevokeGrant(id, event)
+	v, err := g.TxBase.RevokeGrant(id, event)
+	g.noteWrite(err)
+	return v, err
 }
 
 func (g *Guard) PutTask(t domain.TaskState, expectedVersion uint64, event domain.LifecycleEvent) (domain.TaskState, error) {
 	if g.err != nil {
 		return domain.TaskState{}, g.err
 	}
-	return g.TxBase.PutTask(t, expectedVersion, event)
+	v, err := g.TxBase.PutTask(t, expectedVersion, event)
+	g.noteWrite(err)
+	return v, err
 }
 
 func (g *Guard) AppendLifecycleEvent(e domain.LifecycleEvent) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.AppendLifecycleEvent(e)
+	err := g.TxBase.AppendLifecycleEvent(e)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) PutConversation(c domain.Conversation, expectedRevision uint64) (domain.Conversation, error) {
 	if g.err != nil {
 		return domain.Conversation{}, g.err
 	}
-	return g.TxBase.PutConversation(c, expectedRevision)
+	v, err := g.TxBase.PutConversation(c, expectedRevision)
+	g.noteWrite(err)
+	return v, err
 }
 
 func (g *Guard) InsertCall(c domain.CallRecord) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.InsertCall(c)
+	err := g.TxBase.InsertCall(c)
+	g.noteWrite(err)
+	return err
 }
 
 func (g *Guard) UpdateCall(c domain.CallRecord, expectedRevision uint64) (domain.CallRecord, error) {
 	if g.err != nil {
 		return domain.CallRecord{}, g.err
 	}
-	return g.TxBase.UpdateCall(c, expectedRevision)
+	v, err := g.TxBase.UpdateCall(c, expectedRevision)
+	g.noteWrite(err)
+	return v, err
 }
 
 func (g *Guard) PutCallAttempt(a domain.CallAttempt) error {
 	if g.err != nil {
 		return g.err
 	}
-	return g.TxBase.PutCallAttempt(a)
+	err := g.TxBase.PutCallAttempt(a)
+	g.noteWrite(err)
+	return err
 }
 
 // noteWrite enforces P3-1 even when a caller ignores a later write error.
