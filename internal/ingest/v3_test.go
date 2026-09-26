@@ -206,3 +206,33 @@ func TestV3_OperationCountCeiling(t *testing.T) {
 		}
 	})
 }
+
+// TestV3_DirectiveNamespaceExplicit (P3-3): a directive item created under
+// a Phase 3 policy carries the explicit DIRECTIVE namespace; its current
+// key equals the frozen legacy fallback's, so a Phase 2 item with the same
+// ID is replaced across the upgrade, not treated as a separate key.
+func TestV3_DirectiveNamespaceExplicit(t *testing.T) {
+	phase3Stores(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		semantic := f.in.Semantic
+		f.in.Semantic = nil
+		old := mustDirective(t, f.mustIngest(user, userEvent("ns-old", "## Pinned\n- [dep] Use v2.\n", true)), "dep")
+		if old.Namespace != "" {
+			t.Fatalf("legacy ingestion set namespace %q", old.Namespace)
+		}
+		f.in.Semantic = semantic
+		r := f.mustIngest(user, userEvent("ns-new", "## Pinned\n- [dep] Use v3.\n", true))
+		pin := mustDirective(t, r, "dep")
+		if pin.Namespace != domain.NamespaceDirective || pin.ValidateSemantic() != nil {
+			t.Fatalf("namespace %q (%v)", pin.Namespace, pin.ValidateSemantic())
+		}
+		if len(r.Replacements) != 1 || r.Replacements[0].TargetID != old.ID {
+			t.Fatalf("replacements = %+v", r.Replacements)
+		}
+		for _, it := range r.Items {
+			if it.Role == domain.RoleTranscript && it.Namespace != "" {
+				t.Errorf("transcript given a namespace: %+v", it)
+			}
+		}
+	})
+}

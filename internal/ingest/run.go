@@ -204,6 +204,11 @@ func (r *run) fill(it domain.ContextItem) domain.ContextItem {
 		it.CreatedTurn = r.task.Turn
 		it.TurnID = r.task.TurnID
 	}
+	// Under a Phase 3 policy a parsed directive's namespace is explicit
+	// (P3-3); its current key is the same as the legacy fallback's.
+	if r.g.Semantic != nil && it.DirectiveID != "" && it.Section != domain.SectionNone && it.Namespace == "" {
+		it.Namespace = domain.NamespaceDirective
+	}
 	it.ContentHash = domain.ContentHash(it.Parts)
 	it.SemanticBytes = domain.SemanticBytes(it.Parts)
 	it.CreatedAt = r.now
@@ -220,7 +225,11 @@ func (r *run) newItem(it domain.ContextItem) (domain.ContextItem, error) {
 	it = r.fill(it)
 	it.ID = domain.DerivedItemID(r.p.SessionID, r.itemKey(), len(r.items))
 	it.Seq = r.tx.NextSeq()
-	if err := it.Validate(); err != nil {
+	validate := it.Validate
+	if r.g.Semantic != nil {
+		validate = it.ValidateSemantic
+	}
+	if err := validate(); err != nil {
 		return domain.ContextItem{}, err
 	}
 	if err := it.ValidateTurnOwnership(); err != nil {
