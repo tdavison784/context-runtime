@@ -27,8 +27,8 @@ func referenceKey(text string) (string, bool) {
 // edge; references are never retired. Existing sources are paged from the
 // store's exact-key source index, filtered to the source actor inside the
 // query (F1, SEC-1.1), so another principal's sources are never counted;
-// linking stops, without failing the event, once the event's relationship
-// budget (MaxRelationships, D17) is spent.
+// linking stops, without failing the event, once the event's REFERENCES-link
+// budget (MaxReferenceLinks, D17, ruling 1) is spent.
 func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
 	if err := r.referenceItemID(c, ref); err != nil {
 		return err
