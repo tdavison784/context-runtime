@@ -27,7 +27,7 @@ func TestLocatorKey_M5(t *testing.T) {
 		{domain.SourceTool, "x", ""},
 	}
 	for _, c := range cases {
-		got, ok := LocatorKey(c.kind, c.loc)
+		got, ok := domain.LocatorKey(c.kind, c.loc)
 		if got != c.want || ok != (c.want != "") {
 			t.Errorf("LocatorKey(%s, %q) = %q, %v; want %q", c.kind, c.loc, got, ok, c.want)
 		}
@@ -109,6 +109,34 @@ func TestReferences_SurviveRestart(t *testing.T) {
 	if got := f.references(ref.ID); len(got) != 1 || got[0] != src.Items[0].ID {
 		t.Errorf("references after restart = %v", got)
 	}
+}
+
+// TestReferenceDeclarationLookupBound_R19: declaration-time matching reads
+// the bounded source-key index; more already-ingested sources for one
+// locator than the lookup limit reject the declaring event (fail closed)
+// rather than linking only some.
+func TestReferenceDeclarationLookupBound_R19(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("u0", "hi", false))
+		for _, id := range []string{"t1", "t2", "t3"} {
+			f.mustIngest(user, sourceEvent(id, "go.mod", taskAccess()))
+		}
+		e := userEvent("u1", "## References\n- go.mod\n", true)
+		f.in.LookupLimit = 2
+		before := f.lastSeq()
+		if _, err := f.ingest(user, e); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
+			t.Errorf("over the bound: err = %v", err)
+		}
+		f.in.LookupLimit = 3
+		r, err := f.ingest(user, e)
+		if err != nil {
+			t.Fatalf("within the bound: %v", err)
+		}
+		if got := f.references(semantic(r)[0].ID); len(got) != 3 {
+			t.Errorf("linked %d earlier sources, want 3", len(got))
+		}
+	})
 }
 
 // TestReferenceLookupBound_R19: deferred linking reads the bounded

@@ -2,107 +2,45 @@ package ingest
 
 import (
 	"errors"
-	"path"
-	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
-// ReferenceRuleVersion names locator identity rule v1 (M5, R2). A locator
-// key is purely lexical; nothing is fetched, opened, or resolved:
-//
-//   - a URL (scheme "://" rest, scheme = ALPHA *(ALPHA / DIGIT / "+" / "-"
-//     / ".")) keys as "url:" + its exact bytes;
-//   - anything else is a path: it must be relative and must not escape its
-//     base after lexical cleaning (path.Clean), and keys as "path:" + the
-//     cleaned path, so "./docs//a.md" and "docs/a.md" match;
-//   - empty text, whitespace or control bytes, backslashes, absolute paths,
-//     and escaping paths are not locators and never link.
-//
-// The repository/resource namespace and base directory are both the
-// session's single default in v1: the embedding API supplies no namespace
-// on SourceRef yet, so two repositories ingested into one session would
-// share path keys. That is a documented v1 limit, not a guess.
-const ReferenceRuleVersion = "reference-locator/v1"
-
-// LocatorKey returns the rule-v1 key of a locator of the given kind, or
-// ok=false when it is not a linkable locator.
-func LocatorKey(kind domain.SourceKind, locator string) (string, bool) {
-	if locator == "" || len(locator) > domain.MaxLocatorKeyBytes-5 {
-		return "", false
-	}
-	for i := range len(locator) {
-		if c := locator[i]; c <= ' ' || c == 0x7f || c == '\\' {
-			return "", false
-		}
-	}
-	switch kind {
-	case domain.SourceURL:
-		if !isURL(locator) {
-			return "", false
-		}
-		return "url:" + locator, true
-	case domain.SourcePath:
-		if strings.HasPrefix(locator, "/") || isURL(locator) {
-			return "", false
-		}
-		clean := path.Clean(locator)
-		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-			return "", false
-		}
-		return "path:" + clean, true
-	}
-	return "", false
-}
-
-// referenceKey returns the key of a References item's text: a URL if it
-// looks like one, else a path.
+// referenceKey returns the locator key (domain.LocatorKey, rule
+// domain.LocatorRuleVersion) of a References item's text: a URL if it looks
+// like one, else a path. The store indexes item sources under the same
+// rule, so declaration-time and deferred matching agree exactly.
 func referenceKey(text string) (string, bool) {
-	if isURL(text) {
-		return LocatorKey(domain.SourceURL, text)
+	if key, ok := domain.LocatorKey(domain.SourceURL, text); ok {
+		return key, true
 	}
-	return LocatorKey(domain.SourcePath, text)
-}
-
-func isURL(s string) bool {
-	scheme, _, ok := strings.Cut(s, "://")
-	if !ok || scheme == "" {
-		return false
-	}
-	for i := range len(scheme) {
-		c := scheme[i]
-		alpha := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-		if !alpha && (i == 0 || !(c >= '0' && c <= '9' || c == '+' || c == '-' || c == '.')) {
-			return false
-		}
-	}
-	return true
+	return domain.LocatorKey(domain.SourcePath, text)
 }
 
 // declareReference persists an immutable unresolved reference for a new
 // References item whose text is a locator, and links every already
 // ingested source it names (M5, R2). The record is kept even when a source
 // matched, since every later ingestion of a matching source may add an
-// edge; references are never retired.
+// edge; references are never retired. Existing sources come from the
+// store's bounded source-key index (R19); more than the lookup limit
+// rejects the event (store.ErrLimitExceeded, D17).
 func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
 	key, ok := referenceKey(ref.Parts[0].Text)
 	if !ok {
 		return nil
 	}
-	items, err := r.tx.Items(store.ItemFilter{})
+	targets, err := r.tx.ItemsBySourceKey(key, r.g.lookupLimit())
 	if err != nil {
 		return err
 	}
-	for _, target := range items {
-		if target.Source == nil || target.ID == ref.ID {
+	for _, target := range targets {
+		if target.ID == ref.ID {
 			continue
 		}
-		if k, ok := LocatorKey(target.Source.Kind, target.Source.Locator); ok && k == key {
-			if err := r.linkReference(c.actor, ref, target); err != nil {
-				return err
-			}
+		if err := r.linkReference(c.actor, ref, target); err != nil {
+			return err
 		}
 	}
 	ordinal := r.refs
@@ -115,7 +53,7 @@ func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
 		SpanIndex:    c.si,
 		ItemID:       ref.ID,
 		LocatorKey:   key,
-		RuleVersion:  ReferenceRuleVersion,
+		RuleVersion:  domain.LocatorRuleVersion,
 		Access:       ref.Access,
 		Authority:    ref.Authority,
 		Seq:          r.tx.NextSeq(),
@@ -135,11 +73,11 @@ func (r *run) linkPendingReferences(actor domain.Principal, target domain.Contex
 	if target.Source == nil {
 		return nil
 	}
-	key, ok := LocatorKey(target.Source.Kind, target.Source.Locator)
+	key, ok := domain.LocatorKey(target.Source.Kind, target.Source.Locator)
 	if !ok {
 		return nil
 	}
-	refs, err := r.tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: key, RuleVersion: ReferenceRuleVersion, Limit: r.g.lookupLimit()})
+	refs, err := r.tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: key, RuleVersion: domain.LocatorRuleVersion, Limit: r.g.lookupLimit()})
 	if err != nil {
 		return err
 	}
@@ -165,7 +103,7 @@ func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextIt
 	if r.rels >= r.limits.MaxRelationships {
 		return errLimit("MaxRelationships")
 	}
-	_, err := graph.LinkReference(r.tx, actor, ref.ID, target.ID, r.graphEventID(), ReferenceRuleVersion)
+	_, err := graph.LinkReference(r.tx, actor, ref.ID, target.ID, r.graphEventID(), domain.LocatorRuleVersion)
 	if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 		return nil
 	}
