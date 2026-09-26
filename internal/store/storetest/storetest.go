@@ -55,6 +55,7 @@ var suite = []testCase{
 
 	// Transactions.
 	{"NextSeqDense", testNextSeqDense},
+	{"Allocated", testAllocated},
 	{"SessionsSeqIndependent", testSessionsSeqIndependent},
 	{"RollbackOnError", testRollbackOnError},
 	{"RollbackOnStoreError", testRollbackOnStoreError},
