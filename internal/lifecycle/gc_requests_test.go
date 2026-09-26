@@ -133,14 +133,37 @@ func TestEnqueueGCDeduplicatesTriggerIdentity(t *testing.T) {
 	}
 }
 
-func TestCollectPendingFailsClosedWithoutBackendSupport(t *testing.T) {
+func TestCollectPendingExecutesDurableRequestsOnRealStore(t *testing.T) {
+	ctx := context.Background()
 	mem := memory.New()
 	t.Cleanup(func() { mem.Close() })
 	s, _ := New(mem, testPolicy())
-	n, err := s.CollectPending(context.Background(), "s", func(domain.GCRequest) (domain.Principal, bool) {
-		return storetest.NewPrincipal("s", domain.AuthoritySystem), true
-	}, 4)
-	if n != 0 || !errors.Is(err, domain.ErrUnsupportedSchema) {
+	seedCompletion(t, mem, nil, "", false)
+	scratch := storetest.NewItem("s", "scratch", 0, "scratch")
+	scratch.Scope, scratch.Access, scratch.Generation = domain.ScopeTask, storetest.DirectiveBoundary("s"), domain.GenerationEphemeral
+	seedItem(t, mem, scratch)
+	if _, err := s.CompleteTaskStandalone(ctx, storetest.NewPrincipal("s", domain.AuthorityUser), domain.CompleteTaskIntent{RequestID: "r", TaskID: "task"}); err != nil {
+		t.Fatal(err)
+	}
+	collector := storetest.NewPrincipal("s", domain.AuthorityHarness)
+	skip := func(domain.GCRequest) (domain.Principal, bool) { return domain.Principal{}, false }
+	if n, err := s.CollectPending(ctx, "s", skip, 4); n != 0 || err != nil {
+		t.Fatalf("skipped: %d %v", n, err)
+	}
+	pick := func(r domain.GCRequest) (domain.Principal, bool) { return collector, r.TaskID == collector.TaskID }
+	if n, err := s.CollectPending(ctx, "s", pick, 4); n != 1 || err != nil {
 		t.Fatalf("pending: %d %v", n, err)
+	}
+	if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || err != nil {
+		t.Fatalf("request executed twice: %d %v", n, err)
+	}
+	if err := mem.View(ctx, "s", func(tx store.ReadTx) error {
+		it, err := tx.Item("scratch")
+		if err != nil || it.Residency != domain.ResidencyArchived {
+			t.Fatalf("scratch not collected: %+v %v", it, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
