@@ -322,8 +322,22 @@ type ReadTx interface {
 	CallAttempts(callID string) ([]domain.CallAttempt, error)
 }
 
-// Tx is a read-write transaction for one session.
+// Tx is a read-write transaction for one session, as Update passes it to
+// fn: a store's TxBase behind a Guard that implements Poison.
 type Tx interface {
+	TxBase
+	// Poison marks the transaction failed (DUR-1.3): every later write on it
+	// fails with err, and Update rolls back everything the transaction wrote
+	// and returns err, even when fn returns nil or another error. The first
+	// error wins; later calls are no-ops. Poison(nil) poisons with
+	// ErrPoisoned. Reads keep working. Callers poison a transaction when a
+	// multi-step operation fails partway, so no partial result can commit.
+	Poison(err error)
+}
+
+// TxBase is the read-write transaction a store implements; Update wraps it
+// in a Guard to form the Tx fn receives.
+type TxBase interface {
 	ReadTx
 
 	// Allocated reports whether seq was allocated by NextSeq in this

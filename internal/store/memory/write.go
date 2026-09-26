@@ -25,7 +25,7 @@ type tx struct {
 func (t *tx) markSemantic()  { t.semantic = true }
 func (t *tx) markSequenced() { t.semantic, t.sequenced = true, true }
 
-var _ store.Tx = (*tx)(nil)
+var _ store.TxBase = (*tx)(nil)
 
 // commit folds the transaction into st and reports whether it wrote any
 // record.
