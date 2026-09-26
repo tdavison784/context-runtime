@@ -16,10 +16,17 @@ const (
 
 // change describes what an accepted resource update may have altered.
 type change struct {
-	unknown     bool            // freshness lost: every current dependency is suspect
-	allPaths    bool            // any path may have changed
-	paths       map[string]bool // canonical resource-relative changed paths
-	fingerprint string          // resulting KNOWN workspace fingerprint
+	unknown     bool              // freshness lost: every current dependency is suspect
+	allPaths    bool              // any path may have changed
+	paths       map[string]bool   // canonical resource-relative changed paths
+	fingerprint string            // resulting KNOWN workspace fingerprint
+	contents    map[string]string // authoritative resulting content by path
+}
+
+// sameContent reports whether the update states that p still holds hash.
+func (c change) sameContent(p, hash string) bool {
+	h, ok := c.contents[p]
+	return !c.unknown && ok && h == hash
 }
 
 // affects reports whether a proof dependency may no longer hold after the
@@ -29,7 +36,14 @@ func (c change) affects(d domain.ProofDependency) bool {
 	case domain.DependencyWorkspace:
 		return c.unknown || d.Fingerprint != c.fingerprint
 	case domain.DependencyCurrentPath:
-		return c.unknown || c.allPaths || d.Locator == nil || c.paths[path.Join(d.Locator.BaseDir, d.Locator.Path)]
+		if d.Locator == nil {
+			return true
+		}
+		p := path.Join(d.Locator.BaseDir, d.Locator.Path)
+		if c.sameContent(p, d.Fingerprint) {
+			return false // authoritative content is unchanged
+		}
+		return c.unknown || c.allPaths || c.paths[p]
 	case domain.DependencyFixedContent:
 		return false // a fixed snapshot does not depend on the path's current content
 	}
@@ -138,7 +152,9 @@ func markSubject(sem store.SemanticTx, seq uint64, st domain.SubjectState, c cha
 		if err != nil {
 			return err
 		}
-		if f := run.Subject.Target.File; f == nil || c.allPaths || c.paths[path.Join(f.Locator.BaseDir, f.Locator.Path)] {
+		if f := run.Subject.Target.File; f == nil {
+			next = domain.ApplicabilityStale
+		} else if p := path.Join(f.Locator.BaseDir, f.Locator.Path); !c.sameContent(p, obs.ObservedContentHash) && (c.allPaths || c.paths[p]) {
 			next = domain.ApplicabilityStale
 		}
 	}

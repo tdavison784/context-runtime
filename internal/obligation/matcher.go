@@ -1,6 +1,10 @@
 package obligation
 
-import "github.com/tdavison784/context-runtime/internal/domain"
+import (
+	"path"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+)
 
 // Registered matcher versions.
 var (
@@ -152,7 +156,7 @@ func (fileRead) Evaluate(in EvalInput) Verdict {
 		})
 	case domain.FileCurrentContent:
 		p := in.Path
-		if !knownResource(in.Resource, loc.ResourceID) || p == nil || p.Locator != loc ||
+		if !knownResource(in.Resource, loc.ResourceID) || p == nil || !sameFile(p.Locator, loc) ||
 			p.Freshness != domain.ResourceKnown || p.ResourceRevision > in.Resource.AuthoritativeRevision {
 			return notApplicable(InapplicableUnknown)
 		}
@@ -168,4 +172,10 @@ func (fileRead) Evaluate(in EvalInput) Verdict {
 		})
 	}
 	return notApplicable(InapplicableFamily)
+}
+
+// sameFile reports whether two locators name the same resource-relative
+// file, however the base directory splits the path.
+func sameFile(a, b domain.ResourceLocator) bool {
+	return a.ResourceID == b.ResourceID && path.Join(a.BaseDir, a.Path) == path.Join(b.BaseDir, b.Path)
 }

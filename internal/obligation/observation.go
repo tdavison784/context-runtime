@@ -1,6 +1,8 @@
 package obligation
 
 import (
+	"strings"
+
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -90,14 +92,15 @@ func (s *Service) registerRun(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 }
 
 // subjectInWorkspace checks that a run's declared subject lies in its bound
-// workspace: same resource and base directory, and for tests the bound
-// environment.
+// workspace: same resource; for tests the bound base directory and
+// environment; for a (canonical, resource-relative) file, a path under the
+// bound base directory.
 func subjectInWorkspace(sub domain.ObservationSubject, b domain.WorkspaceBinding) bool {
 	if t := sub.Target.Tests; t != nil {
 		return t.ResourceID == b.ResourceID && t.BaseDir == b.BaseDir && t.EnvironmentSpec == b.EnvironmentSpec
 	}
 	f := sub.Target.File
-	return f != nil && f.Locator.ResourceID == b.ResourceID && f.Locator.BaseDir == b.BaseDir
+	return f != nil && f.Locator.ResourceID == b.ResourceID && (b.BaseDir == "." || strings.HasPrefix(f.Locator.Path, b.BaseDir+"/"))
 }
 
 // ReportObservationTx records one typed observation of a registered run

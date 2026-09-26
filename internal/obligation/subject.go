@@ -5,10 +5,10 @@ import "github.com/tdavison784/context-runtime/internal/domain"
 // SubjectFor returns the observation subject an obligation target is compared
 // under (P3-22). A tests target is its own subject: suite, coverage, resource,
 // directories, and environment are all semantic identity. A file target's
-// subject is the read of its path alone; the content mode and any required
-// hash are obligation policy the matcher applies, never part of what a reader
-// observed, so FIXED_HASH and CURRENT_CONTENT obligations on one path share
-// one subject.
+// subject is the read of its resource-relative path alone (base "."); the
+// content mode, any required hash, and how a binding splits the base
+// directory are obligation policy, never part of what a reader observed, so
+// every file obligation on one path shares one subject.
 func SubjectFor(t domain.TargetSpec) (domain.ObservationSubject, error) {
 	if err := t.Validate(); err != nil {
 		return domain.ObservationSubject{}, err
@@ -16,9 +16,13 @@ func SubjectFor(t domain.TargetSpec) (domain.ObservationSubject, error) {
 	if t.Tests != nil {
 		return domain.ObservationSubject{Family: domain.ObservationTests, Target: t.Clone()}, nil
 	}
+	loc, err := canonicalLocator(t.File.Locator)
+	if err != nil {
+		return domain.ObservationSubject{}, err
+	}
 	return domain.ObservationSubject{
 		Family: domain.ObservationFileRead,
-		Target: domain.TargetSpec{File: &domain.FileTarget{Locator: t.File.Locator, Mode: domain.FileCurrentContent}},
+		Target: domain.TargetSpec{File: &domain.FileTarget{Locator: loc, Mode: domain.FileCurrentContent}},
 	}, nil
 }
 

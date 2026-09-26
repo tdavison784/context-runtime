@@ -283,8 +283,8 @@ func TestFileReadEndToEnd(t *testing.T) {
 	if got := f.status(t, fixed); got.Status != domain.ObligationSatisfied || got.CurrentProofID != o.CurrentProofID {
 		t.Errorf("path edit invalidated a fixed-content proof: %+v", got)
 	}
-	// Without authoritative per-path content, current-content reads never
-	// satisfy (fails closed until path content reporting lands).
+	// Without reported authoritative content for the path, current-content
+	// reads never satisfy (fail closed).
 	if got := f.status(t, current); got.Status != domain.ObligationUnresolved {
 		t.Errorf("current-content read satisfied without path state: %+v", got)
 	}
@@ -382,5 +382,72 @@ func TestCurrentContentFreshness(t *testing.T) {
 	f.editPaths(t, "W4", true)
 	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
 		t.Errorf("all-paths edit kept proof: %+v", o)
+	}
+}
+
+func TestPathContentsEndToEnd(t *testing.T) {
+	f := newEvalFixture(t)
+	// Bound with a split base directory; reports and reads use the
+	// resource-relative path.
+	target := domain.TargetSpec{File: &domain.FileTarget{Locator: domain.ResourceLocator{ResourceID: "repo1", BaseDir: "docs", Path: "a.md"}, Mode: domain.FileCurrentContent}}
+	in := domain.DeclareObligationIntent{RequestID: "d-pc", SourceItemID: "pu", DeclarationSlot: "6", Description: "read it",
+		ExpectedSourceVersion: 1, Target: &target, Matcher: &FileReadV1}
+	if _, err := f.s.declare(t, f.st, f.harness, in); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := f.item(t, "pu").CurrentKey()
+	ref := domain.ObligationRef{SessionID: testSession, ObligationID: domain.DerivedObligationID(key, 6), Version: 1}
+	f.matcherGrant(t, "g-pc", ref, FileReadV1, f.userP)
+	report := func(fp string, resync bool, contents ...domain.ResourcePathContent) {
+		t.Helper()
+		f.r.n++
+		rep := domain.ReportResourceChangeIntent{RequestID: fmt.Sprintf("pc-%d", f.r.n), ResourceID: "repo1", ExpectedRevision: f.r.rev,
+			ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf(fp),
+			Resynchronization: resync, PathContents: contents}
+		if !resync {
+			rep.ChangedPaths = []string{"docs/a.md"}
+		}
+		if _, err := f.s.report(t, f.st, f.harness, rep); err != nil {
+			t.Fatal(err)
+		}
+		f.r.rev++
+		f.r.auth++
+	}
+	read := func(content string) {
+		runN++
+		run, err := f.registerRun(t, f.harness, runIntent(fmt.Sprintf("run-%d", runN), fmt.Sprintf("exec-%d", runN), fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, "")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.report(t, run, domain.OutcomePass, hashOf(content), nil)
+	}
+	report("W2", false, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("v1")})
+	read("v1")
+	sat := f.status(t, ref)
+	if sat.Status != domain.ObligationSatisfied {
+		t.Fatalf("read of reported content = %+v", sat)
+	}
+	// Authoritative content unchanged at a new revision keeps the proof.
+	report("W3", false, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("v1")})
+	if o := f.status(t, ref); o.Status != domain.ObligationSatisfied || o.CurrentProofID != sat.CurrentProofID {
+		t.Fatalf("same-content report invalidated: %+v", o)
+	}
+	// New content invalidates; the old content no longer applies.
+	report("W4", false, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("v2")})
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("changed content kept proof: %+v", o)
+	}
+	read("v1")
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("stale read satisfied: %+v", o)
+	}
+	read("v2")
+	if o := f.status(t, ref); o.Status != domain.ObligationSatisfied {
+		t.Fatalf("read of new content = %+v", o)
+	}
+	// A resync that omits the path asserts nothing about it: conservative.
+	report("W5", true)
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Errorf("resync without the path kept proof: %+v", o)
 	}
 }

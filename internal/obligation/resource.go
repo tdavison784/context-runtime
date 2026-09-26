@@ -137,13 +137,13 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 	switch {
 	case in.Resynchronization:
 		u.Freshness, u.WorkspaceFingerprint, u.AllPaths = domain.ResourceKnown, in.WorkspaceFingerprint, true
-		c = change{allPaths: true, fingerprint: in.WorkspaceFingerprint}
+		c = change{allPaths: true, fingerprint: in.WorkspaceFingerprint, contents: pathContents(in)}
 	case gap || state.Freshness != domain.ResourceKnown:
 		u.Freshness, u.AllPaths = domain.ResourceUnknown, true
 		c = change{unknown: true, allPaths: true}
 	default:
 		u.Freshness, u.WorkspaceFingerprint, u.AllPaths, u.ChangedPaths = domain.ResourceKnown, in.WorkspaceFingerprint, in.AllPaths, in.Clone().ChangedPaths
-		c = change{allPaths: in.AllPaths, paths: map[string]bool{}, fingerprint: in.WorkspaceFingerprint}
+		c = change{allPaths: in.AllPaths, paths: map[string]bool{}, fingerprint: in.WorkspaceFingerprint, contents: pathContents(in)}
 		for _, p := range in.ChangedPaths {
 			c.paths[p] = true
 		}
@@ -166,6 +166,11 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 	if _, err := sem.PutResourceState(next, state.Revision); err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
+	if u.Freshness == domain.ResourceKnown {
+		if err := s.recordPathContents(sem, u, in.PathContents); err != nil {
+			return domain.MutationResult{}, w.fail(err)
+		}
+	}
 	inv := invalidation{cause: domain.CauseResourceInvalidation, causeRecord: u.ID, requestID: in.RequestID, reason: domain.ReasonResourceChanged, rule: ResourceInvalidationRule}
 	if err := s.invalidateResource(tx, sem, actor, seq, in.ResourceID, c, inv); err != nil {
 		return domain.MutationResult{}, w.fail(err)
@@ -177,11 +182,68 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 	return result, nil
 }
 
+func pathContents(in domain.ReportResourceChangeIntent) map[string]string {
+	out := make(map[string]string, len(in.PathContents))
+	for _, c := range in.PathContents {
+		out[c.Path] = c.ContentHash
+	}
+	return out
+}
+
+// canonicalLocator is a locator's resource-relative form (base "."), the
+// single identity under which authoritative path content is recorded, so a
+// target bound as base "svc" + "a.go" and a report of "svc/a.go" agree.
+func canonicalLocator(l domain.ResourceLocator) (domain.ResourceLocator, error) {
+	return domain.ResourceLocatorV1(l.ResourceID, ".", path.Join(l.BaseDir, l.Path))
+}
+
+// recordPathContents stores the reported authoritative content of each path
+// at the update's resulting revision (P3-19). Missing entries assert nothing.
+func (s *Service) recordPathContents(sem store.SemanticTx, u domain.ResourceUpdate, contents []domain.ResourcePathContent) error {
+	work := s.newBudget()
+	for _, c := range contents {
+		if err := work.spend(1); err != nil {
+			return err
+		}
+		loc, err := domain.ResourceLocatorV1(u.ResourceID, ".", c.Path)
+		if err != nil {
+			return err
+		}
+		key, err := loc.Key()
+		if err != nil {
+			return err
+		}
+		var expected uint64
+		if cur, err := sem.ResourcePathState(loc); err == nil {
+			expected = cur.Revision
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			return err
+		}
+		_, err = sem.PutResourcePathState(domain.ResourcePathState{
+			SemanticMeta:     domain.SemanticMeta{ID: recordID("pst_", "path-state", key), SessionID: u.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: u.Seq},
+			Locator:          loc,
+			ContentHash:      c.ContentHash,
+			ResourceUpdateID: u.ID,
+			ResourceRevision: u.ResultingAuthoritativeRevision,
+			Revision:         expected + 1, // CAS result; the store assigns it
+			Freshness:        domain.ResourceKnown,
+		}, expected)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // currentPathState returns the path's recorded content if it still describes
 // the resource's current KNOWN state: no later update was UNKNOWN, covered
 // all paths, or listed the path (P3-19). Otherwise ok is false, which the
 // file_read matcher treats as unknown.
 func (s *Service) currentPathState(r store.SemanticReader, work *budget, loc domain.ResourceLocator, rs domain.ResourceState) (domain.ResourcePathState, bool, error) {
+	loc, err := canonicalLocator(loc)
+	if err != nil {
+		return domain.ResourcePathState{}, false, nil
+	}
 	ps, err := r.ResourcePathState(loc)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.ResourcePathState{}, false, nil
