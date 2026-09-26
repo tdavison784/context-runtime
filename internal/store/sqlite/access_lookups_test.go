@@ -159,3 +159,14 @@ func TestObligationReadsUseIndex(t *testing.T) {
 	q, args = obligationsBySourceQuery("s", "item", 2)
 	assertIndexed(t, s, []string{"session_id", "f_source_item_id"}, q, args...)
 }
+
+// TestRetireLookupsUseIndex locks the DELETEs that retire an item from the
+// lookup tables to (session_id, item_id) index searches (SPEC-3.1 item 1):
+// every SUPERSEDES or DUPLICATE_OF edge runs them, so a session-prefix
+// search made each supersession grow with the session.
+func TestRetireLookupsUseIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	for _, table := range []string{"lookup_canonical", "lookup_working", "lookup_source", "lookup_blob"} {
+		assertIndexed(t, s, []string{"session_id", "item_id"}, retireLookupSQL(table), "s", "x")
+	}
+}
