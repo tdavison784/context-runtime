@@ -1,0 +1,28 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [],
+  "items": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "PINNED",
+      "range": [
+        6,
+        15
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "GOAL",
+      "range": [
+        25,
+        32
+      ]
+    }
+  ]
+}

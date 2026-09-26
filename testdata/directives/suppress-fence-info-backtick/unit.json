@@ -1,0 +1,11 @@
+{
+  "description": "Any 3+ run opens a fence, even with an info string CommonMark rejects (fail closed, R17).",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}
