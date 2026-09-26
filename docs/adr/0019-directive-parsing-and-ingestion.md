@@ -1015,18 +1015,104 @@ landed `internal/ingest/derive.go:residue` function (§24).
   transcript item, then the unit's directive items and lifecycle commands
   in source order, then finally its residual instruction item, if any.
 
-### 26. PR #5 review round 1: F2's accepted residual risk (SEC-1.5)
+### 26. PR #5 review round 1: commander rulings F1-F6 (all landed, final pass)
 
 The first external review of this PR (`round1-p5-fixes.md`) produced
-commander rulings F1-F6. F1 and F3-F6 require code changes in
-`internal/store`/`internal/graph`/`internal/ingest` that are other
-workers' assignments and had not landed as of this revision; this ADR
-will reconcile their exact landed shape in a final pass once every fix is
-in, rather than describing an intended design ahead of the code (the
-mistake SPEC-1.4 found with this ADR's earlier "not yet landed"
-paragraphs). F2 is recorded in full now because the commander ruled it a
-documentation-only mitigation with no code change beyond a verification
-test:
+commander rulings F1-F6. All six are now landed and reconciled against
+the code at this ADR's final-pass head.
+
+- **F1 (SEC-1.1, SEC-1.2, DUR-1.1, SPEC-1.3 — access-filtered lookups,
+  refines §7/§9/§13/§15/§16, D10/D17/D19/M5/R19; full record, ADR 3 owns
+  the migrations).** The original R19 lookups (§23) were properly indexed
+  but session-wide: they returned every matching row regardless of
+  whether the calling principal could see it (SEC-1.1's existence
+  oracle/cross-task-lockout), and `SupersedeSnapshot`'s `freezePartitions`
+  still ran a full per-task item scan (SEC-1.2). F1 redesigned every
+  lookup as access-filtered from the start: `internal/store/lookups.go`
+  defines `Cursor`, `Page`, and `Lookup{Items, Unverified, More, Next}`,
+  and five `Validate()`-checked filters — `BlobReferrerFilter`,
+  `CanonicalFilter`, `WorkingFilter`, `SourceFilter`,
+  `VisibleReferenceFilter` — each carrying a `Viewer domain.Principal`.
+  The `ReadTx` methods `BlobReferrer`, `CanonicalCandidates`,
+  `CurrentWorking`, `SourceItems`, and `VisibleReferences`
+  (`store.go:184-195`) replace the deleted `ItemsByBlob`/
+  `DuplicateCandidates`/`ItemsBySourceKey`/`UnresolvedReferences` and the
+  `freezePartitions` task scan; SQLite filters by owner columns on new
+  tables (migration 0012's `lookup_blob`/`lookup_canonical`/
+  `lookup_working`/`lookup_source`, ADR 3) inside the query, before any
+  limit, so an inaccessible row is never counted, returned, or
+  observable — closing SEC-1.1 — and `CanonicalFilter`/`WorkingFilter`
+  fail `ErrLimitExceeded` only on *visible* overflow, so
+  `SupersedeSnapshot` now does one indexed `CurrentWorking` lookup per
+  partition instead of a task scan (`internal/graph/snapshot.go:279`),
+  closing SEC-1.2. The lookup tables hold live items only (excluded by
+  subquery once superseded or classified `DUPLICATE_OF`), and the store
+  deletes an item's lookup rows in the same write that retires it, so
+  repeated identical content never grows them (DUR-1.1). Ingest call
+  sites: `internal/ingest/directives.go:269` (`CanonicalCandidates`),
+  `references.go:42,133` (`SourceItems`, `VisibleReferences`),
+  `run.go:304` (`BlobReferrer`). Separately, SPEC-1.3 found that
+  `internal/ingest`'s *other* per-item reads — `Relationships` filtered by
+  type/from/to, `Items` filtered by task — were not indexed even though
+  the three named R19 lookups were; migration 0012's `relationship_to`
+  index and an item-by-task index close this. Tests:
+  `TestAccessLookupsUseIndex`, `TestUpgradeAccessLookups`,
+  `TestGraphReadsUseIndex`, `TestLegacyLookupsDropped`
+  (`internal/store/sqlite/access_lookups_test.go`,
+  `lookups_test.go`); storetest conformance rows `BlobReferrerAccess`,
+  `CanonicalCandidates`, `CurrentWorking`, `SourceItems`,
+  `VisibleReferences` (`internal/store/storetest/access_lookups.go`,
+  registered `storetest.go:78-82`); ingest-level
+  `TestLookupsNeverLockOut_F1` (`internal/ingest/lookups_test.go`).
+  DUR-1.4's unverified-item handling rides the same redesign: a visible
+  match whose stored content fails verification (a legacy row `0001`
+  altered before the lossless fix, D3/R8) is excluded from `Lookup.Items`
+  and named in `Lookup.Unverified` instead of blocking the whole lookup or
+  hiding behind unrelated identical content; `internal/ingest/run.go`'s
+  `reportUnverified` records one content-free `domain.ItemUnverified`/
+  `ReasonUnverifiedItem` diagnostic per unverified ID, and reading the row
+  directly still fails `domain.ErrIntegrity`. Tests:
+  `TestLegacyUnverifiedNeverBlocks` (SQLite),
+  `TestUnverifiedMatchesNeverBlock_DUR14` (`internal/ingest/lookups_test.go`).
+- **F3 (SPEC-1.7, DUR-1.2 — retry precedes limit/policy checks, refines
+  §10, D14; landed, confirming the mechanism §26's earlier draft
+  described correctly).** `internal/ingest/ingest.go`'s `apply()` runs the
+  idempotency lookup (`lookupReceipt`) before the second, limits-carrying
+  `e.ValidateFor(p, limits)` call — "Only a new occurrence is held to the
+  currently configured limits" (the function's own comment) — so a
+  retry of a known `EventID` always replays the stored receipt verbatim,
+  even when limits or policy versions changed since the original event;
+  only a genuinely new event sees the new configuration. Test:
+  `TestRetryAfterLimitsChange_F3` (`internal/ingest/fixes_r1_test.go`).
+- **F4 (SPEC-1.2 — References-by-item-ID, refines §16, M5/R2/FR-DIR-003;
+  landed).** FR-DIR-003's "a name that matches an item ID in scope … gets
+  a REFERENCES edge" is now implemented: a References entry whose text is
+  a valid item ID resolves it the same way any other accessible source
+  resolves (`internal/ingest/references.go`), and links it, keeping an
+  inaccessible or missing item ID indistinguishable — the same rule §16
+  already specified for path/URL locators. Covered within
+  `internal/ingest/references_test.go`'s existing reference suite rather
+  than a separately named test.
+- **F6 (SEC-1.3 — diagnostic/lifecycle-command record access, refines
+  §12/§1, D16/D1; landed).** A diagnostic or lifecycle-command record's
+  access is now the *narrower* of the source span's boundary and the
+  boundary of the content or target it describes, not the span boundary
+  alone: diagnostics carry a `scopedDiag{d, access}`
+  (`internal/ingest/diagnostics.go`) computed per diagnostic rather than
+  defaulting to the span's transcript access, and a lifecycle command's
+  record narrows via `domain.Intersect(scope, spanAccess, targetAccess)`
+  (`internal/domain/principal.go:101`, `internal/ingest/derive.go:332`)
+  when its target resolves to a narrower-boundary item. This closes the
+  over-disclosure SEC-1.3 found: a span-boundary-only access field could
+  let a principal who can see the span, but not a narrower-boundary target
+  it describes, learn the target exists. Reads filter on the narrowed
+  boundary like any other access-checked record. Test:
+  `TestRecordsAtNarrowerBoundary_F6` (`internal/ingest/fixes_r1_test.go`).
+- **F5 (DUR-1.8, SPEC-1.9 — migration 0011's Go-step checksum) is recorded
+  in ADR 3's Phase 2 migrations section**, not repeated here: migration
+  0011's backfill is now a frozen, private copy of the locator rule with
+  its identity folded into the migration's checksum, so it is no longer
+  outside checksum protection and no longer depends on live domain code.
 
 - **F2 (SEC-1.5 — caller `EventID` namespace, refines §10/§11, D14/D15).**
   `CallerOccurrenceID(session, eventID)` ignores the principal, so a
@@ -1063,16 +1149,6 @@ test:
   change FR-ING-006's session-scoped retry-key contract for every caller
   to close a risk that only materializes when a harness supplies
   low-entropy, cross-principal-predictable IDs against its own guidance.
-
-F1 (bounded lookups, `p2-store`/`p2-graph`), F3 (retry-before-limits,
-`p2-graph`), F4 (References-by-item-ID, `p2-graph`), and F6 (diagnostic/
-lifecycle-command record access, `p2-graph`) are tracked, not yet
-described here in full, pending this ADR's final reconciliation pass
-against their landed code. **F5 has landed and is recorded in ADR 3's
-Phase 2 migrations section** (SPEC-1.9): migration 0011's Go step is now
-a frozen, private copy of the locator rule with its identity folded into
-the migration's checksum, so it is no longer outside checksum protection
-and no longer depends on live domain code.
 
 ### 27. PR #5 review round 1 rulings: SPEC-1.10, SPEC-1.11
 
