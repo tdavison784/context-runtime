@@ -191,11 +191,11 @@ func (r *readTx) Blob(hash string) (domain.Blob, error) {
 	return b, nil
 }
 
-func (r *readTx) CurrentDirective(taskID, directiveID string) (string, error) {
+func (r *readTx) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
 	if err := r.check(); err != nil {
 		return "", err
 	}
-	id, ok := r.directives.get(directiveKey{taskID, directiveID})
+	id, ok := r.directives.get(directiveKey{taskID, directiveID, boundary})
 	if !ok {
 		return "", notFound("directive", taskID+"/"+directiveID)
 	}
