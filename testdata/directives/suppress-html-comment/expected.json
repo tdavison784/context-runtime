@@ -1,0 +1,78 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "REMEMBER",
+      "level": 2,
+      "range": [
+        90,
+        109
+      ],
+      "heading_range": [
+        90,
+        102
+      ],
+      "body_range": [
+        102,
+        109
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "authority": "SYSTEM",
+      "text": "kept",
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        102,
+        109
+      ],
+      "text_ranges": [
+        [
+          104,
+          108
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "html_comment",
+      "section": "PINNED",
+      "range": [
+        5,
+        14
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "html_comment",
+      "section": "WORKING",
+      "range": [
+        50,
+        71
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        102,
+        109
+      ]
+    }
+  ]
+}

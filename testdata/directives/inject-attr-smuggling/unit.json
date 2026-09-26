@@ -1,0 +1,11 @@
+{
+  "description": "Brace, equals, newline and tab smuggling never yield attributes; braces in text are text; USER widening is ignored (D7, D12).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "D7",
+    "D12"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

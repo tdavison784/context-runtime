@@ -8,6 +8,15 @@ import (
 )
 
 func (p *coreParser) extract() {
+	defer func() {
+		// FR-DIR-002: publish derived IDs only for items that survived every
+		// check, so a dropped item is never reported as if it existed.
+		for _, it := range p.items {
+			if !it.explicit && !it.lifecycle {
+				p.diagnostic("DirectiveIDDerived", "derived directive ID", it.section, it.id, it.byteRange)
+			}
+		}
+	}()
 	for si := range p.sections {
 		s := &p.sections[si]
 		h := s.heading
@@ -28,10 +37,14 @@ func (p *coreParser) extract() {
 				// D7: a heading target and target list together are ambiguous;
 				// the whole section creates no command.
 				p.reject(si, "mixed lifecycle forms", h.byteRange)
+				s.heading.id = ""
 				continue
 			}
 			if h.id != "" {
+				// Ignored, never copied onto members; Section.DirectiveID
+				// reports only an ID that took effect.
 				p.malformed(h.section, "heading ID on list section", h.byteRange)
+				s.heading.id = ""
 			}
 			// Only top-level bullets start items; blank and indented lines
 			// continue the preceding item. Unindented prose is malformed
@@ -256,13 +269,11 @@ func (p *coreParser) addItem(item rawItem) {
 		return
 	}
 	if len(p.items) >= p.limits.maxItems {
-		p.itemLimitHit = true
-		p.diagnostic("ErrMalformedDirective", "item limit reached", item.section, "", item.byteRange)
+		p.fail("span exceeds item limit")
 		return
 	}
 	if item.id == "" {
 		item.id = derivedID(item.section, item.text)
-		p.diagnostic("DirectiveIDDerived", "derived directive ID", item.section, item.id, item.byteRange)
 	}
 	p.items = append(p.items, item)
 }

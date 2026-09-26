@@ -1,0 +1,80 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_f1e2c7805f72fe41e56d33674c7536d1",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## WorKing\n- kelvin\n## Reſolve [g]\n## Pınned\n- dotless\n## PİNNED\n- dotted\n## Ｐinned\n- fullwidth\n## Pin​ned\n- zwsp\n## Pinned\n- nbsp\n## Pinnéd\n- combining\n ## Goal\nnbsp indent\n"
+        }
+      ],
+      "content_hash": "sha256:9dc3c30ed1a8b772da4fbdb0ed1edd812f23a198c4b97b518dfa5a512d60301a"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_67ec02fbadaf1ccfee326f5e9ce5f8c0",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## WorKing\n- kelvin\n## Reſolve [g]\n## Pınned\n- dotless\n## PİNNED\n- dotted\n## Ｐinned\n- fullwidth\n## Pin​ned\n- zwsp\n## Pinned\n- nbsp\n## Pinnéd\n- combining\n ## Goal\nnbsp indent"
+        }
+      ],
+      "content_hash": "sha256:fd994129093fdf42d25c29fe2332a237763868554711fba2083236e8d7053e5e",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            186
+          ],
+          "slices": [
+            [
+              0,
+              186
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": []
+}

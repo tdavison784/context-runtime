@@ -1,0 +1,123 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "GOAL",
+      "level": 2,
+      "range": [
+        0,
+        9
+      ],
+      "heading_range": [
+        0,
+        8
+      ],
+      "body_range": [
+        8,
+        9
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "WORKING",
+      "level": 2,
+      "range": [
+        9,
+        31
+      ],
+      "heading_range": [
+        9,
+        20
+      ],
+      "body_range": [
+        20,
+        31
+      ],
+      "items": [
+        0
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "REMEMBER",
+      "level": 2,
+      "range": [
+        31,
+        48
+      ],
+      "heading_range": [
+        31,
+        43
+      ],
+      "body_range": [
+        43,
+        48
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [
+    {
+      "section": "WORKING",
+      "section_index": 1,
+      "directive_id": "working-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "authority": "USER",
+      "text": "b",
+      "content_hash": "sha256:08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "range": [
+        27,
+        31
+      ],
+      "text_ranges": [
+        [
+          29,
+          30
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "empty_item",
+      "section": "GOAL",
+      "range": [
+        0,
+        9
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "empty_item",
+      "section": "WORKING",
+      "range": [
+        20,
+        27
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "range": [
+        27,
+        31
+      ]
+    },
+    {
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "empty_item",
+      "section": "REMEMBER",
+      "range": [
+        31,
+        48
+      ]
+    }
+  ]
+}

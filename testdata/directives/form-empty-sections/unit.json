@@ -1,0 +1,9 @@
+{
+  "description": "Empty bodies and empty items are diagnosed and create nothing (D7).",
+  "requirements": [
+    "FR-DIR-006",
+    "D7"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

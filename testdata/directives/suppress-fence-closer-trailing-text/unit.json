@@ -1,0 +1,11 @@
+{
+  "description": "A closing-looking fence with trailing text does not close the fence (D5).",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

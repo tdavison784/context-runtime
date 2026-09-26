@@ -1,0 +1,9 @@
+{
+  "description": "A same-or-higher non-keyword heading closes a section; text after it is ordinary content (D6).",
+  "requirements": [
+    "FR-DIR-006",
+    "D6"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

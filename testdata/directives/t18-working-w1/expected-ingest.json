@@ -1,0 +1,161 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_46d84bc8728047415ca54b63baed8537",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Working\n- Investigating internal/client.go.\n- Current issue is TestLegacyClient.\n"
+        }
+      ],
+      "content_hash": "sha256:7a26343de5778fa24149a8152165b9cd6b2230c58455814ddf5c07f6c6aaa436"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_98cddcf716979b6772e3a87aa4171d58",
+      "kind": "task_state",
+      "section": "WORKING",
+      "directive_id": "working-e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Investigating internal/client.go."
+        }
+      ],
+      "content_hash": "sha256:e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            11,
+            47
+          ],
+          "slices": [
+            [
+              13,
+              46
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_f2a431103e6a3ba814b0affd68f8b31a",
+      "kind": "task_state",
+      "section": "WORKING",
+      "directive_id": "working-0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Current issue is TestLegacyClient."
+        }
+      ],
+      "content_hash": "sha256:0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            47,
+            84
+          ],
+          "slices": [
+            [
+              49,
+              83
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "range": [
+        11,
+        47
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "range": [
+        47,
+        84
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

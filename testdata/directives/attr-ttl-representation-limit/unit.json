@@ -1,0 +1,10 @@
+{
+  "description": "An allowed ttl above math.MaxInt32 rejects the unit (representation_limit), never ignored (R1).",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

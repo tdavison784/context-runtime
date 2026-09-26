@@ -1,0 +1,11 @@
+{
+  "description": "Indented headings (any leading SP/HTAB) are never directives.",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

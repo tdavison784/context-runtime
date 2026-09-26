@@ -1,0 +1,11 @@
+{
+  "description": "First valid occurrence per level wins; a valid item value overrides the section value; an invalid override keeps the inherited value (M4).",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1",
+    "M4"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

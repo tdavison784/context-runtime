@@ -1,0 +1,9 @@
+{
+  "description": "A malformed keyword heading closes the prior section and grants no semantics, even to deeper keywords, until the next peer (D6).",
+  "requirements": [
+    "FR-DIR-006",
+    "D6"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

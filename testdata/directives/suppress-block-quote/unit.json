@@ -1,0 +1,10 @@
+{
+  "description": "Explicit quote lines (0-3 spaces then '>') are suppressed; a heading after a quote is parsed.",
+  "requirements": [
+    "FR-ING-004",
+    "D5",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false
+}

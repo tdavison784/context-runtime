@@ -1,0 +1,87 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_9355c0a45722c4efbb603a64f76ef52b",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Goal\n\n## Working\n- [a] \n- b\n## Remember\n   \t\n"
+        }
+      ],
+      "content_hash": "sha256:12edb8171e2b3697f6cfdf3fbbcc6ea1b7348fcc858666406a0782964783c4a8"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "empty_item",
+      "section": "GOAL",
+      "range": [
+        0,
+        9
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "empty_item",
+      "section": "WORKING",
+      "range": [
+        20,
+        27
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "range": [
+        27,
+        31
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "empty_item",
+      "section": "REMEMBER",
+      "range": [
+        31,
+        48
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

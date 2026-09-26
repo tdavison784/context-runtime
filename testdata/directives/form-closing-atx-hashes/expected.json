@@ -1,0 +1,76 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "GOAL",
+      "level": 2,
+      "range": [
+        0,
+        16
+      ],
+      "heading_range": [
+        0,
+        11
+      ],
+      "body_range": [
+        11,
+        16
+      ],
+      "malformed": true
+    },
+    {
+      "keyword": "REMEMBER",
+      "level": 2,
+      "range": [
+        16,
+        41
+      ],
+      "heading_range": [
+        16,
+        36
+      ],
+      "body_range": [
+        36,
+        41
+      ],
+      "directive_id": "r",
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 1,
+      "directive_id": "r",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "kept",
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        16,
+        41
+      ],
+      "text_ranges": [
+        [
+          36,
+          40
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "GOAL",
+      "range": [
+        0,
+        10
+      ]
+    }
+  ]
+}

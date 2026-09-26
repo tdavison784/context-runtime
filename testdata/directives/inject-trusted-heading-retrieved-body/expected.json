@@ -1,0 +1,56 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "level": 2,
+      "range": [
+        0,
+        10
+      ],
+      "heading_range": [
+        0,
+        10
+      ],
+      "body_range": [
+        10,
+        10
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "empty_item",
+      "section": "PINNED",
+      "range": [
+        0,
+        10
+      ]
+    }
+  ],
+  "more_units": [
+    {
+      "parser_version": "directive/v1",
+      "sections": [],
+      "items": [],
+      "lifecycle": [],
+      "diagnostics": [
+        {
+          "index": 0,
+          "code": "DirectiveNotParsed",
+          "reason": "source_not_capable",
+          "section": "RESOLVE",
+          "range": [
+            29,
+            43
+          ]
+        }
+      ]
+    }
+  ]
+}

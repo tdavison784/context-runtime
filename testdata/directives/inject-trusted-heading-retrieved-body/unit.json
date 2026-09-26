@@ -1,0 +1,20 @@
+{
+  "description": "M1: a trusted heading cannot adopt a body from a retrieved span; the empty trusted section is diagnosed.",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "M1"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true,
+  "more_units": [
+    {
+      "input": "unit2.md",
+      "authority": "RETRIEVED_CONTENT",
+      "directive_capable": false,
+      "span_index": 1,
+      "part_index": 0
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "description": "obligation= declares a claim name on Pinned only; it is recorded, never executed or resolved (D13).",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1",
+    "D13"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

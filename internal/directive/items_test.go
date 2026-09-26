@@ -198,6 +198,16 @@ func TestMalformedItemsAndLifecycle(t *testing.T) {
 	if len(p.items) != 1 || p.items[0].id == "heading" || p.diagnostics[0].reason != "heading ID on list section" {
 		t.Fatal(p)
 	}
+	for _, input := range []string{"## Working [heading]\n- text", "## Unpin [a]\n- [b]", "## Goal [g]\n", "## Resolve [g]\ntext", "## Goal [goal-" + strings.Repeat("ab", 32) + "]\nx"} {
+		if r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem}); len(r.Sections) != 1 || r.Sections[0].DirectiveID != "" {
+			t.Fatalf("%q: ignored heading ID exported: %+v", input, r.Sections)
+		}
+	}
+	for _, input := range []string{"## Goal [g]\nx", "## Resolve [g]"} {
+		if r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem}); r.Sections[0].DirectiveID != "g" {
+			t.Fatal(r.Sections)
+		}
+	}
 }
 func TestRepeatedIDsWithinList(t *testing.T) {
 	cases := []struct {
@@ -226,6 +236,21 @@ func TestRepeatedIDsWithinList(t *testing.T) {
 		}
 	}
 }
+func TestDerivedIDDiagnosticsOnlyForSurvivors(t *testing.T) {
+	r := Parse([]byte("## Working\n- same\n- same\n- other"), Options{Authority: domain.AuthoritySystem})
+	derived := 0
+	for _, d := range r.Diagnostics {
+		if d.Code == domain.DirectiveIDDerived {
+			derived++
+			if len(r.Items) != 1 || d.DirectiveID != r.Items[0].DirectiveID {
+				t.Fatalf("%+v", r)
+			}
+		}
+	}
+	if derived != 1 {
+		t.Fatal(r.Diagnostics)
+	}
+}
 func TestDerivedIDsAndItemLimit(t *testing.T) {
 	p := parsedCore("## Remember\n- same\n## Remember\n- same")
 	hash := domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: "same"}})
@@ -237,7 +262,7 @@ func TestDerivedIDsAndItemLimit(t *testing.T) {
 	p.limits.maxItems = 2
 	p.extract()
 	p.finish()
-	if len(p.items) != 2 || p.diagnostics[len(p.diagnostics)-1].reason != "item limit reached" {
+	if len(p.items) != 2 || p.fatal != "span exceeds item limit" {
 		t.Fatal(p)
 	}
 }

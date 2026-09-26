@@ -1,0 +1,138 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "level": 2,
+      "range": [
+        0,
+        61
+      ],
+      "heading_range": [
+        0,
+        40
+      ],
+      "body_range": [
+        40,
+        61
+      ],
+      "directive_id": "tests",
+      "attributes": [
+        {
+          "name": "obligation",
+          "value": "tests_pass",
+          "range": [
+            18,
+            39
+          ]
+        }
+      ],
+      "items": [
+        0
+      ]
+    },
+    {
+      "keyword": "PINNED",
+      "level": 2,
+      "range": [
+        61,
+        146
+      ],
+      "heading_range": [
+        61,
+        71
+      ],
+      "body_range": [
+        71,
+        146
+      ],
+      "items": [
+        1,
+        2
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "tests",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "All tests must pass.",
+      "content_hash": "sha256:7727a74aaaa8689c32dc38fc24275332ed5a053fcfaaaf2184ce461c49541945",
+      "obligation": "tests_pass",
+      "attributes": [
+        {
+          "name": "obligation",
+          "value": "tests_pass",
+          "range": [
+            18,
+            39
+          ]
+        }
+      ],
+      "range": [
+        0,
+        61
+      ],
+      "text_ranges": [
+        [
+          40,
+          60
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 1,
+      "directive_id": "lint",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "Lint is clean.",
+      "content_hash": "sha256:41e6e6947b04aaf899d503d8e73180289f1a27b6006c52118cc70423993370f8",
+      "obligation": "lint.clean-v2",
+      "attributes": [
+        {
+          "name": "obligation",
+          "value": "lint.clean-v2",
+          "range": [
+            81,
+            105
+          ]
+        }
+      ],
+      "range": [
+        71,
+        122
+      ],
+      "text_ranges": [
+        [
+          107,
+          121
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 1,
+      "directive_id": "none",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "No obligation.",
+      "content_hash": "sha256:2ada4e4722b3bf0becdf3e80a6728a646817bea90239d6b3587a62820a891bde",
+      "range": [
+        122,
+        146
+      ],
+      "text_ranges": [
+        [
+          131,
+          145
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": []
+}

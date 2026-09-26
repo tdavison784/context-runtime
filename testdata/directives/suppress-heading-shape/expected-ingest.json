@@ -1,0 +1,80 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_5500ed918fd6873593a759f43ff7d6a5",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "##\tPinned\n- a\n####### Goal\nb\nPinned\n======\nWorking\n-------\n## Pinned:\nc\n"
+        }
+      ],
+      "content_hash": "sha256:19bfa0d5833bb49aa49ef2d5a41bf98acae241ad5a30a1ddafc11c2ae4bc668f"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_0a29e30bd77a40f1da490ffed6560db5",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "##\tPinned\n- a\n####### Goal\nb\nPinned\n======\nWorking\n-------\n## Pinned:\nc"
+        }
+      ],
+      "content_hash": "sha256:b6fafaf0e067c8fcb5bb6389c61132a8269039fafde88842fd6966581b869a28",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            71
+          ],
+          "slices": [
+            [
+              0,
+              71
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": []
+}

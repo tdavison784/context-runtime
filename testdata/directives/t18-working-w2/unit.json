@@ -1,0 +1,9 @@
+{
+  "description": "T18 step 2, W2: one Working section with one member; ingestion supersedes both W1 members (FR-DIR-007).",
+  "requirements": [
+    "T18",
+    "FR-DIR-007"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

@@ -1,0 +1,130 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_bd46ad4cc797e5bd812fb071ae62cc00",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "# Pin"
+        },
+        {
+          "text": "ned\n- evil\n"
+        }
+      ],
+      "content_hash": "sha256:652d0ad94d58d43366bacc26589f7ef5004796cc5ad4115792ced96a0a15613c"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_f00f66f88247e027126acddb84054b02",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "# Pin"
+        }
+      ],
+      "content_hash": "sha256:fb2b67d6255da02bf6be1d72acc886491213329fef0ddb0f1829e1db5c93fda6",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            5
+          ],
+          "slices": [
+            [
+              0,
+              5
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_1706316b0d1bcec2cd7b7dc7d7ebc3df",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "ned\n- evil"
+        }
+      ],
+      "content_hash": "sha256:d9246d100df99657426a83089f4c73a9cece494d557817842169308140622045",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 1,
+          "range": [
+            0,
+            10
+          ],
+          "slices": [
+            [
+              0,
+              10
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": []
+}

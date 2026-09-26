@@ -1,6 +1,3 @@
-// Package directive defines the pure, source-gated directive parser contract.
-// Parsing never reads stores, resolves targets, applies defaults, or mutates
-// semantic state. All ranges address the original input bytes (FR-DIR-004).
 package directive
 
 import "github.com/tdavison784/context-runtime/internal/domain"

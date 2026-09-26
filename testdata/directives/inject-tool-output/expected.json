@@ -1,0 +1,38 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [],
+  "items": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "source_not_capable",
+      "section": "PINNED",
+      "range": [
+        0,
+        9
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "source_not_capable",
+      "section": "RESOLVE",
+      "range": [
+        60,
+        80
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveNotParsed",
+      "reason": "source_not_capable",
+      "section": "UNPIN",
+      "range": [
+        81,
+        97
+      ]
+    }
+  ]
+}

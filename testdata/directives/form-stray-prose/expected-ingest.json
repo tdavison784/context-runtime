@@ -1,0 +1,75 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_6099ed5b3f3153e6d97ad3c8c7ebefef",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Working\n- a\nunindented prose\n  still prose\n- b\n"
+        }
+      ],
+      "content_hash": "sha256:9ca424d45c8728bd5bd93f1793816e221f26d6d3ab56ef7f8a0cfe8b5e97a7eb"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "range": [
+        11,
+        15
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "WORKING",
+      "range": [
+        15,
+        45
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "range": [
+        46,
+        50
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

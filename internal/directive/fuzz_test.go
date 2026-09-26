@@ -2,6 +2,8 @@ package directive
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -16,6 +18,18 @@ func FuzzParse(f *testing.F) {
 	f.Add([]byte("<!--\n## Pinned\n-->\n~~~\n## Goal\n~~~"), uint8(4), true, uint16(9))
 	f.Add([]byte("```\n``` x\n## Pinned\n- a\n## Pi<!--x-->nned\n- b"), uint8(0), false, uint16(5))
 	f.Add([]byte("## Remember ttl=0003\n- {kind=decision ttl=2 ttl=9} a  \r\n  b\t\nprose\n- [a] c\n- [a] d"), uint8(2), true, uint16(20))
+	// Every canonical example (testdata/directives) is also a seed, for each
+	// source so gating and the capable path both start from the contract.
+	inputs, _ := filepath.Glob("../../testdata/directives/*/*.md")
+	for _, path := range inputs {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			f.Fatal(err)
+		}
+		for source := range uint8(6) {
+			f.Add(data, source, source == 2, uint16(len(data)/2))
+		}
+	}
 	f.Fuzz(func(t *testing.T, input []byte, source uint8, capable bool, split uint16) {
 		if len(input) > 64<<10 {
 			t.Skip()

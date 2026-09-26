@@ -1,0 +1,701 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_6a4212f364fcc35c97a7480c83c01f1a",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Goal\nUpgrade Foo to v2 while maintaining backwards compatibility.\n\n## Pinned\n- [api] Do not modify exported APIs.\n- [tests] {obligation=tests_pass} All tests must pass.\n- [architecture] Read docs/architecture.md.\n\n## Working\n- Investigating internal/client.go.\n- Current issue is TestLegacyClient.\n\n## Remember\n- Foo v2 requires context.Context.\n- [retry] {kind=decision} Keep the v1 retry policy.\n\n## References\n- docs/architecture.md\n- go.mod\n\n## Ephemeral ttl=2\n- (pasted build output)\n\n## Unpin\n- [architecture]\n"
+        }
+      ],
+      "content_hash": "sha256:5e2c361356f18ed905fa4adc2e8bc7a4431254218ec68efe286a586d9cac2e56"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_769e6495905cea0e42d3463bbe776270",
+      "kind": "goal",
+      "section": "GOAL",
+      "directive_id": "goal-f9f9f156ca0cbd0a098410a67e3de28bf1065c5202a12a76ca079b6f8577c373",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "goal_status": "OPEN",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Upgrade Foo to v2 while maintaining backwards compatibility."
+        }
+      ],
+      "content_hash": "sha256:f9f9f156ca0cbd0a098410a67e3de28bf1065c5202a12a76ca079b6f8577c373",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            70
+          ],
+          "slices": [
+            [
+              8,
+              68
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_2070131de8904f6359cbb58bbfc7b2f9",
+      "kind": "constraint",
+      "section": "PINNED",
+      "directive_id": "api",
+      "generation": "PINNED",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Do not modify exported APIs."
+        }
+      ],
+      "content_hash": "sha256:0d80e18aba70b0f64f7e3a9d63e8eab82cd91007377635098004c34eab090814",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            80,
+            117
+          ],
+          "slices": [
+            [
+              88,
+              116
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#3",
+      "id": "itm_8ac7ba40b5500859c09d0b3262612f5a",
+      "kind": "constraint",
+      "section": "PINNED",
+      "directive_id": "tests",
+      "generation": "PINNED",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "All tests must pass."
+        }
+      ],
+      "content_hash": "sha256:7727a74aaaa8689c32dc38fc24275332ed5a053fcfaaaf2184ce461c49541945",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            117,
+            172
+          ],
+          "slices": [
+            [
+              151,
+              171
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#4",
+      "id": "itm_6f6e5de07358574b26f353e0730f1f47",
+      "kind": "constraint",
+      "section": "PINNED",
+      "directive_id": "architecture",
+      "generation": "PINNED",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Read docs/architecture.md."
+        }
+      ],
+      "content_hash": "sha256:1f3527b11a8add9f1a4d911a38e52c92777c02e3a9f67351256746fc47b1d674",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            172,
+            216
+          ],
+          "slices": [
+            [
+              189,
+              215
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#5",
+      "id": "itm_7d9af70d54aa96d8130ae1484e7bcef5",
+      "kind": "task_state",
+      "section": "WORKING",
+      "directive_id": "working-e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Investigating internal/client.go."
+        }
+      ],
+      "content_hash": "sha256:e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            228,
+            264
+          ],
+          "slices": [
+            [
+              230,
+              263
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#6",
+      "id": "itm_6a7f0b19eeab2c76ff49a0b8295bfa02",
+      "kind": "task_state",
+      "section": "WORKING",
+      "directive_id": "working-0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Current issue is TestLegacyClient."
+        }
+      ],
+      "content_hash": "sha256:0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            264,
+            301
+          ],
+          "slices": [
+            [
+              266,
+              300
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#7",
+      "id": "itm_400054f36b08fe8095a7d40f3e6450b2",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-f066e59a7473043cf54482efa4ba8a2f10f38db97faee175a98587ac62aad327",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Foo v2 requires context.Context."
+        }
+      ],
+      "content_hash": "sha256:f066e59a7473043cf54482efa4ba8a2f10f38db97faee175a98587ac62aad327",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            314,
+            349
+          ],
+          "slices": [
+            [
+              316,
+              348
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#8",
+      "id": "itm_0d5fdfaf7fde4a33ad0abfd9b100edf5",
+      "kind": "decision",
+      "section": "REMEMBER",
+      "directive_id": "retry",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Keep the v1 retry policy."
+        }
+      ],
+      "content_hash": "sha256:7101d8da182af25cc762d9820023b66f48b05d154d11648789f13835bcaa06d4",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            349,
+            401
+          ],
+          "slices": [
+            [
+              375,
+              400
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#9",
+      "id": "itm_27fa6987e5177a363df48f95358939f1",
+      "kind": "reference",
+      "section": "REFERENCES",
+      "directive_id": "references-2660c2a4dbb93e17d967db903654f5362b200504a55e65ff5442619577a192b6",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "docs/architecture.md"
+        }
+      ],
+      "content_hash": "sha256:2660c2a4dbb93e17d967db903654f5362b200504a55e65ff5442619577a192b6",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            416,
+            439
+          ],
+          "slices": [
+            [
+              418,
+              438
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#10",
+      "id": "itm_c0b2d4b25560b6cf2b4c33f2835c3e76",
+      "kind": "reference",
+      "section": "REFERENCES",
+      "directive_id": "references-263eeaec2318e774c2d2766d40e5fe93c875bdc7439dfa6876ab1abb29fe0f9f",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "go.mod"
+        }
+      ],
+      "content_hash": "sha256:263eeaec2318e774c2d2766d40e5fe93c875bdc7439dfa6876ab1abb29fe0f9f",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            439,
+            448
+          ],
+          "slices": [
+            [
+              441,
+              447
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#11",
+      "id": "itm_5702271460778b139a0a53fcc6ecf389",
+      "kind": "evidence",
+      "section": "EPHEMERAL",
+      "directive_id": "ephemeral-992fe4cf9d9f065fc3766c0da4dc381beb8fc6190531df994fe96ef78dde0e54",
+      "generation": "EPHEMERAL",
+      "authority": "USER",
+      "scope": "TURN",
+      "access": {
+        "scope": "TURN",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "LOW",
+      "ttl_turns": 2,
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "(pasted build output)"
+        }
+      ],
+      "content_hash": "sha256:992fe4cf9d9f065fc3766c0da4dc381beb8fc6190531df994fe96ef78dde0e54",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            468,
+            492
+          ],
+          "slices": [
+            [
+              470,
+              491
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#3",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#4",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#5",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#6",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#7",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#8",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#9",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#10",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#11",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [
+    {
+      "source": "event#3",
+      "version": 1,
+      "claim": "tests_pass",
+      "status": "UNRESOLVED",
+      "current": true,
+      "source_authority": "USER",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      }
+    }
+  ],
+  "lifecycle": [
+    {
+      "action": "UNPIN",
+      "target_id": "architecture",
+      "authority": "USER",
+      "actor_authority": "USER",
+      "status": "PARSED_NOT_EXECUTED",
+      "resolution": "RESOLVED",
+      "resolved": "event#4",
+      "range": [
+        502,
+        519
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "GOAL",
+      "directive_id": "goal-f9f9f156ca0cbd0a098410a67e3de28bf1065c5202a12a76ca079b6f8577c373",
+      "range": [
+        0,
+        70
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-e6d4ac4eec945c4c5afd218d4dc285779ee65a454e565dd4b57a79d137c9c391",
+      "range": [
+        228,
+        264
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-0c10e191f215e37ef137e19172fea6f024aa9fb18e40a27b466c453f76581435",
+      "range": [
+        264,
+        301
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-f066e59a7473043cf54482efa4ba8a2f10f38db97faee175a98587ac62aad327",
+      "range": [
+        314,
+        349
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 4,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REFERENCES",
+      "directive_id": "references-2660c2a4dbb93e17d967db903654f5362b200504a55e65ff5442619577a192b6",
+      "range": [
+        416,
+        439
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 5,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REFERENCES",
+      "directive_id": "references-263eeaec2318e774c2d2766d40e5fe93c875bdc7439dfa6876ab1abb29fe0f9f",
+      "range": [
+        439,
+        448
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 6,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "EPHEMERAL",
+      "directive_id": "ephemeral-992fe4cf9d9f065fc3766c0da4dc381beb8fc6190531df994fe96ef78dde0e54",
+      "range": [
+        468,
+        492
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_28d170d59a0d9055db6dc1df3bee9a26",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text_hex": "23232052656d656d6265720a2d20fffe2072617720c3280a23232050c3af6e6e65640a2d206576696c0a"
+        }
+      ],
+      "content_hash": "sha256:6897dffc5f866bdf2df91baeacc8ebe3c0c5d76edd03955c34817a4bbabc3c7c"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_50ff08a99fa4a9efa304efc593a96606",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-c4f6ba987f6d7a020c45bcad3026c4a1f50e479f39814da5d674037422207cea",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text_hex": "fffe2072617720c328"
+        }
+      ],
+      "content_hash": "sha256:c4f6ba987f6d7a020c45bcad3026c4a1f50e479f39814da5d674037422207cea",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            12,
+            24
+          ],
+          "slices": [
+            [
+              14,
+              23
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-c4f6ba987f6d7a020c45bcad3026c4a1f50e479f39814da5d674037422207cea",
+      "range": [
+        12,
+        24
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

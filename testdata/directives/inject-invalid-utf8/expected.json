@@ -1,0 +1,58 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "REMEMBER",
+      "level": 2,
+      "range": [
+        0,
+        24
+      ],
+      "heading_range": [
+        0,
+        12
+      ],
+      "body_range": [
+        12,
+        24
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-c4f6ba987f6d7a020c45bcad3026c4a1f50e479f39814da5d674037422207cea",
+      "authority": "USER",
+      "text_hex": "fffe2072617720c328",
+      "content_hash": "sha256:c4f6ba987f6d7a020c45bcad3026c4a1f50e479f39814da5d674037422207cea",
+      "range": [
+        12,
+        24
+      ],
+      "text_ranges": [
+        [
+          14,
+          23
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-c4f6ba987f6d7a020c45bcad3026c4a1f50e479f39814da5d674037422207cea",
+      "range": [
+        12,
+        24
+      ]
+    }
+  ]
+}

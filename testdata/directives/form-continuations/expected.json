@@ -1,0 +1,138 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "WORKING",
+      "level": 2,
+      "range": [
+        0,
+        96
+      ],
+      "heading_range": [
+        0,
+        11
+      ],
+      "body_range": [
+        11,
+        96
+      ],
+      "items": [
+        0,
+        1,
+        2
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "working-29df0a4a19d321c74b6edb31c1e4741af4f4c4cd5084c91285888b78ca309650",
+      "authority": "USER",
+      "text": "first  \nmore \n  deeper\n\nafter blank",
+      "content_hash": "sha256:29df0a4a19d321c74b6edb31c1e4741af4f4c4cd5084c91285888b78ca309650",
+      "range": [
+        11,
+        63
+      ],
+      "text_ranges": [
+        [
+          13,
+          21
+        ],
+        [
+          25,
+          31
+        ],
+        [
+          35,
+          45
+        ],
+        [
+          49,
+          60
+        ]
+      ]
+    },
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "working-982fcd0f841c7aae1c2ed2ce1313ca4fd8bd7f7a3e4acff257b3801d056bc1e6",
+      "authority": "USER",
+      "text": "tabbed\ncont\n\tnested",
+      "content_hash": "sha256:982fcd0f841c7aae1c2ed2ce1313ca4fd8bd7f7a3e4acff257b3801d056bc1e6",
+      "range": [
+        63,
+        89
+      ],
+      "text_ranges": [
+        [
+          65,
+          72
+        ],
+        [
+          73,
+          78
+        ],
+        [
+          79,
+          86
+        ]
+      ]
+    },
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "working-b4d88f83189ed463d3dd20133f00d5467e3595da7280d825180b868f0ed20dc8",
+      "authority": "USER",
+      "text": "last",
+      "content_hash": "sha256:b4d88f83189ed463d3dd20133f00d5467e3595da7280d825180b868f0ed20dc8",
+      "range": [
+        89,
+        96
+      ],
+      "text_ranges": [
+        [
+          91,
+          95
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-29df0a4a19d321c74b6edb31c1e4741af4f4c4cd5084c91285888b78ca309650",
+      "range": [
+        11,
+        63
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-982fcd0f841c7aae1c2ed2ce1313ca4fd8bd7f7a3e4acff257b3801d056bc1e6",
+      "range": [
+        63,
+        89
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-b4d88f83189ed463d3dd20133f00d5467e3595da7280d825180b868f0ed20dc8",
+      "range": [
+        89,
+        96
+      ]
+    }
+  ]
+}

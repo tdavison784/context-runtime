@@ -1,0 +1,58 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "level": 3,
+      "range": [
+        15,
+        30
+      ],
+      "heading_range": [
+        15,
+        26
+      ],
+      "body_range": [
+        26,
+        30
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "pinned-6cbb041b4792663183643872cbffdd408d4bd78135dae47a69d581c19e5189ab",
+      "authority": "USER",
+      "text": "x",
+      "content_hash": "sha256:6cbb041b4792663183643872cbffdd408d4bd78135dae47a69d581c19e5189ab",
+      "range": [
+        26,
+        30
+      ],
+      "text_ranges": [
+        [
+          28,
+          29
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-6cbb041b4792663183643872cbffdd408d4bd78135dae47a69d581c19e5189ab",
+      "range": [
+        26,
+        30
+      ]
+    }
+  ]
+}

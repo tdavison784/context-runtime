@@ -2,7 +2,6 @@ package directive
 
 import (
 	"bytes"
-	"math"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
@@ -87,12 +86,16 @@ func (p *coreParser) lexAttributes(section string, b []byte, offset int) ([]rawA
 	if len(b) == 0 {
 		return nil, false
 	}
-	for rest := b; ; {
+	for rest, count := b, 1; ; count++ {
 		n := bytes.IndexByte(rest, ' ')
 		if n < 0 {
 			n = len(rest)
 		}
 		token := rest[:n]
+		if count > p.limits.maxAttributes || n > p.limits.maxAttributeBytes {
+			p.fail("attribute limit exceeded")
+			return nil, false
+		}
 		eq := bytes.IndexByte(token, '=')
 		if eq < 1 || !asciiValue(token[:eq]) || !asciiValue(token[eq+1:]) {
 			return nil, false
@@ -200,10 +203,10 @@ func kindAllowed(section, value string) bool {
 	return false
 }
 
-// MaxTTLTurns is the ttl representation bound (R1): portable to every Go int
-// width. Larger positive values reject the parse unit with
-// ErrRepresentationLimit instead of being ignored as malformed.
-const MaxTTLTurns = math.MaxInt32
+// MaxTTLTurns is the domain's ttl representation bound (R1). Larger positive
+// values reject the parse unit with ErrRepresentationLimit instead of being
+// ignored as malformed.
+const MaxTTLTurns = domain.MaxTTLTurns
 
 // parseTTL parses ASCII decimal digits with checked arithmetic; leading zeros
 // are allowed. It returns 0 for a non-digit or all-zero value, and overflow

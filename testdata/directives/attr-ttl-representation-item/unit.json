@@ -1,0 +1,11 @@
+{
+  "description": "An item-level ttl overflow also rejects the whole unit; no partial result (R1, D17).",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1",
+    "D17"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

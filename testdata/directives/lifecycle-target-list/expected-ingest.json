@@ -1,0 +1,110 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_67c1bbce34a296814a8e547ea1a779bd",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Unpin\n- [api]\n- [tests]  \n\n* [architecture]\n"
+        }
+      ],
+      "content_hash": "sha256:19874e2e1540c59bab8ff56e88acdf6ff1b39e3b5f9d57977d276a434ff8b31b"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [
+    {
+      "action": "UNPIN",
+      "target_id": "api",
+      "authority": "USER",
+      "actor_authority": "USER",
+      "status": "PARSED_NOT_EXECUTED",
+      "resolution": "NOT_FOUND",
+      "range": [
+        9,
+        17
+      ]
+    },
+    {
+      "action": "UNPIN",
+      "target_id": "tests",
+      "authority": "USER",
+      "actor_authority": "USER",
+      "status": "PARSED_NOT_EXECUTED",
+      "resolution": "NOT_FOUND",
+      "range": [
+        17,
+        30
+      ]
+    },
+    {
+      "action": "UNPIN",
+      "target_id": "architecture",
+      "authority": "USER",
+      "actor_authority": "USER",
+      "status": "PARSED_NOT_EXECUTED",
+      "resolution": "NOT_FOUND",
+      "range": [
+        30,
+        47
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrNotFound",
+      "reason": "unknown_target",
+      "section": "UNPIN",
+      "range": [
+        9,
+        17
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrNotFound",
+      "reason": "unknown_target",
+      "section": "UNPIN",
+      "range": [
+        17,
+        30
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrNotFound",
+      "reason": "unknown_target",
+      "section": "UNPIN",
+      "range": [
+        30,
+        47
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

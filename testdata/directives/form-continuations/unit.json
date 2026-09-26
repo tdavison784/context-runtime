@@ -1,0 +1,10 @@
+{
+  "description": "Continuation lines lose the common SP/HTAB indentation only; blank lines inside an item are kept, trailing blank lines are structure (D7).",
+  "requirements": [
+    "FR-DIR-006",
+    "D7",
+    "M4"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}
