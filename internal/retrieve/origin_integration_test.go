@@ -29,7 +29,7 @@ func TestW5RegisteredToolCallAuthenticatesRetrievalOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
-		registered, err := service.RegisterExchange(tx, harness, domain.RegisterExchangeIntent{RequestID: "register", Principal: p, TurnID: "turn-1", Turn: 1})
+		registered, err := service.RegisterExchange(tx, harness, domain.RegisterExchangeIntent{RequestID: "register", Principal: p, TurnID: "turn-1", Turn: 1}, tx.NextSeq())
 		if err != nil {
 			return err
 		}
@@ -69,11 +69,11 @@ func TestW5RegisteredToolCallAuthenticatesRetrievalOrigin(t *testing.T) {
 		}
 		member := domain.RegisterExchangeMemberIntent{RequestID: "output", ExchangeID: x.ID, ExpectedRevision: 1, Position: 1,
 			Role: domain.MemberOutput, Source: storetest.ContentRef(output), CallID: call.CallID}
-		if _, err := service.RegisterExchangeMember(tx, harness, member); err != nil {
+		if _, err := service.RegisterExchangeMember(tx, harness, member, tx.NextSeq()); err != nil {
 			return err
 		}
 		member.RequestID, member.ExpectedRevision, member.Position, member.Role, member.ToolCallID = "tool", 2, 2, domain.MemberToolCall, "provider-tool"
-		if _, err := service.RegisterExchangeMember(tx, harness, member); err != nil {
+		if _, err := service.RegisterExchangeMember(tx, harness, member, tx.NextSeq()); err != nil {
 			return err
 		}
 		inv := domain.ToolInvocation{SessionID: "s", ConversationID: x.ConversationID, CallID: call.CallID,
