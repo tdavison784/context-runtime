@@ -156,18 +156,18 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 		olds = append(olds, old)
 	}
 	slices.SortFunc(olds, bySeqID)
+	plans := make([]supersessionPlan, 0, len(olds))
 	for _, old := range olds {
-		if err := domain.AuthorizeSupersession(actor, retire[old.ID], old); err != nil {
+		plan, err := planSupersession(tx, actor, retire[old.ID].ID, old.ID, eventID, "")
+		if err != nil {
 			return SnapshotResult{}, err
 		}
-		if _, err := planObligationRetirement(tx, actor, old.ID); err != nil {
-			return SnapshotResult{}, err
-		}
+		plans = append(plans, plan)
 	}
 
 	res := SnapshotResult{Unverified: unverified}
-	for _, old := range olds {
-		rel, err := Supersede(tx, actor, retire[old.ID].ID, old.ID, eventID, "")
+	for _, plan := range plans {
+		rel, err := applySupersession(tx, plan)
 		if err != nil {
 			return SnapshotResult{}, err
 		}

@@ -193,37 +193,53 @@ func CheckBoundaryConflict(tx store.ReadTx, actor domain.Principal, it domain.Co
 // ruleVersion names the deterministic rule that produced the edge (FR-REL-
 // 007); pass "" for an edge created directly from an authorized event, such
 // as a directive replacement.
-func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (domain.Relationship, error) {
-	newItem, err := loadAccessible(tx, actor, newID)
+func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (rel domain.Relationship, err error) {
+	defer func() {
+		if err != nil {
+			tx.Poison(err)
+		}
+	}()
+	p, err := planSupersession(tx, actor, newID, oldID, eventID, ruleVersion)
 	if err != nil {
 		return domain.Relationship{}, err
+	}
+	return applySupersession(tx, p)
+}
+
+type supersessionPlan struct {
+	rel         domain.Relationship
+	audit       domain.LifecycleEvent
+	obligations []obligationRetirement
+}
+
+// Reserve each actual audit/edge sequence once, before authorization and writes.
+// A Working snapshot plans every retirement before applying the first one.
+func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (supersessionPlan, error) {
+	newItem, err := loadAccessible(tx, actor, newID)
+	if err != nil {
+		return supersessionPlan{}, err
 	}
 	oldItem, err := loadAccessible(tx, actor, oldID)
 	if err != nil {
-		return domain.Relationship{}, err
+		return supersessionPlan{}, err
 	}
 	if err := domain.AuthorizeSupersession(actor, newItem, oldItem); err != nil {
-		return domain.Relationship{}, err
+		return supersessionPlan{}, err
 	}
 	dup, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: newID})
 	if err != nil {
-		return domain.Relationship{}, err
+		return supersessionPlan{}, err
 	}
 	if len(dup) > 0 {
-		return domain.Relationship{}, ErrDuplicateSupersession
+		return supersessionPlan{}, ErrDuplicateSupersession
 	}
 	retired, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: oldID})
 	if err != nil {
-		return domain.Relationship{}, err
+		return supersessionPlan{}, err
 	}
 	if len(retired) > 0 {
-		return domain.Relationship{}, ErrAlreadySuperseded
+		return supersessionPlan{}, ErrAlreadySuperseded
 	}
-	obligations, err := planObligationRetirement(tx, actor, oldID)
-	if err != nil {
-		return domain.Relationship{}, err
-	}
-
 	rel := domain.Relationship{
 		ID:          relationshipID(actor.SessionID, domain.RelSupersedes, newID, oldID, eventID),
 		SessionID:   actor.SessionID,
@@ -235,10 +251,6 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 		EventID:     eventID,
 		RuleVersion: ruleVersion,
 	}
-	if err := tx.InsertRelationship(rel); err != nil {
-		return domain.Relationship{}, err
-	}
-
 	ev := domain.LifecycleEvent{
 		ID:         lifecycleEventID(actor.SessionID, oldID, "superseded", eventID, newID),
 		SessionID:  actor.SessionID,
@@ -251,13 +263,24 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 		Actor:      actor,
 		EventID:    eventID,
 	}
-	if err := tx.AppendLifecycleEvent(ev); err != nil {
+	obligations, err := planObligationRetirement(tx, actor, oldID)
+	if err != nil {
+		return supersessionPlan{}, err
+	}
+	return supersessionPlan{rel: rel, audit: ev, obligations: obligations}, nil
+}
+
+func applySupersession(tx store.Tx, p supersessionPlan) (domain.Relationship, error) {
+	if err := tx.InsertRelationship(p.rel); err != nil {
 		return domain.Relationship{}, err
 	}
-	if err := retireObligations(tx, actor, obligations, oldID, newID, eventID); err != nil {
+	if err := tx.AppendLifecycleEvent(p.audit); err != nil {
 		return domain.Relationship{}, err
 	}
-	return rel, nil
+	if err := retireObligations(tx, p.audit.Actor, p.obligations, p.rel.ToID, p.rel.FromID, p.rel.EventID); err != nil {
+		return domain.Relationship{}, err
+	}
+	return p.rel, nil
 }
 
 // ReplaceDirective files newItemID as the current version of (taskID,
