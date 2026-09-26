@@ -33,6 +33,7 @@ type Relationship struct {
 	Authority   Authority // authority of the mutation that created the edge
 	EventID     string
 	RuleVersion string // deterministic rule that produced the edge, if any
+	CoverageID  string // normalized Phase 3 coverage; mutually exclusive with legacy Coverage
 	Coverage    *Coverage
 }
 
@@ -68,6 +69,9 @@ func (r Relationship) Validate() error {
 	}
 	if !r.Authority.Valid() {
 		return invalid("relationship %s: invalid authority %q", r.ID, r.Authority)
+	}
+	if r.CoverageID != "" && r.Coverage != nil {
+		return invalid("relationship: mixed coverage schemas")
 	}
 	if r.Coverage != nil {
 		if r.Coverage.FromSeq > r.Coverage.ToSeq {

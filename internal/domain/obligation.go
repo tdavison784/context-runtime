@@ -51,14 +51,15 @@ type MatcherRef struct {
 // a new one that starts UNRESOLVED. Status history lives in
 // ObligationTransition records; Status caches the latest.
 type ObligationVersion struct {
-	ObligationID    string
-	Version         uint64
-	SessionID       string
-	TaskID          string
-	SourceItemID    string
-	SourceAuthority Authority
-	Access          AccessBoundary
-	Description     string
+	DeclarationID, CurrentProofID, CurrentAssertionID string
+	ObligationID                                      string
+	Version                                           uint64
+	SessionID                                         string
+	TaskID                                            string
+	SourceItemID                                      string
+	SourceAuthority                                   Authority
+	Access                                            AccessBoundary
+	Description                                       string
 	// Claim is the declared claim name from a Pinned obligation=<claim>
 	// attribute (D13). It is only a name: it is not a registry lookup, a
 	// matcher binding, or a grant. Matcher stays nil until a registered
@@ -89,6 +90,9 @@ func (o ObligationVersion) Clone() ObligationVersion {
 
 // Validate checks structural rules.
 func (o ObligationVersion) Validate() error {
+	if o.Status != ObligationSatisfied && (o.CurrentProofID != "" || o.CurrentAssertionID != "") {
+		return invalid("obligation: nonsatisfied version carries current proof")
+	}
 	if o.ObligationID == "" || o.SessionID == "" || o.SourceItemID == "" {
 		return invalid("obligation: ID, session, and source item are required")
 	}

@@ -65,10 +65,14 @@ type ItemRole string
 const (
 	RoleSemantic   ItemRole = ""
 	RoleTranscript ItemRole = "TRANSCRIPT"
+	RoleCheckpoint ItemRole = "CHECKPOINT"
+	RoleProjection ItemRole = "PROJECTION"
 )
 
 // Valid reports whether r is a known role.
-func (r ItemRole) Valid() bool { return r == RoleSemantic || r == RoleTranscript }
+func (r ItemRole) Valid() bool {
+	return r == RoleSemantic || r == RoleTranscript || r == RoleCheckpoint || r == RoleProjection
+}
 
 // SourceKind says what a source locator names.
 type SourceKind string
