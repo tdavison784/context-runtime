@@ -13,6 +13,7 @@ type applyTx struct {
 	store.Tx
 	sem       *applySemantic
 	source    domain.ContextItem
+	extra     map[string]domain.ContextItem
 	task      domain.TaskState
 	conv      domain.Conversation
 	seq       uint64
@@ -31,6 +32,9 @@ func (t *applyTx) Task(string) (domain.TaskState, error) {
 }
 func (t *applyTx) Conversation(string) (domain.Conversation, error) { return t.conv, nil }
 func (t *applyTx) Item(id string) (domain.ContextItem, error) {
+	if item, ok := t.extra[id]; ok {
+		return item.Clone(), nil
+	}
 	if id != t.source.ID {
 		return domain.ContextItem{}, domain.ErrNotFound
 	}
@@ -46,13 +50,16 @@ func (t *applyTx) InsertItem(item domain.ContextItem) error {
 
 type applySemantic struct {
 	store.SemanticTx
-	leases      []domain.RetrievalLease
-	results     map[string]domain.RetrievalResult
-	receipts    map[string]domain.MutationReceipt
-	coverages   []domain.CoverageRecord
-	projections []domain.ProjectionRecord
-	events      []domain.RetrievalEvent
-	failAt      string
+	leases         []domain.RetrievalLease
+	results        map[string]domain.RetrievalResult
+	receipts       map[string]domain.MutationReceipt
+	coverages      []domain.CoverageRecord
+	projections    []domain.ProjectionRecord
+	events         []domain.RetrievalEvent
+	failAt         string
+	oldProjections map[string]domain.ProjectionRecord
+	oldCoverages   map[string]domain.CoverageRecord
+	oldMembers     map[string][]domain.CoverageMember
 }
 
 func (s *applySemantic) MutationReceipt(_ domain.MutationFamily, id string) (domain.MutationReceipt, error) {
@@ -66,6 +73,29 @@ func (s *applySemantic) RetrievalResult(id string) (domain.RetrievalResult, erro
 		return r, nil
 	}
 	return domain.RetrievalResult{}, domain.ErrNotFound
+}
+func (s *applySemantic) RetrievalLease(id string) (domain.RetrievalLease, error) {
+	for _, lease := range s.leases {
+		if lease.ID == id {
+			return lease, nil
+		}
+	}
+	return domain.RetrievalLease{}, domain.ErrNotFound
+}
+func (s *applySemantic) ProjectionByItem(id string) (domain.ProjectionRecord, error) {
+	if p, ok := s.oldProjections[id]; ok {
+		return p, nil
+	}
+	return domain.ProjectionRecord{}, domain.ErrNotFound
+}
+func (s *applySemantic) Coverage(id string) (domain.CoverageRecord, error) {
+	if c, ok := s.oldCoverages[id]; ok {
+		return c, nil
+	}
+	return domain.CoverageRecord{}, domain.ErrNotFound
+}
+func (s *applySemantic) CoverageMembers(id string, _ store.Page) (store.ResultPage[domain.CoverageMember], error) {
+	return store.ResultPage[domain.CoverageMember]{Records: s.oldMembers[id]}, nil
 }
 func (s *applySemantic) LeasesByHolder(domain.Principal, string, string, store.Page) (store.ResultPage[domain.RetrievalLease], error) {
 	return store.ResultPage[domain.RetrievalLease]{Records: s.leases}, nil
@@ -162,5 +192,35 @@ func TestApplyRejectsProjectionSourceWithoutInheritedCoverage(t *testing.T) {
 	_, err := Apply(tx, p, i, leasePolicy(), false)
 	if !errors.Is(err, domain.ErrIncompleteCoverage) || tx.seq != 1 || len(sem.leases) != 0 {
 		t.Fatalf("projection renewed without inherited lease: %v", err)
+	}
+}
+
+func TestApplyProjectionSourceCarriesOldLeaseAndRejectsExpiry(t *testing.T) {
+	d := dependencyFixture(t)
+	p := d.Principal
+	p.Authority = domain.AuthorityHarness
+	d.Projection.Origin.Holder, d.Projection.Origin.Invocation = p, nil
+	oldLease := d.Leases["lease"]
+	oldLease.Holder = p
+	d.Leases[oldLease.ID] = oldLease
+	projected := storetest.NewItem("s", d.Projection.ItemID, 4, "copied source")
+	projected.Role, projected.Kind, projected.Authority = domain.RoleProjection, domain.KindToolResult, domain.AuthorityTool
+	projected.Scope, projected.Access = domain.ScopeAgent, d.Projection.Access
+	projected.Source = &domain.SourceRef{Kind: domain.SourceItem, Locator: d.Projection.Source.ItemID, ContentHash: d.Projection.Source.ContentHash}
+	sem := &applySemantic{results: map[string]domain.RetrievalResult{}, receipts: map[string]domain.MutationReceipt{},
+		leases: []domain.RetrievalLease{oldLease}, oldProjections: map[string]domain.ProjectionRecord{projected.ID: d.Projection},
+		oldCoverages: d.Coverages, oldMembers: d.Members}
+	tx := &applyTx{sem: sem, source: projected, extra: d.Sources, task: d.Task, conv: d.Conversation, seq: 4}
+	i := AdmissionIntent{Rehydrate: domain.RehydrateIntent{RequestID: "new", ItemID: projected.ID}, Origin: d.Projection.Origin, Method: "rehydrate"}
+	result, err := Apply(tx, p, i, leasePolicy(), false)
+	if err != nil || result.LeaseID == oldLease.ID || len(sem.leases) != 2 || len(sem.coverages) != 1 || sem.coverages[0].MemberCount != 3 {
+		t.Fatalf("projection retrieval lost nested lease: %+v, %v", result, err)
+	}
+	seq := tx.seq
+	tx.conv.LogicalCalls = oldLease.CallAllowance
+	i.Rehydrate.RequestID = "after-expiry"
+	_, err = Apply(tx, p, i, leasePolicy(), false)
+	if !errors.Is(err, domain.ErrLeaseExpired) || tx.seq != seq || len(sem.leases) != 2 {
+		t.Fatalf("expired original lease renewed: %v", err)
 	}
 }

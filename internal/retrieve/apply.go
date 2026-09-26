@@ -79,8 +79,19 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	if err != nil {
 		return out, err
 	}
+	var inherited *domain.ProjectionRecord
 	if got.Item.Role == domain.RoleProjection {
-		return out, domain.ErrIncompleteCoverage
+		old, err := sem.ProjectionByItem(got.Item.ID)
+		if errors.Is(err, domain.ErrNotFound) {
+			return out, domain.ErrIncompleteCoverage
+		}
+		if err != nil {
+			return out, err
+		}
+		if err := CheckStoredProjectionDependencies(tx, sem, old, actor, task, conv, execution.MaxPageSize, execution.MaxTransactionWork); err != nil {
+			return out, err
+		}
+		inherited = &old
 	}
 	source := got.Observed.Source
 	lease, found, err := findActiveLease(sem, actor, source, task, conv, tx.LastSeq(), execution.MaxPageSize, execution.MaxTransactionWork)
@@ -110,7 +121,7 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	seqs.Event = tx.NextSeq()
 	seqs.Receipt = tx.NextSeq()
 	input := recordInput{Source: got.Item, Observed: got.Observed, Task: task, Conversation: conv, Actor: actor,
-		Intent: intent, Policy: execution, Arguments: args, Allowance: allowance, AllowStub: allowStub, Seqs: seqs}
+		Intent: intent, Policy: execution, Arguments: args, Allowance: allowance, AllowStub: allowStub, Inherited: inherited, Seqs: seqs}
 	if found {
 		input.Existing = &lease
 	}
@@ -123,7 +134,7 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 			return out, err
 		}
 	}
-	if err = sem.InsertCoverage(records.Coverage, []domain.CoverageMember{records.Member}); err != nil {
+	if err = sem.InsertCoverage(records.Coverage, records.Members); err != nil {
 		return out, err
 	}
 	if err = tx.InsertItem(records.Item); err != nil {
