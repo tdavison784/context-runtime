@@ -97,7 +97,7 @@ func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemC
 	if err = t.checkSeq(event.Seq); err != nil {
 		return domain.ContextItem{}, err
 	}
-	delete(t.itemCache, id) // the next read decodes the updated row
+	t.itemCache.remove(id) // the next read decodes the updated row
 	err = t.atomic(func() error {
 		if err := t.put("item", id, 0, v, true); err != nil {
 			return err

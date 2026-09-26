@@ -94,3 +94,39 @@ func TestItemCacheEntryCap_SPEC41(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestItemCacheLRU(t *testing.T) {
+	item := func(id string, n int) domain.ContextItem {
+		return storetest.NewItem("s", id, 1, strings.Repeat("x", n))
+	}
+	var c *itemCache
+	if _, ok := c.get("a"); ok {
+		t.Fatal("nil cache hit")
+	}
+	c.remove("a") // nil-safe
+	c = &itemCache{}
+	half := itemCacheMaxBytes / 2
+	c.put("a", item("a", half))
+	c.put("b", item("b", half))
+	if _, ok := c.get("a"); !ok { // a is now most recently used
+		t.Fatal("a missing")
+	}
+	c.put("c", item("c", 1)) // over the byte cap: evicts b, the least recent
+	if _, ok := c.get("b"); ok {
+		t.Error("least recently used entry survived")
+	}
+	for _, id := range []string{"a", "c"} {
+		if _, ok := c.get(id); !ok {
+			t.Errorf("%s evicted", id)
+		}
+	}
+	c.put("huge", item("huge", itemCacheMaxBytes+1))
+	if _, ok := c.get("huge"); ok {
+		t.Error("an item above the byte cap was cached")
+	}
+	c.put("a", item("a", 10)) // replacing an entry re-costs it
+	c.remove("c")
+	if entries, bytes := c.footprint(); entries != 1 || bytes != 10 {
+		t.Errorf("footprint = %d entries, %d bytes; want 1, 10", entries, bytes)
+	}
+}

@@ -21,26 +21,20 @@ func verifyItemContent(v domain.ContextItem) error {
 	return nil
 }
 
-// Caps on the per-transaction item cache (SPEC-4.1): two maximum-size
-// spans' transcripts, and a bounded number of entries.
-const (
-	itemCacheMaxBytes   = 16 << 20
-	itemCacheMaxEntries = 1024
-)
-
 // itemCacheFootprint reports the cache's entry count and text bytes.
-func (t *transaction) itemCacheFootprint() (entries, bytes int) {
-	for _, v := range t.itemCache {
-		entries++
-		for _, p := range v.Parts {
-			bytes += len(p.Text)
-		}
-	}
-	return entries, bytes
-}
+func (t *transaction) itemCacheFootprint() (entries, bytes int) { return t.itemCache.footprint() }
 
-func (t *transaction) Item(id string) (domain.ContextItem, error) {
-	if v, ok := t.itemCache[id]; ok {
+func (t *transaction) Item(id string) (domain.ContextItem, error) { return t.loadItem(id, true) }
+
+// loadItem decodes and verifies an item, serving it from the transaction's
+// bounded cache when present. Decoding and verifying costs the item's size,
+// and ingest reads a span's transcript once per derived item, so point reads
+// cache what they verify (SPEC-3.1 item 2). Scan-driven lookups pass
+// cache=false: paging past many matches must neither grow memory nor evict
+// that working set (SPEC-4.1). Returned values are clones; only verified
+// items are cached.
+func (t *transaction) loadItem(id string, cache bool) (domain.ContextItem, error) {
+	if v, ok := t.itemCache.get(id); ok {
 		return v.Clone(), nil
 	}
 	var v domain.ContextItem
@@ -51,13 +45,12 @@ func (t *transaction) Item(id string) (domain.ContextItem, error) {
 	if err := verifyItemContent(v); err != nil {
 		return domain.ContextItem{}, err
 	}
-	// Decoding and verifying an item costs its size; ingest reads a span's
-	// transcript once per derived item, so each transaction keeps the items
-	// it has verified (SPEC-3.1 item 2). Returned values are clones.
-	if t.itemCache == nil {
-		t.itemCache = map[string]domain.ContextItem{}
+	if cache {
+		if t.itemCache == nil {
+			t.itemCache = &itemCache{}
+		}
+		t.itemCache.put(id, v.Clone())
 	}
-	t.itemCache[id] = v.Clone()
 	return v, nil
 }
 func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {

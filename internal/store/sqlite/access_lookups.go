@@ -179,7 +179,7 @@ func (t *transaction) scanLookup(viewer domain.Principal, want int, after store.
 		for _, c := range batch {
 			cursor = c
 			t.lookupLoads++
-			it, err := t.Item(c.ID)
+			it, err := t.loadItem(c.ID, false)
 			switch {
 			case errors.Is(err, domain.ErrIntegrity):
 				out.Unverified = append(out.Unverified, c.ID)
