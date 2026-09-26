@@ -117,6 +117,10 @@ type ObligationTransition struct {
 	Seq          uint64
 	From         ObligationStatus
 	To           ObligationStatus
+	// Action is the authorized lifecycle action that produced the
+	// transition; it must be the one TransitionAction(From, To) requires,
+	// so a mutation authorized as one action cannot be stored as another.
+	Action       Action
 	Actor        Principal
 	GrantID      string
 	Matcher      *MatcherRef
@@ -136,7 +140,28 @@ func (t ObligationTransition) Clone() ObligationTransition {
 	return t
 }
 
-// Validate checks structural rules including the transition table.
+// TransitionAction returns the lifecycle action that authorizes from -> to
+// (FR-OBL-002): satisfaction and revalidation are assertions, blocking and
+// unblocking are their own actions, and any status may be waived.
+func TransitionAction(from, to ObligationStatus) (Action, bool) {
+	if !ValidObligationTransition(from, to) {
+		return "", false
+	}
+	switch {
+	case to == ObligationWaived:
+		return ActionWaiveObligation, true
+	case to == ObligationBlocked:
+		return ActionBlockObligation, true
+	case from == ObligationBlocked:
+		return ActionUnblockObligation, true
+	}
+	return ActionAssertObligation, true
+}
+
+// Validate checks structural rules including the transition table. The
+// actor must be a SYSTEM, HARNESS, or USER principal in the transition's
+// session: AGENT, TOOL, and RETRIEVED_CONTENT never change obligation
+// status, and a matcher runs under a trusted principal (FR-OBL-002).
 func (t ObligationTransition) Validate() error {
 	if t.ID == "" || t.SessionID == "" || t.ObligationID == "" || t.Version == 0 || t.Seq == 0 {
 		return invalid("obligation transition: ID, session, obligation, version, and sequence are required")
@@ -144,8 +169,21 @@ func (t ObligationTransition) Validate() error {
 	if err := t.Actor.Validate(); err != nil {
 		return err
 	}
-	if !ValidObligationTransition(t.From, t.To) {
+	if t.Actor.SessionID != t.SessionID {
+		return invalid("obligation transition %s: actor belongs to another session", t.ID)
+	}
+	if !t.Actor.Authority.CanHoldLifecycleAuthority() {
+		return ErrInvalidAuthorityPromotion
+	}
+	want, ok := TransitionAction(t.From, t.To)
+	if !ok {
 		return ErrInvalidTransition
+	}
+	if t.Action != want {
+		return invalid("obligation transition %s: %s -> %s requires action %s, not %q", t.ID, t.From, t.To, want, t.Action)
+	}
+	if t.Matcher != nil && t.Action != ActionAssertObligation {
+		return invalid("obligation transition %s: a matcher may only assert", t.ID)
 	}
 	if t.To == ObligationSatisfied && len(t.EvidenceIDs) == 0 && t.Matcher != nil {
 		return invalid("obligation transition %s: matcher satisfaction requires evidence", t.ID)

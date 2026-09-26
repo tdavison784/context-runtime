@@ -223,6 +223,9 @@ func (e LifecycleEvent) Validate() error {
 	if err := e.Actor.Validate(); err != nil {
 		return err
 	}
+	if e.Actor.SessionID != e.SessionID {
+		return invalid("lifecycle event %s: actor belongs to another session", e.ID)
+	}
 	if e.PayloadHash != "" && !ValidHash(e.PayloadHash) {
 		return invalid("lifecycle event %s: malformed payload hash", e.ID)
 	}
