@@ -21,3 +21,17 @@ func TestExchangeClosureRequiresAcknowledgment(t *testing.T) {
 		t.Fatal("other conversation accepted")
 	}
 }
+
+func TestFrontierDoesNotOutrunMembership(t *testing.T) {
+	s := ConversationMembershipState{SemanticMeta: semanticMeta("state"), ConversationID: "c", Revision: 1, LastOrdinal: 2, ClosedFrontier: 3}
+	if s.Validate() == nil {
+		t.Fatal("frontier outran registered exchanges")
+	}
+	s.ClosedFrontier = 2
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if (Checkpoint{SemanticMeta: semanticMeta("summary")}).Validate() == nil {
+		t.Fatal("ordinary summary accepted as checkpoint")
+	}
+}
