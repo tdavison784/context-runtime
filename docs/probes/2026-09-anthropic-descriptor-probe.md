@@ -355,3 +355,137 @@ provider-bound opaque state for replay (FR-PROV-005): store `content` + `signatu
   `applied_edits: []` on a 2-tool-use history. Not applied; the cause was not determined.
 - Docs: clearing invalidates the prompt cache from the cleared point; `clear_thinking` must be
   first when edits are combined; tool-use trigger default 100,000 input tokens, keep 3.
+
+## Descriptor implications for ADR 12
+
+### Profile identity (FR-CAP-001)
+
+Behavior differs by **model**, **account enforcement date** and **request setting**, so the
+profile key must include all three:
+`anthropic/messages-beta/<model>/binding=<error|drop_block|unset>/account=<enforced|legacy>`.
+Recommendation: the adapter always sends `thinking-binding-controls-2026-08-01` and an
+explicit `prefix_mismatch_behavior`: `error` under REQUIRE, `drop_block` under ALLOW_RESET.
+Then the account date no longer changes behavior, and `input_transformations` is always
+present, so drops are observable (FR-PROV-006). The two unsafe states (legacy + unset;
+Sonnet 5) are never used for replay after an edit.
+
+Legend: **O** = OBSERVED in this probe, **D** = DOCUMENTED (docs read 2026-09-26),
+**A** = ASSUMED.
+
+### Draft `Capabilities` - claude-opus-5-5 (profile `binding=error|drop_block`)
+
+```go
+Capabilities{
+    Provider: "anthropic", Model: "claude-opus-5-5",
+    Version: "messages-beta/sdk-go-v1.75.0/probe-2026-09-26",
+    ContextWindow: 1_000_000,                      // O (models API)
+    MaxOutput:     128_000,                        // O (models API)
+    Counter: "anthropic.count_tokens/claude-opus-5-5", // O exact: error 0 on 4 requests; network call, verification only
+    Caching: CachingRules{
+        PrefixOrder:      "tools>system>messages", // D; O that any earlier byte change -> read 0 (C3)
+        MinimumTokens:    512,                     // O bracket 512-517; D for Opus 5 (5.5 not listed)
+        MaxBreakpoints:   4,                       // D
+        TTLs:             {"5m", "1h"},            // O usage split ephemeral_5m/1h; expiry D
+        Automatic:        true,                    // O top-level cache_control + lookback read
+        AppendSystemSafe: true,                    // O (C3 step 4 read 1049)
+        RefusalPersists:  false,                   // O n=2: refused write not readable
+    },
+    Pricing: Pricing{In: 4.00, Write5m: 5.00, Write1h: 8.00, Read: 0.20, Out: 20.00}, // D, USD/MTok
+    Reasoning: ReasoningRules{
+        ReplayRequired:      false, // O: stripping accepted, even in an open round (R2)
+        PriorTurnsRetained:  true,  // O: earlier-turn thinking billed, not stripped (R5)
+        BoundToPriorHistory: true,  // O: messages + system + tools (R4)
+        BoundToModel:        true,  // O: model_binding_mismatch on switch to sonnet-5
+        OpaqueFields:        "signature authoritative; thinking text display-only", // O (R3)
+        DropsReported:       true,  // O only with the binding-controls header
+        CanDisableThinking:  false, // D (400 at every effort); not probed
+    },
+    Edits: map[EditKind]EditSafety{
+        APPEND:                 SAFE,     // O (R1)
+        APPEND_SYSTEM:          SAFE,     // O thinking valid + cache read (R1 table, C3)
+        ADD_DEFERRED_TOOL:      SAFE,     // O thinking valid; deferred definition billed without tool search
+        MOVE_CACHE_MARKERS:     SAFE,     // O thinking valid; D cache-neutral
+        DROP_LEADING_REASONING: SAFE,     // O later blocks still verify; removed reasoning leaves context (R5)
+        DROP_ALL_REASONING:     LOSSY,    // O accepted and unreported; a reset by construction (R2)
+        REWRITE:                SAFE,     // O with post-edit reasoning stripped (RW1, RW2)
+        // replaying post-edit reasoning: REJECTED with binding=error, LOSSY with drop_block (R4)
+    },
+    NativeCompaction:       true, // O on-demand and threshold
+    CompactionInstructions: true, // O (instructions honoured)
+    CompactionProtocol:     "checkpoint: on-demand compact-2026-09-04; pause: compact_20260112 + pause_after_compaction", // O
+    CompactionMinimumTrigger: 50_000, // O threshold (400 below); on-demand has none (O at 828 tokens)
+    MandatoryPreservation: PreservationRules{
+        RestoreAfterBlock:     "user text or appended role=system message", // O (K2)
+        KeptTurnsThinkingValid: true,  // O on-demand, system/tools unchanged (D condition)
+        ThresholdReinsertedThinking: "strip or drop_block", // D
+        SummaryIntegrity:      "on-demand signed (compaction_content_mismatch); threshold unsigned+editable", // O
+        LosesMedia:            true,  // D images/documents/URLs in the summarized range
+        CostInIterations:      true,  // O top-level usage is 0 on a compaction response
+    },
+    ContextEditing:        true,  // O clear_thinking applied; server-side edits are not history edits
+    MidConversationSystem: true,  // O accepted, thinking-safe, cache-safe
+    NativeMemory:          false, // A: memory_20250818 is a client-executed tool (D), not provider memory; not probed
+}
+```
+
+### Draft `Capabilities` - claude-sonnet-5
+
+Same as Opus 5.5 except:
+
+```go
+    Model: "claude-sonnet-5",
+    Counter: "anthropic.count_tokens/claude-sonnet-5",  // O exact (4 requests)
+    Caching.MinimumTokens: 1024,                        // O bracket 1023-1029; D 1024
+    Pricing: Pricing{In: 2.00, Write5m: 2.50, Write1h: 4.00, Read: 0.20, Out: 10.00}, // D
+    Reasoning.BoundToPriorHistory: false, // O: no conversation check even with binding=error (R4)
+    Reasoning.BoundToModel:        true,  // A: the model check is documented as universal; only opus->sonnet was probed
+    Reasoning.CanDisableThinking:  true,  // D ({type: "disabled"} accepted); not probed
+    Edits[REWRITE]: SAFE,                 // O with post-edit reasoning stripped (RW1, RW2)
+    // replaying post-edit reasoning is accepted with STALE reasoning and never reported (R4):
+    // the adapter must strip it itself; the provider offers no safety net here.
+    MidConversationSystem: true, // O accepted (200, cache-safe), though the skill docs say unsupported; system authority not verified -> treat as UNVERIFIED
+    CompactionProtocol: "checkpoint (on-demand)",   // O K1 only; adoption/restore/threshold not run on this model (A: same as Opus)
+    ContextEditing: true,                            // O models API capability only; not exercised
+```
+
+### Consequences for the runtime
+
+1. **T08 is satisfiable natively on Anthropic**: on-demand compaction is a standalone,
+   ledgerable call with no task actions. Its block can be persisted; restoration goes after it
+   (user text or appended system message), then a separately prepared inference. Threshold
+   compaction is acceptable only with `pause_after_compaction: true`. Without pause it is
+   automatic in-request compaction and stays disabled (FR-MAT-005).
+2. **T12 is representable**: an open tool round without its reasoning is structurally valid
+   (R2), so ALLOW_RESET can rebase inside a round. Nothing reports the drop, so the runtime
+   records `discarded block IDs` itself.
+3. **REQUIRE has a native relief valve** on Opus 5.5: on-demand compaction keeps thinking
+   after the block valid (kept-turns probe). Compacting a closed prefix and continuing
+   preserves continuity for the turns after it. Threshold compaction does not.
+4. **Usage accounting**: sum `usage.iterations` whenever it is present, and the three input
+   fields (`input_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) always.
+   Treat `stop_reason: "refusal"` as a cache miss.
+5. **Counter**: count_tokens is exact for the probed shapes. Use it to calibrate the local
+   estimator (FR-COST-004) and for NFR-003 verification, not on the ingestion path.
+
+## Open questions
+
+1. **Enforced-account behavior** was not observable: this organization predates 2026-08-31.
+   The `binding=error` profile emulates it. Confirm on a new organization before claiming the
+   default (field unset) is REJECTED.
+2. **Non-leading reasoning removal** and **RW3** (replay reasoning after an edit point, with
+   the reasoning after that point) were not exercised: neither model produced thinking on the
+   turn after the second user message. The docs say both invalidate later blocks.
+3. **Threshold compaction without pause**, and threshold compaction on Sonnet 5, were not run
+   ($0.22 each). ADR 12 disables the unpaused form anyway.
+4. **Sonnet 5 mid-conversation system messages**: accepted with a 200 and cache-safe, but the
+   docs list them as unsupported. Whether they carry system authority is unknown; keep
+   `MidConversationSystem` UNVERIFIED for Sonnet 5 until a behavioral probe confirms it.
+5. **`clear_tool_uses_20250919` did not apply** on a 2-tool-use history (trigger 100, keep 1).
+   Cause unknown; not needed for the compaction verdicts.
+6. **Cache TTL expiry** (5m/1h) was not waited out. Lifetime rules are DOCUMENTED only.
+7. **Classifier refusals** (`cyber`) on benign filler, 2 of about 40 Opus 5.5 cache requests.
+   Refused requests report a cache write that is not readable. ADR 15 forecasts may need a
+   refusal allowance, and the adapter may want the documented server-side `fallbacks` (not
+   probed, because fallbacks change the model and so drop reasoning).
+8. The SDK exposes everything used here as typed beta fields in v1.75.0. No raw-HTTP escape
+   was needed; ADR 9's transport choice for Anthropic can rely on the official SDK.
