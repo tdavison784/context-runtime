@@ -290,8 +290,9 @@ func bindReference(session string, op *domain.SemanticOperation, ref domain.Oper
 }
 
 // setRequestID gives op's intent its ingestion-derived request identity.
-// Typed operations share their event's identity (P3-34): the caller's
-// RequestID is hashed as part of the request but never selects a receipt.
+// Typed operations share their event's identity (P3-34): a submitted
+// payload's RequestID must be empty (domain validation rejects any other),
+// and ValidateResolved then requires the derived one.
 func setRequestID(op *domain.SemanticOperation, id string) {
 	switch {
 	case op.Grant != nil:

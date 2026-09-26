@@ -48,13 +48,13 @@ func (h recorder) Execute(tx store.Tx, actor domain.Principal, op domain.Semanti
 
 func grantOp(alias string) domain.SemanticOperation {
 	return domain.SemanticOperation{Kind: domain.OperationGrant, Alias: alias, Grant: &domain.GrantIntent{
-		RequestID: "caller", GrantID: "caller-grant", Action: domain.ActionResolve,
+		GrantID: "caller-grant", Action: domain.ActionResolve,
 		Targets: []domain.GrantTarget{domain.ItemGrantTarget(sess, "itm_x")}, Grantee: ptr(principal(domain.AuthorityUser)),
 	}}
 }
 
 func revokeRef(alias string) domain.SemanticOperation {
-	return domain.SemanticOperation{Kind: domain.OperationRevokeGrant, RevokeGrant: &domain.RevokeGrantIntent{RequestID: "caller"},
+	return domain.SemanticOperation{Kind: domain.OperationRevokeGrant, RevokeGrant: &domain.RevokeGrantIntent{},
 		References: []domain.OperationReference{{Slot: domain.OperationGrantReference, Alias: alias}}}
 }
 
@@ -119,9 +119,10 @@ func TestOps_OrderSequenceAndAliases(t *testing.T) {
 			t.Errorf("mutation receipts = %v", r.MutationReceiptIDs)
 		}
 		// Binding never touches the hashed request: neither the caller's
-		// event nor the stored envelope sees a derived ID or bound alias.
+		// event nor the stored envelope sees the derived request ID (the
+		// submitted payload's is empty, W1 917a379) or a bound alias.
 		env := f.envelope(r.OccurrenceID)
-		if e.Operations[1].Grant.RequestID != "caller" || env.Event.Operations[1].Grant.RequestID != "caller" ||
+		if e.Operations[1].Grant.RequestID != "" || env.Event.Operations[1].Grant.RequestID != "" ||
 			env.Event.Operations[2].RevokeGrant.GrantID != "" || len(env.Event.Operations[2].References) != 1 {
 			t.Fatalf("operation binding mutated the request")
 		}
@@ -143,7 +144,7 @@ func TestOps_AliasBindsSpanItem(t *testing.T) {
 		src := spanOp(0)
 		src.Alias = "src"
 		declare := domain.SemanticOperation{Kind: domain.OperationDeclareObligation, DeclareObligation: &domain.DeclareObligationIntent{
-			RequestID: "caller", DeclarationSlot: "tests", Description: "All tests pass", Claim: "tests_pass",
+			DeclarationSlot: "tests", Description: "All tests pass", Claim: "tests_pass",
 		}, References: []domain.OperationReference{{Slot: domain.OperationSourceItem, Alias: "src"}}}
 		r := f.mustIngest(sys, sysOpsEvent("ops-src", []domain.Span{textSpan(domain.AuthoritySystem, false, "## Pinned\n- [t] Tests pass.\n")}, src, declare))
 		pin := mustDirective(t, r, "t")
@@ -177,7 +178,7 @@ func TestOps_AliasRejections(t *testing.T) {
 		two := spanOp(0)
 		two.Alias = "two"
 		declare := domain.SemanticOperation{Kind: domain.OperationDeclareObligation, DeclareObligation: &domain.DeclareObligationIntent{
-			RequestID: "caller", DeclarationSlot: "s", Description: "d", Claim: "tests_pass",
+			DeclarationSlot: "s", Description: "d", Claim: "tests_pass",
 		}, References: []domain.OperationReference{{Slot: domain.OperationSourceItem, Alias: "two"}}}
 		f.requireAtomic(domain.ErrInvalidRecord, func() error {
 			_, err := f.ingest(sys, sysOpsEvent("ops-amb", []domain.Span{textSpan(domain.AuthoritySystem, false, "## Pinned\n- [a] one\n- [b] two\n")}, two, declare))
@@ -223,7 +224,7 @@ func TestOps_ControlEventOpensNothing(t *testing.T) {
 		harness := principal(domain.AuthorityHarness)
 		e := domain.Event{EventID: "ctl", Kind: domain.EventHarness, Control: true, Operations: []domain.SemanticOperation{{
 			Kind: domain.OperationRegisterResource, RegisterResource: &domain.RegisterResourceIntent{
-				RequestID: "caller", ResourceID: "repo", Reporter: harness, Access: taskAccess()}}}}
+				ResourceID: "repo", Reporter: harness, Access: taskAccess()}}}}
 		r := f.mustIngest(harness, e)
 		if len(calls) != 1 || r.OpenedTurn != 0 || len(r.Items) != 0 {
 			t.Fatalf("calls %d, turn %d, items %d", len(calls), r.OpenedTurn, len(r.Items))
@@ -234,5 +235,20 @@ func TestOps_ControlEventOpensNothing(t *testing.T) {
 			}
 			return nil
 		})
+	})
+}
+
+// TestOps_CallerRequestIDRejected (P3-2/34, ruling 4): an operation payload
+// that names its own RequestID is rejected before anything is written;
+// only ingest derives an operation's request identity.
+func TestOps_CallerRequestIDRejected(t *testing.T) {
+	phase3Stores(t, func(t *testing.T, f *fixture) {
+		harness := principal(domain.AuthorityHarness)
+		op := domain.SemanticOperation{Kind: domain.OperationRegisterResource, RegisterResource: &domain.RegisterResourceIntent{
+			RequestID: "chosen-by-caller", ResourceID: "repo", Reporter: harness, Access: taskAccess()}}
+		e := domain.Event{EventID: "ctl-req", Kind: domain.EventHarness, Control: true, Operations: []domain.SemanticOperation{op}}
+		if _, err := f.ingest(harness, e); !errors.Is(err, domain.ErrInvalidRecord) || f.lastSeq() != 0 {
+			t.Fatalf("err = %v, seq %d", err, f.lastSeq())
+		}
 	})
 }
