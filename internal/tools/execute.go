@@ -1,0 +1,179 @@
+package tools
+
+import (
+	"errors"
+	"reflect"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
+	"github.com/tdavison784/context-runtime/internal/store"
+)
+
+// Service runs semantic tool handlers inside the caller's transaction. Outer
+// callers open one Store.Update; nothing here reenters the Store (P3-1/24).
+type Service struct {
+	policy     domain.Phase3Policy
+	membership *graph.MembershipService
+}
+
+func NewService(policy domain.Phase3Policy) (*Service, error) {
+	membership, err := graph.NewMembershipService(policy)
+	if err != nil {
+		return nil, err
+	}
+	return &Service{policy: policy, membership: membership}, nil
+}
+
+// toolRequest binds the composite invocation into the request fingerprint, so
+// the same arguments under another output, call, or principal conflict.
+type toolRequest[I any] struct {
+	Invocation domain.ToolInvocation
+	Intent     I
+}
+
+// effect performs one method's writes after authentication. It never runs for
+// a committed request and returns the frozen result to record.
+type effect func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, error)
+
+// execute replays a committed invocation before reading any current state,
+// otherwise authenticates it, applies the effect, and commits the result
+// transcript, its TOOL_RESULT membership, and both receipts atomically.
+func execute[I any](s *Service, tx store.Tx, i domain.ToolInvocation, method, requestID string, intent I, apply effect) (result domain.ToolResult, err error) {
+	defer func() {
+		if err != nil {
+			tx.Poison(err)
+		}
+	}()
+	if i.Validate() != nil || i.SessionID != tx.SessionID() {
+		return result, domain.ErrNotFound
+	}
+	sem, err := store.Semantic(tx)
+	if err != nil {
+		return result, err
+	}
+	invocationID, _ := i.ID()
+	mutationID, err := domain.MutationReceiptID(tx.SessionID(), domain.MutationTool, requestID)
+	if err != nil {
+		return result, err
+	}
+	request := toolRequest[I]{Invocation: i, Intent: intent}
+	prior, err := sem.ToolExecutionReceipt(invocationID)
+	if err == nil {
+		return replayTool(sem, prior, request, method, requestID, mutationID, s.policy)
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		return result, err
+	}
+	if _, err = sem.MutationReceipt(domain.MutationTool, requestID); err == nil {
+		return result, domain.ErrEventIDConflict // the request belongs to another invocation
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return result, err
+	}
+	args, err := domain.CanonicalSemanticArguments(request, s.policy.MaxMetadataBytes)
+	if err != nil {
+		return result, err
+	}
+	hash, err := domain.MutationRequestHash(i.Principal, domain.MutationTool, method, args)
+	if err != nil {
+		return result, err
+	}
+	state, err := readInvocation(tx, sem, i, s.policy)
+	if err != nil {
+		return result, err
+	}
+	if result, err = apply(tx, sem, state); err != nil {
+		return domain.ToolResult{}, err
+	}
+	if err = result.Validate(); err != nil {
+		return domain.ToolResult{}, err
+	}
+	if err = s.associateResult(tx, i, invocationID, state, ResultText(result)); err != nil {
+		return domain.ToolResult{}, err
+	}
+	receipt := domain.MutationReceipt{
+		SemanticMeta: domain.SemanticMeta{ID: mutationID, SessionID: tx.SessionID(), SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+		Family:       domain.MutationTool, RequestID: requestID, Principal: i.Principal, CanonicalMethod: method,
+		CanonicalArguments: args, RequestHashVersion: domain.RequestHashV3, RequestHash: hash,
+		PolicyVersion: s.policy.Version, Result: domain.MutationResult{Tool: &result},
+	}
+	if _, err = domain.CanonicalSemanticArguments(receipt, s.policy.MaxReceiptBytes); err != nil {
+		return domain.ToolResult{}, err
+	}
+	if err = sem.InsertMutationReceipt(receipt); err != nil {
+		return domain.ToolResult{}, err
+	}
+	tool := domain.ToolExecutionReceipt{
+		SemanticMeta: domain.SemanticMeta{ID: invocationID, SessionID: tx.SessionID(), SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+		Invocation:   i, Method: method, MutationReceiptID: mutationID, RequestHash: hash, Result: result.Clone(),
+	}
+	if err = sem.InsertToolExecutionReceipt(tool); err != nil {
+		return domain.ToolResult{}, err
+	}
+	return result.Clone(), nil
+}
+
+// replayTool returns the frozen result only for the identical request. It
+// checks no task, turn, target, or policy state and allocates no sequence.
+func replayTool[I any](sem store.SemanticReader, prior domain.ToolExecutionReceipt, request toolRequest[I], method, requestID, mutationID string, policy domain.Phase3Policy) (domain.ToolResult, error) {
+	var none domain.ToolResult
+	m, err := sem.MutationReceipt(domain.MutationTool, requestID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return none, domain.ErrEventIDConflict
+	}
+	if err != nil {
+		return none, err
+	}
+	// A later, smaller policy limit cannot turn a committed request into a conflict.
+	args, err := domain.CanonicalSemanticArguments(request, max(policy.MaxMetadataBytes, len(m.CanonicalArguments)))
+	if err != nil {
+		return none, domain.ErrEventIDConflict
+	}
+	if prior.Invocation != request.Invocation || prior.Method != method || prior.MutationReceiptID != mutationID || m.ID != mutationID || prior.RequestHash != m.RequestHash {
+		return none, domain.ErrEventIDConflict
+	}
+	if err = m.CheckReplay(request.Invocation.Principal, domain.MutationTool, method, args); err != nil {
+		return none, err
+	}
+	if prior.Validate() != nil || m.Result.Tool == nil || !reflect.DeepEqual(*m.Result.Tool, prior.Result) {
+		return none, domain.ErrIntegrity
+	}
+	return prior.Result.Clone(), nil
+}
+
+// associateResult persists the closed result text as a TOOL transcript of the
+// originating turn and registers it as the call's TOOL_RESULT. The recorded
+// trusted dispatcher of the producing inference performs the registration;
+// the model never asserts membership.
+func (s *Service) associateResult(tx store.Tx, i domain.ToolInvocation, invocationID string, state invocationState, text string) error {
+	if len(text) > s.policy.MaxToolResultBytes {
+		return domain.ErrResourceLimit
+	}
+	p, x := i.Principal, state.exchange
+	parts := []domain.ContentPart{{Type: domain.PartText, MediaType: "text/plain", Text: text}}
+	boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: p.SessionID, WorkflowID: p.WorkflowID, TaskID: p.TaskID, AgentID: p.AgentID}
+	item := domain.ContextItem{
+		ID: toolID("toolresult", invocationID), Role: domain.RoleTranscript, Seq: tx.NextSeq(),
+		SessionID: p.SessionID, WorkflowID: p.WorkflowID, TaskID: p.TaskID, AgentID: p.AgentID, TurnID: x.TurnID,
+		Kind: domain.KindToolResult, Generation: domain.GenerationWorking, Authority: domain.AuthorityTool,
+		Scope: domain.ScopeTask, Access: boundary, Residency: domain.ResidencyResident, Retention: domain.RetentionNormal,
+		Parts: parts, ContentHash: domain.ContentHash(parts), SemanticBytes: domain.SemanticBytes(parts),
+		CreatedTurn: x.Turn, Source: &domain.SourceRef{Kind: domain.SourceTool, ToolCallID: i.ToolCallID}, Version: 1,
+	}
+	if err := tx.InsertItem(item); err != nil {
+		return err
+	}
+	_, err := s.membership.RegisterExchangeMember(tx, state.call.ServiceActor, domain.RegisterExchangeMemberIntent{
+		RequestID: toolID("toolresult-member", invocationID), ExchangeID: x.ID, ExpectedRevision: x.Revision,
+		Position: state.nextPosition, Role: domain.MemberToolResult, Source: domain.ItemContentRef{ItemID: item.ID, ContentHash: item.ContentHash},
+		CallID: i.CallID, ToolCallID: i.ToolCallID,
+	})
+	return err
+}
+
+func toolID(kind string, parts ...string) string {
+	e := domain.NewCanonicalEncoder("context-runtime/tools/id/v1").String(kind)
+	for _, p := range parts {
+		e.String(p)
+	}
+	return kind + "_" + e.Hash()[len("sha256:"):][:32]
+}

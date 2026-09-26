@@ -10,6 +10,7 @@ import (
 type invocationState struct {
 	exchange     domain.LogicalExchange
 	task         domain.TaskState
+	call         domain.CallRecord
 	output       domain.ItemContentRef
 	nextPosition uint64
 }
@@ -89,5 +90,5 @@ func readInvocation(tx store.ReadTx, sem store.SemanticReader, i domain.ToolInvo
 	if source.ValidateSemantic() != nil || source.Authority != domain.AuthorityAgent || source.TurnID != i.TurnID || source.CreatedTurn != x.Turn || source.ContentHash != output.Source.ContentHash || domain.ContentHash(source.Parts) != source.ContentHash {
 		return state, domain.ErrIntegrity
 	}
-	return invocationState{exchange: x, task: task, output: output.Source, nextPosition: uint64(len(members)) + 1}, nil
+	return invocationState{exchange: x, task: task, call: call, output: output.Source, nextPosition: uint64(len(members)) + 1}, nil
 }
