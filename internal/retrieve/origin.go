@@ -33,6 +33,8 @@ func validateToolOrigin(r store.MembershipReader, origin domain.RetrievalOrigin,
 	}
 	var outputRef, toolRef domain.ItemContentRef
 	var foundOutput, foundTool bool
+	var outputPosition, toolPosition uint64
+	positions := map[uint64]bool{}
 	after := store.Cursor{}
 	work := 0
 	for {
@@ -44,7 +46,9 @@ func validateToolOrigin(r store.MembershipReader, origin domain.RetrievalOrigin,
 		if err != nil {
 			return err
 		}
-		if len(page.Records) > limit || page.More && (len(page.Records) == 0 || page.Next.Seq < after.Seq || page.Next.Seq == after.Seq && page.Next.ID <= after.ID) {
+		if len(page.Records) > limit || page.More && (len(page.Records) == 0 ||
+			page.Next != (store.Cursor{Seq: page.Records[len(page.Records)-1].Seq, ID: page.Records[len(page.Records)-1].ID}) ||
+			page.Next.Seq < after.Seq || page.Next.Seq == after.Seq && page.Next.ID <= after.ID) {
 			return domain.ErrIntegrity
 		}
 		for _, member := range page.Records {
@@ -52,17 +56,24 @@ func validateToolOrigin(r store.MembershipReader, origin domain.RetrievalOrigin,
 			if member.Validate() != nil || member.ExchangeID != inv.ExchangeID || member.SessionID != origin.Holder.SessionID {
 				return domain.ErrIntegrity
 			}
+			if positions[member.Position] {
+				return domain.ErrIntegrity
+			}
+			positions[member.Position] = true
 			switch {
-			case member.Role == domain.MemberOutput && member.CallID == inv.CallID:
-				if foundOutput && outputRef != member.Source {
+			case member.Role == domain.MemberOutput:
+				if foundOutput {
 					return domain.ErrIntegrity
 				}
-				foundOutput, outputRef = true, member.Source
+				if member.CallID != inv.CallID {
+					return domain.ErrInvalidAuthorityPromotion
+				}
+				foundOutput, outputRef, outputPosition = true, member.Source, member.Position
 			case member.Role == domain.MemberToolCall && member.CallID == inv.CallID && member.ToolCallID == inv.ToolCallID:
-				if foundTool && toolRef != member.Source {
+				if foundTool {
 					return domain.ErrIntegrity
 				}
-				foundTool, toolRef = true, member.Source
+				foundTool, toolRef, toolPosition = true, member.Source, member.Position
 			}
 		}
 		if !page.More {
@@ -70,8 +81,16 @@ func validateToolOrigin(r store.MembershipReader, origin domain.RetrievalOrigin,
 		}
 		after = page.Next
 	}
+	for position := uint64(1); position <= uint64(work); position++ {
+		if !positions[position] {
+			return domain.ErrIntegrity
+		}
+	}
 	if !foundOutput || !foundTool || outputRef != toolRef {
 		return domain.ErrInvalidAuthorityPromotion
+	}
+	if toolPosition <= outputPosition {
+		return domain.ErrIntegrity
 	}
 	return nil
 }
