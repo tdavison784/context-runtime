@@ -70,6 +70,9 @@ type semState struct {
 	declIDs      map[string]string                     // declaration ID -> item ID
 	snapshots    map[string]domain.SnapshotDeclaration
 	grantIdx     map[grantKey][]seqRef // (action, target) -> grants by (IssuedSeq, ID)
+	lcByTarget   map[lifecycleKey][]seqRef
+	changes      map[string]domain.SemanticChange
+	chByTarget   map[string][]seqRef // target authorization key -> changes
 }
 
 func newSemState() *semState {
@@ -103,6 +106,9 @@ func newSemState() *semState {
 		declIDs:      map[string]string{},
 		snapshots:    map[string]domain.SnapshotDeclaration{},
 		grantIdx:     map[grantKey][]seqRef{},
+		lcByTarget:   map[lifecycleKey][]seqRef{},
+		changes:      map[string]domain.SemanticChange{},
+		chByTarget:   map[string][]seqRef{},
 	}
 }
 
@@ -145,6 +151,9 @@ type semView struct {
 	declIDs      table[string, string]
 	snapshots    table[string, domain.SnapshotDeclaration]
 	grantIdx     orderedIndex[grantKey]
+	lcByTarget   orderedIndex[lifecycleKey]
+	changes      table[string, domain.SemanticChange]
+	chByTarget   orderedIndex[string]
 }
 
 func newSemView(st *semState, w bool) semView {
@@ -178,6 +187,9 @@ func newSemView(st *semState, w bool) semView {
 		declIDs:      newTable(st.declIDs, w, same[string]),
 		snapshots:    newTable(st.snapshots, w, domain.SnapshotDeclaration.Clone),
 		grantIdx:     newOrderedIndex(st.grantIdx, w),
+		lcByTarget:   newOrderedIndex(st.lcByTarget, w),
+		changes:      newTable(st.changes, w, domain.SemanticChange.Clone),
+		chByTarget:   newOrderedIndex(st.chByTarget, w),
 	}
 }
 
@@ -186,7 +198,8 @@ func newSemView(st *semState, w bool) semView {
 func (v *semView) dirty() bool {
 	return v.owners.dirty() || v.coverages.dirty() || v.exchanges.dirty() || v.members.dirty() ||
 		v.acks.dirty() || v.admissions.dirty() || v.membership.dirty() || v.checkpoints.dirty() ||
-		v.mutReceipts.dirty() || v.toolReceipts.dirty() || v.decls.dirty() || v.snapshots.dirty()
+		v.mutReceipts.dirty() || v.toolReceipts.dirty() || v.decls.dirty() || v.snapshots.dirty() ||
+		v.changes.dirty()
 }
 
 func (v *semView) commit() {
@@ -219,6 +232,9 @@ func (v *semView) commit() {
 	v.declIDs.commit()
 	v.snapshots.commit()
 	v.grantIdx.commit()
+	v.lcByTarget.commit()
+	v.changes.commit()
+	v.chByTarget.commit()
 }
 
 // semRead implements store.SemanticReader over a transaction's view.

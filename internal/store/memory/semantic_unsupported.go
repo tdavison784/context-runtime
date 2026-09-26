@@ -14,16 +14,9 @@ var errUnsupported = domain.ErrUnsupportedSchema
 
 // Declarations and semantic changes.
 
-func (r semRead) LifecycleByTarget(domain.TargetKind, string, store.Page) (store.ResultPage[domain.LifecycleEvent], error) {
-	return store.ResultPage[domain.LifecycleEvent]{}, errUnsupported
-}
 func (r semRead) OpenGoalsByTaskOwner(string, store.Page) (store.ResultPage[domain.ContextItem], error) {
 	return store.ResultPage[domain.ContextItem]{}, errUnsupported
 }
-func (r semRead) SemanticChanges(domain.Principal, domain.GrantTarget, store.Page) (store.ResultPage[domain.SemanticChange], error) {
-	return store.ResultPage[domain.SemanticChange]{}, errUnsupported
-}
-func (t *semTx) InsertSemanticChange(domain.SemanticChange) error { return errUnsupported }
 
 // Obligation proofs.
 
