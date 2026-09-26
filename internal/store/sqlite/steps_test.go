@@ -15,7 +15,7 @@ import (
 // SHA-256 of the file holding its frozen code. A committed step is never
 // edited; a changed transform is a new migration.
 var committedSteps = map[int]struct{ id, file, sum string }{
-	11: {"0011/item-sources/reference-locator-v1", "steps_0011.go", ""},
+	11: {"0011/item-sources/reference-locator-v1", "steps_0011.go", "e99a25b0aa67a7d3d2388fb739fe0d941430f38a09a61e89726008d23ab1c409"},
 }
 
 func TestCommittedStepsUnchanged(t *testing.T) {
