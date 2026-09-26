@@ -942,3 +942,23 @@ func (b *semBackend) InsertCoverage(c domain.CoverageRecord, members []domain.Co
 		return nil
 	})
 }
+
+func (b *semBackend) ObligationsByTaskOwner(taskID string, p store.Page) (store.ResultPage[domain.ObligationVersion], error) {
+	all, err := b.rtx.Obligations("")
+	if err != nil {
+		return store.ResultPage[domain.ObligationVersion]{}, err
+	}
+	var out []domain.ObligationVersion
+	for _, o := range all {
+		if (o.Access.Scope == domain.ScopeTurn || o.Access.Scope == domain.ScopeTask) && o.Access.TaskID == taskID {
+			v, err := b.ExactObligation(domain.ObligationRef{SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version})
+			if err != nil {
+				return store.ResultPage[domain.ObligationVersion]{}, err
+			}
+			out = append(out, v)
+		}
+	}
+	return page(out, func(o domain.ObligationVersion) store.Cursor {
+		return store.Cursor{Seq: o.CreatedSeq, ID: o.ObligationID}
+	}, p)
+}
