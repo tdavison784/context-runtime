@@ -801,6 +801,66 @@ Answers to `p2-contract`'s implementation questions, appended to
   explicitly deferred — no such cross-event caller exists yet in Phase 2's
   scope to require it.
 
+### 23. Round 5 ruling (p2-ingest questions): R19
+
+Answers to `p2-ingest`'s implementation questions, appended to
+`phase2-amendments.md` as R19.
+
+- **`SourceRanges` is the transcript-to-semantic mapping, with no separate
+  section record (confirms §5, D8/M1).** `ContextItem.SourceRanges
+  []SourceRange` (`internal/domain/item.go`, `source_range.go`), already
+  landed, *is* §5's "complete mapping from transcript ranges to derived
+  item IDs/versions and section IDs" — each derived item names its own
+  transcript coverage directly on the item, and there is no additional
+  standalone section-record type to keep in sync with it.
+- **`IngestReceipt.Items` is the record of a turn's opening items
+  (confirms §10/§14, D14/D18).** `IngestReceipt.Items` (creation order),
+  read together with the same receipt's `OpenedTurn`/`TurnID` (set only
+  when the event actually advanced the turn), is the SDD's "turn-opening
+  message" and its pending-input items — no separate pending-input
+  structure is needed; the receipt already carries it.
+- **Indexed lookups, not session-wide scans (refines §7/§13/§15/§16,
+  D10/D17/D19/M5 — not yet landed).** `p2-store` adds indexes so blob-
+  reference lookup (§15, R5), duplicate-candidate lookup (§7, D10), and
+  reference matching (§16, M5/R2) are bounded lookups, not a scan of every
+  item in a session, matching D17/NFR's bounded-work discipline. No such
+  index or lookup method exists in `internal/store/store.go` as of this
+  ADR revision; this is `p2-store`'s outstanding work, and `p2-ingest`
+  must not implement any of the three as a full-session scan in the
+  meantime.
+- **Locator identity has no repository namespace in V1 (resolves the §16
+  open question, M5/R2).** Sharpens this ADR's earlier "References
+  base-directory policy — resolved, deferred" open-question answer with
+  the exact rule: V1's lexical locator identity has no repository/
+  namespace component at all, not merely an unconfigured default: a
+  locator is matched on its lexical form alone within the session, and
+  multi-repository disambiguation is out of scope for V1 rather than a
+  parameter this phase leaves at a default value.
+- **TOOL/RETRIEVED_CONTENT evidence before the first turn is rejected
+  (refines §14, D18).** A TOOL or RETRIEVED_CONTENT event or span arriving
+  for a task before any turn has opened (`Turn=0`, no `TurnID`) is
+  rejected outright — D18 already forbids creating a TURN-bound or
+  TTL-dependent item without a valid owning turn, and every TOOL/
+  RETRIEVED_CONTENT transcript item is EPHEMERAL/TURN-scoped by default
+  (§5, D8), so it always needs one; R19 makes the rejection explicit
+  rather than leaving it as a consequence to rediscover from D8+D18.
+- **Diagnostic code paired with each R13/R14 reason (new pinning
+  decision, refines §7/§1).** `DiagnosticCode` is a closed seven-value set
+  (`internal/domain/diagnostic.go`'s `Severity` switch); R13/R14's new
+  `DiagnosticReason`s must reuse an existing code, and no code is paired
+  with either in the merged code as of this ADR revision. This ADR pins
+  the pairing so `p2-graph`/`p2-ingest` do not each invent one
+  independently: R13's per-item `boundary_conflict` (§7, D10) pairs with
+  `ErrMalformedDirective` — the item is dropped as non-executable content,
+  the same category D7/M4 already use for an invalid or repeated ID;
+  R14's `target_mismatch` (§1, D1) pairs with `DiagnosticNotFound`
+  (`"ErrNotFound"`) on the diagnostic accompanying the
+  `LifecycleCommandRecord`, alongside `Resolution: TargetMismatch` on the
+  record itself — a target in the wrong state for its action is, from the
+  caller's perspective, not currently a valid target for that action, the
+  same outcome class as `TargetNotFound`, distinguished only by the
+  `Reason` token, never by a different `Code`.
+
 ## Alternatives considered
 
 - **D1:** the brief's read-only resolution without an explicit
@@ -1072,6 +1132,23 @@ reconciles exact names in a later round.
   landed, `domain.TTLLive(0, current, n)` is `false` for every
   `current`/`n` (R18); once landed, `domain.UnresolvedReference`
   round-trips through migration 0008 and survives restart (R18).
+- **§23 (round 5 ruling, R19):** `internal/domain` — a derived item's
+  `SourceRanges` alone reconstructs its transcript coverage, with no
+  companion section record to keep consistent (R19); an `IngestReceipt`
+  with `OpenedTurn`/`TurnID` set has its turn-opening pending-input items
+  exactly in `Items` (R19); a diagnostic paired with `ReasonBoundaryConflict`
+  always carries `Code: ErrMalformedDirective`, and one paired with
+  `ReasonTargetMismatch` always carries `Code: DiagnosticNotFound`, never
+  a different code for either (R19, the pinning decision above).
+  `internal/ingest` (once it lands) — a TOOL or RETRIEVED_CONTENT event
+  for a task with `Turn=0` is rejected before any item is created (R19); a
+  References locator match never considers a repository/namespace
+  component, so two same-named locators in different conceptual
+  repositories within one session are treated as the same target (R19,
+  until multi-repo support exists). Deferred until `p2-store` lands the
+  indexes: blob-reference lookup, duplicate-candidate lookup, and
+  reference matching each run in bounded time independent of session
+  size, not as a linear scan (R19).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
