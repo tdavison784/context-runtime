@@ -26,14 +26,21 @@ type run struct {
 	hasTask    bool
 	openedTurn uint64
 
-	items    []domain.ContextItem
-	rels     int
-	refs     int         // unresolved references declared so far (ordinals)
-	derived  map[int]int // derived items per span (MaxItemsPerSpan across parts)
-	diags    diagnostics
-	commands []domain.LifecycleCommandRecord
-	dups     []domain.IngestLink
-	repls    []domain.IngestLink
+	items   []domain.ContextItem
+	rels    int
+	refs    int         // unresolved references declared so far (ordinals)
+	derived map[int]int // derived items per span (MaxItemsPerSpan across parts)
+
+	// Per parse unit: ingestion diagnostics are reported after the
+	// parser's, and a parser notice about an item survives only if that
+	// item was written (R20.2).
+	unitDiags []domain.Diagnostic
+	written   map[domain.ByteRange]bool // ranges of parser items written
+	refused   map[int]bool              // sections ingestion refused
+	diags     diagnostics
+	commands  []domain.LifecycleCommandRecord
+	dups      []domain.IngestLink
+	repls     []domain.IngestLink
 
 	suppliedBlobs map[string]bool // blob hashes whose bytes this event supplied
 }

@@ -79,7 +79,7 @@ func (r *run) buildDirective(c unitCtx, item directive.Item) (domain.ContextItem
 
 // diagnose records an ingestion diagnostic for a parser item.
 func (r *run) diagnose(c unitCtx, item directive.Item, code domain.DiagnosticCode, reason domain.DiagnosticReason) {
-	r.diags.add(domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason,
+	r.unitDiags = append(r.unitDiags, domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason,
 		Section: string(item.Section), DirectiveID: item.DirectiveID, Range: item.Range})
 }
 
@@ -112,6 +112,7 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	if err != nil {
 		return err
 	}
+	r.written[item.Range] = true
 	if err := r.linkDerived(c, it); err != nil {
 		return err
 	}

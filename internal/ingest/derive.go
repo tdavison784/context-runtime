@@ -41,12 +41,21 @@ func (r *run) deriveSpan(si int, span domain.Span, transcript domain.ContextItem
 		if !u.ParsesDirectives() && (len(res.Items) > 0 || len(res.Lifecycle) > 0) {
 			return domain.ErrInvalidRecord // parser gate defect: fail closed
 		}
-		for _, d := range res.Diagnostics {
-			r.diags.add(d)
-		}
 		c := unitCtx{si: si, pi: pi, span: span, actor: actor, transcript: transcript, res: res, text: part.Text}
+		r.unitDiags, r.written, r.refused = nil, map[domain.ByteRange]bool{}, map[int]bool{}
 		if err := r.applyUnit(c); err != nil {
 			return err
+		}
+		for _, d := range res.Diagnostics {
+			// A derived-ID notice describes an item; ingestion reports it
+			// only for items it actually wrote (R20.2).
+			if d.Code == domain.DirectiveIDDerived && !r.written[d.Range] {
+				continue
+			}
+			r.diags.add(d)
+		}
+		for _, d := range r.unitDiags {
+			r.diags.add(d)
 		}
 	}
 	return nil
@@ -173,6 +182,7 @@ func (r *run) workingSection(c unitCtx, si int) error {
 		members = append(members, it)
 	}
 	if conflict {
+		r.refused[si] = true
 		return nil
 	}
 	ids := make([]string, 0, len(members))
@@ -189,6 +199,9 @@ func (r *run) workingSection(c unitCtx, si int) error {
 	res, err := graph.SupersedeSnapshot(r.tx, c.actor, ids, r.p.TaskID, r.graphEventID())
 	if err != nil {
 		return err
+	}
+	for _, ii := range sec.ItemIndexes {
+		r.written[c.res.Items[ii].Range] = true
 	}
 	for _, rel := range res.Supersedes {
 		r.repls = append(r.repls, domain.IngestLink{ItemID: rel.FromID, TargetID: rel.ToID})
@@ -226,7 +239,7 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 		LifecycleCommand: cmd,
 	}
 	diag := func(code domain.DiagnosticCode, reason domain.DiagnosticReason) {
-		r.diags.add(domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range})
+		r.unitDiags = append(r.unitDiags, domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range})
 	}
 	auth, err := graph.AuthorizeLifecycleCommand(r.tx, r.p, r.p.TaskID, cmd)
 	switch {
