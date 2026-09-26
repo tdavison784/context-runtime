@@ -670,3 +670,49 @@ func (t *tx) PutCallAttempt(a domain.CallAttempt) error {
 	t.attempts.put(key, a)
 	return nil
 }
+
+// checkLedgerSeqs enforces that a TargetCall event's sequence number is not
+// shared with a semantic record written in the same transaction, so a
+// semantic write cannot hide behind a ledger sequence number (FR-CALL-001).
+// Call and attempt sequence fields may share it.
+func (t *tx) checkLedgerSeqs() error {
+	ledger := map[uint64]bool{}
+	for _, e := range t.lifecycle.over {
+		if e.TargetKind == domain.TargetCall {
+			ledger[e.Seq] = true
+		}
+	}
+	if len(ledger) == 0 {
+		return nil
+	}
+	var seqs []uint64
+	for _, it := range t.items.over {
+		seqs = append(seqs, it.Seq)
+	}
+	for _, r := range t.rels.over {
+		seqs = append(seqs, r.Seq)
+	}
+	for _, e := range t.events.over {
+		seqs = append(seqs, e.Seq)
+	}
+	for _, o := range t.obligations.over {
+		seqs = append(seqs, o.CreatedSeq)
+	}
+	for _, tr := range t.transitions.over {
+		seqs = append(seqs, tr.Seq)
+	}
+	for _, g := range t.grants.over {
+		seqs = append(seqs, g.IssuedSeq)
+	}
+	for _, e := range t.lifecycle.over {
+		if e.TargetKind != domain.TargetCall {
+			seqs = append(seqs, e.Seq)
+		}
+	}
+	for _, seq := range seqs {
+		if ledger[seq] {
+			return invalid("sequence %d is used by both a TargetCall event and a semantic record", seq)
+		}
+	}
+	return nil
+}
