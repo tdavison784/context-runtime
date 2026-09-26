@@ -39,3 +39,12 @@ func (x *index[K]) commit() {
 		x.base[k] = append(x.base[k], ids...)
 	}
 }
+
+// iterFirst returns the first value of seq, if any.
+func iterFirst[V any](seq iter.Seq[V]) (V, bool) {
+	for v := range seq {
+		return v, true
+	}
+	var zero V
+	return zero, false
+}

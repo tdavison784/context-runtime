@@ -52,47 +52,49 @@ type attemptKey struct {
 
 // state is one session's committed records.
 type state struct {
-	lastSeq     uint64
-	items       map[string]domain.ContextItem
-	rels        map[string]domain.Relationship
-	supersedes  map[string][]string // SUPERSEDES successors: FromID -> ToIDs
-	relsFrom    map[string][]string // relationship IDs by FromID
-	relsTo      map[string][]string // relationship IDs by ToID
-	relsByType  map[domain.RelationshipType][]string
-	events      map[string]domain.EventRecord
-	blobs       map[string]domain.Blob
-	directives  map[directiveKey]string
-	obligations map[obligationKey]domain.ObligationVersion
-	latest      map[string]uint64 // obligation ID -> latest version
-	transitions map[string]domain.ObligationTransition
-	grants      map[string]domain.MutationGrant
-	tasks       map[string]domain.TaskState
-	lifecycle   map[string]domain.LifecycleEvent
-	convs       map[string]domain.Conversation
-	calls       map[string]domain.CallRecord
-	attempts    map[attemptKey]domain.CallAttempt
+	lastSeq      uint64
+	items        map[string]domain.ContextItem
+	rels         map[string]domain.Relationship
+	supersedes   map[string][]string // SUPERSEDES successors: FromID -> ToIDs
+	supersededBy map[string][]string // SUPERSEDES predecessors: ToID -> FromIDs
+	relsFrom     map[string][]string // relationship IDs by FromID
+	relsTo       map[string][]string // relationship IDs by ToID
+	relsByType   map[domain.RelationshipType][]string
+	events       map[string]domain.EventRecord
+	blobs        map[string]domain.Blob
+	directives   map[directiveKey]string
+	obligations  map[obligationKey]domain.ObligationVersion
+	latest       map[string]uint64 // obligation ID -> latest version
+	transitions  map[string]domain.ObligationTransition
+	grants       map[string]domain.MutationGrant
+	tasks        map[string]domain.TaskState
+	lifecycle    map[string]domain.LifecycleEvent
+	convs        map[string]domain.Conversation
+	calls        map[string]domain.CallRecord
+	attempts     map[attemptKey]domain.CallAttempt
 }
 
 func newState() *state {
 	return &state{
-		items:       map[string]domain.ContextItem{},
-		rels:        map[string]domain.Relationship{},
-		supersedes:  map[string][]string{},
-		relsFrom:    map[string][]string{},
-		relsTo:      map[string][]string{},
-		relsByType:  map[domain.RelationshipType][]string{},
-		events:      map[string]domain.EventRecord{},
-		blobs:       map[string]domain.Blob{},
-		directives:  map[directiveKey]string{},
-		obligations: map[obligationKey]domain.ObligationVersion{},
-		latest:      map[string]uint64{},
-		transitions: map[string]domain.ObligationTransition{},
-		grants:      map[string]domain.MutationGrant{},
-		tasks:       map[string]domain.TaskState{},
-		lifecycle:   map[string]domain.LifecycleEvent{},
-		convs:       map[string]domain.Conversation{},
-		calls:       map[string]domain.CallRecord{},
-		attempts:    map[attemptKey]domain.CallAttempt{},
+		items:        map[string]domain.ContextItem{},
+		rels:         map[string]domain.Relationship{},
+		supersedes:   map[string][]string{},
+		supersededBy: map[string][]string{},
+		relsFrom:     map[string][]string{},
+		relsTo:       map[string][]string{},
+		relsByType:   map[domain.RelationshipType][]string{},
+		events:       map[string]domain.EventRecord{},
+		blobs:        map[string]domain.Blob{},
+		directives:   map[directiveKey]string{},
+		obligations:  map[obligationKey]domain.ObligationVersion{},
+		latest:       map[string]uint64{},
+		transitions:  map[string]domain.ObligationTransition{},
+		grants:       map[string]domain.MutationGrant{},
+		tasks:        map[string]domain.TaskState{},
+		lifecycle:    map[string]domain.LifecycleEvent{},
+		convs:        map[string]domain.Conversation{},
+		calls:        map[string]domain.CallRecord{},
+		attempts:     map[attemptKey]domain.CallAttempt{},
 	}
 }
 

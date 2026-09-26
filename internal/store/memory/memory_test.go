@@ -3,6 +3,7 @@ package memory_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -66,4 +67,28 @@ func TestCanceledContext(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// BenchmarkSupersessionChain appends versions that each supersede the
+// previous one, the common replacement pattern; with the predecessor index
+// each append is independent of chain length.
+func BenchmarkSupersessionChain(b *testing.B) {
+	s := memory.New()
+	prev := ""
+	for i := range b.N {
+		id := fmt.Sprintf("v%d", i)
+		err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+			if err := tx.InsertItem(storetest.NewItem("s", id, tx.NextSeq(), id)); err != nil {
+				return err
+			}
+			if prev == "" {
+				return nil
+			}
+			return tx.InsertRelationship(storetest.NewRelationship("s", "r"+id, domain.RelSupersedes, id, prev, tx.NextSeq()))
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		prev = id
+	}
 }
