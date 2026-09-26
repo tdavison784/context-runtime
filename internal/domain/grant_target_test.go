@@ -52,3 +52,26 @@ func TestTypedGrantNeverFollowsLatestVersion(t *testing.T) {
 		t.Fatal("clone aliases targets")
 	}
 }
+
+func TestTypedTargetKindIsRequiredEvenWithDirectAuthority(t *testing.T) {
+	p := Principal{SessionID: "s", Authority: AuthoritySystem}
+	for _, tc := range []struct {
+		action Action
+		target GrantTarget
+	}{
+		{ActionResolve, ObligationGrantTarget("s", "o", 1)},
+		{ActionAssertObligation, ItemGrantTarget("s", "i")},
+		{ActionCompleteTask, ItemGrantTarget("s", "i")},
+	} {
+		t.Run(string(tc.action), func(t *testing.T) {
+			target := MutationTarget{Ref: tc.target, Authority: AuthorityUser, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}
+			if _, err := AuthorizeMutation(MutationRequest{Actor: p, Action: tc.action, Targets: []MutationTarget{target}, Seq: 1}); err == nil {
+				t.Fatal("direct authority bypassed typed target kind")
+			}
+			intent := GrantIntent{RequestID: "req", GrantID: "g", Action: tc.action, Targets: []GrantTarget{tc.target}, Grantee: &p}
+			if intent.Validate() == nil {
+				t.Fatal("grant intent accepted wrong target kind")
+			}
+		})
+	}
+}

@@ -199,7 +199,7 @@ func AuthorizeMutation(r MutationRequest) (Authorization, error) {
 		return auth, invalid("mutation: no targets")
 	}
 	for _, t := range r.Targets {
-		if t.Ref != (GrantTarget{}) && (t.Ref.Validate() != nil || t.Ref.SessionID != r.Actor.SessionID || r.Seq == 0 || r.Action == ActionCompleteTask) {
+		if t.Ref != (GrantTarget{}) && (t.Ref.Validate() != nil || t.Ref.SessionID != r.Actor.SessionID || r.Seq == 0 || !r.Action.ValidForTarget(t.Ref.Kind)) {
 			return Authorization{}, ErrInvalidRecord
 		}
 		if !t.Access.Permits(r.Actor) {

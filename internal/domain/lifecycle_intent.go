@@ -102,6 +102,9 @@ func (i GrantIntent) Validate() error {
 		if err := t.Validate(); err != nil {
 			return err
 		}
+		if !i.Action.ValidForTarget(t.Kind) {
+			return invalid("grant intent: action does not apply to target kind")
+		}
 		if seen[t.AuthorizationKey] {
 			return invalid("grant intent: duplicate target")
 		}
