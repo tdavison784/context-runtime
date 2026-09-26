@@ -3,6 +3,7 @@ package storetest
 import (
 	"testing"
 
+	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -32,6 +33,7 @@ type durableCase struct {
 var durableSuite = []durableCase{
 	{"LosslessTextAcrossRestart", testLosslessTextAcrossRestart},
 	{"IngestionAcrossRestart", testIngestionAcrossRestart},
+	{"Phase2StateAcrossRestart", testPhase2StateAcrossRestart},
 }
 
 // openDurable opens the backing state and closes the store when the test
@@ -52,4 +54,49 @@ func reopen(t *testing.T, s store.Store, open Opener) store.Store {
 	t.Helper()
 	noErr(t, s.Close())
 	return openDurable(t, open)
+}
+
+// testPhase2StateAcrossRestart checks that item provenance, namespaced
+// current-version pointers, obligation claims, and retirements survive a
+// restart (D8, D13, D18, M6).
+func testPhase2StateAcrossRestart(t *testing.T, open Opener) {
+	s := openDurable(t, open)
+	var transcript, pin domain.ContextItem
+	var retired domain.ObligationVersion
+	update(t, s, sessA, func(tx store.Tx) error {
+		transcript = NewTranscript(sessA, "tr", tx.NextSeq(), "# Pinned\n- x\n")
+		noErr(t, tx.InsertItem(transcript))
+		pin = NewDirective(sessA, "pin", "agent.status", tx.NextSeq(), "x")
+		pin.CreatedTurn = 1
+		pin.SourceRanges = []domain.SourceRange{{TranscriptID: "tr", Range: domain.ByteRange{Start: 10, End: 13}, Slices: []domain.ByteRange{{Start: 12, End: 13}}}}
+		noErr(t, tx.InsertItem(pin))
+		noErr(t, tx.InsertItem(NewAgentKeyItem(sessA, "key", "agent.status", tx.NextSeq(), "state")))
+		noErr(t, tx.SetCurrentVersion("pin"))
+		noErr(t, tx.SetCurrentVersion("key"))
+		o := NewObligation(sessA, "o", 1, tx.NextSeq(), "pin")
+		o.Claim, o.Matcher = "tests_pass", nil
+		noErr(t, tx.InsertObligationVersion(o))
+		var err error
+		retired, err = tx.RetireObligationVersion("o", 1, 1, NewLifecycleEvent(sessA, "retire", tx.NextSeq(), domain.TargetObligation, "o"))
+		return err
+	})
+	s = reopen(t, s, open)
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		for _, want := range []domain.ContextItem{transcript, pin} {
+			got, err := tx.Item(want.ID)
+			noErr(t, err)
+			assertEqual(t, "item "+want.ID+" after restart", got, want)
+		}
+		for ns, want := range map[domain.DirectiveNamespace]string{domain.NamespaceDirective: "pin", domain.NamespaceAgentKey: "key"} {
+			got, err := tx.CurrentVersion(namespaceKey(sessA, ns, "agent.status"))
+			noErr(t, err)
+			if got != want {
+				t.Errorf("CurrentVersion(%s) after restart = %q, want %q", ns, got, want)
+			}
+		}
+		got, err := tx.ObligationsBySource("pin", 1)
+		noErr(t, err)
+		assertEqual(t, "retired obligation after restart", got, []domain.ObligationVersion{retired})
+		return nil
+	})
 }
