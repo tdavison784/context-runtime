@@ -11,10 +11,6 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
-// maxClaimsPerSource bounds the obligation lookup when comparing a
-// duplicate's declaration with its canonical item's (R9, R11).
-const maxClaimsPerSource = 256
-
 // dedupRule names the deterministic rule recorded on DUPLICATE_OF edges
 // (FR-REL-007, M2).
 const dedupRule = policy.Version
@@ -122,7 +118,7 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		return errLimit("MaxRelationships")
 	}
 	if dup {
-		if _, err := graph.LinkDuplicate(r.tx, c.actor, it.ID, canonical.ID, r.graphEventID(), dedupRule); err != nil {
+		if _, err := graph.LinkDuplicate(r.tx, c.actor, it.ID, canonical.ID, r.graphEventID(), dedupRule, item.Obligation); err != nil {
 			return err
 		}
 		r.rels++
@@ -147,9 +143,9 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 }
 
 // duplicateOf returns its key's current version, if any, and whether it
-// would be an exact semantic duplicate of it (D10, R11): same meaning under
-// graph.SameDirectiveSemantics and the same obligation declaration. A
-// lower-authority or otherwise different write is never a duplicate.
+// would be an exact semantic duplicate of it (D10) under graph's single
+// comparison, which includes the obligation declaration (R11, SPEC-1.12).
+// A lower-authority or otherwise different write is never a duplicate.
 func (r *run) duplicateOf(actor domain.Principal, it domain.ContextItem, claim string) (domain.ContextItem, bool, error) {
 	cur, err := graph.CurrentVersionFor(r.tx, actor, it)
 	if isNotFound(err) {
@@ -158,31 +154,11 @@ func (r *run) duplicateOf(actor domain.Principal, it domain.ContextItem, claim s
 	if err != nil {
 		return domain.ContextItem{}, false, err
 	}
-	if !graph.SameDirectiveSemantics(it, cur) {
-		return cur, false, nil
-	}
-	claims, err := r.currentClaims(cur.ID)
+	same, err := graph.SameDirective(r.tx, it, claim, cur)
 	if err != nil {
 		return domain.ContextItem{}, false, err
 	}
-	same := len(claims) == 0 && claim == "" || len(claims) == 1 && claims[0] == claim
 	return cur, same, nil
-}
-
-// currentClaims returns the claim names of the current obligation versions
-// bound to source.
-func (r *run) currentClaims(source string) ([]string, error) {
-	versions, err := r.tx.ObligationsBySource(source, maxClaimsPerSource)
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, v := range versions {
-		if v.Current {
-			out = append(out, v.Claim)
-		}
-	}
-	return out, nil
 }
 
 // declareObligation creates the UNRESOLVED obligation version a Pinned
@@ -298,7 +274,7 @@ func (r *run) detectDuplicate(actor domain.Principal, it domain.ContextItem) err
 		if r.rels >= r.limits.MaxRelationships {
 			return errLimit("MaxRelationships")
 		}
-		_, err := graph.LinkDuplicate(r.tx, actor, it.ID, c.ID, r.graphEventID(), dedupRule)
+		_, err := graph.LinkDuplicate(r.tx, actor, it.ID, c.ID, r.graphEventID(), dedupRule, "")
 		switch {
 		case errors.Is(err, graph.ErrNotDuplicate):
 			continue // c is itself a duplicate; a later candidate may be canonical

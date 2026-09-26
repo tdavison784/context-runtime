@@ -107,7 +107,11 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	retired := map[string]domain.ContextItem{}
 	var filed, dupes, dupeOf []domain.ContextItem
 	for _, p := range parts {
-		if isDuplicateSnapshot(p) {
+		dupSnapshot, err := isDuplicateSnapshot(tx, p)
+		if err != nil {
+			return SnapshotResult{}, err
+		}
+		if dupSnapshot {
 			dupes = append(dupes, p.members...)
 			dupeOf = append(dupeOf, p.prior...)
 			continue
@@ -172,7 +176,7 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 		}
 	}
 	for i, d := range dupes {
-		rel, err := LinkDuplicate(tx, actor, d.ID, dupeOf[i].ID, eventID, "")
+		rel, err := LinkDuplicate(tx, actor, d.ID, dupeOf[i].ID, eventID, "", "")
 		if err != nil {
 			return SnapshotResult{}, err
 		}
@@ -280,17 +284,19 @@ func freezePartitions(tx store.ReadTx, taskID string, members []domain.ContextIt
 }
 
 // isDuplicateSnapshot reports whether a partition's ordered members are a
-// semantically identical copy of its ordered prior set.
-func isDuplicateSnapshot(p *snapshotPartition) bool {
+// copy of its ordered prior set under the single duplicate comparison
+// (SameDirective, R11), so a snapshot judged a duplicate here always links.
+func isDuplicateSnapshot(tx store.ReadTx, p *snapshotPartition) (bool, error) {
 	if len(p.prior) == 0 || len(p.prior) != len(p.members) {
-		return false
+		return false, nil
 	}
 	for i := range p.members {
-		if !SameDirectiveSemantics(p.members[i], p.prior[i]) {
-			return false
+		same, err := SameDirective(tx, p.members[i], "", p.prior[i])
+		if err != nil || !same {
+			return false, err
 		}
 	}
-	return true
+	return true, nil
 }
 
 // bySeqID orders items by (Seq, ID).
