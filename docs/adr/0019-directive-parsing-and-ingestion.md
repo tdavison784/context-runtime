@@ -438,3 +438,168 @@ an idempotent replay returns the receipt's original diagnostics unchanged.
 Owner: `internal/domain` (diagnostic record type), `internal/store`
 (schema migration, access-checked reads, both backends, restart/rollback/
 anonymous-uniqueness/replay coverage in storetest — `p2-store`).
+
+### 13. Parser and event resource limits (D17)
+
+§9/12, NFR-002, FR-ING-001, INV-10.
+
+Parser work is linear in accepted bytes plus bounded output, including
+diagnostic scanning; default limits are 8 MiB per text span, 4096 parsed
+items per span, 256 diagnostics plus one truncation marker per span.
+Beyond the brief's per-span caps, finite versioned limits also bound total
+event bytes, spans/parts, total items, total diagnostics, total blob
+bytes, attribute tokens/length, and generated relationships, since
+thousands of small spans could otherwise evade a per-span cap and force
+repeated scans of an unbounded prior graph. Limits are checked with
+overflow-safe arithmetic before allocating/copying or committing; exceeding
+any limit rejects the entire event, changing no task/turn/item/
+relationship/obligation/receipt. Diagnostic emission stops at the cap
+without stopping suppression-state tracking or semantic validation. Limits
+are trusted configuration, never directive attributes. Fuzzing covers
+panics, valid offsets, deterministic output, source gating, and
+structural/allocation bounds via scaling benchmarks or instrumented
+counters, not wall-clock assertions inside fuzz tests.
+
+Owner: `internal/directive` (per-span/per-parse-unit limits),
+`internal/domain` (limits config type), `internal/ingest` (whole-event
+totals, graph-scan bounds).
+
+### 14. Turn advancement (D18)
+
+Terminology (§1 of the SDD), FR-DOM-003/007, FR-AUTH-001/003, FR-ING-006,
+§10, trace T03/T10.
+
+A trusted USER-event envelope, or a HARNESS envelope explicitly flagged as
+a turn boundary, advances a task's turn exactly once, regardless of span
+count or contained-directive authority; AGENT/TOOL/RETRIEVED_CONTENT
+payloads can never assert either form, so low-authority content can never
+forge a turn boundary to expire higher-authority TURN requirements.
+Advancement is determined only after the idempotency lookup (§10) and
+persisted with `PutTask`'s required `TargetTask` audit and CAS in the same
+event transaction. A task becomes ACTIVE on its first valid task-bound
+event (preserving immutable workflow ownership); before any opener it has
+`Turn=0` and no `TurnID` — no event synthesizes a first USER turn, and
+TURN-bound or TTL-dependent items cannot be created without a valid owning
+turn. A new opener sets `Turn=old+1`, a stable derived `TurnID`, and its
+ordered pending-input item IDs. Every applicable item (including
+TASK-scoped ones) records a creation-turn index/owner for TTL; N-turn TTL
+is eligible while `currentTurn >= creationTurn && currentTurn-creationTurn
+< N` in the recorded owning task, using the difference form to avoid
+overflow; TURN scope always expires on the next turn regardless of a
+larger `ttl`. A cross-task consumer never substitutes its own turn
+counter. A COMPLETED task is never reactivated by ordinary ingestion. An
+exact idempotent retry returns the original `TurnID`/result and never
+re-advances or refreshes TTL.
+
+Owner: `internal/domain` (`TaskState` transition rule), `internal/ingest`
+(envelope-kind gate, transactional ordering with §10).
+
+### 15. Blob/image reference authorization (D19, R5)
+
+FR-ING-007, FR-REL-008, §9, INV-05/08; ADR 4.
+
+Image/document bytes are immutable, session-scoped blobs verified by digest
+and size before a referencing item is accepted; a supplied hash reference
+must resolve to bytes already in that session, and D19's general rule
+requires the reference be authorized through an accessible source item or
+an explicit authenticated blob-access record — possession of a digest
+alone grants no read/copy permission, closing the path where an agent that
+merely learns another agent's private-document hash could reference it
+into a new accessible item. R5 fixes Phase 2's concrete check: a blob hash
+reference is accepted only when an item the principal can already access
+references that blob in the same session; otherwise the caller must supply
+bytes outright. Missing and inaccessible references return the identical
+public error. Derived item boundaries stay within all referenced source
+boundaries; a caller supplying full bytes may make a new authorized
+assertion at its own authority/boundary without borrowing hidden
+provenance. Media type/encoding/options live on each `ContentPart` and its
+canonical hash, not on whichever blob metadata won first insertion. No
+locator (URL/path) is ever fetched, opened, OCR'd, or extracted during
+ingestion or replay; externally extracted text must arrive as its own
+authenticated span.
+
+Owner: `internal/ingest` (R5's access check at reference time),
+`internal/store` (session-scoped blob existence, unchanged from Phase 1).
+
+### 16. References resolution and deferred tool dependencies (M5, R2)
+
+FR-DIR-003, FR-REL-002/007, §9, INV-05/07.
+
+R2 confirms M5's References half is in Phase 2: lookup of accessible
+same-session targets runs in the declared scope, filtered before any
+ID/count or ambiguity is disclosed; a source locator is matched under a
+documented, versioned lexical identity rule that includes
+repository/resource namespace and a relevant base directory, with no
+filesystem or network access. Matching authorized targets link
+deterministically, preserving each immutable reference and target
+snapshot; an inaccessible target stays indistinguishable from an absent
+one. Later path ingestion may add `REFERENCES` edges only under both the
+original reference's authenticated ownership context and the current
+event's authorization — an older broad reference can never be made to
+disclose newly-ingested private evidence — and unresolved references
+persist so restart never loses future linking. R2 defers M5's
+tool-dependency half to Phase 5: `tool_call` items are created by the call
+ledger, which Phase 2 does not implement, so a Phase 2 TOOL span may carry
+a `ToolCallID` recorded only in `SourceRef`, creating no edge and no
+semantics until Phase 5.
+
+Owner: `internal/ingest` (lexical locator identity rule, deferred-link
+persistence).
+
+### 17. Directive vs. agent-key namespace (M6, R6)
+
+FR-TOOL-002, FR-DIR-006.
+
+FR-TOOL-002 promises agent keys (`agent.<key>`) never collide with
+directive IDs, but FR-DIR-006's `id` grammar already allows dots, so
+`agent.status` is a legal *directive* ID string, and `domain.AgentKeyID`'s
+prefix is display syntax with no enforced separation from the current-map
+key. R6: Phase 2 adds a typed namespace (`DIRECTIVE` vs. `AGENT_KEY`) to
+the current-version key via a forward migration in both stores (never
+editing migration 0001); lifecycle resolution (`graph.ResolveLifecycleTarget`)
+only ever considers the `DIRECTIVE` namespace, so a keyed agent write can
+never accidentally resolve as a Resolve/Unpin target even though Phase 3
+is what actually performs keyed writes.
+
+Owner: `internal/store` (forward migration, both backends — `p2-store`),
+`internal/graph` (namespace-scoped resolution — `p2-graph`).
+
+### 18. Explicit relationship input is never a trusted back door (M7)
+
+FR-ING-001/003, FR-AUTH-001, FR-REL-002/006/007/008, §9.
+
+Phase 2 either rejects unsupported explicit relationship declarations in an
+event outright, or supports a closed, typed allowlist with full endpoint
+access and action authorization for each — never arbitrary caller-supplied
+`Relationship` rows, edge authority, coverage, or current-map updates.
+`DERIVED_FROM` must name complete accessible sources and attach only
+through `graph.LinkDerived` at item creation (ADR 16's `tx.Allocated`
+gate); `SUPERSEDES` only through the common authorized transition path
+(§7); `DUPLICATE_OF` only through D10 (§7). Relationship-shaped JSON inside
+tool text remains inert text. This closes a bypass the review flagged: an
+ungated generic "relationships" field on an event would skip
+directive-capability checks and graph protections, and — if left out of
+`PayloadHash` (§10) — would additionally permit conflicting retries.
+
+Owner: `internal/ingest` (reject-or-allowlist gate; the allowlist, if any,
+is `internal/ingest`'s own code, not caller data).
+
+### 19. Public result/API shape and migration compatibility (M8, R3)
+
+§7/8, FR-PER-002/003, ADR 3.
+
+Phase 2's `IngestResult`/receipt types are internal until the public
+service signature is settled: R3 keeps them in `internal/ingest` (or
+`internal/domain`), *not* aliased from the root package — the root package
+aliases only `Event`/`Span` input types (SDD §8's `Ingest(...)
+([]ContextItem, error)` signature change to return items plus
+diagnostics/commands is deferred to the phase that implements
+`Runtime.Ingest`, i.e. Phase 5). Migrations for source ranges, event
+receipts, claims, the typed namespace (§17), diagnostics, and the lossless
+text representation (§3) are all forward-only against the checksum-locked
+migration 0001; upgrade/restart parity fixtures are required for
+pre-existing records, and a record that predates new metadata gets
+explicit handling rather than an invented executable default.
+
+Owner: `internal/domain`/root package (alias scope), `internal/store`
+(forward migrations + parity fixtures).
