@@ -164,6 +164,11 @@ type ReadTx interface {
 	// directives, so a boundary a caller cannot see never blocks or reveals
 	// itself through a shared ID.
 	CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error)
+	// CurrentDirectives returns the item IDs of the current versions of a
+	// directive across every access boundary in a task, ordered by item ID;
+	// empty when none exist. Callers filter by access before acting, so a
+	// version a principal cannot see stays invisible (FR-DIR-002, FR-DIR-005).
+	CurrentDirectives(taskID, directiveID string) ([]string, error)
 	// Obligation returns the latest version of an obligation.
 	Obligation(obligationID string) (domain.ObligationVersion, error)
 	ObligationVersions(obligationID string) ([]domain.ObligationVersion, error)
@@ -265,7 +270,11 @@ type Tx interface {
 	PutTask(t domain.TaskState, expectedVersion uint64, event domain.LifecycleEvent) (domain.TaskState, error)
 
 	// AppendLifecycleEvent appends an audit event. TargetCall events are
-	// reserved for the call ledger (internal/invocation).
+	// reserved for the call ledger (internal/invocation), and a TargetCall
+	// event's Seq is never shared with any other record: at commit, a
+	// sequence number used by a TargetCall event and by any other
+	// sequenced record fails with domain.ErrInvalidRecord, so a semantic
+	// write cannot hide behind a ledger sequence number (FR-CALL-001).
 	AppendLifecycleEvent(e domain.LifecycleEvent) error
 
 	// PutConversation creates (expectedRevision 0) or replaces a
