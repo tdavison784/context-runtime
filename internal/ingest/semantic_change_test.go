@@ -1,9 +1,11 @@
 package ingest
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -85,6 +87,49 @@ func TestP336_ChangedRestatementReplaces(t *testing.T) {
 			old, err := tx.Item(g.ID)
 			if err != nil || *old.GoalStatus != domain.GoalResolved {
 				t.Errorf("replaced goal status %v (%v)", old.GoalStatus, err)
+			}
+			return nil
+		})
+	})
+}
+
+// TestP336_ReplacementHistoryReconstructible (P3-36): after a chain of
+// replacements by different authorities and a later lifecycle change, every
+// version keeps its original authority, content, generation at creation and
+// transcript-range mapping, and the chain orders them newest to oldest, so
+// later delta/rebase logic can identify obsolete raw representations.
+func TestP336_ReplacementHistoryReconstructible(t *testing.T) {
+	phase3Stores(t, func(t *testing.T, f *fixture) {
+		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+		user, sys := principal(domain.AuthorityUser), principal(domain.AuthoritySystem)
+		// P2 arrives in a two-span event whose operations run the second
+		// span first, so the mapping must follow the item's own span.
+		r1 := f.mustIngest(user, userEvent("h1", "## Pinned\n- [dep] Use v1.\n", true))
+		e2 := domain.Event{EventID: "h2", Kind: domain.EventSystem, Spans: []domain.Span{
+			textSpan(domain.AuthoritySystem, false, "Unrelated note."), textSpan(domain.AuthoritySystem, false, "## Pinned\n- [dep] Use v2.\n")},
+			Operations: []domain.SemanticOperation{spanOp(1), spanOp(0)}}
+		r2 := f.mustIngest(sys, e2)
+		f.mustIngest(sys, sysEvent("h3", "## Unpin [dep]\n"))
+		p1, p2 := mustDirective(t, r1, "dep"), mustDirective(t, r2, "dep")
+		f.view(func(tx store.ReadTx) error {
+			chain, err := graph.SupersessionChain(tx, p1.ID)
+			if err != nil || len(chain) != 2 || chain[0] != p2.ID || chain[1] != p1.ID {
+				t.Fatalf("chain = %v (%v)", chain, err)
+			}
+			old, err := tx.Item(p1.ID)
+			if err != nil || old.Authority != domain.AuthorityUser || old.Parts[0].Text != "Use v1." || old.Generation != domain.GenerationPinned {
+				t.Errorf("replaced version changed: %+v (%v)", old, err)
+			}
+			cur, err := tx.Item(p2.ID)
+			if err != nil || cur.Authority != domain.AuthoritySystem || cur.Generation == domain.GenerationPinned {
+				t.Errorf("current version: %+v (%v)", cur, err)
+			}
+			for _, it := range []domain.ContextItem{old, cur} {
+				tr, err := tx.Item(it.SourceRanges[0].TranscriptID)
+				rg := it.SourceRanges[0].Range
+				if err != nil || tr.Role != domain.RoleTranscript || tr.Authority != it.Authority || !strings.Contains(tr.Parts[it.SourceRanges[0].PartIndex].Text[rg.Start:rg.End], it.Parts[0].Text) {
+					t.Errorf("%s maps to %+v (%v)", it.ID, tr, err)
+				}
 			}
 			return nil
 		})
