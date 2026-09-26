@@ -2357,14 +2357,17 @@ fixed.
   by endpoint only, so reading `SUPERSEDES` into an item with thousands of
   unrelated `DUPLICATE_OF` edges into the same item walked all of them.
   Both maps are now keyed by `relKey{Type, ID}`; a read by endpoint alone
-  (no type filter) probes the (fixed, six-entry) `relationshipTypes` list
-  of keys instead. `Relationships(SUPERSEDES, ToID=c)` with 8,000
+  (no type filter) probes keys for every type returned by
+  `domain.RelationshipTypes()`, which `RelationshipType.Valid` also uses.
+  `Relationships(SUPERSEDES, ToID=c)` with 8,000
   `DUPLICATE_OF` edges into `c`: 257µs before. Test:
   `TestRelationshipsReadTheirTypedKey`
   (`internal/store/memory/scan_test.go` — a read by type and endpoint
   walks at most one index entry and scans zero edges, counted via the
   index's own yield counter, with 1,000 unrelated `DUPLICATE_OF` edges
-  into the same target present).
+  into the same target present);
+  `TestUntypedEndpointReadsAllRelationshipTypes_SPEC31` (iterates the
+  domain list and fails if either endpoint read misses a new type).
 - **DUR-3.1: `SourceItems` reports each unverified ID on exactly one page,
   not once per page it happens to be skipped past (refines DUR-1.4,
   §26).** A page reads one row past its limit only to learn whether more
