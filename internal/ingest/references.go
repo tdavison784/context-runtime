@@ -27,10 +27,6 @@ import (
 // share path keys. That is a documented v1 limit, not a guess.
 const ReferenceRuleVersion = "reference-locator/v1"
 
-// maxReferenceMatches bounds one deferred-link lookup (D17). More matches
-// than this fail the event rather than linking only some.
-const maxReferenceMatches = 4096
-
 // LocatorKey returns the rule-v1 key of a locator of the given kind, or
 // ok=false when it is not a linkable locator.
 func LocatorKey(kind domain.SourceKind, locator string) (string, bool) {
@@ -132,6 +128,9 @@ func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
 // current source actor must see the reference, and everyone who can see the
 // reference must already see the new source. Anything else is skipped
 // silently, so the event learns nothing about references it cannot see.
+// The references come from the store's bounded locator-key index (R19);
+// more than the lookup limit rejects the event (store.ErrLimitExceeded,
+// D17) rather than linking only some.
 func (r *run) linkPendingReferences(actor domain.Principal, target domain.ContextItem) error {
 	if target.Source == nil {
 		return nil
@@ -140,7 +139,7 @@ func (r *run) linkPendingReferences(actor domain.Principal, target domain.Contex
 	if !ok {
 		return nil
 	}
-	refs, err := r.tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: key, RuleVersion: ReferenceRuleVersion, Limit: maxReferenceMatches})
+	refs, err := r.tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: key, RuleVersion: ReferenceRuleVersion, Limit: r.g.lookupLimit()})
 	if err != nil {
 		return err
 	}

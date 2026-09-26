@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -108,4 +109,25 @@ func TestReferences_SurviveRestart(t *testing.T) {
 	if got := f.references(ref.ID); len(got) != 1 || got[0] != src.Items[0].ID {
 		t.Errorf("references after restart = %v", got)
 	}
+}
+
+// TestReferenceLookupBound_R19: deferred linking reads the bounded
+// locator-key index; more stored references to one locator than the lookup
+// limit reject the source's event (fail closed) rather than linking only
+// some.
+func TestReferenceLookupBound_R19(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("u0", "hi", false))
+		f.mustIngest(user, userEvent("u1", "## References\n- go.mod\n- ./go.mod\n- a/../go.mod\n", true))
+		f.in.LookupLimit = 2
+		before := f.lastSeq()
+		if _, err := f.ingest(user, sourceEvent("t1", "go.mod", taskAccess())); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
+			t.Errorf("over the bound: err = %v", err)
+		}
+		f.in.LookupLimit = 3
+		if _, err := f.ingest(user, sourceEvent("t1", "go.mod", taskAccess())); err != nil {
+			t.Errorf("within the bound: %v", err)
+		}
+	})
 }
