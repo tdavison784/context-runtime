@@ -532,3 +532,157 @@ func (b *semBackend) SetObligationMaterialization(ref domain.ObligationRef, disa
 	})
 	return out, err
 }
+
+// --- proofs, assertions, transitions ---
+
+func (b *semBackend) ApplicabilityProof(id string) (domain.ApplicabilityProof, error) {
+	p, ok := b.st.proofs[id]
+	if !ok {
+		return domain.ApplicabilityProof{}, domain.ErrNotFound
+	}
+	return p.Clone(), nil
+}
+
+func (b *semBackend) ProofDependencies(proofID string, p store.Page) (store.ResultPage[domain.ProofDependency], error) {
+	var out []domain.ProofDependency
+	for _, d := range b.st.deps[proofID] {
+		out = append(out, d.Clone())
+	}
+	return page(out, func(d domain.ProofDependency) store.Cursor { return store.Cursor{Seq: d.Seq, ID: d.ID} }, p)
+}
+
+func (b *semBackend) InsertApplicabilityProof(p domain.ApplicabilityProof, deps []domain.ProofDependency) error {
+	return b.write(&p.SemanticMeta, func() error {
+		if err := p.Validate(); err != nil {
+			return err
+		}
+		if _, ok := b.st.proofs[p.ID]; ok {
+			return domain.ErrImmutable
+		}
+		if _, err := b.ExactObligation(p.Target); err != nil {
+			return domain.ErrInvalidRecord
+		}
+		if len(deps) != len(p.DependencyIDs) {
+			return domain.ErrInvalidRecord
+		}
+		for i, d := range deps {
+			if err := d.Validate(); err != nil {
+				return err
+			}
+			if d.ID != p.DependencyIDs[i] || d.ProofID != p.ID || d.SessionID != p.SessionID || !b.tx.Allocated(d.Seq) {
+				return domain.ErrInvalidRecord
+			}
+			if _, ok := b.st.resBindings[d.ResourceID]; !ok {
+				return domain.ErrInvalidRecord
+			}
+		}
+		for _, id := range p.EvidenceIDs {
+			if _, err := b.rtx.Item(id); err != nil {
+				return domain.ErrDanglingRelationship
+			}
+		}
+		b.st.proofs[p.ID] = p.Clone()
+		cp := make([]domain.ProofDependency, len(deps))
+		for i, d := range deps {
+			cp[i] = d.Clone()
+		}
+		b.st.deps[p.ID] = cp
+		return nil
+	})
+}
+
+func (b *semBackend) Assertion(id string) (domain.AssertionRecord, error) {
+	a, ok := b.st.assertions[id]
+	if !ok {
+		return domain.AssertionRecord{}, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (b *semBackend) InsertAssertion(a domain.AssertionRecord) error {
+	return b.write(&a.SemanticMeta, func() error {
+		if err := a.Validate(); err != nil {
+			return err
+		}
+		if _, ok := b.st.assertions[a.ID]; ok {
+			return domain.ErrImmutable
+		}
+		if a.ProofID != "" {
+			if p, ok := b.st.proofs[a.ProofID]; !ok || p.AssertionID != a.ID || p.Target != a.Target {
+				return domain.ErrInvalidRecord
+			}
+		}
+		b.st.assertions[a.ID] = a
+		return nil
+	})
+}
+
+func (b *semBackend) TransitionDetail(id string) (domain.TransitionDetail, error) {
+	d, ok := b.st.details[id]
+	if !ok {
+		return domain.TransitionDetail{}, domain.ErrNotFound
+	}
+	return d.Clone(), nil
+}
+
+func (b *semBackend) TransitionsByVersion(ref domain.ObligationRef, p store.Page) (store.ResultPage[domain.ObligationTransition], error) {
+	all, err := b.rtx.ObligationTransitions(ref.ObligationID)
+	if err != nil {
+		return store.ResultPage[domain.ObligationTransition]{}, err
+	}
+	var out []domain.ObligationTransition
+	for _, t := range all {
+		if t.Version == ref.Version {
+			out = append(out, t)
+		}
+	}
+	return page(out, func(t domain.ObligationTransition) store.Cursor { return store.Cursor{Seq: t.Seq, ID: t.ID} }, p)
+}
+
+func (b *semBackend) AppendSemanticObligationTransition(t domain.ObligationTransition, d domain.TransitionDetail, expected uint64) (domain.ObligationVersion, error) {
+	var out domain.ObligationVersion
+	err := b.write(&d.SemanticMeta, func() error {
+		if err := t.Validate(); err != nil {
+			return err
+		}
+		if err := d.Validate(); err != nil {
+			return err
+		}
+		ref := domain.ObligationRef{SessionID: t.SessionID, ObligationID: t.ObligationID, Version: t.Version}
+		if t.Cause == "" || d.TransitionID != t.ID || d.ID != t.ID || d.Target != ref || d.Cause != t.Cause || d.ProofID != t.ProofID || d.PreviousProofID != t.PriorProofID || d.Seq != t.Seq {
+			return domain.ErrInvalidRecord
+		}
+		if _, ok := b.st.details[t.ID]; ok {
+			return domain.ErrImmutable
+		}
+		cache := b.st.caches[ref]
+		if t.From == domain.ObligationSatisfied && t.PriorProofID != cache.proof {
+			return domain.ErrInvalidRecord
+		}
+		if t.ProofID != "" {
+			p, ok := b.st.proofs[t.ProofID]
+			if !ok || p.Target != ref || p.TransitionID != t.ID || !equalPtr(p.Matcher, t.Matcher) {
+				return domain.ErrInvalidRecord
+			}
+		}
+		if d.AssertionID != "" {
+			if _, ok := b.st.assertions[d.AssertionID]; !ok {
+				return domain.ErrInvalidRecord
+			}
+		}
+		var err error
+		if out, err = b.tx.AppendObligationTransition(t, expected); err != nil {
+			return err
+		}
+		if t.To == domain.ObligationSatisfied {
+			b.st.caches[ref] = proofCache{proof: t.ProofID, assertion: d.AssertionID}
+		} else {
+			delete(b.st.caches, ref)
+		}
+		b.st.details[t.ID] = d.Clone()
+		c := b.st.caches[ref]
+		out.CurrentProofID, out.CurrentAssertionID = c.proof, c.assertion
+		return nil
+	})
+	return out, err
+}

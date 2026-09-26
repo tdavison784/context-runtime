@@ -91,3 +91,35 @@ func seedResource(t *testing.T, st store.Store, resourceID string, reporter doma
 }
 
 func taskBoundary() domain.AccessBoundary { return storetest.DirectiveBoundary(testSession) }
+
+// seedResourceState records an authoritative KNOWN state directly through the
+// facet (a stand-in until resource reporting is exercised end to end).
+func seedResourceState(t *testing.T, st store.Store, resourceID string, rev uint64, fp string) {
+	t.Helper()
+	mustUpdate(t, st, func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		seq := tx.NextSeq()
+		var prior domain.ResourceState
+		if cur, err := sem.ResourceState(resourceID); err == nil {
+			prior = cur
+		}
+		u := domain.ResourceUpdate{
+			SemanticMeta: domain.SemanticMeta{ID: "ru-seed-" + fp[7:15], SessionID: testSession, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
+			ResourceID:   resourceID, RequestID: "seed-" + fp[7:15], Reporter: actorOf(domain.AuthorityHarness),
+			ExpectedAuthoritativeRevision: prior.AuthoritativeRevision, ResultingAuthoritativeRevision: rev,
+			WorkspaceFingerprint: fp, Freshness: domain.ResourceKnown, Resynchronization: true, AllPaths: true,
+		}
+		if err := sem.InsertResourceUpdate(u); err != nil {
+			return err
+		}
+		_, err = sem.PutResourceState(domain.ResourceState{
+			SemanticMeta: domain.SemanticMeta{ID: "rs-" + resourceID, SessionID: testSession, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
+			ResourceID:   resourceID, BindingID: "rb-" + resourceID, LastUpdateID: u.ID,
+			AuthoritativeRevision: rev, WorkspaceFingerprint: fp, Freshness: domain.ResourceKnown,
+		}, prior.Revision)
+		return err
+	})
+}
