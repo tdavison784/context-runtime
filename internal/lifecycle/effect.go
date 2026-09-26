@@ -12,12 +12,13 @@ func observe(it domain.ContextItem, current domain.ItemCurrentness) domain.Obser
 		Currentness: current, GoalStatus: it.GoalStatus, Generation: it.Generation, Residency: it.Residency, Authority: it.Authority, Expiry: domain.ExpiryUnknown}).Clone()
 }
 
-func (e itemEffect) result(current domain.ItemCurrentness) domain.ItemMutationResult {
+func (e itemEffect) result() domain.ItemMutationResult {
 	return domain.ItemMutationResult{ItemID: e.before.ID, BeforeVersion: e.before.Version, AfterVersion: e.after.Version,
-		Before: observe(e.before, current), After: observe(e.after, current), AuditID: e.audit.ID}
+		Before: observe(e.before, e.current), After: observe(e.after, e.current), AuditID: e.audit.ID, ExplicitProtectedRemoval: e.protectedRemoval}
 }
 
-func recordEffect(tx store.Tx, sem store.SemanticTx, e itemEffect, current domain.ItemCurrentness) error {
+func recordEffect(tx store.Tx, sem store.SemanticTx, e itemEffect) error {
+	current := e.current
 	return sem.InsertSemanticChange(domain.SemanticChange{
 		SemanticMeta: domain.SemanticMeta{ID: changeID(e.audit.ID), SessionID: e.before.SessionID, Seq: tx.NextSeq(), SchemaVersion: domain.SemanticSchemaV1},
 		Target:       domain.ItemGrantTarget(e.before.SessionID, e.before.ID), SourceAuthority: e.before.Authority, Actor: e.audit.Actor,
