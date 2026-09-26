@@ -31,6 +31,9 @@ type SnapshotResult struct {
 	// semantically identical snapshot, in member source order. Those
 	// members retire nothing and never become current.
 	Duplicates []domain.Relationship
+	// Unverified lists prior members the store excluded because their
+	// stored content failed verification (DUR-1.4); the caller reports them.
+	Unverified []string
 }
 
 // snapshotPartition is one (authority, access boundary) partition of a
@@ -97,7 +100,7 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	if err != nil {
 		return SnapshotResult{}, err
 	}
-	parts, err := freezePartitions(tx, taskID, members)
+	parts, unverified, err := freezePartitions(tx, actor, taskID, members)
 	if err != nil {
 		return SnapshotResult{}, err
 	}
@@ -162,7 +165,7 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 		}
 	}
 
-	var res SnapshotResult
+	res := SnapshotResult{Unverified: unverified}
 	for _, old := range olds {
 		rel, err := Supersede(tx, actor, retire[old.ID].ID, old.ID, eventID, "")
 		if err != nil {
@@ -241,10 +244,21 @@ func members0Authority(members []domain.ContextItem, it domain.ContextItem) doma
 	return members[0].Authority
 }
 
+// maxSnapshotMembers bounds one partition's current Working set as read
+// by CurrentWorking (D17, SEC-1.2). A partition's current set is its last
+// snapshot plus live explicit-ID members, which ingestion bounds by its
+// per-span item limit (default 4096), so this is unreachable in routine use;
+// exceeding it fails the snapshot (store.ErrLimitExceeded) rather than
+// replacing only part of the set.
+const maxSnapshotMembers = 16384
+
 // freezePartitions groups members by access boundary, in order of first
 // appearance, and captures each partition's prior Working set before any
-// write.
-func freezePartitions(tx store.ReadTx, taskID string, members []domain.ContextItem) ([]*snapshotPartition, error) {
+// write through one indexed CurrentWorking lookup per partition, filtered
+// to actor inside the store: never a scan of the task (SEC-1.2). Prior
+// members whose stored content fails verification are excluded (and
+// returned) rather than blocking the partition (DUR-1.4).
+func freezePartitions(tx store.ReadTx, actor domain.Principal, taskID string, members []domain.ContextItem) ([]*snapshotPartition, []string, error) {
 	var parts []*snapshotPartition
 	byAccess := map[domain.AccessBoundary]*snapshotPartition{}
 	isMember := map[string]bool{}
@@ -260,27 +274,27 @@ func freezePartitions(tx store.ReadTx, taskID string, members []domain.ContextIt
 	}
 
 	authority := members[0].Authority
-	candidates, err := tx.Items(store.ItemFilter{TaskID: taskID})
-	if err != nil {
-		return nil, err
-	}
-	for _, c := range candidates { // (Seq, ID) order
-		if isMember[c.ID] || c.Section != domain.SectionWorking || c.Authority != authority {
-			continue
-		}
-		p := byAccess[c.Access]
-		if p == nil {
-			continue
-		}
-		cur, err := isCurrentItem(tx, c)
+	var unverified []string
+	for _, p := range parts {
+		found, err := tx.CurrentWorking(store.WorkingFilter{Viewer: actor, TaskID: taskID, Authority: authority, Access: p.access, Limit: maxSnapshotMembers})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if cur {
-			p.prior = append(p.prior, c)
+		unverified = append(unverified, found.Unverified...)
+		for _, c := range found.Items { // (Seq, ID) order
+			if isMember[c.ID] || c.Section != domain.SectionWorking || c.Authority != authority || c.Access != p.access {
+				continue // defensive: the lookup's key already excludes these
+			}
+			cur, err := isCurrentItem(tx, c)
+			if err != nil {
+				return nil, nil, err
+			}
+			if cur {
+				p.prior = append(p.prior, c)
+			}
 		}
 	}
-	return parts, nil
+	return parts, unverified, nil
 }
 
 // isDuplicateSnapshot reports whether a partition's ordered members are a
