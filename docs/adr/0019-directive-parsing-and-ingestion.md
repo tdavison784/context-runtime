@@ -861,6 +861,88 @@ Answers to `p2-ingest`'s implementation questions, appended to
   same outcome class as `TargetNotFound`, distinguished only by the
   `Reason` token, never by a different `Code`.
 
+### 24. Round 6 ruling (ingest-suite findings): R20
+
+Findings from `p2-ingest`'s own test suite, appended to
+`phase2-amendments.md` as R20.
+
+- **Reserved internal ID prefixes on caller `EventID` (refines §10/§11,
+  D14/D15/R16 — not yet landed).** `Event.Validate`
+  (`internal/domain/ingest.go`) checks length and printable-ASCII (R16)
+  but not shape: a caller-supplied `EventID` equal to or prefixed like an
+  internally generated occurrence or artifact ID — `evc_` (caller
+  occurrence, `internal/domain/ids.go`'s `callerOccurrencePrefix`), `eva_`
+  (anonymous occurrence), or any `IDDomain` prefix (`dgn`, `cmd`, `sec`,
+  `ref`, `internal/domain/ids.go`) — currently passes validation. R20
+  rules that `Event.Validate` must reject any caller `EventID` using a
+  reserved internal prefix, so a caller can never construct an `EventID`
+  that collides with, or is mistaken for, an internally derived ID; this
+  is `p2-contract`'s outstanding work. Separately, R20 confirms "ingest
+  errors never echo item IDs" as already true: `internal/ingest`'s only
+  formatted error (`internal/ingest/ids.go`) names a limit, never an ID.
+- **`DirectiveIDDerived` notices for a refused section (refines §6/§10,
+  D9/D14 — not yet landed).** `internal/directive` emits an informational
+  `DirectiveIDDerived` diagnostic (`internal/directive/items.go:265`) for
+  every item it derives an ID for, before `internal/ingest` decides
+  whether that item's section is actually applied. `internal/ingest
+  /diagnostics.go`'s `diagnostics.add`/`records` currently keep every
+  diagnostic the parser produced regardless of that later decision, so a
+  section ingest ultimately refuses (for example a Working section
+  `workingSection` drops entirely on a boundary conflict, per the D11 item
+  below) can still leave a `DirectiveIDDerived` notice in the receipt for
+  an item that was never created. R20 rules the receipt must drop a
+  section's `DirectiveIDDerived` notices when ingest refuses that section,
+  so a diagnostic never reports a derived ID for an item that does not
+  exist; `p2-ingest`'s outstanding work.
+- **Residual instructions: no BOM/whitespace-only items, lossless bytes,
+  and malformed trusted headings still produce residue (refines §5, D8 —
+  not yet landed as specified).** `internal/ingest/derive.go`'s
+  `residualSlices` already drops a whitespace-only residual range before
+  `residualInstruction` is ever called (its trim loop empties `out`, and
+  `applyUnit` only queues a residual step when `len(residual) > 0`), so
+  whitespace-only residue already creates no item; R20 additionally
+  requires the same for a residue that is only a leading UTF-8 BOM
+  (3 bytes, not ASCII whitespace, so the current trim loop does not strip
+  it) — not yet handled. R20's other two requirements are not yet
+  implemented and contradict the function's current documented behavior:
+  (a) *lossless bytes* — `residualSlices`'s trim loop mutates the same
+  `Start`/`End` range both to decide whether residue exists and to build
+  the residual instruction item's actual content
+  (`residualInstruction`'s `b.WriteString(c.text[s.Start:s.End])`), so
+  today a residual instruction's persisted text has already lost its
+  leading/trailing whitespace bytes; R20 requires the trim to affect only
+  the *emptiness* decision, never the bytes actually stored. (b) *malformed
+  trusted headings still produce residue* — `residualSlices`'s doc comment
+  states "Malformed section bytes are never salvaged into an instruction:
+  only text the parser did not claim is residual," and its implementation
+  excludes every section's `Range` from residual regardless of
+  `Section.Malformed`; for a SYSTEM/HARNESS span this means a malformed
+  trusted heading's body currently is neither a directive item (it failed
+  to parse) nor a residual instruction (its bytes are excluded as
+  "claimed") — it is silently dropped, which is exactly the outcome D8's
+  residual-instruction mechanism exists to prevent. R20 rules that for a
+  SYSTEM/HARNESS span specifically, a malformed section's bytes must
+  still be included in `residualSlices`'s output (not excluded as
+  claimed), so a malformed trusted heading degrades to trusted plain text
+  instead of vanishing. This is `p2-ingest`'s outstanding work; the
+  function's doc comment above states the pre-R20 behavior and must be
+  updated when the fix lands.
+- **A malformed Working section writes no members, stricter than D11's
+  literal text (confirms §7, D11 — landed).** `internal/ingest/derive.go
+  :workingSection` already returns immediately, creating no items and no
+  snapshot edges at all, when `sec.Malformed || len(sec.ItemIndexes) ==
+  0` — sharper than D11's "preserves all raw bytes and diagnostics but
+  performs no snapshot replacement," which read as leaving open whether a
+  malformed section's well-formed members might still be created as
+  freestanding (non-snapshot) items. R20 confirms the stricter reading is
+  correct and records it here: a malformed Working section produces no
+  items whatsoever, only diagnostics, so a parse error can never partially
+  apply a snapshot. The same function also confirms this ADR's R19
+  code/reason pinning exactly: a boundary conflict on any member aborts
+  the whole section's write with `Code: ErrMalformedDirective, Reason:
+  ReasonBoundaryConflict` (§23), not a per-member drop, because a Working
+  snapshot is one atomic operation (D11).
+
 ## Alternatives considered
 
 - **D1:** the brief's read-only resolution without an explicit
@@ -1149,6 +1231,24 @@ reconciles exact names in a later round.
   indexes: blob-reference lookup, duplicate-candidate lookup, and
   reference matching each run in bounded time independent of session
   size, not as a linear scan (R19).
+- **§24 (round 6 ruling, R20):** `internal/domain` — once landed, an
+  `EventID` equal to or prefixed like `evc_`, `eva_`, or any `IDDomain`
+  prefix fails `Event.Validate` (R20). `internal/ingest` — once landed, a
+  `DirectiveIDDerived` diagnostic for an item whose section ingest refused
+  is absent from the receipt, not merely present-but-orphaned (R20); a
+  residual instruction is never created for a leading-BOM-only residue,
+  matching the existing whitespace-only case (R20); a residual
+  instruction's content includes leading and trailing whitespace exactly
+  as it appeared in the transcript, once the trim-for-emptiness and
+  trim-for-content paths are split (R20); a malformed section inside a
+  SYSTEM or HARNESS span still produces a residual instruction item from
+  its bytes, so the malformed-heading-drops-a-trusted-requirement case has
+  a regression test (R20). Already passing: `workingSection` creates zero
+  items for a `Malformed` section or one with no items, confirmed as the
+  correct (stricter) reading of D11 (R20); a boundary conflict on any
+  Working-section member aborts the whole section's write with
+  `ErrMalformedDirective`/`ReasonBoundaryConflict`, never a partial commit
+  (R20, confirming §23's pinning).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
