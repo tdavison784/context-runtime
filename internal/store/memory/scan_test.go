@@ -71,3 +71,51 @@ func TestKeyedReadsDoNotScan(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestRelationshipsReadTheirTypedKey checks SPEC-3.1 item 5: a
+// relationship read by (type, endpoint) yields only that type's edges from
+// the index, however many edges of other types share the endpoint (the
+// dedup path reads SUPERSEDES into an item with thousands of DUPLICATE_OF
+// edges).
+func TestRelationshipsReadTheirTypedKey(t *testing.T) {
+	s := New()
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		if err := tx.InsertItem(storetest.NewItem("s", "c", tx.NextSeq(), "c")); err != nil {
+			return err
+		}
+		for i := range 1000 {
+			id := fmt.Sprintf("d%d", i)
+			if err := tx.InsertItem(storetest.NewItem("s", id, tx.NextSeq(), "c")); err != nil {
+				return err
+			}
+			if err := tx.InsertRelationship(storetest.NewRelationship("s", "e"+id, domain.RelDuplicateOf, id, "c", tx.NextSeq())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.View(ctx, "s", func(rtx store.ReadTx) error {
+		r := rtx.(*readTx)
+		for _, f := range []store.RelationshipFilter{
+			{Type: domain.RelSupersedes, ToID: "c"},
+			{Type: domain.RelSupersedes, FromID: "d7"},
+		} {
+			r.rels.scanned = 0
+			yieldsBefore := r.relsTo.yields + r.relsFrom.yields
+			rels, err := rtx.Relationships(f)
+			if err != nil || len(rels) != 0 {
+				t.Errorf("Relationships(%+v) = %v, %v", f, rels, err)
+			}
+			if n := r.relsTo.yields + r.relsFrom.yields - yieldsBefore; n > 1 || r.rels.scanned != 0 {
+				t.Errorf("Relationships(%+v) walked %d index entries and scanned %d edges", f, n, r.rels.scanned)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
