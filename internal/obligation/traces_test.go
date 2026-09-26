@@ -135,9 +135,6 @@ func TestConcurrentINV16(t *testing.T) {
 			if rs.Freshness != domain.ResourceKnown || p.Fingerprint != rs.WorkspaceFingerprint {
 				t.Errorf("INV-16 violated: proof at %s, resource %+v", p.Fingerprint, rs)
 			}
-			smu.Lock()
-			satisfied++
-			smu.Unlock()
 			return nil
 		})
 	}
@@ -172,8 +169,19 @@ func TestConcurrentINV16(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					_, err = f.s.reportObservation(tx, sem, f.harness, obsIntent(fmt.Sprintf("co-%d", id), run, f.evidence.ID, domain.OutcomePass, fps[i%3]), tx.NextSeq())
-					return err
+					fp := fps[i%3] // often stale
+					if i%2 == 0 {
+						fp = rs.WorkspaceFingerprint // current when it commits
+					}
+					if _, err = f.s.reportObservation(tx, sem, f.harness, obsIntent(fmt.Sprintf("co-%d", id), run, f.evidence.ID, domain.OutcomePass, fp), tx.NextSeq()); err != nil {
+						return err
+					}
+					if o, err := sem.ExactObligation(f.sysTests); err == nil && o.Status == domain.ObligationSatisfied {
+						smu.Lock()
+						satisfied++
+						smu.Unlock()
+					}
+					return nil
 				})
 				check()
 			}
