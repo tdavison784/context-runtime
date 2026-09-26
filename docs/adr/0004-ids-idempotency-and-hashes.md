@@ -226,14 +226,11 @@ restricting what a directive's boundary may be.
   but different access boundaries resolve independently; every boundary
   field (`AgentID`, `WorkflowID`, `Scope`, `SessionID`, `TaskID`) is part of
   the key, and a boundary that doesn't match returns exactly the same
-  `ErrNotFound` as an unused ID. **This subtest currently fails on
-  `internal/store/sqlite` only** (passes on `internal/store/memory`):
-  querying with a boundary from a different session than the transaction's
-  returns `invalid record: record belongs to another session` instead of
-  `ErrNotFound` — the same existence-disclosure pattern AUTH-1.3 fixed
-  elsewhere in `internal/graph`, not yet applied to this new SQLite code
-  path. See ADR 17's Tests section for the full reproduction; this is a
-  `sqlite-worker` implementation gap, not a gap in the decision above.
+  `ErrNotFound` as an unused ID. Passes on both `internal/store/memory` and
+  `internal/store/sqlite` (fixed in `a8e895f`: `CurrentDirective` was
+  reporting a different-session boundary as `ErrInvalidRecord` instead of
+  `ErrNotFound`, the same existence-disclosure pattern AUTH-1.3 fixed
+  elsewhere in `internal/graph`).
 - `internal/domain/item_test.go`: `TestDirectiveSectionValid`,
   `TestContextItemValidate_SectionNoneWithoutDirectiveIDPasses`,
   `TestContextItemValidate_EachSectionWithDirectiveIDPasses` lock
@@ -287,6 +284,6 @@ consuming rule (Working-snapshot selection) is ADR 16's.
 
 Verified against the merged `memstore-worker`/`sqlite-worker`/
 `domain-tests-worker` branches: `TestConformance/DirectiveBoundaries` and
-the `Section`-validation tests exist and pass — except the SQLite-only
-`DirectiveBoundaries` failure recorded in Tests above, which is a store
-implementation gap, not a gap in this ADR's decision.
+the `Section`-validation tests exist and pass on both stores. The
+SQLite-only `DirectiveBoundaries` failure this ADR flagged is fixed
+(`a8e895f`).
