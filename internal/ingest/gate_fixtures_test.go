@@ -60,7 +60,7 @@ func (f *fixture) requireAtomic(want error, fn func() error) {
 // a USER Resolve of a SYSTEM goal aborts the whole event, including the
 // turn it would have opened.
 func TestRequireAtomic_T06Denial(t *testing.T) {
-	eachStore(t, func(t *testing.T, f *fixture) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		f.mustIngest(principal(domain.AuthoritySystem), t06Setup())
 		user := principal(domain.AuthorityUser)
 		f.requireAtomic(domain.ErrInvalidAuthorityPromotion, func() error {

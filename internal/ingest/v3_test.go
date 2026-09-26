@@ -56,7 +56,7 @@ func (f *fixture) envelope(occurrence string) domain.EventEnvelope {
 func TestV3_NewEventRecordsSchema(t *testing.T) {
 	phase3Stores(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
-		e := userEvent("v3-1", "## Remember\n- a fact\n", true)
+		e := userEvent("v3-1", "a plain question", false)
 		r := f.mustIngest(user, e)
 		if r.SchemaVersion != domain.IngestReceiptSchemaV2 || r.RequestHashVersion != domain.RequestHashV3 || r.Versions.Semantic == nil || *r.Versions.Semantic != *f.in.Semantic {
 			t.Fatalf("receipt schema %q hash %q semantic %v", r.SchemaVersion, r.RequestHashVersion, r.Versions.Semantic)
@@ -99,7 +99,7 @@ func TestV3_LegacyIngesterRejectsOperations(t *testing.T) {
 func TestV3_RetryUsesRecordedSchema(t *testing.T) {
 	phase3Stores(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
-		e := userEvent("v2-old", "## Remember\n- old fact\n", true)
+		e := userEvent("v2-old", "an old question", false)
 		f.in.legacyV2 = true
 		old := f.mustIngest(user, e)
 		if old.SchemaVersion != domain.IngestReceiptSchemaVersion || old.RequestHashVersion != "" {
@@ -208,7 +208,7 @@ func TestV3_OperationCountCeiling(t *testing.T) {
 // key equals the frozen legacy fallback's, so a Phase 2 item with the same
 // ID is replaced across the upgrade, not treated as a separate key.
 func TestV3_DirectiveNamespaceExplicit(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
 		f.in.legacyV2 = true
 		old := mustDirective(t, f.mustIngest(user, userEvent("ns-old", "## Pinned\n- [dep] Use v2.\n", true)), "dep")

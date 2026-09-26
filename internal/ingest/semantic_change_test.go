@@ -27,9 +27,7 @@ func (f *fixture) restate(setup, lifecycle string) (domain.IngestReceipt, domain
 // a resolved goal verbatim records a noncurrent duplicate occurrence; the
 // resolved goal stays current and RESOLVED, and nothing reopens.
 func TestP336_ResolvedRestatementStaysResolved(t *testing.T) {
-	pending(t, "W1 declaration dedup + graph.DeclareCreation (P3-4); verified failing: restatement reopens as a new OPEN current goal")
-	phase3Stores(t, func(t *testing.T, f *fixture) {
-		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		first, again := f.restate("## Goal [g]\nShip.\n", "## Resolve [g]\n")
 		g, dup := mustDirective(t, first, "g"), mustDirective(t, again, "g")
 		if len(again.Replacements) != 0 || len(semanticDups(again)) != 1 {
@@ -51,9 +49,7 @@ func TestP336_ResolvedRestatementStaysResolved(t *testing.T) {
 // TestP336_UnpinnedRestatementStaysUnpinned (P3-4/36, Q1): restating an
 // unpinned directive verbatim never re-pins it.
 func TestP336_UnpinnedRestatementStaysUnpinned(t *testing.T) {
-	pending(t, "W1 declaration dedup + graph.DeclareCreation (P3-4); verified failing: restatement re-pins as a new current PINNED version")
-	phase3Stores(t, func(t *testing.T, f *fixture) {
-		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		first, again := f.restate("## Pinned\n- [p] Keep the API stable.\n", "## Unpin [p]\n")
 		p, dup := mustDirective(t, first, "p"), mustDirective(t, again, "p")
 		if len(again.Replacements) != 0 || !f.isCurrent(p.ID) || f.isCurrent(dup.ID) {
@@ -73,8 +69,7 @@ func TestP336_UnpinnedRestatementStaysUnpinned(t *testing.T) {
 // changed content is an authorized replacement: a new OPEN current goal
 // supersedes the resolved one, which keeps its RESOLVED status.
 func TestP336_ChangedRestatementReplaces(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
-		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		sys := principal(domain.AuthoritySystem)
 		g := mustDirective(t, f.mustIngest(sys, sysEvent("orig", "## Goal [g]\nShip v1.\n")), "g")
 		f.mustIngest(sys, sysEvent("life", "## Resolve [g]\n"))
@@ -99,8 +94,7 @@ func TestP336_ChangedRestatementReplaces(t *testing.T) {
 // transcript-range mapping, and the chain orders them newest to oldest, so
 // later delta/rebase logic can identify obsolete raw representations.
 func TestP336_ReplacementHistoryReconstructible(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
-		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		user, sys := principal(domain.AuthorityUser), principal(domain.AuthoritySystem)
 		// P2 arrives in a two-span event whose operations run the second
 		// span first, so the mapping must follow the item's own span.

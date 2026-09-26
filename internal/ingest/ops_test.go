@@ -82,7 +82,7 @@ func TestOps_MissingHandlerFailsClosed(t *testing.T) {
 // value an earlier operation created. Results and receipt IDs are recorded
 // in order, and a retry replays them without executing anything again.
 func TestOps_OrderSequenceAndAliases(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		var calls []opCall
 		var allocated []bool
 		h := recorder{calls: &calls, allocated: &allocated}
@@ -137,7 +137,7 @@ func TestOps_OrderSequenceAndAliases(t *testing.T) {
 // the single semantic item that span created (SOURCE_ITEM, at its exact
 // version) and its transcript (EVIDENCE_ITEM).
 func TestOps_AliasBindsSpanItem(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		var calls []opCall
 		f.in.Operations = map[domain.SemanticOperationKind]OperationHandler{domain.OperationDeclareObligation: recorder{calls: &calls}}
 		sys := principal(domain.AuthoritySystem)
@@ -159,7 +159,7 @@ func TestOps_AliasBindsSpanItem(t *testing.T) {
 // failure after earlier writes rolls back the whole event, including its
 // opened turn.
 func TestOps_AliasRejections(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		var calls []opCall
 		f.in.Operations = map[domain.SemanticOperationKind]OperationHandler{
 			domain.OperationGrant: recorder{calls: &calls}, domain.OperationRevokeGrant: recorder{calls: &calls},

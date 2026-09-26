@@ -51,6 +51,17 @@ func newFixture(t *testing.T, s store.Store) *fixture {
 // errProbe rolls back the semantic-facet probe.
 var errProbe = errors.New("probe")
 
+// hasSemantic reports whether s implements the Phase 3 semantic facet.
+func hasSemantic(s store.Store) bool {
+	supported := false
+	_ = s.Update(ctx, sess, func(tx store.Tx) error {
+		_, err := store.Semantic(tx)
+		supported = err == nil
+		return errProbe
+	})
+	return supported
+}
+
 // lifecycleFor is W3's lifecycle service over s under the default Phase 3
 // policy. A store without the Phase 3 semantic facet (before W2's backends
 // land) cannot run it; the fixture then uses the routing fake, which is
@@ -61,13 +72,7 @@ func lifecycleFor(t *testing.T, s store.Store) LifecycleExecutor {
 	if err != nil {
 		t.Fatalf("lifecycle.New: %v", err)
 	}
-	supported := false
-	_ = s.Update(ctx, sess, func(tx store.Tx) error {
-		_, err := store.Semantic(tx)
-		supported = err == nil
-		return errProbe
-	})
-	if !supported {
+	if !hasSemantic(s) {
 		t.Log("lifecycle executor: routing fake (store lacks the Phase 3 semantic facet; pending W2)")
 		return fakeLifecycle{calls: new([]lifecycleCall)}
 	}

@@ -79,7 +79,7 @@ func (l fakeLifecycle) apply(tx store.Tx, a domain.LifecycleAction, actor domain
 // version; a later command in the same event sees its effect. Nothing
 // executes again on retry.
 func TestCommandsV2_ExecuteInSourceOrder(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		var calls []lifecycleCall
 		f.in.Lifecycle = fakeLifecycle{calls: &calls}
 		sys := principal(domain.AuthoritySystem)
@@ -129,7 +129,7 @@ func TestCommandsV2_ExecuteInSourceOrder(t *testing.T) {
 // command's detail boundary reads one uniform WITHHELD record, so a hidden
 // successful Resolve is indistinguishable from a command naming nothing.
 func TestCommandsV2_DetailRedaction(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
 		a := principal(domain.AuthorityUser)
 		f.mustIngest(a, userEvent("priv", "## Pinned\n- [p] {scope=AGENT} private rule\n", true))
@@ -171,7 +171,7 @@ func TestCommandsV2_DetailRedaction(t *testing.T) {
 // no lifecycle executor fails closed. Unresolvable commands need no
 // executor and are recorded as not executed.
 func TestCommandsV2_AbortsAtomically(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		sys, user := principal(domain.AuthoritySystem), principal(domain.AuthorityUser)
 		f.mustIngest(sys, sysEvent("g", "## Goal [G]\nShip.\n"))
 

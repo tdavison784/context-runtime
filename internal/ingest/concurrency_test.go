@@ -33,7 +33,7 @@ func (h syncRecorder) Execute(tx store.Tx, actor domain.Principal, op domain.Sem
 // effect: every caller gets the same receipt and the session advances by
 // exactly one event's sequences.
 func TestConcurrency_IdenticalV3Retries(t *testing.T) {
-	phase3Stores(t, func(t *testing.T, f *fixture) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		var mu sync.Mutex
 		var calls int
 		f.in.Operations = map[domain.SemanticOperationKind]OperationHandler{domain.OperationGrant: syncRecorder{&mu, &calls}}
