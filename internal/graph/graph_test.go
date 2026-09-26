@@ -76,8 +76,9 @@ func agentDirective(sess, id, dirID string, seq uint64) domain.ContextItem {
 	it.Kind = domain.KindTaskState
 	it.DirectiveID = dirID
 	it.Authority = domain.AuthorityAgent
+	it.Namespace = domain.NamespaceAgentKey
 	it.Scope = domain.ScopeTask
-	it.Access = domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: it.TaskID}
+	it.Access = domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, WorkflowID: it.WorkflowID, TaskID: it.TaskID, AgentID: it.AgentID}
 	return it
 }
 
@@ -381,10 +382,10 @@ func TestSupersede_MissingAndInaccessibleErrorsAreIndistinguishable(t *testing.T
 	err = s.Update(ctx, sess, func(tx store.Tx) error {
 		_, missingErr = Supersede(tx, actor, newID, "does-not-exist-at-all", "evt", "")
 		_, inaccessibleErr = Supersede(tx, actor, newID, hiddenID, "evt", "")
-		return nil
+		return nil // deliberately ignore errors: the graph must poison this tx
 	})
-	if err != nil {
-		t.Fatalf("update: %v", err)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("ignored graph error did not abort update: %v", err)
 	}
 	if !errors.Is(missingErr, domain.ErrNotFound) {
 		t.Fatalf("missing item error = %v, want ErrNotFound", missingErr)
@@ -793,7 +794,7 @@ func TestReplaceDirective_KeyedAgentWriteChain_T17(t *testing.T) {
 	}
 
 	err = s.View(ctx, sess, func(tx store.ReadTx) error {
-		boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: taskID}
+		boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, WorkflowID: actor.WorkflowID, TaskID: taskID, AgentID: actor.AgentID}
 		cur, err := tx.CurrentVersion(domain.CurrentKey{SessionID: sess, TaskID: taskID, Access: boundary, Namespace: domain.NamespaceAgentKey, ID: dirID})
 		if err != nil || cur != v2 {
 			t.Errorf("CurrentVersion = %q, %v; want %q, nil", cur, err, v2)

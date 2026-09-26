@@ -2,7 +2,6 @@ package graph
 
 import (
 	"errors"
-	"slices"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -11,8 +10,7 @@ import (
 var (
 	// ErrNotDuplicate reports a LinkDuplicate call whose items are not
 	// duplicates under D10: they differ in authority, boundary, section,
-	// directive ID, content, eligibility origin, or effective lifecycle
-	// metadata, the canonical item is not current, or the new item has
+	// directive ID, content, eligibility origin, or creation declaration, the canonical item is not current, or the new item has
 	// already acted as a version. Such a write must go through authorized
 	// replacement (ReplaceDirective) instead.
 	ErrNotDuplicate = errors.New("graph: item is not a duplicate of the canonical item")
@@ -23,76 +21,74 @@ var (
 	ErrDuplicateNotAtCreation = errors.New("graph: an item can only be classified a duplicate in the transaction that created it")
 )
 
-// SameDirectiveSemantics reports whether a and b are the same semantic
-// directive for deduplication (FR-ING-005, D10): same session, task,
-// workflow, agent, role, and eligibility origin (turn ID and creation turn
-// for a TURN-scoped item, creation turn for a TTL item, R11), exact authority and
-// access boundary, section and directive ID, canonical content, and every
-// effective kind/generation/scope/retention/TTL/goal-state/residency,
-// importance, and tag value. Mutable lifecycle fields are compared as they
-// currently are, so a canonical item that was since resolved, unpinned, or
-// archived never absorbs a fresh write. Source locators, event IDs, item
-// IDs, sequence numbers, creation times, source ranges, and usage counters
-// identify the occurrence, not its meaning, and are not compared. An
-// obligation declaration is not an item field: callers compare it
-// separately (R11).
+// SameDirectiveSemantics compares immutable row identity only. It is a necessary
+// precheck, never duplicate authorization: SameDirective also requires the stored
+// creation declarations. Current lifecycle fields are deliberately excluded.
 func SameDirectiveSemantics(a, b domain.ContextItem) bool {
-	// The turn origin is part of meaning only where it governs eligibility
-	// (R11): a TURN-scoped item expires with its turn, and a TTL counts
-	// from its creation turn. A TASK-scoped directive restated verbatim in
-	// a later turn is the same directive.
-	if a.Scope == domain.ScopeTurn && (a.TurnID != b.TurnID || a.CreatedTurn != b.CreatedTurn) {
-		return false
-	}
-	if a.TTLTurns != nil && a.CreatedTurn != b.CreatedTurn {
-		return false
-	}
-	return a.SessionID == b.SessionID &&
-		a.TaskID == b.TaskID &&
-		a.WorkflowID == b.WorkflowID &&
-		a.AgentID == b.AgentID &&
-		a.Role == b.Role &&
-		a.Authority == b.Authority &&
-		a.Access == b.Access &&
-		a.Scope == b.Scope &&
-		a.Section == b.Section &&
-		a.DirectiveID == b.DirectiveID &&
-		a.ContentHash == b.ContentHash &&
-		a.Kind == b.Kind &&
-		a.Generation == b.Generation &&
-		a.Retention == b.Retention &&
-		a.Residency == b.Residency &&
-		a.Importance == b.Importance &&
-		equalPtr(a.GoalStatus, b.GoalStatus) &&
-		equalPtr(a.TTLTurns, b.TTLTurns) &&
-		slices.Equal(a.Tags, b.Tags)
+	ka, oka := a.CurrentKey()
+	kb, okb := b.CurrentKey()
+	return oka && okb && ka == kb && a.WorkflowID == b.WorkflowID && a.AgentID == b.AgentID &&
+		a.Role == b.Role && a.Authority == b.Authority && a.Section == b.Section &&
+		a.ContentHash == b.ContentHash && a.Kind == b.Kind
 }
 
-// maxDeclaredClaims bounds the obligation lookup of one canonical source
-// when comparing declarations (R9, D17): a Pinned directive declares at
-// most one obligation slot.
-const maxDeclaredClaims = 256
-
-// SameDirective is the single duplicate comparison of R11 (SPEC-1.12):
-// SameDirectiveSemantics plus the obligation declaration. newClaim is the
-// claim the new item declares ("" for none); the canonical's declaration
-// is the claim of its current obligation versions. They must match exactly:
-// no claim on both, or exactly one current version with the same claim.
-func SameDirective(tx store.ReadTx, it domain.ContextItem, newClaim string, canonical domain.ContextItem) (bool, error) {
+// SameDirective uses immutable creation declarations, including accepted
+// attributes, obligation declaration and cited support. The legacy claim argument
+// is not authority and is ignored; producers persist the complete declaration
+// before comparison. Unknown legacy identity never matches. Registry/policy
+// upgrades alone do not change identity: compare under the canonical policy.
+func SameDirective(tx store.ReadTx, it domain.ContextItem, _ string, canonical domain.ContextItem) (bool, error) {
 	if !SameDirectiveSemantics(it, canonical) {
 		return false, nil
 	}
-	versions, err := tx.ObligationsBySource(canonical.ID, maxDeclaredClaims)
+	r, err := store.ReadSemantic(tx)
 	if err != nil {
 		return false, err
 	}
-	var claims []string
-	for _, v := range versions {
-		if v.Current {
-			claims = append(claims, v.Claim)
-		}
+	fresh, err := checkedDeclaration(r, it)
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
 	}
-	return len(claims) == 0 && newClaim == "" || len(claims) == 1 && claims[0] == newClaim, nil
+	if err != nil {
+		return false, err
+	}
+	prior, err := checkedDeclaration(r, canonical)
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !fresh.LegacyKnown || !prior.LegacyKnown {
+		return false, nil
+	}
+	hash, err := fresh.AcceptedSemantics.Signature(prior.PolicyVersion)
+	return hash == prior.Signature, err
+}
+
+func checkedDeclaration(r store.SemanticReader, item domain.ContextItem) (domain.CreationDeclaration, error) {
+	d, err := r.CreationDeclaration(item.ID)
+	if err != nil {
+		return d, err
+	}
+	if err := d.Validate(); err != nil {
+		return d, err
+	}
+	if d.ItemID != item.ID || d.SessionID != item.SessionID {
+		return d, domain.ErrIntegrity
+	}
+	if !d.LegacyKnown {
+		return d, nil
+	}
+	key, ok := item.CurrentKey()
+	s := d.AcceptedSemantics
+	if !ok || key != s.Key || item.ContentHash != s.ContentHash || item.Authority != s.Authority || item.WorkflowID != s.WorkflowID || item.AgentID != s.AgentID || item.Kind != s.Kind || item.Section != s.Section || !equalPtr(item.TTLTurns, s.TTLTurns) {
+		return d, domain.ErrIntegrity
+	}
+	if (item.Scope == domain.ScopeTurn || item.TTLTurns != nil) && (item.TaskID != s.OriginTaskID || item.TurnID != s.OriginTurnID || item.CreatedTurn != s.CreatedTurn) {
+		return d, domain.ErrIntegrity
+	}
+	return d, nil
 }
 
 func equalPtr[T comparable](a, b *T) bool {
@@ -138,7 +134,8 @@ func sameContentOccurrence(a, b domain.ContextItem) bool {
 // ruleVersion names the deterministic deduplication rule (FR-REL-007).
 // claim is the obligation claim the duplicate declares ("" for none); it
 // must match the canonical's declaration (SameDirective, R11).
-func LinkDuplicate(tx store.Tx, actor domain.Principal, dupID, canonicalID, eventID, ruleVersion, claim string) (domain.Relationship, error) {
+func LinkDuplicate(tx store.Tx, actor domain.Principal, dupID, canonicalID, eventID, ruleVersion, claim string) (result domain.Relationship, err error) {
+	defer poisonGraphError(tx, &err)
 	if err := actor.Validate(); err != nil {
 		return domain.Relationship{}, err
 	}
