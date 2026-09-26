@@ -86,6 +86,27 @@ func agentDirective(sess, id, dirID string, seq uint64) domain.ContextItem {
 func workingItem(sess, id string, seq uint64, authority domain.Authority) domain.ContextItem {
 	it := taskItem(sess, id, seq, authority)
 	it.Kind = domain.KindTaskState
+	it.Section = domain.SectionWorking
+	it.DirectiveID = "wd-" + id // Section != SectionNone requires a directive ID
+	return it
+}
+
+// workingConversationItem is a Working item of kind=conversation: FR-DIR-003
+// permits a Working section item of any kind, not only task_state
+// (SPEC-1.1).
+func workingConversationItem(sess, id string, seq uint64, authority domain.Authority) domain.ContextItem {
+	it := workingItem(sess, id, seq, authority)
+	it.Kind = domain.KindConversation
+	return it
+}
+
+// independentTaskStateItem is a plain task_state item that was NOT written
+// as part of a Working section (Section stays SectionNone): SupersedeSnapshot
+// must never touch it, even if it happens to share a Working item's
+// authority and access boundary (SPEC-1.1).
+func independentTaskStateItem(sess, id string, seq uint64, authority domain.Authority) domain.ContextItem {
+	it := taskItem(sess, id, seq, authority)
+	it.Kind = domain.KindTaskState
 	return it
 }
 
@@ -95,6 +116,8 @@ func agentScopedWorkingItem(sess, id string, seq uint64, authority domain.Author
 	it := agentScopedItem(sess, id, seq, agentID)
 	it.Kind = domain.KindTaskState
 	it.Authority = authority
+	it.Section = domain.SectionWorking
+	it.DirectiveID = "wd-" + id
 	return it
 }
 
@@ -151,7 +174,8 @@ func TestReplaceDirective_T02(t *testing.T) {
 	}
 
 	err = s.View(ctx, sess, func(tx store.ReadTx) error {
-		cur, err := tx.CurrentDirective(taskID, dirID)
+		boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: taskID}
+		cur, err := tx.CurrentDirective(taskID, dirID, boundary)
 		if err != nil {
 			return err
 		}
@@ -173,6 +197,222 @@ func TestReplaceDirective_T02(t *testing.T) {
 	if err != nil {
 		t.Fatalf("view: %v", err)
 	}
+}
+
+// TestReplaceDirective_MismatchedNewItem covers ErrDirectiveMismatch
+// (TEST-1.1): a new item whose TaskID or DirectiveID disagrees with the
+// (taskID, directiveID) it's being filed under is rejected, whether or not
+// a current version already exists.
+func TestReplaceDirective_MismatchedNewItem(t *testing.T) {
+	const sess, taskID, dirID = "sess-mismatch", "task", "dep-version"
+	actor := principal(sess, domain.AuthorityUser)
+
+	t.Run("WrongDirectiveID", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			it := storetest.NewDirective(sess, "wrong-dir", "some-other-directive", tx.NextSeq(), "text")
+			mustInsert(t, tx, it)
+			_, err := ReplaceDirective(tx, actor, taskID, dirID, it.ID, "evt")
+			return err
+		})
+		if !errors.Is(err, ErrDirectiveMismatch) {
+			t.Fatalf("err = %v, want ErrDirectiveMismatch", err)
+		}
+	})
+
+	t.Run("WrongTask", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			// SESSION-scoped (no task boundary constraint) so the actor can
+			// still see it; only its ambient TaskID disagrees with the task
+			// this directive is being filed under, so the call reaches the
+			// identity guard rather than failing on access first.
+			it := storetest.NewItem(sess, "wrong-task", tx.NextSeq(), "text")
+			it.DirectiveID = dirID
+			it.TaskID = "some-other-task"
+			mustInsert(t, tx, it)
+			_, err := ReplaceDirective(tx, actor, taskID, dirID, it.ID, "evt")
+			return err
+		})
+		if !errors.Is(err, ErrDirectiveMismatch) {
+			t.Fatalf("err = %v, want ErrDirectiveMismatch", err)
+		}
+	})
+}
+
+// TestReplaceDirective_InaccessibleNewItem covers the actor-cannot-see-its-
+// own-new-item branch (TEST-1.1): access is checked before the identity
+// guard, so an inaccessible new item fails with ErrNotFound.
+func TestReplaceDirective_InaccessibleNewItem(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess, taskID, dirID = "sess-inaccessible-new", "task", "dep-version"
+
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		it := agentScopedItem(sess, "owned-by-agent-b", tx.NextSeq(), "agent-b")
+		it.DirectiveID = dirID
+		mustInsert(t, tx, it)
+		actor := principalWithAgent(sess, domain.AuthorityUser, "agent-a")
+		_, err := ReplaceDirective(tx, actor, taskID, dirID, it.ID, "evt")
+		return err
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestSupersedeSnapshot_TaskMismatch covers ErrSnapshotTaskMismatch
+// (TEST-1.1): a new item from a different task than the snapshot's taskID
+// is rejected, and nothing is written.
+func TestSupersedeSnapshot_TaskMismatch(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess, taskID = "sess-snapshot-mismatch", "task"
+	actor := principal(sess, domain.AuthorityUser)
+
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		// SESSION-scoped (no task boundary constraint) so the actor can
+		// still see it; only its ambient TaskID disagrees with the
+		// snapshot's taskID, so the call reaches the task guard rather than
+		// failing on access first.
+		wrongTask := storetest.NewItem(sess, "wrong-task-item", tx.NextSeq(), "text")
+		wrongTask.Kind = domain.KindTaskState
+		wrongTask.Section = domain.SectionWorking
+		wrongTask.DirectiveID = "wd-wrong-task-item"
+		wrongTask.TaskID = "some-other-task"
+		mustInsert(t, tx, wrongTask)
+		_, err := SupersedeSnapshot(tx, actor, []string{wrongTask.ID}, taskID, "evt")
+		return err
+	})
+	if !errors.Is(err, ErrSnapshotTaskMismatch) {
+		t.Fatalf("err = %v, want ErrSnapshotTaskMismatch", err)
+	}
+}
+
+// TestSupersede_MissingAndInaccessibleErrorsAreIndistinguishable is AUTH-1.3:
+// a genuinely missing item and one that exists but is inaccessible must
+// fail with the identical bare domain.ErrNotFound, not merely
+// errors.Is-equivalent errors that a caller could otherwise tell apart by
+// their text (a store's "item <id>: not found" would reveal the ID exists
+// when only the other case's item is truly missing).
+func TestSupersede_MissingAndInaccessibleErrorsAreIndistinguishable(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess = "sess-auth13"
+	actor := principalWithAgent(sess, domain.AuthorityUser, "agent-a")
+
+	var newID, hiddenID string
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		newItem := taskItem(sess, "new", tx.NextSeq(), domain.AuthorityUser)
+		hidden := agentScopedItem(sess, "hidden", tx.NextSeq(), "agent-b")
+		newID, hiddenID = newItem.ID, hidden.ID
+		mustInsert(t, tx, newItem, hidden)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	var missingErr, inaccessibleErr error
+	err = s.Update(ctx, sess, func(tx store.Tx) error {
+		_, missingErr = Supersede(tx, actor, newID, "does-not-exist-at-all", "evt", "")
+		_, inaccessibleErr = Supersede(tx, actor, newID, hiddenID, "evt", "")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if !errors.Is(missingErr, domain.ErrNotFound) {
+		t.Fatalf("missing item error = %v, want ErrNotFound", missingErr)
+	}
+	if !errors.Is(inaccessibleErr, domain.ErrNotFound) {
+		t.Fatalf("inaccessible item error = %v, want ErrNotFound", inaccessibleErr)
+	}
+	if missingErr.Error() != inaccessibleErr.Error() {
+		t.Errorf("error text differs: missing=%q inaccessible=%q; a caller could tell the cases apart",
+			missingErr.Error(), inaccessibleErr.Error())
+	}
+	if missingErr.Error() != domain.ErrNotFound.Error() {
+		t.Errorf("error text = %q, want the bare sentinel %q (must not name the ID)", missingErr.Error(), domain.ErrNotFound.Error())
+	}
+}
+
+// TestReplaceDirective_FirstVersionAuthorization is AUTH-1.5:
+// domain.AuthorizeSupersession never runs for a directive's first version
+// (there is nothing to compare against), so ReplaceDirective must apply the
+// same actor rules itself before letting an untrusted actor set the
+// current-directive pointer.
+func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
+	const sess, taskID, dirID = "sess-auth15", "task", "dep-version"
+
+	t.Run("ToolActorRejected", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			it := storetest.NewDirective(sess, "d1", dirID, tx.NextSeq(), "text")
+			it.Authority = domain.AuthorityTool
+			mustInsert(t, tx, it)
+			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityTool), taskID, dirID, it.ID, "evt")
+			return err
+		})
+		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Fatalf("err = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+	})
+
+	t.Run("AgentRejectedForNonKeyedItem", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			// AGENT authority but not a keyed "agent.<key>" directive ID.
+			it := storetest.NewDirective(sess, "d2", dirID, tx.NextSeq(), "text")
+			it.Authority = domain.AuthorityAgent
+			mustInsert(t, tx, it)
+			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityAgent), taskID, dirID, it.ID, "evt")
+			return err
+		})
+		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Fatalf("err = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+	})
+
+	t.Run("AgentAllowedForItsOwnKeyedItem", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		keyedDirID := domain.AgentKeyID("status")
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			it := agentDirective(sess, "d3", keyedDirID, tx.NextSeq())
+			mustInsert(t, tx, it)
+			prev, err := ReplaceDirective(tx, principal(sess, domain.AuthorityAgent), taskID, keyedDirID, it.ID, "evt")
+			if err != nil {
+				return err
+			}
+			if prev != "" {
+				t.Errorf("prev = %q, want empty", prev)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("UserActorInsufficientAuthorityRejected", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			it := storetest.NewDirective(sess, "d4", dirID, tx.NextSeq(), "text")
+			it.Authority = domain.AuthoritySystem // outranks the USER actor below
+			mustInsert(t, tx, it)
+			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityUser), taskID, dirID, it.ID, "evt")
+			return err
+		})
+		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Fatalf("err = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+	})
 }
 
 // -- authorization rules (FR-REL-006) -------------------------------------
@@ -393,7 +633,8 @@ func TestReplaceDirective_KeyedAgentWriteChain_T17(t *testing.T) {
 	}
 
 	err = s.View(ctx, sess, func(tx store.ReadTx) error {
-		cur, err := tx.CurrentDirective(taskID, dirID)
+		boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: taskID}
+		cur, err := tx.CurrentDirective(taskID, dirID, boundary)
 		if err != nil || cur != v2 {
 			t.Errorf("CurrentDirective = %q, %v; want %q, nil", cur, err, v2)
 		}
@@ -516,6 +757,57 @@ func TestSupersedeSnapshot_MultipleOldItems(t *testing.T) {
 		}
 		if len(chain) != 3 || chain[0] != "m-w2" {
 			t.Errorf("SupersessionChain(m-w1a) = %v, want newest-first [m-w2 <m-w1a,m-w1b in some order>]", chain)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+}
+
+// TestSupersedeSnapshot_ConversationKindAndIndependentTaskState is the
+// SPEC-1.1 regression: a Working section may hold an item of kind
+// conversation (FR-DIR-003), and a plain task_state item that merely shares
+// the new item's authority and boundary, but was never part of a Working
+// section, must not be swept up. Selection must key off Section==WORKING,
+// not Kind==task_state.
+func TestSupersedeSnapshot_ConversationKindAndIndependentTaskState(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess, taskID = "sess-dir007-spec11", "task"
+	actor := principal(sess, domain.AuthorityUser)
+
+	var oldConv, independent, newConv domain.ContextItem
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		oldConv = workingConversationItem(sess, "old-conv", tx.NextSeq(), domain.AuthorityUser)
+		independent = independentTaskStateItem(sess, "independent", tx.NextSeq(), domain.AuthorityUser)
+		newConv = workingConversationItem(sess, "new-conv", tx.NextSeq(), domain.AuthorityUser)
+		mustInsert(t, tx, oldConv, independent, newConv)
+
+		rels, err := SupersedeSnapshot(tx, actor, []string{newConv.ID}, taskID, "evt-conv")
+		if err != nil {
+			return err
+		}
+		if len(rels) != 1 || rels[0].ToID != oldConv.ID {
+			t.Errorf("SupersedeSnapshot relationships = %+v, want exactly one edge to %s", rels, oldConv.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot supersession: %v", err)
+	}
+
+	err = s.View(ctx, sess, func(tx store.ReadTx) error {
+		if ok, err := IsCurrent(tx, oldConv.ID); err != nil || ok {
+			t.Errorf("IsCurrent(old conversation Working item) = %v, %v; want false, nil", ok, err)
+		}
+		if ok, err := IsCurrent(tx, newConv.ID); err != nil || !ok {
+			t.Errorf("IsCurrent(new conversation Working item) = %v, %v; want true, nil", ok, err)
+		}
+		// The independent task_state item was never part of a Working
+		// section (Section == SectionNone) and must be left alone.
+		if ok, err := IsCurrent(tx, independent.ID); err != nil || !ok {
+			t.Errorf("IsCurrent(independent task_state) = %v, %v; want true, nil (must not be superseded)", ok, err)
 		}
 		return nil
 	})
@@ -692,6 +984,7 @@ func TestLinkDerived_BoundaryRejection(t *testing.T) {
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser) // TASK-scoped
 		derived := storetest.NewItem(sess, "derived", tx.NextSeq(), "summary")
+		derived.Authority = domain.AuthorityAgent // passes the actor-authority gate (AUTH-1.1); SESSION scope still trips the boundary check
 		derivedID = derived.ID
 		mustInsert(t, tx, src, derived)
 		_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, "evt")

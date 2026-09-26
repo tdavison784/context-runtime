@@ -36,6 +36,51 @@ var (
 	ErrCoverageMismatch = errors.New("graph: coverage item IDs do not match the linked sources")
 )
 
+// loadAccessible loads item id and confirms it is visible to actor (AUTH-
+// 1.3). A missing item and one that exists but is inaccessible are
+// indistinguishable to any caller: both fail with the bare
+// domain.ErrNotFound, never a store error naming the ID, so error text
+// cannot be used to probe for existence. Callers load every endpoint through
+// this helper, one at a time, so an inaccessible first endpoint is reported
+// before a second endpoint is ever loaded (and so never distinguishes "you
+// can't see this" from "the next one doesn't exist either").
+func loadAccessible(tx store.ReadTx, actor domain.Principal, id string) (domain.ContextItem, error) {
+	it, err := tx.Item(id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.ContextItem{}, domain.ErrNotFound
+		}
+		return domain.ContextItem{}, err
+	}
+	if !it.Access.Permits(actor) {
+		return domain.ContextItem{}, domain.ErrNotFound
+	}
+	return it, nil
+}
+
+// authorizeFirstVersionDirective checks FR-DIR-002/FR-AUTH-001 for a
+// directive's first version, where domain.AuthorizeSupersession does not
+// apply because there is no prior version to compare against (AUTH-1.5): the
+// actor must be SYSTEM, HARNESS, or USER with authority at least newItem's,
+// or AGENT filing its own keyed "agent.<key>" AGENT-authority item
+// (FR-TOOL-002), the same actor rules AuthorizeSupersession applies to a
+// replacement.
+func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.ContextItem) error {
+	switch actor.Authority {
+	case domain.AuthoritySystem, domain.AuthorityHarness, domain.AuthorityUser:
+	case domain.AuthorityAgent:
+		if newItem.Authority != domain.AuthorityAgent || !strings.HasPrefix(newItem.DirectiveID, domain.AgentKeyID("")) {
+			return domain.ErrInvalidAuthorityPromotion
+		}
+	default:
+		return domain.ErrInvalidAuthorityPromotion
+	}
+	if !actor.Authority.AtLeast(newItem.Authority) {
+		return domain.ErrInvalidAuthorityPromotion
+	}
+	return nil
+}
+
 // Supersede records that newID supersedes oldID (FR-REL-003, FR-REL-004,
 // FR-REL-006): it loads both items, authorizes the edge with
 // domain.AuthorizeSupersession (an inaccessible or missing endpoint fails
@@ -49,11 +94,11 @@ var (
 // 007); pass "" for an edge created directly from an authorized event, such
 // as a directive replacement.
 func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (domain.Relationship, error) {
-	newItem, err := tx.Item(newID)
+	newItem, err := loadAccessible(tx, actor, newID)
 	if err != nil {
 		return domain.Relationship{}, err
 	}
-	oldItem, err := tx.Item(oldID)
+	oldItem, err := loadAccessible(tx, actor, oldID)
 	if err != nil {
 		return domain.Relationship{}, err
 	}
@@ -102,25 +147,30 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 }
 
 // ReplaceDirective files newItemID as the current version of (taskID,
-// directiveID) (FR-DIR-002): if a current version already exists, it first
-// Supersedes it, then points the directive at newItemID. Both writes commit
-// atomically within the caller's transaction. previousID is "" when
-// newItemID is the directive's first version.
+// directiveID, newItemID's access boundary) (FR-DIR-002, v0.7: the current-
+// directive key includes the access boundary, so two boundaries never share
+// or contend for the same pointer and neither can probe the other's
+// versions, AUTH-1.2): if a current version already exists at that
+// boundary, it first Supersedes it, then points the directive at
+// newItemID. If none exists yet, newItemID must itself be authorized as a
+// first version (authorizeFirstVersionDirective, AUTH-1.5). Both writes
+// commit atomically within the caller's transaction. previousID is "" when
+// newItemID is the directive's first version at that boundary.
 func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string) (string, error) {
-	newItem, err := tx.Item(newItemID)
+	newItem, err := loadAccessible(tx, actor, newItemID)
 	if err != nil {
 		return "", err
-	}
-	if !newItem.Access.Permits(actor) {
-		return "", domain.ErrNotFound
 	}
 	if newItem.TaskID != taskID || newItem.DirectiveID != directiveID {
 		return "", ErrDirectiveMismatch
 	}
 
-	previousID, err := tx.CurrentDirective(taskID, directiveID)
+	previousID, err := tx.CurrentDirective(taskID, directiveID, newItem.Access)
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
+		if err := authorizeFirstVersionDirective(actor, newItem); err != nil {
+			return "", err
+		}
 		previousID = ""
 	case err != nil:
 		return "", err
@@ -136,15 +186,20 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 	return previousID, nil
 }
 
-// SupersedeSnapshot ingests a Working section (FR-DIR-007 v0.6): for each new
-// item in newIDs, it finds every other current task_state item in taskID
-// that shares that new item's authority and access boundary exactly, and
-// Supersedes it. Boundary equality, not mere task membership, decides what a
-// snapshot replaces, so an item scoped more narrowly than the snapshot (for
-// example an AGENT-scoped Working item belonging to a different agent) is
-// left untouched even though it lives in the same task. Items in newIDs are
-// never candidates to supersede each other. It returns every SUPERSEDES
-// relationship created, or nothing if none matched.
+// SupersedeSnapshot ingests a Working section (FR-DIR-007 v0.6, SPEC-1.1):
+// for each new item in newIDs, it finds every other current item in taskID
+// whose DirectiveSection is WORKING (of any kind FR-DIR-003 permits there,
+// such as a conversation summary, not only task_state) and that shares that
+// new item's authority and access boundary exactly, and Supersedes it. Only
+// the Working section is ever a candidate: an item that happens to share
+// authority and boundary but was not written as part of a Working section
+// (Section != WORKING) is independent state and is left alone. Boundary
+// equality, not mere task membership, further narrows candidates, so an
+// item scoped more narrowly than the snapshot (for example an AGENT-scoped
+// Working item belonging to a different agent) is also left untouched even
+// though it lives in the same task. Items in newIDs are never candidates to
+// supersede each other. It returns every SUPERSEDES relationship created, or
+// nothing if none matched.
 func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, taskID, eventID string) ([]domain.Relationship, error) {
 	if len(newIDs) == 0 {
 		return nil, nil
@@ -153,12 +208,9 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	newItems := make([]domain.ContextItem, 0, len(newIDs))
 	newSet := make(map[string]bool, len(newIDs))
 	for _, id := range newIDs {
-		it, err := tx.Item(id)
+		it, err := loadAccessible(tx, actor, id)
 		if err != nil {
 			return nil, err
-		}
-		if !it.Access.Permits(actor) {
-			return nil, domain.ErrNotFound
 		}
 		if it.TaskID != taskID {
 			return nil, ErrSnapshotTaskMismatch
@@ -167,14 +219,14 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 		newSet[id] = true
 	}
 
-	candidates, err := tx.Items(store.ItemFilter{TaskID: taskID, Kinds: []domain.Kind{domain.KindTaskState}})
+	candidates, err := tx.Items(store.ItemFilter{TaskID: taskID})
 	if err != nil {
 		return nil, err
 	}
 
 	var rels []domain.Relationship
 	for _, cand := range candidates {
-		if newSet[cand.ID] {
+		if newSet[cand.ID] || cand.Section != domain.SectionWorking {
 			continue
 		}
 		cur, err := IsCurrent(tx, cand.ID)
@@ -285,26 +337,32 @@ func CheckDerivedBoundary(derived domain.AccessBoundary, sources []domain.Contex
 // LinkDerived populates it with sourceIDs, sorted and deduplicated; if the
 // caller already set ItemIDs, they must name exactly the same set of sources
 // or the call fails with ErrCoverageMismatch and nothing is written.
+//
+// actor must be able to hold lifecycle authority (SYSTEM, HARNESS, or USER)
+// or be AGENT, and actor's authority must be at least derived's (AUTH-1.1):
+// otherwise a low-authority actor could attach DERIVED_FROM edges, and the
+// coverage that comes with them, to an item it does not own, rewriting that
+// item's provenance and, under ADR 6's eligibility recheck, later forcing it
+// out of context. TOOL and RETRIEVED_CONTENT actors are always rejected,
+// mirroring AuthorizeSupersession.
 func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) ([]domain.Relationship, error) {
 	if err := actor.Validate(); err != nil {
 		return nil, err
 	}
-	derived, err := tx.Item(derivedID)
+	derived, err := loadAccessible(tx, actor, derivedID)
 	if err != nil {
 		return nil, err
 	}
-	if !derived.Access.Permits(actor) {
-		return nil, domain.ErrNotFound
+	if !(actor.Authority.CanHoldLifecycleAuthority() || actor.Authority == domain.AuthorityAgent) ||
+		!actor.Authority.AtLeast(derived.Authority) {
+		return nil, domain.ErrInvalidAuthorityPromotion
 	}
 
 	sources := make([]domain.ContextItem, 0, len(sourceIDs))
 	for _, id := range sourceIDs {
-		src, err := tx.Item(id)
+		src, err := loadAccessible(tx, actor, id)
 		if err != nil {
 			return nil, err
-		}
-		if !src.Access.Permits(actor) {
-			return nil, domain.ErrNotFound
 		}
 		sources = append(sources, src)
 	}
@@ -389,12 +447,9 @@ func Provenance(tx store.ReadTx, principal domain.Principal, itemID string) (Pro
 	if err := principal.Validate(); err != nil {
 		return ProvenanceGraph{}, err
 	}
-	root, err := tx.Item(itemID)
+	root, err := loadAccessible(tx, principal, itemID)
 	if err != nil {
 		return ProvenanceGraph{}, err
-	}
-	if !root.Access.Permits(principal) {
-		return ProvenanceGraph{}, domain.ErrNotFound
 	}
 
 	g := ProvenanceGraph{Root: itemID}
