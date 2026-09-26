@@ -20,13 +20,19 @@ func (l IngestLink) Validate() error {
 // of the caller's payload fingerprint, so a retry after an upgrade still
 // matches and returns the original receipt. Limits are the effective values.
 type ExecutionVersions struct {
-	Parser string
-	Policy string
-	Limits Limits
+	Parser   string
+	Policy   string
+	Limits   Limits
+	Semantic *Phase3Policy
 }
 
 // Validate checks that every version is recorded and limits are effective.
 func (v ExecutionVersions) Validate() error {
+	if v.Semantic != nil {
+		if err := v.Semantic.Validate(); err != nil {
+			return err
+		}
+	}
 	if v.Parser == "" || v.Policy == "" {
 		return invalid("execution versions: parser and policy versions are required")
 	}
@@ -41,19 +47,23 @@ func (v ExecutionVersions) Validate() error {
 
 // EventEnvelopeSchemaVersion versions the persisted request envelope.
 const EventEnvelopeSchemaVersion = "event-envelope/v1"
+const EventEnvelopeSchemaV2 = "event-envelope/v2"
 
 // EventEnvelope is the replayable immutable request (D14): the complete
 // authenticated event as accepted, with image/document bytes replaced by
 // their verified blob references (the bytes live in session blobs). Replay
 // reads the envelope; it never dereferences locators.
 type EventEnvelope struct {
-	SessionID     string
-	OccurrenceID  string
-	EventID       string
-	Principal     Principal
-	Event         Event
-	PayloadHash   string
-	SchemaVersion string
+	RequestHashVersion string
+	SemanticPolicy     *Phase3Policy
+	Limits             Limits
+	SessionID          string
+	OccurrenceID       string
+	EventID            string
+	Principal          Principal
+	Event              Event
+	PayloadHash        string
+	SchemaVersion      string
 }
 
 // NewEventEnvelope snapshots e for principal p under occurrenceID. It deep
@@ -78,7 +88,7 @@ func NewEventEnvelope(p Principal, occurrenceID string, e Event) (EventEnvelope,
 
 // Validate recomputes the payload hash and checks the occurrence key.
 func (v EventEnvelope) Validate() error {
-	if v.SchemaVersion != EventEnvelopeSchemaVersion || v.SessionID == "" || v.Principal.SessionID != v.SessionID || v.Event.EventID != v.EventID {
+	if (v.SchemaVersion != EventEnvelopeSchemaVersion && v.SchemaVersion != EventEnvelopeSchemaV2) || v.SessionID == "" || v.Principal.SessionID != v.SessionID || v.Event.EventID != v.EventID {
 		return invalid("event envelope: schema, session, principal, or event ID mismatch")
 	}
 	if !OccurrenceMatchesEvent(v.SessionID, v.OccurrenceID, v.EventID) {
@@ -91,7 +101,19 @@ func (v EventEnvelope) Validate() error {
 			}
 		}
 	}
-	hash, err := v.Event.PayloadHash(v.Principal)
+	var hash string
+	var err error
+	if v.SchemaVersion == EventEnvelopeSchemaVersion {
+		if v.RequestHashVersion != "" && v.RequestHashVersion != RequestHashV2 || v.SemanticPolicy != nil || v.Limits != (Limits{}) {
+			return invalid("legacy envelope: unexpected semantic metadata")
+		}
+		hash, err = v.Event.PayloadHash(v.Principal)
+	} else {
+		if v.RequestHashVersion != RequestHashV3 || v.SemanticPolicy == nil {
+			return invalid("semantic envelope: recorded hash schema and policy required")
+		}
+		hash, err = v.Event.PayloadHashFor(v.RequestHashVersion, v.Principal, v.Limits, *v.SemanticPolicy)
+	}
 	if err != nil {
 		return err
 	}
@@ -104,11 +126,16 @@ func (v EventEnvelope) Validate() error {
 // Clone returns a deep copy.
 func (v EventEnvelope) Clone() EventEnvelope {
 	v.Event = v.Event.Clone()
+	if v.SemanticPolicy != nil {
+		p := *v.SemanticPolicy
+		v.SemanticPolicy = &p
+	}
 	return v
 }
 
 // IngestReceiptSchemaVersion versions the persisted receipt.
 const IngestReceiptSchemaVersion = "ingest-receipt/v1"
+const IngestReceiptSchemaV2 = "ingest-receipt/v2"
 
 // IngestReceipt is the immutable original result of one accepted event
 // (D14), persisted atomically with its effects. An idempotent retry returns
@@ -117,21 +144,23 @@ const IngestReceiptSchemaVersion = "ingest-receipt/v1"
 // changes. It is internal (R3): the root package does not alias it.
 // OpenedTurn/TurnID are set only when the event opened a turn (D18).
 type IngestReceipt struct {
-	SessionID     string
-	OccurrenceID  string
-	EventID       string
-	Principal     Principal
-	PayloadHash   string
-	Seq           uint64
-	OpenedTurn    uint64
-	TurnID        string
-	Items         []ContextItem // creation order
-	Diagnostics   []DiagnosticRecord
-	Lifecycle     []LifecycleCommandRecord
-	Duplicates    []IngestLink
-	Replacements  []IngestLink
-	Versions      ExecutionVersions
-	SchemaVersion string
+	RequestHashVersion string
+	MutationReceiptIDs []string
+	SessionID          string
+	OccurrenceID       string
+	EventID            string
+	Principal          Principal
+	PayloadHash        string
+	Seq                uint64
+	OpenedTurn         uint64
+	TurnID             string
+	Items              []ContextItem // creation order
+	Diagnostics        []DiagnosticRecord
+	Lifecycle          []LifecycleCommandRecord
+	Duplicates         []IngestLink
+	Replacements       []IngestLink
+	Versions           ExecutionVersions
+	SchemaVersion      string
 }
 
 // ItemIDs returns the created item IDs in creation order.
@@ -145,6 +174,11 @@ func (r IngestReceipt) ItemIDs() []string {
 
 // Clone returns a deep copy.
 func (r IngestReceipt) Clone() IngestReceipt {
+	r.MutationReceiptIDs = slices.Clone(r.MutationReceiptIDs)
+	if r.Versions.Semantic != nil {
+		p := *r.Versions.Semantic
+		r.Versions.Semantic = &p
+	}
 	items := make([]ContextItem, len(r.Items))
 	for i, it := range r.Items {
 		items[i] = it.Clone()
@@ -161,7 +195,14 @@ func (r IngestReceipt) Clone() IngestReceipt {
 // occurrence, diagnostics are in stable (span, index) order, commands are in
 // ordinal order, and links name items the event created.
 func (r IngestReceipt) Validate() error {
-	if r.SchemaVersion != IngestReceiptSchemaVersion || r.SessionID == "" || r.Seq == 0 || !ValidHash(r.PayloadHash) {
+	if r.SchemaVersion == IngestReceiptSchemaVersion {
+		if r.RequestHashVersion != "" && r.RequestHashVersion != RequestHashV2 || r.Versions.Semantic != nil || r.MutationReceiptIDs != nil {
+			return invalid("legacy receipt: unexpected semantic metadata")
+		}
+	} else if r.RequestHashVersion != RequestHashV3 || r.Versions.Semantic == nil {
+		return invalid("semantic receipt: recorded hash schema and policy required")
+	}
+	if (r.SchemaVersion != IngestReceiptSchemaVersion && r.SchemaVersion != IngestReceiptSchemaV2) || r.SessionID == "" || r.Seq == 0 || !ValidHash(r.PayloadHash) {
 		return invalid("ingest receipt: schema, session, sequence, and payload hash are required")
 	}
 	if !OccurrenceMatchesEvent(r.SessionID, r.OccurrenceID, r.EventID) {

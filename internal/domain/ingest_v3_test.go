@@ -53,3 +53,26 @@ func TestV3SpanCoverageAndSourceAuthority(t *testing.T) {
 		t.Fatal("missing span accepted")
 	}
 }
+
+func TestV3EnvelopeVerifiesRecordedSchemaAndClonesPolicy(t *testing.T) {
+	p := Principal{SessionID: "s", Authority: AuthorityHarness}
+	policy := semanticPolicy()
+	e := Event{EventID: "event", Kind: EventHarness, Spans: []Span{{Authority: AuthorityHarness, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}, Parts: []InputPart{{Type: PartText, Text: "hello"}}}}}
+	h, err := e.PayloadHashFor(RequestHashV3, p, Limits{}, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := EventEnvelope{SessionID: "s", OccurrenceID: CallerOccurrenceID("s", "event"), EventID: "event", Principal: p, Event: e, PayloadHash: h, SchemaVersion: EventEnvelopeSchemaV2, RequestHashVersion: RequestHashV3, SemanticPolicy: &policy}
+	if err := env.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	copy := env.Clone()
+	copy.SemanticPolicy.MaxOperations = 1
+	if env.SemanticPolicy.MaxOperations == 1 {
+		t.Fatal("envelope aliases recorded policy")
+	}
+	env.SchemaVersion = EventEnvelopeSchemaVersion
+	if env.Validate() == nil {
+		t.Fatal("v3 envelope decoded as legacy")
+	}
+}
