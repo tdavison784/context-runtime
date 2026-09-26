@@ -192,6 +192,12 @@ type ReadTx interface {
 type Tx interface {
 	ReadTx
 
+	// Allocated reports whether seq was allocated by NextSeq in this
+	// transaction. Callers use it to confine an operation to records the
+	// transaction itself created (for example, provenance may be linked
+	// only when the derived item was inserted in the same transaction).
+	Allocated(seq uint64) bool
+
 	// NextSeq allocates the next sequence number. Numbers are dense and
 	// strictly increasing per session; numbers allocated by a rolled-back
 	// transaction are reused.
