@@ -88,6 +88,11 @@ func makeSchemas() map[string]*recordSchema {
 		{"observation_run", domain.ObservationRun{}, "ID", ""},
 		{"observation", domain.ObservationRecord{}, "ID", ""},
 		{"subject_state", subjectStateRow{}, "Key", ""},
+		{"obligation_declaration", obligationDeclarationRow{}, "ObligationID", "Version"},
+		{"proof", domain.ApplicabilityProof{}, "ID", ""},
+		{"proof_dependency", domain.ProofDependency{}, "ID", ""},
+		{"assertion", domain.AssertionRecord{}, "ID", ""},
+		{"transition_detail", domain.TransitionDetail{}, "TransitionID", ""},
 	}
 	out := make(map[string]*recordSchema, len(definitions))
 	for _, d := range definitions {
@@ -226,7 +231,8 @@ var recordTables = []string{"item", "relationship", "event", "obligation", "obli
 	"envelope", "receipt", "receipt_item", "diagnostic", "command", "reference",
 	"owner", "coverage", "coverage_member", "exchange", "exchange_member", "exchange_ack", "admission", "membership",
 	"checkpoint", "mutation_receipt", "tool_receipt", "creation_declaration", "snapshot_declaration", "semantic_change",
-	"resource_binding", "resource_update", "resource_state", "path_state", "workspace_binding", "observation_run", "observation", "subject_state"}
+	"resource_binding", "resource_update", "resource_state", "path_state", "workspace_binding", "observation_run", "observation", "subject_state",
+	"obligation_declaration", "proof", "proof_dependency", "assertion", "transition_detail"}
 
 // typedColumns is the column layout (name -> declared type) the Go record
 // types require of each rec_* table. Migrations are forward-only and never

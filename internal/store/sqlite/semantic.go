@@ -175,6 +175,8 @@ func cursorOf(v reflect.Value) store.Cursor {
 	switch r := v.Interface().(type) {
 	case domain.CallRecord:
 		return store.Cursor{Seq: r.PreparedSeq, ID: r.CallID}
+	case domain.ObligationVersion:
+		return store.Cursor{Seq: r.CreatedSeq, ID: r.ObligationID}
 	}
 	return store.Cursor{Seq: v.FieldByName("Seq").Uint(), ID: v.FieldByName("ID").String()}
 }

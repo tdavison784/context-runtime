@@ -18,55 +18,6 @@ func (semRead) OpenGoalsByTaskOwner(string, store.Page) (store.ResultPage[domain
 	return store.ResultPage[domain.ContextItem]{}, errUnsupported
 }
 
-// Obligation proofs.
-
-func (semRead) ExactObligation(domain.ObligationRef) (domain.ObligationVersion, error) {
-	return domain.ObligationVersion{}, errUnsupported
-}
-func (semRead) ObligationDeclaration(domain.ObligationRef) (domain.ObligationDeclaration, error) {
-	return domain.ObligationDeclaration{}, errUnsupported
-}
-func (semRead) ApplicabilityProof(string) (domain.ApplicabilityProof, error) {
-	return domain.ApplicabilityProof{}, errUnsupported
-}
-func (semRead) Assertion(string) (domain.AssertionRecord, error) {
-	return domain.AssertionRecord{}, errUnsupported
-}
-func (semRead) TransitionDetail(string) (domain.TransitionDetail, error) {
-	return domain.TransitionDetail{}, errUnsupported
-}
-func (semRead) ProofDependencies(string, store.Page) (store.ResultPage[domain.ProofDependency], error) {
-	return store.ResultPage[domain.ProofDependency]{}, errUnsupported
-}
-func (semRead) CurrentBoundObligationsBySubject(string, store.Page) (store.ResultPage[domain.ObligationVersion], error) {
-	return store.ResultPage[domain.ObligationVersion]{}, errUnsupported
-}
-func (semRead) CurrentProofsByDependency(string, string, store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
-	return store.ResultPage[domain.ApplicabilityProof]{}, errUnsupported
-}
-func (semRead) ObligationsByTaskOwner(string, store.Page) (store.ResultPage[domain.ObligationVersion], error) {
-	return store.ResultPage[domain.ObligationVersion]{}, errUnsupported
-}
-func (semRead) TransitionsByVersion(domain.ObligationRef, store.Page) (store.ResultPage[domain.ObligationTransition], error) {
-	return store.ResultPage[domain.ObligationTransition]{}, errUnsupported
-}
-func (semRead) Satisfies(domain.Principal, domain.ObligationRef, bool, store.Page) (store.ResultPage[domain.SatisfiesRelation], error) {
-	return store.ResultPage[domain.SatisfiesRelation]{}, errUnsupported
-}
-func (semTx) InsertObligationDeclaration(domain.ObligationDeclaration) error {
-	return errUnsupported
-}
-func (semTx) InsertApplicabilityProof(domain.ApplicabilityProof, []domain.ProofDependency) error {
-	return errUnsupported
-}
-func (semTx) InsertAssertion(domain.AssertionRecord) error { return errUnsupported }
-func (semTx) AppendSemanticObligationTransition(domain.ObligationTransition, domain.TransitionDetail, uint64) (domain.ObligationVersion, error) {
-	return domain.ObligationVersion{}, errUnsupported
-}
-func (semTx) SetObligationMaterialization(domain.ObligationRef, bool, uint64, domain.LifecycleEvent) (domain.ObligationVersion, error) {
-	return domain.ObligationVersion{}, errUnsupported
-}
-
 // Retrieval.
 
 func (semRead) RetrievalLease(string) (domain.RetrievalLease, error) {
