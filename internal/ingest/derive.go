@@ -339,45 +339,38 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 		Status:           domain.CommandParsedNotExecuted,
 		LifecycleCommand: cmd,
 	}
-	// The record, and its diagnostic, are readable only where both the
-	// command's transcript and any resolved target are (F6, SEC-1.3).
+	// One record per command, readable at the transcript boundary whatever
+	// the outcome; its resolution, and the command's diagnostic, only at the
+	// detail boundary the outcome depends on (F6, SEC-1.3, SEC-2.2,
+	// SEC-3.2). NOT_FOUND narrows to the actor's own boundary, so to anyone
+	// else a missing target reads exactly like one they cannot see.
 	rec.Access = c.transcript.Access
+	detail := c.transcript.Access
 	diag := func(code domain.DiagnosticCode, reason domain.DiagnosticReason) {
-		r.unitDiags = append(r.unitDiags, scopedDiag{domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range}, rec.Access})
+		r.unitDiags = append(r.unitDiags, scopedDiag{domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range}, detail})
 	}
-	narrow := func(target domain.AccessBoundary) error {
-		acc, ok := domain.Intersect(rec.Access.Scope, rec.Access, target)
-		if !ok {
-			return domain.ErrInvalidAuthorityPromotion
-		}
-		rec.Access = acc
-		return nil
-	}
+	actorOwn := domain.AccessBoundary{Scope: detail.Scope, SessionID: c.actor.SessionID, WorkflowID: c.actor.WorkflowID, TaskID: c.actor.TaskID, AgentID: c.actor.AgentID}
 	auth, err := graph.AuthorizeLifecycleCommand(r.tx, r.p, r.p.TaskID, cmd)
 	switch {
 	case err == nil:
-		if err := narrow(auth.TargetAccess); err != nil {
-			return err
-		}
+		detail = r.causeAccess(detail, []domain.AccessBoundary{auth.TargetAccess})
 		rec.Resolution, rec.ResolvedItemID, rec.ResolvedVersion = domain.TargetResolved, auth.ResolvedItemID, auth.TargetVersion
 	case isNotFound(err):
+		detail = r.causeAccess(detail, []domain.AccessBoundary{actorOwn})
 		rec.Resolution = domain.TargetNotFound
 		diag(domain.DiagnosticNotFound, domain.ReasonUnknownTarget)
 	case errors.Is(err, graph.ErrAmbiguousDirective):
-		// Readable only where every version that made it ambiguous is
-		// (SEC-2.2).
-		rec.Access = r.causeAccess(rec.Access, auth.CandidateAccess)
+		detail = r.causeAccess(detail, auth.CandidateAccess)
 		rec.Resolution = domain.TargetAmbiguous
 		diag(domain.ErrAmbiguousDirective, domain.ReasonAmbiguousTarget)
 	case errors.Is(err, graph.ErrLifecycleTargetMismatch):
-		if err := narrow(auth.TargetAccess); err != nil {
-			return err
-		}
+		detail = r.causeAccess(detail, []domain.AccessBoundary{auth.TargetAccess})
 		rec.Resolution, rec.ResolvedItemID, rec.ResolvedVersion = domain.TargetMismatch, auth.ResolvedItemID, auth.TargetVersion
 		diag(domain.DiagnosticNotFound, domain.ReasonTargetMismatch)
 	default:
 		return err
 	}
+	rec.DetailAccess = detail
 	r.commands = append(r.commands, rec)
 	return nil
 }
