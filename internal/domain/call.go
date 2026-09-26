@@ -336,11 +336,9 @@ func (c CallRecord) Validate() error {
 		if c.Outcome != nil || c.Reason == "" {
 			return invalid("call %s: abandoned call requires a reason and no outcome", c.CallID)
 		}
-	default:
-		if c.Outcome != nil {
-			return invalid("call %s: non-terminal call cannot carry a final outcome", c.CallID)
-		}
 	}
+	// Non-terminal states cannot carry an outcome: an outcome's state is
+	// COMPLETED or FAILED, so the state-agreement check above rejects it.
 	if c.State.Terminal() != (c.FinishedSeq != 0) {
 		return invalid("call %s: finished sequence disagrees with state", c.CallID)
 	}
