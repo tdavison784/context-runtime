@@ -66,3 +66,28 @@ func TestFindActiveLeaseBoundsEveryPage(t *testing.T) {
 		t.Fatalf("unbounded lease scan = %v", err)
 	}
 }
+
+func TestFindActiveLeaseNeverTransfersAcrossOccurrenceOrAuthority(t *testing.T) {
+	p := storetest.NewPrincipal("s", domain.AuthorityAgent)
+	convID := domain.ConversationIDFor("task", "agent")
+	hash := domain.HashBytes([]byte("same content"))
+	task := domain.TaskState{SessionID: "s", TaskID: "task", WorkflowID: "wf", Status: domain.TaskActive, Turn: 1, TurnID: "turn-1", Version: 1}
+	conv := domain.Conversation{SessionID: "s", ConversationID: convID, TaskID: "task", AgentID: "agent", Version: 1, Revision: 1, LogicalCalls: 1}
+	old := domain.ItemContentRef{ItemID: "v1", ContentHash: hash}
+	lease := domain.RetrievalLease{SemanticMeta: domain.SemanticMeta{ID: "old", SessionID: "s", Seq: 1, SchemaVersion: domain.SemanticSchemaV1}, Holder: p, ConversationID: convID, TurnID: "turn-1", Source: old, IssuedCompletedInferenceIndex: 1, CallAllowance: 2, PolicyVersion: "policy"}
+	r := leaseReader{leases: []domain.RetrievalLease{lease}}
+	// A superseding occurrence with identical bytes is a distinct source.
+	if _, ok, err := findActiveLease(r, p, domain.ItemContentRef{ItemID: "v2", ContentHash: hash}, task, conv, 2, 4, 4); err != nil || ok {
+		t.Fatalf("lease transferred to superseding occurrence: %v, %v", ok, err)
+	}
+	// A mismatched holder row from the index is corruption, not a miss.
+	harness := p
+	harness.Authority = domain.AuthorityHarness
+	if _, _, err := findActiveLease(r, harness, old, task, conv, 2, 4, 4); !errors.Is(err, domain.ErrIntegrity) {
+		t.Fatalf("other-authority lease = %v", err)
+	}
+	// The exact occurrence and content still coalesce without extension.
+	if got, ok, err := findActiveLease(r, p, old, task, conv, 2, 4, 4); err != nil || !ok || got.ID != "old" || got.CallAllowance != 2 {
+		t.Fatalf("exact lease = %+v, %v, %v", got, ok, err)
+	}
+}
