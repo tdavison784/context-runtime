@@ -63,6 +63,7 @@ var suite = []testCase{
 	{"ConcurrentUpdatesDense", testConcurrentUpdatesDense},
 	{"SessionIsolation", testSessionIsolation},
 	{"ForeignSessionRecords", testForeignSessionRecords},
+	{"DeepCopies", testDeepCopies},
 
 	// Semantic state.
 	{"ItemRichRoundTrip", testItemRichRoundTrip},
@@ -75,6 +76,16 @@ var suite = []testCase{
 	{"Events", testEvents},
 	{"Blobs", testBlobs},
 	{"DirectiveReplacement", testDirectiveReplacement},
+
+	// Obligations, grants, tasks, audit, and the call ledger.
+	{"ObligationVersions", testObligationVersions},
+	{"ObligationTransitions", testObligationTransitions},
+	{"Grants", testGrants},
+	{"Tasks", testTasks},
+	{"LifecycleEvents", testLifecycleEvents},
+	{"Conversations", testConversations},
+	{"Calls", testCalls},
+	{"CallAttempts", testCallAttempts},
 }
 
 var ctx = context.Background()
