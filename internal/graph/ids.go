@@ -40,6 +40,12 @@ func relationshipID(sessionID string, relType domain.RelationshipType, fromID, t
 	return deriveID("rel", relationshipIDTag, sessionID, string(relType), fromID, toID, eventID)
 }
 
+// derivedRelationshipID derives the ID of the DERIVED_FROM edge from derivedID
+// to sourceID written for one coverage purpose by eventID.
+func derivedRelationshipID(sessionID, derivedID, sourceID, eventID string, purpose domain.CoveragePurpose) string {
+	return deriveID("rel", "context-runtime/graph/derived-relationship-id/v2", sessionID, derivedID, sourceID, eventID, string(purpose))
+}
+
 // lifecycleEventID derives the ID of the audit record for one action on
 // targetID raised by eventID, whose other party is counterpartID (for a
 // retirement, the successor).
