@@ -54,7 +54,7 @@ func resolveFor(t *testing.T, s *Service, st store.Store, source domain.ContextI
 
 func TestBindWorkspace(t *testing.T) {
 	s := newTestService(t)
-	st := newTestStore()
+	st := newTestStore(t)
 	harness := actorOf(domain.AuthorityHarness)
 	seedTask(t, st, "task")
 	seedResource(t, st, "repo1", harness)
@@ -123,7 +123,7 @@ func TestBindWorkspace(t *testing.T) {
 
 func TestResolveWorkspace(t *testing.T) {
 	s := newTestService(t)
-	st := newTestStore()
+	st := newTestStore(t)
 	harness := actorOf(domain.AuthorityHarness)
 	system := actorOf(domain.AuthoritySystem)
 	seedTask(t, st, "task")

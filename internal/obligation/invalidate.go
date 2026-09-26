@@ -146,7 +146,7 @@ func markSubject(sem store.SemanticTx, seq uint64, st domain.SubjectState, c cha
 		return nil
 	}
 	expected := st.Revision
-	st.Applicability, st.Seq = next, seq
+	st.Applicability, st.Seq, st.Revision = next, seq, expected+1
 	_, err = sem.PutSubjectState(st, expected, cause)
 	return err
 }
@@ -200,7 +200,7 @@ func (s *Service) invalidateProof(tx store.Tx, sem store.SemanticTx, actor domai
 	} else {
 		d.ObservationID = inv.causeRecord
 	}
-	if _, err := sem.AppendSemanticObligationTransition(t, d, o.Revision); err != nil {
+	if _, err := appendTransition(tx, sem, o, t, d, o.Revision); err != nil {
 		tx.Poison(err)
 		return err
 	}

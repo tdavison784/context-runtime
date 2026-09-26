@@ -64,7 +64,7 @@ type probeIntent struct {
 
 func TestReceiptReplayAndConflict(t *testing.T) {
 	s := newTestService(t)
-	st := newTestStore()
+	st := newTestStore(t)
 	ctx := context.Background()
 	actor := principal(domain.AuthorityHarness, "t1")
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: "REEVALUATION", IDs: []string{"x1"}}}
@@ -120,7 +120,7 @@ func TestReceiptReplayAndConflict(t *testing.T) {
 }
 
 func TestBeginRejectsForeignSessionAndUnallocatedSeq(t *testing.T) {
-	st := newTestStore()
+	st := newTestStore(t)
 	err := st.Update(context.Background(), testSession, func(tx store.Tx) error {
 		if _, err := begin(tx, domain.Principal{SessionID: "s2", Authority: domain.AuthorityHarness}, tx.NextSeq()); !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("foreign session: %v", err)

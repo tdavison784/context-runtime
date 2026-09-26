@@ -8,6 +8,67 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
+// resultResourceBinding is the registration result kind (pending W1 request).
+const resultResourceBinding = "RESOURCE_BINDING"
+
+// RegisterResourceTx registers a resource and binds its reporter (P3-19,
+// Q-7): the reporter is exactly the registering SYSTEM or HARNESS principal,
+// and only it may later report. Registration establishes no baseline;
+// currentness starts with the reporter's first resynchronization. Reporting
+// authority grants no read access to obligations or proofs.
+func (s *Service) RegisterResourceTx(tx store.Tx, actor domain.Principal, in domain.RegisterResourceIntent, seq uint64) (domain.MutationResult, error) {
+	if err := in.Validate(); err != nil {
+		return domain.MutationResult{}, err
+	}
+	sem, err := begin(tx, actor, seq)
+	if err != nil {
+		return domain.MutationResult{}, err
+	}
+	req, err := s.newRequest(domain.MutationResourceRegister, in.RequestID, "RegisterResource", in)
+	if err != nil {
+		return domain.MutationResult{}, err
+	}
+	if res, ok, err := replay(sem, actor, req); ok || err != nil {
+		return res, err
+	}
+	b, err := s.registerResource(tx, sem, actor, in, seq)
+	if err != nil {
+		return domain.MutationResult{}, err
+	}
+	result := domain.MutationResult{Records: &domain.RecordResult{Kind: resultResourceBinding, IDs: []string{b.ID}}}
+	if err := s.recordReceipt(sem, actor, req, seq, result); err != nil {
+		tx.Poison(err)
+		return domain.MutationResult{}, err
+	}
+	return result, nil
+}
+
+func (s *Service) registerResource(tx store.Tx, sem store.SemanticTx, actor domain.Principal, in domain.RegisterResourceIntent, seq uint64) (domain.ResourceBinding, error) {
+	if !trustedControl(actor) || in.Reporter != actor {
+		return domain.ResourceBinding{}, domain.ErrInvalidAuthorityPromotion
+	}
+	if !in.Access.Permits(actor) {
+		return domain.ResourceBinding{}, domain.ErrInvalidRecord
+	}
+	if _, err := sem.ResourceBinding(in.ResourceID); err == nil {
+		return domain.ResourceBinding{}, domain.ErrInvalidTransition
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return domain.ResourceBinding{}, err
+	}
+	b := domain.ResourceBinding{
+		SemanticMeta: domain.SemanticMeta{ID: recordID("rb_", "resource-binding", in.ResourceID), SessionID: actor.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
+		ResourceID:   in.ResourceID,
+		Owner:        actor,
+		Reporter:     actor,
+		Access:       in.Access,
+	}
+	if err := sem.InsertResourceBinding(b); err != nil {
+		tx.Poison(err)
+		return domain.ResourceBinding{}, err
+	}
+	return b, nil
+}
+
 // ReportResourceChangeTx records one authenticated, ordered resource report
 // (P3-19, C-9) and atomically invalidates every current proof it may affect
 // (P3-23). Only the resource's registered reporter reports, exactly as
@@ -100,6 +161,7 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 		AuthoritativeRevision: u.ResultingAuthoritativeRevision,
 		WorkspaceFingerprint:  u.WorkspaceFingerprint,
 		Freshness:             u.Freshness,
+		Revision:              state.Revision + 1, // CAS result; the store assigns it
 	}
 	if _, err := sem.PutResourceState(next, state.Revision); err != nil {
 		return domain.MutationResult{}, w.fail(err)

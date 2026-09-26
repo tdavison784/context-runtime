@@ -66,6 +66,12 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 	}
 	var claims []domain.ResourceClaim
 	if in.AssertionMode == domain.AssertionResourceBound {
+		// A resource-bound proof names the version's bound target; an
+		// UNBOUND obligation can be attested but has nothing to bind a
+		// resource proof to.
+		if o.TargetSpec == nil {
+			return domain.MutationResult{}, domain.ErrUnknownApplicability
+		}
 		if claims, err = s.checkResourceClaims(sem, o, in.Resources); err != nil {
 			return domain.MutationResult{}, err
 		}
@@ -124,7 +130,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 		d.AssertionID = assertion.ID
 	}
 	w.start()
-	after, err := sem.AppendSemanticObligationTransition(t, d, in.ExpectedRevision)
+	after, err := appendTransition(tx, sem, o, t, d, in.ExpectedRevision)
 	if err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
@@ -229,19 +235,19 @@ func (s *Service) checkResourceClaims(r store.SemanticReader, o domain.Obligatio
 }
 
 // assertionProof builds the resource-bound proof of an authorized assertion
-// and its dependency records. A bound obligation's proof names its target
-// hash; an unbound one names its exact version key instead.
+// and its dependency records, naming the version's bound target hash.
 func (s *Service) assertionProof(o domain.ObligationVersion, t domain.ObligationTransition, assertionID string, evidence []string, claims []domain.ResourceClaim) (domain.ApplicabilityProof, []domain.ProofDependency, error) {
 	ref := domain.ObligationRef{SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version}
 	proofID, err := domain.ApplicabilityProofID(ref, t.ID)
 	if err != nil {
 		return domain.ApplicabilityProof{}, nil, err
 	}
-	targetHash := ref.Target().AuthorizationKey
-	if o.TargetSpec != nil {
-		if targetHash, err = o.TargetSpec.CanonicalHash(); err != nil {
-			return domain.ApplicabilityProof{}, nil, err
-		}
+	if o.TargetSpec == nil {
+		return domain.ApplicabilityProof{}, nil, domain.ErrUnknownApplicability
+	}
+	targetHash, err := o.TargetSpec.CanonicalHash()
+	if err != nil {
+		return domain.ApplicabilityProof{}, nil, err
 	}
 	deps := dependencies(proofID, t.Seq, o.Access, claims)
 	p := domain.ApplicabilityProof{

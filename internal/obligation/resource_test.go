@@ -28,6 +28,7 @@ func (s *Service) report(t *testing.T, st store.Store, actor domain.Principal, i
 
 type resourceFixture struct {
 	fixture
+	sysTests domain.ObligationRef // bound SYSTEM obligation
 	reporter domain.Principal
 	rev      uint64 // state CAS revision
 	auth     uint64 // authoritative revision
@@ -35,7 +36,8 @@ type resourceFixture struct {
 }
 
 func newResourceFixture(t *testing.T) *resourceFixture {
-	f := &resourceFixture{fixture: newFixture(t), reporter: sessionReporter()}
+	ef := newEvalFixture(t)
+	f := &resourceFixture{fixture: ef.fixture, sysTests: ef.sysTests, reporter: sessionReporter()}
 	seedResource(t, f.st, "repo2", f.reporter)
 	f.resync(t, 1, hashOf("W1"))
 	return f
@@ -229,24 +231,24 @@ func TestResourceInvalidationScope(t *testing.T) {
 	mustUpdate(t, f.st, func(tx store.Tx) error {
 		return tx.InsertGrant(domain.MutationGrant{
 			ID: "g-a", SessionID: testSession, Action: domain.ActionAssertObligation,
-			Targets: []domain.GrantTarget{domain.ObligationGrantTarget(testSession, f.sys.ObligationID, 1)},
+			Targets: []domain.GrantTarget{domain.ObligationGrantTarget(testSession, f.sysTests.ObligationID, 1)},
 			Issuer:  f.system, Grantee: &f.harness, IssuedSeq: tx.NextSeq(),
 		})
 	})
-	sat := f.assertBound(t, f.sys, f.harness)
+	sat := f.assertBound(t, f.sysTests, f.harness)
 	mustUpdate(t, f.st, func(tx store.Tx) error {
 		ev := domain.LifecycleEvent{ID: "revoke-g-a", SessionID: testSession, Seq: tx.NextSeq(), TargetKind: domain.TargetGrant, TargetID: "g-a", Action: "revoke", Actor: f.system}
 		_, err := tx.RevokeGrant("g-a", ev)
 		return err
 	})
 	f.edit(t, hashOf("W2"))
-	o := f.status(t, f.sys)
+	o := f.status(t, f.sysTests)
 	if o.Status != domain.ObligationUnresolved {
 		t.Fatalf("revoked-grant proof survived: %+v", o)
 	}
 	var trs []domain.ObligationTransition
 	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
-		trs, _ = tx.ObligationTransitions(f.sys.ObligationID)
+		trs, _ = tx.ObligationTransitions(f.sysTests.ObligationID)
 		return nil
 	})
 	if last := trs[len(trs)-1]; last.GrantID != "" || last.OriginAuthorizationRef.GrantID != "g-a" || last.OriginAuthorizationRef.TransitionID != sat.TransitionIDs[0] {
@@ -297,5 +299,81 @@ func TestResourceInvalidationPagingAndLimit(t *testing.T) {
 		if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
 			t.Errorf("proof beyond first page survived: %s %+v", ref.ObligationID, o.Status)
 		}
+	}
+}
+
+func TestRegisterResource(t *testing.T) {
+	f := newFixture(t)
+	session := domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: testSession}
+	reg := func(actor domain.Principal, in domain.RegisterResourceIntent) (domain.ResourceBinding, error) {
+		var b domain.ResourceBinding
+		err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+			sem, err := begin(tx, actor, tx.NextSeq())
+			if err != nil {
+				return err
+			}
+			b, err = f.s.registerResource(tx, sem, actor, in, tx.LastSeq())
+			return err
+		})
+		return b, err
+	}
+	rep := sessionReporter()
+	b, err := reg(rep, domain.RegisterResourceIntent{RequestID: "reg1", ResourceID: "repo3", Reporter: rep, Access: session})
+	if err != nil || b.Reporter != rep || b.Owner != rep {
+		t.Fatalf("register = %+v %v", b, err)
+	}
+	// Registration sets no baseline: the first ordinary report is refused.
+	if _, err := f.s.report(t, f.st, rep, domain.ReportResourceChangeIntent{RequestID: "x", ResourceID: "repo3", ExpectedAuthoritativeRevision: 0, ResultingAuthoritativeRevision: 1, WorkspaceFingerprint: hashOf("W1")}); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("report before baseline: %v", err)
+	}
+	for name, c := range map[string]struct {
+		actor domain.Principal
+		in    domain.RegisterResourceIntent
+		want  error
+	}{
+		"re-registration":        {rep, domain.RegisterResourceIntent{RequestID: "reg2", ResourceID: "repo3", Reporter: rep, Access: session}, domain.ErrInvalidTransition},
+		"designate other":        {f.system, domain.RegisterResourceIntent{RequestID: "reg3", ResourceID: "repo4", Reporter: rep, Access: session}, domain.ErrInvalidAuthorityPromotion},
+		"USER registrar":         {f.userP, domain.RegisterResourceIntent{RequestID: "reg4", ResourceID: "repo5", Reporter: f.userP, Access: session}, domain.ErrInvalidAuthorityPromotion},
+		"boundary excludes self": {rep, domain.RegisterResourceIntent{RequestID: "reg5", ResourceID: "repo6", Reporter: rep, Access: taskBoundary()}, domain.ErrInvalidRecord},
+	} {
+		if _, err := reg(c.actor, c.in); !errors.Is(err, c.want) {
+			t.Errorf("%s: %v, want %v", name, err, c.want)
+		}
+	}
+}
+
+func TestRegisterResourceReceipt(t *testing.T) {
+	if (domain.RecordResult{Kind: resultResourceBinding, IDs: []string{"x"}}).Validate() != nil {
+		t.Skipf("RecordResult kind %s not yet accepted by W1", resultResourceBinding)
+	}
+	f := newFixture(t)
+	rep := sessionReporter()
+	in := domain.RegisterResourceIntent{RequestID: "reg1", ResourceID: "repo3", Reporter: rep, Access: domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: testSession}}
+	var first, again domain.MutationResult
+	mustUpdate(t, f.st, func(tx store.Tx) error {
+		var err error
+		first, err = f.s.RegisterResourceTx(tx, rep, in, tx.NextSeq())
+		return err
+	})
+	mustUpdate(t, f.st, func(tx store.Tx) error {
+		var err error
+		again, err = f.s.RegisterResourceTx(tx, rep, in, tx.NextSeq())
+		return err
+	})
+	if first.Records.IDs[0] != again.Records.IDs[0] {
+		t.Errorf("replay = %+v, want %+v", again, first)
+	}
+}
+
+func TestResourceBoundNeedsBoundTarget(t *testing.T) {
+	f := newResourceFixture(t)
+	in := intent(f.sys, 1, domain.ObligationSatisfied) // f.sys is UNBOUND (Q-3)
+	in.AssertionMode = domain.AssertionResourceBound
+	in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyWorkspace, ResourceID: "repo2", ResourceRevision: 1, Fingerprint: hashOf("W1")}}
+	if _, err := f.s.transition(t, f.st, f.system, in); !errors.Is(err, domain.ErrUnknownApplicability) {
+		t.Errorf("resource-bound assertion on unbound obligation: %v", err)
+	}
+	if _, err := f.s.transition(t, f.st, f.system, intent(f.sys, 1, domain.ObligationSatisfied)); err != nil {
+		t.Errorf("attestation of unbound obligation: %v", err)
 	}
 }

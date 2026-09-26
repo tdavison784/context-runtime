@@ -82,6 +82,14 @@ func agentDirective(sess, id, dirID string, seq uint64) domain.ContextItem {
 	return it
 }
 
+// newDirective is storetest.NewDirective with the explicit DIRECTIVE
+// namespace every new semantic write must carry (P3-3).
+func newDirective(sess, id, dirID string, seq uint64, text string) domain.ContextItem {
+	it := storetest.NewDirective(sess, id, dirID, seq, text)
+	it.Namespace = domain.NamespaceDirective
+	return it
+}
+
 // workingItem returns a TASK-scoped task_state item, as a Working section's
 // items are (FR-DIR-007).
 func workingItem(sess, id string, seq uint64, authority domain.Authority) domain.ContextItem {
@@ -89,6 +97,7 @@ func workingItem(sess, id string, seq uint64, authority domain.Authority) domain
 	it.Kind = domain.KindTaskState
 	it.Section = domain.SectionWorking
 	it.DirectiveID = "wd-" + id // Section != SectionNone requires a directive ID
+	it.Namespace = domain.NamespaceDirective
 	return it
 }
 
@@ -119,6 +128,7 @@ func agentScopedWorkingItem(sess, id string, seq uint64, authority domain.Author
 	it.Authority = authority
 	it.Section = domain.SectionWorking
 	it.DirectiveID = "wd-" + id
+	it.Namespace = domain.NamespaceDirective
 	return it
 }
 
@@ -127,6 +137,30 @@ func mustInsert(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
 	for _, it := range items {
 		if err := tx.InsertItem(it); err != nil {
 			t.Fatalf("InsertItem(%s): %v", it.ID, err)
+		}
+	}
+}
+
+// testDeclarationPolicy is the creation-declaration policy version fixtures
+// declare under, so declarations made by different helpers compare equal.
+const testDeclarationPolicy = "graph-test/1"
+
+// mustCreate inserts each keyed semantic item and declares its creation in
+// the same transaction, as ingest and tools must before any duplicate or
+// snapshot comparison (P3-4). Declaring outside the creating transaction is
+// rejected by DeclareCreation, so callers cannot use this for prior state.
+func mustCreate(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
+	t.Helper()
+	mustCreateWith(t, tx, CreationAcceptance{PolicyVersion: testDeclarationPolicy}, items...)
+}
+
+// mustCreateWith is mustCreate with explicit accepted creation inputs.
+func mustCreateWith(t *testing.T, tx store.Tx, accepted CreationAcceptance, items ...domain.ContextItem) {
+	t.Helper()
+	for _, it := range items {
+		mustInsert(t, tx, it)
+		if _, err := DeclareCreation(tx, it, accepted); err != nil {
+			t.Fatalf("DeclareCreation(%s): %v", it.ID, err)
 		}
 	}
 }
@@ -154,7 +188,7 @@ func TestReplaceDirective_T02(t *testing.T) {
 
 	var p1ID, p2ID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
-		p1 := storetest.NewDirective(sess, "p1", dirID, tx.NextSeq(), "Use dependency v2.")
+		p1 := newDirective(sess, "p1", dirID, tx.NextSeq(), "Use dependency v2.")
 		p1ID = p1.ID
 		mustInsert(t, tx, p1)
 		prev, err := ReplaceDirective(tx, actor, taskID, dirID, p1.ID, "evt-p1")
@@ -171,7 +205,7 @@ func TestReplaceDirective_T02(t *testing.T) {
 	}
 
 	err = s.Update(ctx, sess, func(tx store.Tx) error {
-		p2 := storetest.NewDirective(sess, "p2", dirID, tx.NextSeq(), "Use dependency v3.")
+		p2 := newDirective(sess, "p2", dirID, tx.NextSeq(), "Use dependency v3.")
 		p2ID = p2.ID
 		mustInsert(t, tx, p2)
 		prev, err := ReplaceDirective(tx, actor, taskID, dirID, p2.ID, "evt-p2")
@@ -225,7 +259,7 @@ func TestReplaceDirective_MismatchedNewItem(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			it := storetest.NewDirective(sess, "wrong-dir", "some-other-directive", tx.NextSeq(), "text")
+			it := newDirective(sess, "wrong-dir", "some-other-directive", tx.NextSeq(), "text")
 			mustInsert(t, tx, it)
 			_, err := ReplaceDirective(tx, actor, taskID, dirID, it.ID, "evt")
 			return err
@@ -294,6 +328,7 @@ func TestSupersedeSnapshot_TaskMismatch(t *testing.T) {
 		wrongTask := storetest.NewItem(sess, "wrong-task-item", tx.NextSeq(), "text")
 		wrongTask.Kind = domain.KindTaskState
 		wrongTask.Section = domain.SectionWorking
+		wrongTask.Namespace = domain.NamespaceDirective
 		wrongTask.DirectiveID = "wd-wrong-task-item"
 		wrongTask.TaskID = "some-other-task"
 		mustInsert(t, tx, wrongTask)
@@ -319,7 +354,7 @@ func TestSupersedeSnapshot_NewItemNotWorking(t *testing.T) {
 	var oldWorking, notWorking domain.ContextItem
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		oldWorking = workingItem(sess, "old-working", tx.NextSeq(), domain.AuthorityUser)
-		notWorking = storetest.NewDirective(sess, "pinned-not-working", "some-pin", tx.NextSeq(), "text")
+		notWorking = newDirective(sess, "pinned-not-working", "some-pin", tx.NextSeq(), "text")
 		mustInsert(t, tx, oldWorking, notWorking)
 		mustFile(t, tx, oldWorking)
 		return nil
@@ -414,11 +449,9 @@ func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			// No Section: Validate now requires SYSTEM/HARNESS/USER authority
-			// for a directive section (AUTH-2.2), which would mask the actor
-			// rule this test targets. A directive ID alone doesn't need one.
-			it := taskItem(sess, "d1", tx.NextSeq(), domain.AuthorityTool)
-			it.DirectiveID = dirID
+			// A well-formed USER directive: the TOOL actor itself is refused,
+			// whatever the item's authority (AUTH-2.2).
+			it := newDirective(sess, "d1", dirID, tx.NextSeq(), "text")
 			mustInsert(t, tx, it)
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityTool), taskID, dirID, it.ID, "evt")
 			return err
@@ -428,16 +461,16 @@ func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
 		}
 	})
 
-	t.Run("AgentRejectedForNonKeyedItem", func(t *testing.T) {
+	t.Run("AgentRejectedForDirectiveNamespace", func(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			// AGENT authority but not a keyed "agent.<key>" directive ID; no
-			// Section, for the same reason as ToolActorRejected above.
-			it := taskItem(sess, "d2", tx.NextSeq(), domain.AuthorityAgent)
-			it.DirectiveID = dirID
+			// An AGENT may file only its own exactly owned AGENT_KEY slot;
+			// the namespace, not an "agent." display prefix, is the
+			// boundary (P3-3/25), so a parsed DIRECTIVE is out of reach.
+			it := newDirective(sess, "d2", dirID, tx.NextSeq(), "text")
 			mustInsert(t, tx, it)
-			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityAgent), taskID, dirID, it.ID, "evt")
+			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityAgent, "agent"), taskID, dirID, it.ID, "evt")
 			return err
 		})
 		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
@@ -470,7 +503,7 @@ func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			it := storetest.NewDirective(sess, "d4", dirID, tx.NextSeq(), "text")
+			it := newDirective(sess, "d4", dirID, tx.NextSeq(), "text")
 			it.Authority = domain.AuthoritySystem // outranks the USER actor below
 			mustInsert(t, tx, it)
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityUser), taskID, dirID, it.ID, "evt")
@@ -495,7 +528,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			h := taskItem(sess, "h", tx.NextSeq(), domain.AuthorityHarness)
-			h.DirectiveID = dirID
+			h.DirectiveID, h.Section, h.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 			mustInsert(t, tx, h)
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityHarness), taskID, dirID, h.ID, "evt-h")
 			return err
@@ -508,7 +541,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 			// Same session and task, but TURN-scoped instead of TASK-scoped:
 			// a different boundary, visible to the same USER principal.
 			u := taskItem(sess, "u", tx.NextSeq(), domain.AuthorityUser)
-			u.DirectiveID = dirID
+			u.DirectiveID, u.Section, u.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 			u.Scope = domain.ScopeTurn
 			u.Access = domain.AccessBoundary{Scope: domain.ScopeTurn, SessionID: sess, TaskID: u.TaskID}
 			mustInsert(t, tx, u)
@@ -524,7 +557,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 		// h must remain the only current version; the rejected write left
 		// nothing behind.
 		err = s.View(ctx, sess, func(tx store.ReadTx) error {
-			versions, err := tx.CurrentVersions(taskID, domain.NamespaceAgentKey, dirID)
+			versions, err := tx.CurrentVersions(taskID, domain.NamespaceDirective, dirID)
 			if err != nil {
 				return err
 			}
@@ -548,7 +581,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			hidden := agentScopedItem(sess, "hidden-v", tx.NextSeq(), "agent-b")
-			hidden.DirectiveID = dirID
+			hidden.DirectiveID, hidden.Section, hidden.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 			mustInsert(t, tx, hidden)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-b"), taskID, dirID, hidden.ID, "evt-hidden")
 			return err
@@ -559,7 +592,7 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
 			visible := agentScopedItem(sess, "visible-v", tx.NextSeq(), "agent-a")
-			visible.DirectiveID = dirID
+			visible.DirectiveID, visible.Section, visible.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 			mustInsert(t, tx, visible)
 			prev, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID, visible.ID, "evt-visible")
 			if err != nil {
@@ -832,7 +865,8 @@ func TestSupersedeSnapshot_FRDIR007(t *testing.T) {
 		w1a = workingItem(sess, "w1a", tx.NextSeq(), domain.AuthorityUser)
 		otherAgentItem = agentScopedWorkingItem(sess, "agent-restricted", tx.NextSeq(), domain.AuthorityUser, "agent-b")
 		w2 = workingItem(sess, "w2", tx.NextSeq(), domain.AuthorityUser)
-		mustInsert(t, tx, w1a, otherAgentItem, w2)
+		mustInsert(t, tx, w1a, otherAgentItem)
+		mustCreate(t, tx, w2)
 		mustFile(t, tx, w1a, otherAgentItem)
 
 		res, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
@@ -888,7 +922,8 @@ func TestSupersedeSnapshot_MultipleOldItems(t *testing.T) {
 		w1a := workingItem(sess, "m-w1a", tx.NextSeq(), domain.AuthorityUser)
 		w1b := workingItem(sess, "m-w1b", tx.NextSeq(), domain.AuthorityUser)
 		w2 := workingItem(sess, "m-w2", tx.NextSeq(), domain.AuthorityUser)
-		mustInsert(t, tx, w1a, w1b, w2)
+		mustInsert(t, tx, w1a, w1b)
+		mustCreate(t, tx, w2)
 		mustFile(t, tx, w1a, w1b)
 
 		res, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
@@ -947,7 +982,8 @@ func TestSupersedeSnapshot_ConversationKindAndIndependentTaskState(t *testing.T)
 		oldConv = workingConversationItem(sess, "old-conv", tx.NextSeq(), domain.AuthorityUser)
 		independent = independentTaskStateItem(sess, "independent", tx.NextSeq(), domain.AuthorityUser)
 		newConv = workingConversationItem(sess, "new-conv", tx.NextSeq(), domain.AuthorityUser)
-		mustInsert(t, tx, oldConv, independent, newConv)
+		mustInsert(t, tx, oldConv, independent)
+		mustCreate(t, tx, newConv)
 		mustFile(t, tx, oldConv)
 
 		res, err := SupersedeSnapshot(tx, actor, []string{newConv.ID}, taskID, "evt-conv")
@@ -999,7 +1035,9 @@ func TestLinkDerived_And_Provenance_HappyPath(t *testing.T) {
 		derivedID, s1ID, s2ID = derived.ID, s1.ID, s2.ID
 		mustInsert(t, tx, derived, s1, s2)
 
-		cov := &domain.Coverage{ConversationID: "conv", FromSeq: 1, ToSeq: 2}
+		// Legacy range/frontier metadata cannot authorize new coverage
+		// (P3-6); an explicit item set must equal the linked sources.
+		cov := &domain.Coverage{ItemIDs: []string{s2.ID, s1.ID}}
 		rels, err := LinkDerived(tx, actor, derived.ID, []string{s2.ID, s1.ID}, cov, "evt-link")
 		if err != nil {
 			return err
@@ -1007,16 +1045,33 @@ func TestLinkDerived_And_Provenance_HappyPath(t *testing.T) {
 		if len(rels) != 2 {
 			t.Errorf("LinkDerived returned %d relationships, want 2", len(rels))
 		}
-		// Coverage.ItemIDs must be populated, sorted, and deduplicated from
-		// the sources actually linked, regardless of the order given.
-		wantIDs := []string{s1.ID, s2.ID}
+		// Both edges reference ONE normalized PROVENANCE coverage record
+		// whose members are the sources actually linked, sorted and
+		// deduplicated regardless of the order given (P3-6).
 		for _, r := range rels {
-			if r.Coverage == nil {
-				t.Fatalf("relationship %s has no coverage", r.ID)
+			if r.Coverage != nil || r.CoverageID == "" || r.CoverageID != rels[0].CoverageID {
+				t.Fatalf("relationship %s: coverage %+v / %q, want one shared normalized record", r.ID, r.Coverage, r.CoverageID)
 			}
-			if !slices.Equal(r.Coverage.ItemIDs, wantIDs) {
-				t.Errorf("Coverage.ItemIDs = %v, want %v", r.Coverage.ItemIDs, wantIDs)
+		}
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		if c, err := r.Coverage(rels[0].CoverageID); err != nil || c.Purpose != domain.CoverageProvenance {
+			t.Errorf("Coverage(%s) = %+v, %v; want PROVENANCE", rels[0].CoverageID, c, err)
+		}
+		members, err := r.CoverageMembers(rels[0].CoverageID, store.Page{Limit: 10})
+		if err != nil {
+			return err
+		}
+		var gotIDs []string
+		for _, m := range members.Records {
+			if m.Source != nil {
+				gotIDs = append(gotIDs, m.Source.ItemID)
 			}
+		}
+		if wantIDs := []string{s1.ID, s2.ID}; members.More || !slices.Equal(gotIDs, wantIDs) {
+			t.Errorf("coverage members = %v (more %v), want %v", gotIDs, members.More, wantIDs)
 		}
 		return nil
 	})
@@ -1449,7 +1504,7 @@ func TestResolveLifecycleTarget_LiteralItemID(t *testing.T) {
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		// Lifecycle targets live in the DIRECTIVE namespace (R6): a
 		// current directive item resolves by its literal item ID.
-		it := storetest.NewDirective(sess, "pinned-item", "some-pin", tx.NextSeq(), "text")
+		it := newDirective(sess, "pinned-item", "some-pin", tx.NextSeq(), "text")
 		itemID = it.ID
 		mustInsert(t, tx, it)
 		mustFile(t, tx, it)
@@ -1537,6 +1592,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 			g := storetest.NewGoal(sess, "goal1", tx.NextSeq(), "Ship it")
 			g.DirectiveID = dirID
 			g.Section = domain.SectionGoal
+			g.Namespace = domain.NamespaceDirective
 			goalID = g.ID
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, dirID, g.ID, "evt")
@@ -1568,6 +1624,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 			hidden := agentScopedItem(sess, "hidden-goal", tx.NextSeq(), "agent-b")
 			hidden.DirectiveID = dirID
 			hidden.Section = domain.SectionPinned
+			hidden.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, hidden)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-b"), taskID, dirID, hidden.ID, "evt")
 			return err
@@ -1602,6 +1659,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 			private := agentScopedItem(sess, "d-private", tx.NextSeq(), "agent-a")
 			private.DirectiveID = dirID
 			private.Section = domain.SectionPinned
+			private.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, private)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID, private.ID, "evt-private")
 			return err
@@ -1614,6 +1672,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 			taskWide := taskItem(sess, "d-task-wide", tx.NextSeq(), domain.AuthorityHarness)
 			taskWide.DirectiveID = dirID
 			taskWide.Section = domain.SectionPinned
+			taskWide.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, taskWide)
 			// A HARNESS/task-wide principal cannot see agent-a's private
 			// version, so this must succeed (round-1 AUTH-2.1 property: a
@@ -1667,6 +1726,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
 			g.Section = domain.SectionGoal
+			g.Namespace = domain.NamespaceDirective
 			goalID = g.ID
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
@@ -1724,6 +1784,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
 			g.Section = domain.SectionGoal
+			g.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
 			return err
@@ -1735,7 +1796,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 		// A second, unrelated current directive whose own item ID (not
 		// directive ID) is the same string, and IS accessible to actor.
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
-			it := storetest.NewDirective(sess, sharedID, "unrelated-pin", tx.NextSeq(), "text")
+			it := newDirective(sess, sharedID, "unrelated-pin", tx.NextSeq(), "text")
 			mustInsert(t, tx, it)
 			mustFile(t, tx, it)
 			return nil
@@ -1764,6 +1825,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
 			g.Section = domain.SectionGoal
+			g.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
 			return err
@@ -1839,7 +1901,7 @@ func TestResolveLifecycleTarget_StaleDirectivePointerNotReturned(t *testing.T) {
 	// map at all.
 	err = s.Update(ctx, sess, func(tx store.Tx) error {
 		w2 := workingItem(sess, "w2", tx.NextSeq(), domain.AuthorityUser)
-		mustInsert(t, tx, w2)
+		mustCreate(t, tx, w2)
 		_, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
 		return err
 	})
@@ -1877,7 +1939,7 @@ func TestReplaceDirective_StalePointerDoesNotBlockNewBoundary(t *testing.T) {
 	var w1ID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		w1 := taskItem(sess, "w1", tx.NextSeq(), domain.AuthorityUser)
-		w1.DirectiveID = dirID
+		w1.DirectiveID, w1.Section, w1.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 		w1ID = w1.ID
 		mustInsert(t, tx, w1)
 		_, err := ReplaceDirective(tx, actor, taskID, dirID, w1.ID, "evt-w1")
@@ -1904,7 +1966,7 @@ func TestReplaceDirective_StalePointerDoesNotBlockNewBoundary(t *testing.T) {
 	// pointer to w1 would have wrongly been treated as a live conflict.
 	err = s.Update(ctx, sess, func(tx store.Tx) error {
 		turnScoped := taskItem(sess, "turn-version", tx.NextSeq(), domain.AuthorityUser)
-		turnScoped.DirectiveID = dirID
+		turnScoped.DirectiveID, turnScoped.Section, turnScoped.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 		turnScoped.Scope = domain.ScopeTurn
 		turnScoped.Access = domain.AccessBoundary{Scope: domain.ScopeTurn, SessionID: sess, TaskID: turnScoped.TaskID}
 		mustInsert(t, tx, turnScoped)

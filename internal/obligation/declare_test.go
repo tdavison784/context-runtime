@@ -65,7 +65,7 @@ func setupWorkspace(t *testing.T, s *Service, st store.Store, binder domain.Prin
 
 func TestDeclarePinnedBound(t *testing.T) {
 	s := newTestService(t)
-	st := newTestStore()
+	st := newTestStore(t)
 	setupWorkspace(t, s, st, actorOf(domain.AuthorityHarness))
 
 	ref, err := pinAndDeclare(t, s, st, "p1", "tests", domain.AuthorityUser, "All tests must pass.", "")
@@ -91,7 +91,7 @@ func TestDeclarePinnedBound(t *testing.T) {
 
 func TestDeclarePinnedCases(t *testing.T) {
 	s := newTestService(t)
-	st := newTestStore()
+	st := newTestStore(t)
 	setupWorkspace(t, s, st, actorOf(domain.AuthorityHarness))
 
 	if ref, err := pinAndDeclare(t, s, st, "p0", "plain", domain.AuthorityUser, "Use dependency v2.", ""); ref != nil || err != nil {
@@ -125,7 +125,7 @@ func TestDeclarePinnedCases(t *testing.T) {
 
 func TestDeclarePinnedRejects(t *testing.T) {
 	s := newTestService(t)
-	st := newTestStore()
+	st := newTestStore(t)
 	setupWorkspace(t, s, st, actorOf(domain.AuthorityHarness))
 	old := seedPinned(t, st, "old", "legacy", domain.AuthorityUser, "All tests must pass.")
 
@@ -202,7 +202,7 @@ func (s *Service) declare(t *testing.T, st store.Store, actor domain.Principal, 
 
 func TestDeclareHarness(t *testing.T) {
 	s := newTestService(t)
-	st := newTestStore()
+	st := newTestStore(t)
 	harness := actorOf(domain.AuthorityHarness)
 	system := actorOf(domain.AuthoritySystem)
 	setupWorkspace(t, s, st, harness)
@@ -283,7 +283,7 @@ func TestDeclareHarness(t *testing.T) {
 
 func TestDeclarePinnedReplacementVersions(t *testing.T) {
 	s := newTestService(t)
-	st := newTestStore()
+	st := newTestStore(t)
 	setupWorkspace(t, s, st, actorOf(domain.AuthorityHarness))
 	v1, err := pinAndDeclare(t, s, st, "p1", "tests", domain.AuthorityUser, "All tests must pass.", "")
 	if err != nil {

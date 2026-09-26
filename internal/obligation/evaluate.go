@@ -205,7 +205,7 @@ func (s *Service) satisfy(tx store.Tx, sem store.SemanticTx, actor domain.Princi
 			SemanticMeta: domain.SemanticMeta{ID: release.ID, SessionID: o.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: releaseSeq},
 			Target:       ref, TransitionID: release.ID, Cause: release.Cause, PreviousProofID: old.ID, ObservationID: obs.ID, RuleVersion: rule,
 		}
-		after, err := sem.AppendSemanticObligationTransition(release, d, expected)
+		after, err := appendTransition(tx, sem, o, release, d, expected)
 		if err != nil {
 			return nil, w.fail(err)
 		}
@@ -219,7 +219,7 @@ func (s *Service) satisfy(tx store.Tx, sem store.SemanticTx, actor domain.Princi
 	if old != nil {
 		d.PreviousProofID = "" // the pair's release step records the replaced proof
 	}
-	if _, err := sem.AppendSemanticObligationTransition(t, d, expected); err != nil {
+	if _, err := appendTransition(tx, sem, o, t, d, expected); err != nil {
 		return nil, w.fail(err)
 	}
 	return append(ids, t.ID), nil

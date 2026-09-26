@@ -159,3 +159,52 @@ func TestFileReadFixedHash(t *testing.T) {
 		t.Errorf("read of other content = %+v", v)
 	}
 }
+
+// FuzzTestsPassVerdict checks tests_pass/1's safety property over arbitrary
+// inputs: a PASS or FAIL verdict implies the same subject, a terminal complete
+// run not older than the watermark, a KNOWN state of the target resource, and
+// an observed fingerprint equal to the current one; the dependency always
+// names exactly that state.
+func FuzzTestsPassVerdict(f *testing.F) {
+	f.Add(uint8(0), true, true, uint64(5), uint64(3), true, uint8(0), uint8(0), true)
+	f.Add(uint8(1), true, true, uint64(5), uint64(5), true, uint8(1), uint8(1), true)
+	f.Add(uint8(3), false, false, uint64(1), uint64(9), false, uint8(2), uint8(0), false)
+	outcomes := []domain.ObservationOutcome{domain.OutcomePass, domain.OutcomeFail, domain.OutcomeError, domain.OutcomeTimeout, domain.OutcomeCancelled}
+	fps := []string{hashOf("W1"), hashOf("W2"), ""}
+	f.Fuzz(func(t *testing.T, outcome uint8, complete, sameSubject bool, ordinal, watermark uint64, known bool, obsFP, curFP uint8, sameResource bool) {
+		in := testsInput(nil)
+		in.Observation.Outcome = outcomes[int(outcome)%len(outcomes)]
+		if !complete {
+			in.Observation.Completeness = domain.ObservationPartial
+		}
+		if !sameSubject {
+			in.Observation.SubjectKey = mustSubjectKey(testsTarget(func(v *domain.TestsTarget) { v.SuiteSpec = "other" }))
+		}
+		in.Ordinal, in.Watermark = ordinal, watermark
+		in.Observation.ObservedWorkspaceFingerprint = fps[int(obsFP)%len(fps)]
+		rs := &domain.ResourceState{ResourceID: "repo1", AuthoritativeRevision: 7, WorkspaceFingerprint: fps[int(curFP)%len(fps)], Freshness: domain.ResourceKnown}
+		if !known {
+			rs.Freshness, rs.WorkspaceFingerprint = domain.ResourceUnknown, ""
+		}
+		if !sameResource {
+			rs.ResourceID = "repo2"
+		}
+		in.Resource = rs
+		v := testsPass{}.Evaluate(in)
+		if v.Kind == VerdictNotApplicable {
+			if v.Dependency != (domain.ResourceClaim{}) || v.Reason == "" {
+				t.Fatalf("inapplicable verdict carries data: %+v", v)
+			}
+			return
+		}
+		o := in.Observation
+		ok := sameSubject && o.TerminalComplete() && ordinal > 0 && ordinal >= watermark && known && sameResource &&
+			rs.WorkspaceFingerprint != "" && o.ObservedWorkspaceFingerprint == rs.WorkspaceFingerprint
+		if !ok {
+			t.Fatalf("applicable verdict %+v for inapplicable input %+v / %+v", v, o, rs)
+		}
+		if (v.Kind == VerdictPass) != (o.Outcome == domain.OutcomePass) || v.Dependency.Fingerprint != rs.WorkspaceFingerprint || v.Dependency.ResourceRevision != 7 || v.Dependency.Kind != domain.DependencyWorkspace {
+			t.Fatalf("verdict %+v disagrees with input", v)
+		}
+	})
+}

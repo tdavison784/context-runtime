@@ -183,7 +183,36 @@ func TestRunAndObservationReceipts(t *testing.T) {
 		again, err = f.s.RegisterRunTx(tx, f.harness, in, tx.NextSeq())
 		return err
 	})
-	if res.Records.IDs[0] != again.Records.IDs[0] {
+	if res.Records.IDs[0] != again.Records.IDs[0] || res.Records.Kind != resultObservationRun {
 		t.Errorf("replay registered a second run: %v %v", res, again)
+	}
+	var run domain.ObservationRun
+	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		r, _ := store.ReadSemantic(tx)
+		run, _ = r.ObservationRun(res.Records.IDs[0])
+		return nil
+	})
+	obs := obsIntent("o1", run, f.evidence.ID, domain.OutcomePass, hashOf("W1"))
+	report := func(in domain.ObservationIntent) (domain.MutationResult, error) {
+		var out domain.MutationResult
+		err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+			var err error
+			out, err = f.s.ReportObservationTx(tx, f.harness, in, tx.NextSeq())
+			return err
+		})
+		return out, err
+	}
+	first, err := report(obs)
+	if err != nil || first.Records.Kind != resultObservation {
+		t.Fatalf("report = %+v %v", first, err)
+	}
+	if again, err := report(obs); err != nil || again.Records.IDs[0] != first.Records.IDs[0] {
+		t.Errorf("observation replay = %+v %v", again, err)
+	}
+	changed := obs
+	changed.Failed, changed.Passed = 1, 2
+	changed.Outcome = domain.OutcomeFail
+	if _, err := report(changed); !errors.Is(err, domain.ErrEventIDConflict) {
+		t.Errorf("changed typed field under same request: %v", err)
 	}
 }

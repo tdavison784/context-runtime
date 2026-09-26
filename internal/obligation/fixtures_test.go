@@ -118,7 +118,7 @@ func seedResourceState(t *testing.T, st store.Store, resourceID string, rev uint
 		_, err = sem.PutResourceState(domain.ResourceState{
 			SemanticMeta: domain.SemanticMeta{ID: "rs-" + resourceID, SessionID: testSession, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
 			ResourceID:   resourceID, BindingID: "rb-" + resourceID, LastUpdateID: u.ID,
-			AuthoritativeRevision: rev, WorkspaceFingerprint: fp, Freshness: domain.ResourceKnown,
+			AuthoritativeRevision: rev, WorkspaceFingerprint: fp, Freshness: domain.ResourceKnown, Revision: prior.Revision + 1,
 		}, prior.Revision)
 		return err
 	})
@@ -129,4 +129,8 @@ func seedItemTx(tx store.Tx, id, dirID string, a domain.Authority, text string) 
 	it := storetest.NewDirective(testSession, id, dirID, tx.NextSeq(), text)
 	it.Authority = a
 	return it
+}
+
+func equalTargetPtr(a, b *domain.TargetSpec) bool {
+	return a == nil && b == nil || a != nil && b != nil && equalTarget(*a, *b)
 }
