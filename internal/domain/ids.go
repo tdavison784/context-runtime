@@ -3,6 +3,7 @@ package domain
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -123,9 +124,34 @@ const (
 	IDDomainReference  IDDomain = "ref"
 )
 
+var idDomains = []IDDomain{IDDomainDiagnostic, IDDomainCommand, IDDomainSection, IDDomainReference}
+
 // Valid reports whether d is a known ID domain.
-func (d IDDomain) Valid() bool {
-	return d == IDDomainDiagnostic || d == IDDomainCommand || d == IDDomainSection || d == IDDomainReference
+func (d IDDomain) Valid() bool { return slices.Contains(idDomains, d) }
+
+// reservedIDPrefixes are the prefixes of every internally generated ID: the
+// occurrence forms, each artifact ID domain, and the item, call, turn, and
+// obligation IDs derived here. internal/graph derives relationship ("rel")
+// and lifecycle-audit ("evt") IDs; they are reserved here too because the
+// domain cannot import graph.
+var reservedIDPrefixes = func() []string {
+	out := []string{callerOccurrencePrefix, anonymousOccurrencePrefix + "_", "itm_", "call_", "turn_", "obl_", "rel_", "evt_"}
+	for _, d := range idDomains {
+		out = append(out, string(d)+"_")
+	}
+	return out
+}()
+
+// ReservedIDPrefix reports whether id begins with the prefix of an internally
+// generated ID. Caller-chosen identifiers (EventIDs) must not (R20.1), so no
+// caller value can pose as, or alias, a runtime-generated ID.
+func ReservedIDPrefix(id string) bool {
+	for _, p := range reservedIDPrefixes {
+		if strings.HasPrefix(id, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // DerivedArtifactID is the deterministic ID of an occurrence artifact at the

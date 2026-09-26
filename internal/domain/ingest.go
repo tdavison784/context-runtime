@@ -84,7 +84,8 @@ func (s Span) ParsesDirectives() bool {
 
 // Event is the caller's ordered ingestion input. EventID is an optional
 // session-local retry key; an event without one is never idempotent
-// (FR-ING-006). Turn IDs are derived by ingestion, never supplied (D18).
+// (FR-ING-006). It is printable ASCII, at most MaxEventIDBytes, and never
+// starts with a reserved internal ID prefix (R20.1). Turn IDs are derived by ingestion, never supplied (D18).
 type Event struct {
 	EventID      string
 	Kind         EventKind
@@ -106,6 +107,9 @@ func (e Event) Validate() error {
 	}
 	if len(e.EventID) > MaxEventIDBytes {
 		return invalid("event: event ID too long")
+	}
+	if ReservedIDPrefix(e.EventID) {
+		return invalid("event: event ID uses a reserved internal ID prefix")
 	}
 	for i := range len(e.EventID) {
 		if c := e.EventID[i]; c < 0x21 || c > 0x7e {
