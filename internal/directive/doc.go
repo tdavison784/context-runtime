@@ -43,7 +43,8 @@
 // # Section extent (D6)
 //
 // A section ends at the next unsuppressed heading of the same or higher
-// level, or at the unit end. Deeper headings, keyword or not, are body text
+// level (including a CommonMark-heading-shaped line that is not a directive
+// heading), or at the unit end. Deeper headings, keyword or not, are body text
 // (with a nested_heading diagnostic for keywords). A malformed keyword
 // heading or an unsupported lifecycle word still opens a region that grants
 // no directive semantics until the next same-or-higher heading. Every such
@@ -119,12 +120,13 @@
 //     ABNF ends with *(SP attr) EOL; it carries no payload
 //     (form-closing-atx-hashes, TestIDAndAttributeLexing).
 //   - Setext headings never open or close a section (suppress-heading-shape).
-//   - A bare ATX line ("#" to "######" alone) or a tab-separated one
-//     ("#\tOther") is not a heading: it neither opens nor closes a section
-//     and stays body or ordinary text; in a list body it is stray prose,
-//     so the section is Malformed (TestBareAndTabATXLines). This is the one
-//     entry that can leave more text inside a section than CommonMark
-//     would, and it awaits a ruling (SPEC-1.11).
+//   - A line shaped like a CommonMark ATX heading that is not a directive
+//     heading (bare "#" to "######", '#' plus a tab, or indented 1-3
+//     spaces) closes an open section of the same or higher level and never
+//     opens one. With no list-container model this also applies inside a
+//     list item, where CommonMark would keep the heading in the item:
+//     closing early only removes directive text (TestHeadingShapedLinesClose,
+//     form-heading-shaped-close; SPEC-1.11 ruling).
 //   - Lazy quote continuation lines are ordinary lines; only explicit quote
 //     lines are suppressed (suppress-block-quote).
 //   - In a list body, unindented prose is malformed content rather than a

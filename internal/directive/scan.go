@@ -238,6 +238,19 @@ func (p *coreParser) scan(capable bool) {
 			}
 			p.diagnostic("DirectiveNotParsed", reason, section, "", byteRange{candidateStart, end})
 		}
+		if capable && active >= 0 && (blocked == "" && level == 0 || blocked == "indented heading") {
+			// SPEC-1.11 ruling: a line CommonMark renders as an ATX heading
+			// but that is no directive heading (bare, tab-separated, or
+			// indented 1-3 spaces) still ends a same-or-higher section, so
+			// text the author sees under another heading never stays inside
+			// a directive. It never opens a section. Fenced, quoted and
+			// commented lines are never heading-shaped here.
+			if n := atxShape(b); n > 0 && n <= p.sections[active].heading.level {
+				p.sections[active].end = line.start
+				active = -1
+				continue
+			}
+		}
 		if capable && blocked == "" && level > 0 {
 			// D6/FR-DIR-006: only a same-or-higher heading ends a section. A
 			// deeper heading, keyword or not, is body text of the open section
@@ -298,6 +311,24 @@ func fenceRun(b []byte) (byte, int, []byte) {
 		j++
 	}
 	return ch, j - i, b[j:]
+}
+
+// atxShape returns the level of a CommonMark ATX heading shape: 0-3
+// spaces, 1-6 '#', then SP, HTAB or end of line; 0 otherwise. Tabs and
+// four or more spaces of indentation make indented code, not a heading.
+func atxShape(b []byte) int {
+	i := 0
+	for i < len(b) && i < 3 && b[i] == ' ' {
+		i++
+	}
+	n := 0
+	for i+n < len(b) && b[i+n] == '#' {
+		n++
+	}
+	if n < 1 || n > 6 || i+n < len(b) && b[i+n] != ' ' && b[i+n] != '\t' {
+		return 0
+	}
+	return n
 }
 func headingPrefix(b []byte) (int, []byte, []byte) {
 	i := 0
