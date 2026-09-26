@@ -34,6 +34,7 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		call.OutcomeHash = call.Outcome.OutcomeHash()
 		obl := NewObligation(sessA, "o", 1, 1, "rich")
 		obl.Status, obl.EvidenceIDs, obl.Revision = domain.ObligationSatisfied, []string{"ev-t"}, 2
+		obl.Claim = "tests_pass"
 		rel := NewRelationship(sessA, "r", domain.RelDerivedFrom, "rich", "plain", 2)
 		rel.Coverage = &domain.Coverage{ConversationID: "conv", FromSeq: 1, ToSeq: 2}
 		return fixture{
@@ -53,6 +54,8 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		*f.item.GoalStatus = domain.GoalResolved
 		*f.item.TTLTurns = 99
 		f.item.Source.Locator = "scribbled"
+		f.item.SourceRanges[0].Slices[0].Start = 99
+		f.item.SourceRanges[1].TranscriptID = "scribbled"
 		f.rel.Coverage.ToSeq = 99
 		f.event.ItemIDs[0] = "scribbled"
 		f.blob.Data[0] = 'X'
@@ -121,6 +124,7 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		noErr(t, err)
 		noErr(t, tx.InsertBlob(f.blob))
 		obl := NewObligation(sessA, "o", 1, 1, "rich")
+		obl.Claim = "tests_pass"
 		noErr(t, tx.InsertObligationVersion(obl))
 		obl.Matcher.Name = "scribbled"
 		applied, err := tx.AppendObligationTransition(f.tr, 1)

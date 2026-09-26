@@ -428,3 +428,33 @@ func TestAccessBoundaryProperty(t *testing.T) {
 	}
 	t.Logf("checked %d/%d satisfiable Intersect pairs", checked, iterations)
 }
+
+func TestSourceActorReducesAuthority(t *testing.T) {
+	caller := Principal{SessionID: "s1", WorkflowID: "w1", TaskID: "t1", AgentID: "a1", Authority: AuthoritySystem}
+	actor, err := SourceActor(caller, AuthorityUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := caller
+	want.Authority = AuthorityUser
+	if actor != want {
+		t.Fatalf("SourceActor = %+v, want %+v", actor, want)
+	}
+	for _, c := range []struct {
+		caller, span Authority
+	}{
+		{AuthorityUser, AuthorityHarness},
+		{AuthorityTool, AuthorityRetrievedContent},
+		{AuthorityRetrievedContent, AuthorityTool},
+		{AuthoritySystem, "bogus"},
+	} {
+		p := caller
+		p.Authority = c.caller
+		if _, err := SourceActor(p, c.span); !errors.Is(err, ErrInvalidAuthorityPromotion) {
+			t.Errorf("SourceActor(%s, %s) err = %v, want ErrInvalidAuthorityPromotion", c.caller, c.span, err)
+		}
+	}
+	if _, err := SourceActor(Principal{Authority: AuthoritySystem}, AuthorityUser); err == nil {
+		t.Fatal("invalid caller accepted")
+	}
+}

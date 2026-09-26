@@ -39,6 +39,11 @@ func richItem(sess, id string, seq uint64) domain.ContextItem {
 	it.TTLTurns = &ttl
 	it.Tags = []string{"a", "b"}
 	it.Source = &domain.SourceRef{Kind: domain.SourcePath, Locator: "/x", ContentHash: blob.Hash, ToolCallID: "tc"}
+	it.CreatedTurn = 3
+	it.SourceRanges = []domain.SourceRange{
+		{TranscriptID: "transcript\xff", PartIndex: 1, Range: domain.ByteRange{Start: 2, End: 10}, Slices: []domain.ByteRange{{Start: 3, End: 5}, {Start: 6, End: 9}}},
+		{TranscriptID: "transcript-2", Range: domain.ByteRange{Start: 0, End: 0}},
+	}
 	return it
 }
 
