@@ -50,6 +50,13 @@ type directiveKey struct {
 	namespace           domain.DirectiveNamespace
 }
 
+// currentIDKey is a current-version identity without its boundary.
+type currentIDKey struct {
+	taskID    string
+	namespace domain.DirectiveNamespace
+	id        string
+}
+
 type obligationKey struct {
 	id      string
 	version uint64
@@ -88,12 +95,17 @@ type state struct {
 
 	// Access-filtered lookup indexes (F1): keyed by owner columns, live-only
 	// where noted.
-	blobOwners  map[blobKey][]string
-	canonical   map[canonicalKey]map[string]bool // live
-	working     map[workingKey]map[string]bool   // live
-	sources     map[sourceKey]map[string]bool    // live
-	refOwners   map[sourceKey][]string
+	blobOwners  map[blobKey][]seqRef
+	canonical   map[canonicalKey][]seqRef // live
+	working     map[workingKey][]seqRef   // live
+	sources     map[sourceKey][]seqRef    // live
+	refOwners   map[sourceKey][]seqRef
 	itemsByTask map[string][]string // task ID -> item IDs (SPEC-1.3)
+	// Keyed secondary indexes (SPEC-2.1): the boundaries a (task,
+	// namespace, ID) has current-version pointers in, and the obligation
+	// versions bound to each source item.
+	currentIDs   map[currentIDKey]map[domain.AccessBoundary]bool
+	oblsBySource map[string]map[obligationKey]bool
 }
 
 func newState() *state {
@@ -120,11 +132,13 @@ func newState() *state {
 		receipts:     map[string]domain.IngestReceipt{},
 		envelopes:    map[string]domain.EventEnvelope{},
 		references:   map[string]domain.UnresolvedReference{},
-		blobOwners:   map[blobKey][]string{},
-		canonical:    map[canonicalKey]map[string]bool{},
-		working:      map[workingKey]map[string]bool{},
-		sources:      map[sourceKey]map[string]bool{},
-		refOwners:    map[sourceKey][]string{},
+		blobOwners:   map[blobKey][]seqRef{},
+		canonical:    map[canonicalKey][]seqRef{},
+		working:      map[workingKey][]seqRef{},
+		sources:      map[sourceKey][]seqRef{},
+		currentIDs:   map[currentIDKey]map[domain.AccessBoundary]bool{},
+		oblsBySource: map[string]map[obligationKey]bool{},
+		refOwners:    map[sourceKey][]seqRef{},
 		itemsByTask:  map[string][]string{},
 	}
 }

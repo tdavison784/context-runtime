@@ -276,6 +276,7 @@ var committedMigrations = map[string]string{
 	"0012_access_filtered_lookups.sql":     "904534c3f0ac90a37b2a0bd5f8b13fca86ec50fb5b8e344f70e5fde13f66846e",
 	"0013_drop_pre_f1_lookups.sql":         "9a038bf8ab370753e7822c4f9a83bf60b28e6c598fe1f2f1d18a1b73bee59cec",
 	"0014_receipt_max_reference_links.sql": "f9b5886a6bffda9c87a2f6fa7956476dde9b2fecfec8d036e3cf7c0c08b6f088",
+	"0015_ordered_graph_indexes.sql":       "29641185de8f67af08dfe15d768d23259827a2b74f10840eee1b778e5558bc18",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {

@@ -43,11 +43,13 @@ type readTx struct {
 	receipts     table[string, domain.IngestReceipt]
 	envelopes    table[string, domain.EventEnvelope]
 	references   table[string, domain.UnresolvedReference]
-	blobOwners   index[blobKey]
-	canonical    liveIndex[canonicalKey]
-	working      liveIndex[workingKey]
-	sources      liveIndex[sourceKey]
-	refOwners    index[sourceKey]
+	blobOwners   orderedIndex[blobKey]
+	canonical    orderedIndex[canonicalKey]
+	working      orderedIndex[workingKey]
+	sources      orderedIndex[sourceKey]
+	currentIDs   liveIndex[currentIDKey, domain.AccessBoundary]
+	oblsBySource liveIndex[string, obligationKey]
+	refOwners    orderedIndex[sourceKey]
 	itemsByTask  index[string]
 }
 
@@ -79,11 +81,13 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		receipts:     newTable(st.receipts, writable, domain.IngestReceipt.Clone),
 		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
 		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
-		blobOwners:   newIndex(st.blobOwners, writable),
-		canonical:    newLiveIndex(st.canonical, writable),
-		working:      newLiveIndex(st.working, writable),
-		sources:      newLiveIndex(st.sources, writable),
-		refOwners:    newIndex(st.refOwners, writable),
+		blobOwners:   newOrderedIndex(st.blobOwners, writable),
+		canonical:    newOrderedIndex(st.canonical, writable),
+		working:      newOrderedIndex(st.working, writable),
+		sources:      newOrderedIndex(st.sources, writable),
+		currentIDs:   newLiveIndex(st.currentIDs, writable),
+		oblsBySource: newLiveIndex(st.oblsBySource, writable),
+		refOwners:    newOrderedIndex(st.refOwners, writable),
 		itemsByTask:  newIndex(st.itemsByTask, writable),
 	}
 }
@@ -236,9 +240,11 @@ func (r *readTx) CurrentVersions(taskID string, ns domain.DirectiveNamespace, id
 	if !ns.Valid() {
 		return nil, invalid("current versions: invalid namespace %q", ns)
 	}
+	// Only the boundaries this (task, namespace, ID) has pointers in
+	// (SPEC-2.1), never every pointer in the session.
 	var out []string
-	for k, itemID := range r.directives.all() {
-		if k.taskID == taskID && k.directiveID == id && k.namespace == ns {
+	for b := range r.currentIDs.lookup(currentIDKey{taskID, ns, id}) {
+		if itemID, ok := r.directives.get(directiveKey{taskID, id, b, ns}); ok {
 			out = append(out, itemID)
 		}
 	}
@@ -306,14 +312,12 @@ func (r *readTx) ObligationsBySource(sourceItemID string, limit int) ([]domain.O
 		return nil, invalid("obligations by source: limit must be positive")
 	}
 	out := []domain.ObligationVersion{}
-	for _, o := range r.obligations.all() {
-		if o.SourceItemID != sourceItemID {
-			continue
-		}
+	for k := range r.oblsBySource.lookup(sourceItemID) { // the source's own versions (SPEC-2.1)
 		if len(out) == limit {
 			return nil, store.ErrLimitExceeded
 		}
-		out = append(out, o.Clone())
+		o, _ := r.obligations.get(k)
+		out = append(out, o)
 	}
 	slices.SortFunc(out, func(a, b domain.ObligationVersion) int {
 		return cmp.Or(cmp.Compare(a.ObligationID, b.ObligationID), cmp.Compare(a.Version, b.Version))

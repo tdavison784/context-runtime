@@ -1,7 +1,7 @@
 package memory
 
 import (
-	"cmp"
+	"iter"
 	"slices"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -61,25 +61,36 @@ type sourceKey struct {
 
 // indexLookups adds a new item to the access-filtered lookup indexes.
 func (t *tx) indexLookups(it domain.ContextItem) {
+	ref := seqRef{it.Seq, it.ID}
+	for _, k := range blobKeysOf(it) {
+		t.blobOwners.add(k, ref)
+	}
+	t.canonical.add(canonicalKeyOf(it), ref)
+	if it.Section == domain.SectionWorking {
+		t.working.add(workingKey{it.TaskID, it.Authority, it.Access}, ref)
+	}
+	if k, ok := sourceKeyOf(it); ok {
+		t.sources.add(k, ref)
+	}
+}
+
+func blobKeysOf(it domain.ContextItem) []blobKey {
+	var out []blobKey
 	seen := map[string]bool{}
 	for _, p := range it.Parts {
 		if p.BlobHash != "" && !seen[p.BlobHash] {
 			seen[p.BlobHash] = true
-			t.blobOwners.add(blobKey{p.BlobHash, ownersOf(it.Access)}, it.ID)
+			out = append(out, blobKey{p.BlobHash, ownersOf(it.Access)})
 		}
 	}
-	t.canonical.add(canonicalKeyOf(it), it.ID)
-	if it.Section == domain.SectionWorking {
-		t.working.add(workingKey{it.TaskID, it.Authority, it.Access}, it.ID)
-	}
-	if k, ok := sourceKeyOf(it); ok {
-		t.sources.add(k, it.ID)
-	}
+	return out
 }
 
 // retireLookups drops an item that stopped being live from the live
-// indexes.
-func (t *tx) retireLookups(id string) {
+// indexes. A duplicate also leaves the blob index (DUR-2.1): its canonical
+// item has the same content and boundary, so it authorizes every
+// reference the duplicate could.
+func (t *tx) retireLookups(id string, duplicate bool) {
 	it, ok := t.items.peek(id)
 	if !ok {
 		return
@@ -91,6 +102,11 @@ func (t *tx) retireLookups(id string) {
 	if k, ok := sourceKeyOf(it); ok {
 		t.sources.remove(k, id)
 	}
+	if duplicate {
+		for _, k := range blobKeysOf(it) {
+			t.blobOwners.remove(k, id)
+		}
+	}
 }
 
 func sourceKeyOf(it domain.ContextItem) (sourceKey, bool) {
@@ -101,19 +117,39 @@ func sourceKeyOf(it domain.ContextItem) (sourceKey, bool) {
 	return sourceKey{key, ownersOf(it.Access)}, ok
 }
 
-// sortedItems loads ids, keeps those whose boundary permits viewer, and
-// orders them by (Seq, ID).
-func (r *readTx) sortedItems(ids []string, viewer domain.Principal) []domain.ContextItem {
-	out := make([]domain.ContextItem, 0, len(ids))
-	for _, id := range ids {
-		if it, ok := r.items.get(id); ok && it.Access.Permits(viewer) {
-			out = append(out, it)
+// intersectOwners lists the owners values whose boundary permits every
+// principal in ps.
+func intersectOwners(ps ...domain.Principal) []owners {
+	var out []owners
+	for _, o := range permitted(ps[0]) {
+		ok := true
+		for _, p := range ps[1:] {
+			ok = ok && slices.Contains(permitted(p), o)
+		}
+		if ok {
+			out = append(out, o)
 		}
 	}
-	slices.SortFunc(out, func(a, b domain.ContextItem) int {
-		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
-	})
 	return out
+}
+
+// scan walks refs in order, loading each item once, and collects visible
+// items until want are found (found=true). Work is bounded by what it
+// returns plus the entries it skips (DUR-2.1).
+func (r *readTx) scan(refs iter.Seq[seqRef], viewer domain.Principal, want int, keep func(domain.ContextItem) bool) (store.Lookup, bool) {
+	out := store.Lookup{Items: []domain.ContextItem{}}
+	for ref := range refs {
+		it, ok := r.items.get(ref.id)
+		if !ok || !it.Access.Permits(viewer) || keep != nil && !keep(it) {
+			continue
+		}
+		out.Items = append(out.Items, it)
+		if len(out.Items) == want {
+			return out, true
+		}
+		out.Next = store.Cursor{Seq: ref.seq, ID: ref.id}
+	}
+	return out, false
 }
 
 func (r *readTx) BlobReferrer(f store.BlobReferrerFilter) (store.Lookup, error) {
@@ -123,18 +159,17 @@ func (r *readTx) BlobReferrer(f store.BlobReferrerFilter) (store.Lookup, error) 
 	if err := f.Validate(); err != nil {
 		return store.Lookup{}, err
 	}
-	var ids []string
-	for _, o := range permitted(f.Viewer) {
-		for id := range r.blobOwners.lookup(blobKey{f.BlobHash, o}) {
-			ids = append(ids, id)
-		}
+	if f.Within.SessionID != r.sessionID {
+		return store.Lookup{Items: []domain.ContextItem{}}, nil
 	}
-	for _, it := range r.sortedItems(ids, f.Viewer) {
-		if f.Within.Within(it.Access) {
-			return store.Lookup{Items: []domain.ContextItem{it}}, nil
-		}
+	within := domain.Principal{SessionID: f.Within.SessionID, WorkflowID: f.Within.WorkflowID, TaskID: f.Within.TaskID, AgentID: f.Within.AgentID}
+	var keys []blobKey
+	for _, o := range intersectOwners(f.Viewer, within) {
+		keys = append(keys, blobKey{f.BlobHash, o})
 	}
-	return store.Lookup{Items: []domain.ContextItem{}}, nil
+	l, _ := r.scan(mergeAfter(&r.blobOwners, keys, seqRef{}), f.Viewer, 1, func(it domain.ContextItem) bool { return f.Within.Within(it.Access) })
+	l.Next = store.Cursor{}
+	return l, nil
 }
 
 func (r *readTx) CanonicalCandidates(f store.CanonicalFilter) (store.Lookup, error) {
@@ -144,12 +179,16 @@ func (r *readTx) CanonicalCandidates(f store.CanonicalFilter) (store.Lookup, err
 	if err := f.Validate(); err != nil {
 		return store.Lookup{}, err
 	}
-	out := store.Lookup{Items: []domain.ContextItem{}}
 	if !f.Access.Permits(f.Viewer) {
-		return out, nil
+		return store.Lookup{Items: []domain.ContextItem{}}, nil
 	}
 	key := canonicalKey{f.TaskID, f.Section, f.DirectiveID, f.Kind, f.Role, f.Authority, f.Access, f.ContentHash}
-	return r.boundedLive(r.canonical.lookup(key), f.Viewer, f.Limit, nil)
+	l, over := r.scan(r.canonical.after(key, seqRef{}), f.Viewer, f.Limit+1, nil)
+	if over {
+		return store.Lookup{}, store.ErrLimitExceeded
+	}
+	l.Next = store.Cursor{}
+	return l, nil
 }
 
 func (r *readTx) CurrentWorking(f store.WorkingFilter) (store.Lookup, error) {
@@ -170,27 +209,12 @@ func (r *readTx) CurrentWorking(f store.WorkingFilter) (store.Lookup, error) {
 		id, ok := r.directives.get(directiveKey{k.TaskID, k.ID, k.Access, k.Namespace})
 		return ok && id == it.ID
 	}
-	return r.boundedLive(r.working.lookup(workingKey{f.TaskID, f.Authority, f.Access}), f.Viewer, f.Limit, named)
-}
-
-// boundedLive loads the IDs, keeps visible items that pass keep (if set),
-// and fails with store.ErrLimitExceeded past limit.
-func (r *readTx) boundedLive(ids func(func(string) bool), viewer domain.Principal, limit int, keep func(domain.ContextItem) bool) (store.Lookup, error) {
-	var all []string
-	for id := range ids {
-		all = append(all, id)
+	l, over := r.scan(r.working.after(workingKey{f.TaskID, f.Authority, f.Access}, seqRef{}), f.Viewer, f.Limit+1, named)
+	if over {
+		return store.Lookup{}, store.ErrLimitExceeded
 	}
-	out := store.Lookup{Items: []domain.ContextItem{}}
-	for _, it := range r.sortedItems(all, viewer) {
-		if keep != nil && !keep(it) {
-			continue
-		}
-		if len(out.Items) == limit {
-			return store.Lookup{}, store.ErrLimitExceeded
-		}
-		out.Items = append(out.Items, it)
-	}
-	return out, nil
+	l.Next = store.Cursor{}
+	return l, nil
 }
 
 func (r *readTx) SourceItems(f store.SourceFilter) (store.Lookup, error) {
@@ -200,28 +224,19 @@ func (r *readTx) SourceItems(f store.SourceFilter) (store.Lookup, error) {
 	if err := f.Validate(); err != nil {
 		return store.Lookup{}, err
 	}
-	var ids []string
+	var keys []sourceKey
 	for _, o := range permitted(f.Viewer) {
-		for id := range r.sources.lookup(sourceKey{f.LocatorKey, o}) {
-			ids = append(ids, id)
-		}
+		keys = append(keys, sourceKey{f.LocatorKey, o})
 	}
-	out := store.Lookup{Items: []domain.ContextItem{}}
-	for _, it := range r.sortedItems(ids, f.Viewer) {
-		if !after(it.Seq, it.ID, f.Page.After) {
-			continue
-		}
-		if len(out.Items) == f.Page.Limit {
-			out.More = true
-			break
-		}
-		out.Items = append(out.Items, it)
-		out.Next = store.Cursor{Seq: it.Seq, ID: it.ID}
+	after := seqRef{f.Page.After.Seq, f.Page.After.ID}
+	l, more := r.scan(mergeAfter(&r.sources, keys, after), f.Viewer, f.Page.Limit+1, nil)
+	if more { // the extra item only proves more remain
+		l.Items, l.More = l.Items[:f.Page.Limit], true
 	}
-	if len(out.Items) == 0 {
-		out.Next = f.Page.After
+	if len(l.Items) == 0 {
+		l.Next = f.Page.After
 	}
-	return out, nil
+	return l, nil
 }
 
 func (r *readTx) VisibleReferences(f store.VisibleReferenceFilter) ([]domain.UnresolvedReference, bool, store.Cursor, error) {
@@ -231,20 +246,14 @@ func (r *readTx) VisibleReferences(f store.VisibleReferenceFilter) ([]domain.Unr
 	if err := f.Validate(); err != nil {
 		return nil, false, store.Cursor{}, err
 	}
-	var refs []domain.UnresolvedReference
+	var keys []sourceKey
 	for _, o := range permitted(f.Viewer) {
-		for id := range r.refOwners.lookup(sourceKey{f.LocatorKey, o}) {
-			if v, ok := r.references.get(id); ok && v.RuleVersion == domain.LocatorRuleVersion && v.Access.Permits(f.Viewer) {
-				refs = append(refs, v)
-			}
-		}
+		keys = append(keys, sourceKey{f.LocatorKey, o})
 	}
-	slices.SortFunc(refs, func(a, b domain.UnresolvedReference) int {
-		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
-	})
 	out, next := []domain.UnresolvedReference{}, f.Page.After
-	for _, v := range refs {
-		if !after(v.Seq, v.ID, f.Page.After) {
+	for ref := range mergeAfter(&r.refOwners, keys, seqRef{f.Page.After.Seq, f.Page.After.ID}) {
+		v, ok := r.references.get(ref.id)
+		if !ok || v.RuleVersion != domain.LocatorRuleVersion || !v.Access.Permits(f.Viewer) {
 			continue
 		}
 		if len(out) == f.Page.Limit {
@@ -254,9 +263,4 @@ func (r *readTx) VisibleReferences(f store.VisibleReferenceFilter) ([]domain.Unr
 		next = store.Cursor{Seq: v.Seq, ID: v.ID}
 	}
 	return out, false, next, nil
-}
-
-// after reports whether (seq, id) is strictly after c.
-func after(seq uint64, id string, c store.Cursor) bool {
-	return seq > c.Seq || seq == c.Seq && id > c.ID
 }

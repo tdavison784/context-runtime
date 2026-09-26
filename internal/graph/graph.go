@@ -146,19 +146,31 @@ func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, task
 // boundary is a replacement, not a conflict; hidden boundaries, stale
 // pointers, and duplicates never conflict. An item without a directive ID
 // never conflicts.
-func CheckBoundaryConflict(tx store.ReadTx, actor domain.Principal, it domain.ContextItem) error {
+//
+// With ErrBoundaryConflict it returns the access boundaries of the
+// conflicting versions, so a record of the conflict can be made readable
+// only where those versions are (SEC-2.2).
+func CheckBoundaryConflict(tx store.ReadTx, actor domain.Principal, it domain.ContextItem) ([]domain.AccessBoundary, error) {
 	ns, ok := it.DirectiveNamespace()
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	_, err := currentVersionAt(tx, it.TaskID, ns, it.DirectiveID, it.Access)
 	switch {
 	case err == nil:
-		return nil
+		return nil, nil
 	case !errors.Is(err, domain.ErrNotFound):
-		return err
+		return nil, err
 	}
-	return rejectVisibleBoundaryConflict(tx, actor, it.TaskID, ns, it.DirectiveID)
+	versions, err := CurrentVersions(tx, actor, it.TaskID, ns, it.DirectiveID)
+	if err != nil || len(versions) == 0 {
+		return nil, err
+	}
+	causes := make([]domain.AccessBoundary, len(versions))
+	for i, v := range versions {
+		causes[i] = v.Access
+	}
+	return causes, ErrBoundaryConflict
 }
 
 // Supersede records that newID supersedes oldID (FR-REL-003, FR-REL-004,
@@ -485,22 +497,40 @@ func CurrentVersions(tx store.ReadTx, actor domain.Principal, taskID string, ns 
 // actor cannot access are never consulted, so the result discloses nothing
 // beyond what actor could already see.
 func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id string) (string, error) {
-	var candidates []string
+	candidates, err := lifecycleCandidates(tx, actor, taskID, id)
+	if err != nil {
+		return "", err
+	}
+	switch len(candidates) {
+	case 0:
+		return "", domain.ErrNotFound
+	case 1:
+		return candidates[0].ID, nil
+	default:
+		return "", ErrAmbiguousDirective
+	}
+}
+
+// lifecycleCandidates gathers ResolveLifecycleTarget's accessible, current
+// DIRECTIVE-namespace candidates for id, literal item first, then directive
+// versions in (Seq, ID) order.
+func lifecycleCandidates(tx store.ReadTx, actor domain.Principal, taskID, id string) ([]domain.ContextItem, error) {
+	var candidates []domain.ContextItem
 	seen := map[string]bool{}
 
 	if it, err := tx.Item(id); err == nil {
 		if ns, _ := it.DirectiveNamespace(); ns == domain.NamespaceDirective && it.Access.Permits(actor) {
 			cur, err := isCurrentItem(tx, it)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			if cur {
-				candidates = append(candidates, id)
+				candidates = append(candidates, it)
 				seen[id] = true
 			}
 		}
 	} else if !errors.Is(err, domain.ErrNotFound) {
-		return "", err
+		return nil, err
 	}
 
 	// CurrentVersions drops stale map pointers (a version superseded
@@ -509,23 +539,15 @@ func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id 
 	// is no longer current (D10).
 	versions, err := CurrentVersions(tx, actor, taskID, domain.NamespaceDirective, id)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	for _, v := range versions {
 		if !seen[v.ID] {
-			candidates = append(candidates, v.ID)
+			candidates = append(candidates, v)
 			seen[v.ID] = true
 		}
 	}
-
-	switch len(candidates) {
-	case 0:
-		return "", domain.ErrNotFound
-	case 1:
-		return candidates[0], nil
-	default:
-		return "", ErrAmbiguousDirective
-	}
+	return candidates, nil
 }
 
 // SupersessionChain returns every item in the supersession chain containing

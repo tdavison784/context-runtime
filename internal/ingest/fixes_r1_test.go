@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -136,4 +137,139 @@ func TestApplyFailureAtomic_DUR13(t *testing.T) {
 			t.Errorf("retry of the EventID after a failed Apply: %v", err)
 		}
 	})
+}
+
+// TestRecordsNeverRevealHiddenVersions_SEC22 completes SEC-1.3: an
+// ambiguous lifecycle record and a boundary-conflict diagnostic are caused
+// by versions the source actor sees, so they are readable only where those
+// versions are too; another agent learns nothing of a private version.
+func TestRecordsNeverRevealHiddenVersions_SEC22(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		agentA := principal(domain.AuthorityUser)
+		agentB := agentA
+		agentB.AgentID = "B"
+		f.mustIngest(agentA, userEvent("u0", "hi", false))
+
+		// Ambiguous: A's private [plan], B's task-wide [plan] (B cannot see
+		// A's), then A's Unpin sees both.
+		f.mustIngest(agentA, userEvent("a1", "## Pinned [plan] scope=AGENT\nA's private plan.\n", true))
+		f.mustIngest(agentB, userEvent("b1", "## Pinned [plan]\nB's plan.\n", true))
+		r := f.mustIngest(agentA, userEvent("a2", "## Unpin [plan]\n", true))
+		if len(r.Lifecycle) != 1 || r.Lifecycle[0].Resolution != domain.TargetAmbiguous {
+			t.Fatalf("setup: commands %+v", r.Lifecycle)
+		}
+
+		// Boundary conflict: A restates [q] task-wide while its private [q]
+		// is current.
+		f.mustIngest(agentA, userEvent("a3", "## Pinned [q] scope=AGENT\nA's private q.\n", true))
+		r = f.mustIngest(agentA, userEvent("a4", "## Pinned [q]\nTask-wide q.\n", true))
+		if !hasDiag(r, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict) {
+			t.Fatalf("setup: no boundary conflict: %+v", r.Diagnostics)
+		}
+
+		f.view(func(tx store.ReadTx) error {
+			cs, err := tx.LifecycleCommands(store.CommandFilter{Viewer: agentB})
+			if err != nil {
+				return err
+			}
+			for _, c := range cs {
+				if c.Resolution == domain.TargetAmbiguous {
+					t.Errorf("agent B reads an AMBIGUOUS record caused by A's private version")
+				}
+			}
+			ds, err := tx.Diagnostics(store.DiagnosticFilter{Viewer: agentB})
+			if err != nil {
+				return err
+			}
+			for _, d := range ds {
+				if d.Code == domain.ErrAmbiguousDirective || d.Reason == domain.ReasonBoundaryConflict {
+					t.Errorf("agent B reads %s/%s revealing A's private version", d.Code, d.Reason)
+				}
+			}
+			// Agent A, who caused and can see both, still reads them.
+			ds, err = tx.Diagnostics(store.DiagnosticFilter{Viewer: agentA})
+			seen := 0
+			for _, d := range ds {
+				if d.Code == domain.ErrAmbiguousDirective || d.Reason == domain.ReasonBoundaryConflict {
+					seen++
+				}
+			}
+			if seen != 2 {
+				t.Errorf("agent A reads %d of its own ambiguity/conflict diagnostics, want 2", seen)
+			}
+			return err
+		})
+	})
+}
+
+// countingStore counts write transactions.
+type countingStore struct {
+	store.Store
+	updates *int
+}
+
+func (s countingStore) Update(ctx context.Context, sessionID string, fn func(store.Tx) error) error {
+	*s.updates++
+	return s.Store.Update(ctx, sessionID, fn)
+}
+
+// TestOverLimitNewEventsStayOutOfWriteTx_SEC21: F3 still replays a known
+// EventID whatever the limits, but a NEW event over the configured limits
+// is rejected by size alone, before its payload is copied or hashed and
+// without ever entering the session write transaction; an input over the
+// hard, non-configurable ceiling is rejected before anything else, even as
+// a retry.
+func TestOverLimitNewEventsStayOutOfWriteTx_SEC21(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		known := userEvent("known", strings.Repeat("k", 2048), false)
+		f.mustIngest(user, known)
+		updates := 0
+		f.s = countingStore{f.s, &updates}
+		f.in.Limits = domain.Limits{MaxSpanBytes: 1024, MaxEventBytes: 1024, MaxBlobBytes: 1024}
+		big := domain.InputPart{Type: domain.PartImage, MediaType: "image/png", Data: make([]byte, 4096)}
+		for name, e := range map[string]domain.Event{
+			"anonymous":   {Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(), Parts: []domain.InputPart{big}}}},
+			"new EventID": {EventID: "new", Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(), Parts: []domain.InputPart{big}}}},
+		} {
+			if _, err := f.ingest(user, e); !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Errorf("%s: err = %v, want a limit rejection", name, err)
+			}
+		}
+		if updates != 0 {
+			t.Errorf("over-limit new events entered %d write transactions, want 0", updates)
+		}
+		if _, err := f.ingest(user, known); err != nil {
+			t.Errorf("known EventID retry over the limits: %v (F3)", err)
+		}
+
+		defer func(v uint64) { hardMaxEventBytes = v }(hardMaxEventBytes)
+		hardMaxEventBytes = 1024
+		updates = 0
+		if _, err := f.ingest(user, known); !errors.Is(err, domain.ErrInvalidRecord) || updates != 0 {
+			t.Errorf("over the hard ceiling: err = %v, updates %d; want rejection before any transaction", err, updates)
+		}
+	})
+}
+
+// TestSizeGateMatchesValidateFor_SEC21: the length-only admission gate
+// accepts exactly what ValidateFor's limit accounting accepts at the edge,
+// so it never rejects a valid event and never admits an over-limit one.
+func TestSizeGateMatchesValidateFor_SEC21(t *testing.T) {
+	user := principal(domain.AuthorityUser)
+	l := domain.Limits{MaxSpanBytes: 64, MaxEventBytes: 96, MaxBlobBytes: 32}.Effective()
+	mk := func(text, blob int) domain.Event {
+		parts := []domain.InputPart{{Type: domain.PartText, MediaType: "text/plain", Text: strings.Repeat("t", text)}}
+		if blob > 0 {
+			parts = append(parts, domain.InputPart{Type: domain.PartImage, MediaType: "image/png", Data: make([]byte, blob)})
+		}
+		return domain.Event{EventID: "edge", Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(), Parts: parts}}}
+	}
+	for _, c := range []struct{ text, blob int }{{64, 32}, {65, 0}, {64, 33}, {60, 32}, {64, 31}} {
+		e := mk(c.text, c.blob)
+		gate, exact := checkSizes(e, configuredSizes(l)) == nil, e.ValidateFor(user, l) == nil
+		if gate != exact {
+			t.Errorf("text %d blob %d: gate accepts %v, ValidateFor accepts %v", c.text, c.blob, gate, exact)
+		}
+	}
 }

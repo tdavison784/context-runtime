@@ -39,7 +39,7 @@ func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
 	}
 	var after store.Cursor
 	for more := true; more; {
-		page, err := r.tx.SourceItems(store.SourceFilter{Viewer: c.actor, LocatorKey: key, Page: store.Page{After: after, Limit: r.g.lookupLimit()}})
+		page, err := r.tx.SourceItems(store.SourceFilter{Viewer: c.actor, LocatorKey: key, Page: store.Page{After: after, Limit: r.linkPageLimit()}})
 		if err != nil {
 			return err
 		}
@@ -104,7 +104,10 @@ func (r *run) referenceItemID(c unitCtx, ref domain.ContextItem) error {
 	case err != nil:
 		return err
 	}
-	_, err = r.linkReference(c.actor, ref, target)
+	stop, err := r.linkReference(c.actor, ref, target)
+	if err == nil && stop {
+		r.truncatedLinks(c.si, c.pi, ref.SourceRanges[0].Range, ref.Access)
+	}
 	return err
 }
 
@@ -130,7 +133,7 @@ func (r *run) linkPendingReferences(si int, actor domain.Principal, target domai
 	}
 	var after store.Cursor
 	for {
-		refs, more, next, err := r.tx.VisibleReferences(store.VisibleReferenceFilter{Viewer: actor, LocatorKey: key, Page: store.Page{After: after, Limit: r.g.lookupLimit()}})
+		refs, more, next, err := r.tx.VisibleReferences(store.VisibleReferenceFilter{Viewer: actor, LocatorKey: key, Page: store.Page{After: after, Limit: r.linkPageLimit()}})
 		if err != nil {
 			return err
 		}
@@ -163,13 +166,16 @@ func (r *run) linkPendingReferences(si int, actor domain.Principal, target domai
 // the reference's boundary is within the target's; otherwise it writes
 // nothing and reports nothing.
 func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextItem) (stop bool, err error) {
+	// A candidate that could never be linked is skipped before the budget
+	// is consulted, so truncation is reported only when a linkable link is
+	// actually dropped (DUR-2.2).
+	if !ref.Access.Permits(actor) || !target.Access.Permits(actor) || !ref.Access.Within(target.Access) {
+		return false, nil
+	}
 	// Optional links spend the event's own MaxReferenceLinks budget, never
 	// MaxRelationships (ruling 1); the receipt records it with the limits.
 	if r.refLinks >= r.limits.MaxReferenceLinks {
 		return true, nil
-	}
-	if !ref.Access.Permits(actor) || !target.Access.Permits(actor) || !ref.Access.Within(target.Access) {
-		return false, nil
 	}
 	_, err = graph.LinkReference(r.tx, actor, ref.ID, target.ID, r.graphEventID(), domain.LocatorRuleVersion)
 	if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
@@ -179,6 +185,15 @@ func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextIt
 		r.refLinks++
 	}
 	return false, err
+}
+
+// linkPageLimit sizes one reference-lookup page by what the event can
+// still use (DUR-2.1): the remaining MaxReferenceLinks budget plus one, so
+// a dropped linkable candidate is still seen and reported as truncation,
+// and never more than LookupLimit. A page therefore never loads thousands
+// of items to write a handful of edges.
+func (r *run) linkPageLimit() int {
+	return max(1, min(r.g.lookupLimit(), r.limits.MaxReferenceLinks-r.refLinks+1))
 }
 
 // truncatedLinks records that an event stopped adding optional REFERENCES

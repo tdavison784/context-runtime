@@ -43,6 +43,8 @@ func (t *tx) commit(st *state) bool {
 	t.canonical.commit()
 	t.working.commit()
 	t.sources.commit()
+	t.currentIDs.commit()
+	t.oblsBySource.commit()
 	t.refOwners.commit()
 	t.itemsByTask.commit()
 	t.relsTo.commit()
@@ -227,9 +229,9 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	// A superseded or duplicate item is no longer live (F1).
 	switch r.Type {
 	case domain.RelSupersedes:
-		t.retireLookups(r.ToID)
+		t.retireLookups(r.ToID, false)
 	case domain.RelDuplicateOf:
-		t.retireLookups(r.FromID)
+		t.retireLookups(r.FromID, true)
 	}
 	t.markSequenced()
 	return nil
@@ -251,6 +253,7 @@ func (t *tx) SetCurrentVersion(itemID string) error {
 		return fmt.Errorf("item %s: %w", itemID, err)
 	}
 	t.directives.put(directiveKey{key.TaskID, key.ID, key.Access, key.Namespace}, itemID)
+	t.currentIDs.add(currentIDKey{key.TaskID, key.Namespace, key.ID}, key.Access)
 	t.markSemantic()
 	return nil
 }
@@ -291,6 +294,7 @@ func (t *tx) InsertObligationVersion(o domain.ObligationVersion) error {
 	}
 	t.obligations.put(obligationKey{o.ObligationID, o.Version}, o)
 	t.latest.put(o.ObligationID, o.Version)
+	t.oblsBySource.add(o.SourceItemID, obligationKey{o.ObligationID, o.Version})
 	t.markSequenced()
 	return nil
 }
@@ -848,7 +852,7 @@ func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
 		return fmt.Errorf("unresolved reference %s: %w", r.ID, domain.ErrImmutable)
 	}
 	t.references.put(r.ID, r)
-	t.refOwners.add(sourceKey{r.LocatorKey, ownersOf(r.Access)}, r.ID)
+	t.refOwners.add(sourceKey{r.LocatorKey, ownersOf(r.Access)}, seqRef{r.Seq, r.ID})
 	t.markSequenced()
 	return nil
 }

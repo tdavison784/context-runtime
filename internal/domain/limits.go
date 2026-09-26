@@ -29,7 +29,7 @@ type Limits struct {
 	MaxEventItems       int
 	MaxEventDiagnostics int
 	MaxRelationships    int // relationships the event may generate
-	MaxReferenceLinks   int // REFERENCES edges one References entry or new source may create
+	MaxReferenceLinks   int // optional REFERENCES edges one event may create in total (ruling 1)
 }
 
 // DefaultLimits returns the Phase 2 resource limits (D17).

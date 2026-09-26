@@ -94,9 +94,9 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	if err != nil {
 		return err
 	}
-	if err := graph.CheckBoundaryConflict(r.tx, c.actor, it); err != nil {
+	if causes, err := graph.CheckBoundaryConflict(r.tx, c.actor, it); err != nil {
 		if errors.Is(err, graph.ErrBoundaryConflict) {
-			r.diagnose(c, item, it.Access, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
+			r.diagnose(c, item, r.causeAccess(it.Access, causes), domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
 			return nil
 		}
 		return err
