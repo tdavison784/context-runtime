@@ -31,6 +31,9 @@ var (
 	// ErrSnapshotTaskMismatch reports a Working-snapshot item that does not
 	// belong to the task its snapshot is being superseded within.
 	ErrSnapshotTaskMismatch = errors.New("graph: snapshot item does not belong to the given task")
+	// ErrCoverageMismatch reports a LinkDerived call whose caller-supplied
+	// coverage.ItemIDs disagrees with the sources actually being linked.
+	ErrCoverageMismatch = errors.New("graph: coverage item IDs do not match the linked sources")
 )
 
 // Supersede records that newID supersedes oldID (FR-REL-003, FR-REL-004,
@@ -276,6 +279,12 @@ func CheckDerivedBoundary(derived domain.AccessBoundary, sources []domain.Contex
 // source, all carrying the same coverage. Run inside store.Store.Update so a
 // failure partway through (an inaccessible source, or a boundary violation)
 // leaves nothing committed.
+//
+// coverage's ItemIDs must be complete for dispatch to recheck eligibility
+// later (see domain.Coverage): if coverage is given with ItemIDs unset,
+// LinkDerived populates it with sourceIDs, sorted and deduplicated; if the
+// caller already set ItemIDs, they must name exactly the same set of sources
+// or the call fails with ErrCoverageMismatch and nothing is written.
 func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) ([]domain.Relationship, error) {
 	if err := actor.Validate(); err != nil {
 		return nil, err
@@ -303,11 +312,27 @@ func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceID
 		return nil, err
 	}
 
+	var covTemplate *domain.Coverage
+	if coverage != nil {
+		wantIDs := sortedUniqueIDs(sourceIDs)
+		c := *coverage
+		switch {
+		case len(c.ItemIDs) == 0:
+			c.ItemIDs = wantIDs
+		case !slices.Equal(sortedUniqueIDs(c.ItemIDs), wantIDs):
+			return nil, ErrCoverageMismatch
+		default:
+			c.ItemIDs = wantIDs // canonicalize to the sorted/unique form Relationship.Validate requires
+		}
+		covTemplate = &c
+	}
+
 	rels := make([]domain.Relationship, 0, len(sources))
 	for _, src := range sources {
 		var cov *domain.Coverage
-		if coverage != nil {
-			c := *coverage
+		if covTemplate != nil {
+			c := *covTemplate
+			c.ItemIDs = slices.Clone(covTemplate.ItemIDs)
 			cov = &c
 		}
 		rel := domain.Relationship{
@@ -324,9 +349,17 @@ func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceID
 		if err := tx.InsertRelationship(rel); err != nil {
 			return nil, err
 		}
-		rels = append(rels, rel)
+		rels = append(rels, rel.Clone())
 	}
 	return rels, nil
+}
+
+// sortedUniqueIDs returns ids sorted and deduplicated, as
+// domain.Coverage.ItemIDs and domain.Relationship.Validate require.
+func sortedUniqueIDs(ids []string) []string {
+	out := slices.Clone(ids)
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // ProvenanceNode is one item reachable from a provenance query's root.
