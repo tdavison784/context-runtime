@@ -958,10 +958,20 @@ Answers to `p2-ingest`'s implementation questions, appended to
   (§5, D8), so it always needs one; R19 makes the rejection explicit
   rather than leaving it as a consequence to rediscover from D8+D18.
 - **Diagnostic code paired with each R13/R14 reason (new pinning
-  decision, refines §7/§1).** `DiagnosticCode` is a closed seven-value set
-  (`internal/domain/diagnostic.go`'s `Severity` switch); R13/R14's new
-  `DiagnosticReason`s must reuse an existing code, and no code is paired
-  with either in the merged code as of this ADR revision. This ADR pins
+  decision, refines §7/§1; SPEC-2.2: updated to the landed, current
+  state).** `DiagnosticCode` was a closed seven-value set when this
+  pairing was first proposed; it is now nine
+  (`ErrUnsupportedDirective`, `ErrMalformedDirective`,
+  `ErrAmbiguousDirective`, `DirectiveNotParsed`, `DiagnosticsTruncated`,
+  `DirectiveIDDerived`, `DiagnosticNotFound`, `ItemUnverified`,
+  `ReferenceLinksTruncated` — `internal/domain/diagnostic.go`), the last
+  two added by DUR-1.4 and the SEC-1.4/§28 `MaxReferenceLinks` ruling
+  respectively. R13/R14's new `DiagnosticReason`s must reuse an existing
+  code; this is no longer merely a convention pinned by this ADR's prose
+  but mechanically enforced — `Diagnostic.Validate` checks every reason
+  against a `reasonCode` map (`internal/domain/diagnostic.go:145-151`) and
+  fails if a diagnostic's `Code` doesn't match its `Reason`'s required one
+  (locked by `TestIngestionReasonCodePairing`). This ADR pins
   the pairing so `p2-graph`/`p2-ingest` do not each invent one
   independently: R13's per-item `boundary_conflict` (§7, D10) pairs with
   `ErrMalformedDirective` — the item is dropped as non-executable content,
