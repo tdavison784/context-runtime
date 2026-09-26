@@ -179,12 +179,23 @@ audit/pending-input envelope, never an independent current requirement
 merely because its authority is SYSTEM or HARNESS: an accepted directive
 gets its own semantic instruction item, and the raw transcript copy must
 not persist as an active instruction after that directive is replaced —
-future rendering (Phase 4/5) must track expiry against both. Transcript
-defaults: USER/AGENT messages get WORKING generation, TASK scope, NORMAL
-retention; TOOL/RETRIEVED_CONTENT get EPHEMERAL generation, TURN scope, LOW
-retention; SYSTEM/HARNESS instructions get DURABLE generation, HIGH
-retention, SESSION scope (SYSTEM) or TASK scope (HARNESS) — all RESIDENT on
-creation. Final item access is the requested scope boundary intersected
+future rendering (Phase 4/5) must track expiry against both. **Landed
+transcript defaults differ from this ADR's original text (SPEC-1.5,
+corrected here): every transcript item, regardless of authority, is
+`policy.ForTranscript`'s row (`internal/policy/defaults.go`) — USER gets
+kind `user_message`, AGENT `assistant_message`, TOOL `tool_result`,
+RETRIEVED_CONTENT `evidence` (TOOL/RETRIEVED_CONTENT additionally get
+EPHEMERAL generation, TURN scope, LOW retention), and SYSTEM/HARNESS get
+kind `conversation` with WORKING generation and NORMAL retention (SESSION
+scope for SYSTEM, TASK scope for HARNESS) — never `instruction`/DURABLE/
+HIGH.** The `instruction`/DURABLE/HIGH/mandatory-for-SYSTEM row this ADR
+originally described belongs to the separate residual instruction item
+(`policy.ForResidual`, §24/R20 below), derived from a SYSTEM or HARNESS
+transcript's unclaimed bytes, never to the transcript item itself — a raw
+transcript never becomes an active instruction merely because of its
+authority, which is D8's own concern and the safer of the two readings.
+`TestTranscriptDefaults` and `TestResidualRows` lock the two rows
+separately. Final item access is the requested scope boundary intersected
 with the authenticated span boundary; an impossible combination is
 rejected, and a derived item's access must stay within its
 transcript/source boundary (scope attributes cannot declassify). Store a
@@ -684,12 +695,14 @@ Answers to `p2-contract`'s implementation questions, appended to
   caller-supplied `EventID` is printable ASCII, at most 256 bytes — a
   syntax bound on the idempotency key itself, distinct from D14's
   payload-hash/receipt semantics.
-- **HARNESS residual instructions are not mandatory (refines §5, D8).**
-  FR-DOM-007's mandatory-by-policy list names SYSTEM-authority
-  instructions only; a HARNESS-authority residual/transcript instruction
-  item (§5's transcript defaults) is eligible for scoring like any other
-  non-mandatory item, never automatically mandatory merely because it is
-  HARNESS.
+- **HARNESS residual instructions are not mandatory (refines §5, D8;
+  wording corrected by SPEC-1.5).** FR-DOM-007's mandatory-by-policy list
+  names SYSTEM-authority instructions only; a HARNESS-authority residual
+  instruction item (`policy.ForResidual`, not the transcript item — §5's
+  transcript defaults are the separate `conversation`/WORKING/NORMAL row)
+  is eligible for scoring like any other non-mandatory item, never
+  automatically mandatory merely because it is HARNESS. `ForResidual`
+  confirms this precisely: only the SYSTEM row sets `Mandatory = true`.
 - **Parser item ranges become `SourceRange.Slices` (refines §4/§5,
   D7/M1).** The parser's `Item.TextRanges` (D7's per-item byte ranges)
   populate `SourceRef.Slices` on the derived item (§5's transcript-range
