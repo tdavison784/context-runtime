@@ -65,7 +65,6 @@ func (r ObservationRecord) Clone() ObservationRecord                     { retur
 func (r ResourcePathState) Clone() ResourcePathState                     { return r }
 func (r AssertionRecord) Clone() AssertionRecord                         { return r }
 func (r RetrievalLease) Clone() RetrievalLease                           { return r }
-func (r ProjectionRecord) Clone() ProjectionRecord                       { return r }
 func (r GCRequest) Clone() GCRequest                                     { return r }
 func (r GCResult) Clone() GCResult                                       { return r }
 func (r SemanticChange) Clone() SemanticChange                           { return r }

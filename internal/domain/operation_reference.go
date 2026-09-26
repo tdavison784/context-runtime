@@ -37,5 +37,5 @@ func (o SemanticOperation) ValidateResolved() error {
 	if len(o.References) != 0 {
 		return invalid("operation: unresolved alias references")
 	}
-	return o.Validate()
+	return o.validate(true)
 }
