@@ -85,10 +85,6 @@ type state struct {
 	receipts     map[string]domain.IngestReceipt // by occurrence ID
 	envelopes    map[string]domain.EventEnvelope // by occurrence ID
 	references   map[string]domain.UnresolvedReference
-	itemsByBlob  map[string][]string // blob hash -> referencing item IDs
-	duplicates   map[duplicateKey][]string
-	refsByKey    map[string][]string // locator key -> unresolved reference IDs
-	itemsByKey   map[string][]string // source locator key (rule v1) -> item IDs
 
 	// Access-filtered lookup indexes (F1): keyed by owner columns, live-only
 	// where noted.
@@ -98,20 +94,6 @@ type state struct {
 	sources     map[sourceKey]map[string]bool    // live
 	refOwners   map[sourceKey][]string
 	itemsByTask map[string][]string // task ID -> item IDs (SPEC-1.3)
-}
-
-// duplicateKey is the duplicate-candidate identity of an item (R19, D10).
-type duplicateKey struct {
-	taskID      string
-	section     domain.DirectiveSection
-	role        domain.ItemRole
-	authority   domain.Authority
-	access      domain.AccessBoundary
-	contentHash string
-}
-
-func itemDuplicateKey(it domain.ContextItem) duplicateKey {
-	return duplicateKey{it.TaskID, it.Section, it.Role, it.Authority, it.Access, it.ContentHash}
 }
 
 func newState() *state {
@@ -138,10 +120,6 @@ func newState() *state {
 		receipts:     map[string]domain.IngestReceipt{},
 		envelopes:    map[string]domain.EventEnvelope{},
 		references:   map[string]domain.UnresolvedReference{},
-		itemsByBlob:  map[string][]string{},
-		duplicates:   map[duplicateKey][]string{},
-		refsByKey:    map[string][]string{},
-		itemsByKey:   map[string][]string{},
 		blobOwners:   map[blobKey][]string{},
 		canonical:    map[canonicalKey]map[string]bool{},
 		working:      map[workingKey]map[string]bool{},
