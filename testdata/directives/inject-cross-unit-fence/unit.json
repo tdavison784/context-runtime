@@ -1,0 +1,19 @@
+{
+  "description": "M1: an unclosed fence in one unit does not suppress the next unit's own directives.",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "M1"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "more_units": [
+    {
+      "input": "unit2.md",
+      "authority": "SYSTEM",
+      "directive_capable": false,
+      "span_index": 0,
+      "part_index": 1
+    }
+  ]
+}

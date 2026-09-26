@@ -1,0 +1,20 @@
+{
+  "description": "M1: a keyword split across two parse units never forms a heading.",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "M1"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true,
+  "more_units": [
+    {
+      "input": "unit2.md",
+      "authority": "SYSTEM",
+      "directive_capable": false,
+      "span_index": 0,
+      "part_index": 1
+    }
+  ]
+}

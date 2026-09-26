@@ -1,0 +1,10 @@
+{
+  "description": "A BOM at byte 0 is skipped for parsing only; ranges still address original bytes and CRLF payload is kept (D3).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "D3"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false
+}
