@@ -39,12 +39,13 @@ type rawItem struct {
 }
 
 type coreParser struct {
-	data        []byte
-	limits      scanLimits
-	diagnostics []parseDiagnostic
-	sections    []rawSection
-	items       []rawItem
-	work        int // deterministic work accounting used by adversarial tests
+	itemLimitHit bool
+	data         []byte
+	limits       scanLimits
+	diagnostics  []parseDiagnostic
+	sections     []rawSection
+	items        []rawItem
+	work         int // deterministic work accounting used by adversarial tests
 }
 
 func (p *coreParser) diagnostic(code, reason, section, id string, r byteRange) {

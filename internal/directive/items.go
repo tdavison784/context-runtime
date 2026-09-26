@@ -187,6 +187,7 @@ func (p *coreParser) addItem(item rawItem) {
 		return
 	}
 	if len(p.items) >= p.limits.maxItems {
+		p.itemLimitHit = true
 		p.diagnostic("ErrMalformedDirective", "item limit reached", item.section, "", item.byteRange)
 		return
 	}
