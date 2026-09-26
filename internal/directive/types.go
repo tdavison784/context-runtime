@@ -51,10 +51,8 @@ type Attribute struct {
 // Section records one recognized section, including empty/malformed sections
 // so ingestion can distinguish an empty Working snapshot from its absence.
 // Range includes heading and body; HeadingRange and BodyRange partition it.
-// A section ends at the next unsuppressed heading of the same or a higher
-// level (fewer '#') or at the parse-unit end; a deeper heading, keyword or
-// not, is body text and never opens a nested section (D6 as amended).
-// ItemIndexes address Result.Items in input order.
+// A keyword at any depth closes it; an ordinary heading closes it only at the
+// same or shallower depth. ItemIndexes address Result.Items in input order.
 type Section struct {
 	Keyword      Keyword
 	Level        int
