@@ -28,19 +28,27 @@ func TestAccessLookupsUseIndex(t *testing.T) {
 		assertIndexed(t, s, keys, q, args...)
 	}
 	owners := []string{"workflow_id", "task_id", "agent_id"}
-	blob, _ := blobReferrerQuery("s", "h", planViewer, planViewer)
-	q, args := blob(mid, lookupBatch)
-	check(append([]string{"session_id", "blob_hash"}, owners...), q, args)
+	combos := ownerCombos(planViewer)
+	var q string
+	var args []any
+	for _, b := range blobReferrerQueries("s", "h", combos) {
+		q, args = b(mid, lookupBatch)
+		check(append([]string{"session_id", "blob_hash"}, owners...), q, args)
+	}
 	q, args = canonicalQuery("s", store.CanonicalFilter{TaskID: "task", Kind: domain.KindFact, Authority: domain.AuthorityUser,
 		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, ContentHash: "h"})(mid, lookupBatch)
 	check([]string{"session_id", "content_hash", "task_id", "section", "directive_id", "kind", "role", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, q, args)
 	q, args = workingQuery("s", store.WorkingFilter{TaskID: "task", Authority: domain.AuthorityUser,
 		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}})(mid, lookupBatch)
 	check([]string{"session_id", "task_id", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, q, args)
-	q, args = sourceItemsQuery("s", "k", planViewer)(mid, lookupBatch)
-	check(append([]string{"session_id", "rule_version", "locator_key"}, owners...), q, args)
-	q, args = visibleReferencesQuery("s", "k", planViewer, mid, 3)
-	check([]string{"session_id", "f_locator_key", "f_rule_version", "f_access_workflow_id", "f_access_task_id", "f_access_agent_id"}, q, args)
+	for _, b := range sourceItemsQueries("s", "k", combos) {
+		q, args = b(mid, lookupBatch)
+		check(append([]string{"session_id", "rule_version", "locator_key"}, owners...), q, args)
+	}
+	for _, b := range visibleReferencesQueries("s", "k", combos) {
+		q, args = b(mid, 3)
+		check([]string{"session_id", "f_locator_key", "f_rule_version", "f_access_workflow_id", "f_access_task_id", "f_access_agent_id"}, q, args)
+	}
 }
 
 // TestUpgradeAccessLookups checks migration 0012's backfill: live items are
@@ -148,6 +156,14 @@ func TestGraphReadsUseIndex(t *testing.T) {
 	assertIndexed(t, s, []string{"session_id", "f_task_id"}, q, args...)
 }
 
+// TestCurrentVersionsUseIndex locks the current-version read by (task,
+// namespace, ID) to its primary-key prefix (SPEC-2.1, SPEC-3.2).
+func TestCurrentVersionsUseIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	q, args := currentVersionsQuery("s", "task", domain.NamespaceDirective, "d")
+	assertIndexed(t, s, []string{"session_id", "task_id", "namespace", "directive_id"}, q, args...)
+}
+
 // TestObligationReadsUseIndex locks obligation reads to their keys
 // (SPEC-2.1): versions of one obligation by primary key, versions bound to
 // a source by the 0006 index. Ingest reads the latest version once per
@@ -158,4 +174,127 @@ func TestObligationReadsUseIndex(t *testing.T) {
 	assertIndexed(t, s, []string{"session_id", "id"}, q, args...)
 	q, args = obligationsBySourceQuery("s", "item", 2)
 	assertIndexed(t, s, []string{"session_id", "f_source_item_id"}, q, args...)
+}
+
+// TestRetireLookupsUseIndex locks the DELETEs that retire an item from the
+// lookup tables to (session_id, item_id) index searches (SPEC-3.1 item 1):
+// every SUPERSEDES or DUPLICATE_OF edge runs them, so a session-prefix
+// search made each supersession grow with the session.
+func TestRetireLookupsUseIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	for _, table := range []string{"lookup_canonical", "lookup_working", "lookup_source", "lookup_blob"} {
+		assertIndexed(t, s, []string{"session_id", "item_id"}, retireLookupSQL(table), "s", "x")
+	}
+}
+
+// assertSeeks fails unless q's plan searches an index with cursor inside
+// its constraint and sorts nothing: a page after a cursor then costs what
+// it returns, not the matches before the cursor (SPEC-3.1 item 4).
+func assertSeeks(t *testing.T, s *Store, cursor string, q string, args ...any) {
+	t.Helper()
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	seeks := false
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(detail, "TEMP B-TREE") {
+			t.Errorf("query sorts (%s): %q", detail, q)
+		}
+		if strings.HasPrefix(detail, "SEARCH ") && strings.Contains(detail, cursor) {
+			seeks = true
+		}
+	}
+	if !seeks {
+		t.Errorf("cursor %s is not part of an index search: %q", cursor, q)
+	}
+}
+
+// TestLookupCursorsSeek runs every paged or batched lookup builder, one
+// query per permitted owner combination, at a mid-list cursor (SPEC-3.1
+// item 4).
+func TestLookupCursorsSeek(t *testing.T) {
+	s, _ := openTemp(t)
+	mid := store.Cursor{Seq: 7, ID: "m"}
+	combos := ownerCombos(planViewer)
+	if len(combos) != 8 {
+		t.Fatalf("owner combinations = %d, want 8", len(combos))
+	}
+	for _, b := range blobReferrerQueries("s", "h", combos) {
+		q, args := b(mid, lookupBatch)
+		assertSeeks(t, s, "(seq,item_id)>(?,?)", q, args...)
+	}
+	for _, b := range sourceItemsQueries("s", "k", combos) {
+		q, args := b(mid, lookupBatch)
+		assertSeeks(t, s, "(seq,item_id)>(?,?)", q, args...)
+	}
+	for _, b := range visibleReferencesQueries("s", "k", combos) {
+		q, args := b(mid, 3)
+		assertSeeks(t, s, "(f_seq,id)>(?,?)", q, args...)
+	}
+	q, args := canonicalQuery("s", store.CanonicalFilter{TaskID: "task", Kind: domain.KindFact, Authority: domain.AuthorityUser,
+		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, ContentHash: "h"})(mid, lookupBatch)
+	assertSeeks(t, s, "(seq,item_id)>(?,?)", q, args...)
+	q, args = workingQuery("s", store.WorkingFilter{TaskID: "task", Authority: domain.AuthorityUser,
+		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}})(mid, lookupBatch)
+	assertSeeks(t, s, "(seq,item_id)>(?,?)", q, args...)
+}
+
+// TestSourceItemsReportsUnverifiedOnce is DUR-3.1: paging through sources
+// interleaved with legacy rows 0001 altered reports each unverified ID on
+// exactly one page, never one past the page's Next cursor (which the next
+// page reads again).
+func TestSourceItemsReportsUnverifiedOnce(t *testing.T) {
+	l := openLegacy(t, 1)
+	for i, id := range []string{"src-a", "lossy-1", "src-b", "lossy-2", "src-c"} {
+		text := id
+		if strings.HasPrefix(id, "lossy") {
+			text = id + "\xff"
+		}
+		it := storetest.NewItem("s", id, uint64(i+1), text)
+		it.Source = &domain.SourceRef{Kind: domain.SourcePath, Locator: "src/main.go"}
+		o := legacyLists(t, "item", it)
+		o["f_parts"] = legacyPartsJSON(t, it.Parts)
+		l.insert("item", it, o)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		f := store.SourceFilter{Viewer: planViewer, LocatorKey: "path:src/main.go", Page: store.Page{Limit: 1}}
+		var items []string
+		seen := map[string]int{}
+		for page := 0; ; page++ {
+			lk, err := tx.SourceItems(f)
+			if err != nil {
+				return err
+			}
+			for _, it := range lk.Items {
+				items = append(items, it.ID)
+			}
+			for _, id := range lk.Unverified {
+				seen[id]++
+			}
+			if page > 10 {
+				t.Fatal("paging does not terminate")
+			}
+			if !lk.More {
+				break
+			}
+			f.Page.After = lk.Next
+		}
+		if strings.Join(items, ",") != "src-a,src-b,src-c" {
+			t.Errorf("items = %v", items)
+		}
+		if seen["lossy-1"] != 1 || seen["lossy-2"] != 1 {
+			t.Errorf("unverified reported %v, want each once", seen)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

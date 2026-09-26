@@ -13,6 +13,9 @@ import (
 type index[K comparable] struct {
 	base map[K][]string
 	over map[K][]string // nil in a read-only transaction
+	// yields counts IDs lookup has yielded, so tests can assert a keyed
+	// read walks only its key (SPEC-3.2).
+	yields int
 }
 
 func newIndex[K comparable](base map[K][]string, writable bool) index[K] {
@@ -30,6 +33,7 @@ func (x *index[K]) lookup(k K) iter.Seq[string] {
 	return func(yield func(string) bool) {
 		for _, ids := range [][]string{x.base[k], x.over[k]} {
 			for _, id := range ids {
+				x.yields++
 				if !yield(id) {
 					return
 				}
@@ -131,35 +135,43 @@ func (a seqRef) less(b seqRef) bool { return a.seq < b.seq || a.seq == b.seq && 
 // orderedIndex maps a key to entries kept in (Seq, ID) order, seen through a
 // transaction, so a lookup can start at a cursor and stop after a few
 // entries instead of collecting and sorting every match (DUR-2.1). The
-// overlay holds sorted additions and removals; commit applies both.
+// overlay holds sorted additions and removals; commit merges both into the
+// committed lists in place, doing work proportional to the change
+// (SPEC-3.1 item 3).
 type orderedIndex[K comparable] struct {
 	base map[K][]seqRef
-	over map[K][]seqRef        // sorted additions; nil when read-only
-	gone map[K]map[string]bool // removals in this transaction
+	over map[K][]seqRef          // sorted additions; nil when read-only
+	gone map[K]map[string]seqRef // removals in this transaction, by ID
+	// commitWork counts additions and removals commit applied, so tests
+	// can assert it never rebuilds a list.
+	commitWork int
 }
 
 func newOrderedIndex[K comparable](base map[K][]seqRef, writable bool) orderedIndex[K] {
 	x := orderedIndex[K]{base: base}
 	if writable {
-		x.over, x.gone = map[K][]seqRef{}, map[K]map[string]bool{}
+		x.over, x.gone = map[K][]seqRef{}, map[K]map[string]seqRef{}
 	}
 	return x
 }
 
-func (x *orderedIndex[K]) add(k K, r seqRef) {
-	l := x.over[k]
-	i := sort.Search(len(l), func(i int) bool { return !l[i].less(r) })
-	x.over[k] = slices.Insert(l, i, r)
-	if x.gone[k] != nil {
-		delete(x.gone[k], r.id)
-	}
+// search returns the position of r in l, or where it would be inserted.
+func search(l []seqRef, r seqRef) int {
+	return sort.Search(len(l), func(i int) bool { return !l[i].less(r) })
 }
 
-func (x *orderedIndex[K]) remove(k K, id string) {
+func (x *orderedIndex[K]) add(k K, r seqRef) {
+	l := x.over[k]
+	x.over[k] = slices.Insert(l, search(l, r), r)
+	delete(x.gone[k], r.id)
+}
+
+// remove drops entry r (its Seq locates it) from k.
+func (x *orderedIndex[K]) remove(k K, r seqRef) {
 	if x.gone[k] == nil {
-		x.gone[k] = map[string]bool{}
+		x.gone[k] = map[string]seqRef{}
 	}
-	x.gone[k][id] = true
+	x.gone[k][r.id] = r
 }
 
 // after yields k's entries strictly after c, in order.
@@ -175,7 +187,7 @@ func (x *orderedIndex[K]) after(k K, c seqRef) iter.Seq[seqRef] {
 			} else {
 				r, j = o[j], j+1
 			}
-			if gone[r.id] {
+			if _, removed := gone[r.id]; removed {
 				continue
 			}
 			if !yield(r) {
@@ -185,20 +197,34 @@ func (x *orderedIndex[K]) after(k K, c seqRef) iter.Seq[seqRef] {
 	}
 }
 
+// commit applies removals by binary search and additions by appending
+// (the usual case: new entries carry the newest sequence numbers) or by
+// binary-search insertion.
 func (x *orderedIndex[K]) commit() {
-	keys := map[K]bool{}
-	for k := range x.over {
-		keys[k] = true
-	}
-	for k := range x.gone {
-		keys[k] = true
-	}
-	for k := range keys {
-		var merged []seqRef
-		for r := range x.after(k, seqRef{}) {
-			merged = append(merged, r)
+	for k, gone := range x.gone {
+		l := x.base[k]
+		for _, r := range gone {
+			x.commitWork++
+			if i := search(l, r); i < len(l) && l[i] == r {
+				l = slices.Delete(l, i, i+1)
+			}
 		}
-		x.base[k] = merged
+		x.base[k] = l
+	}
+	for k, adds := range x.over {
+		l := x.base[k]
+		for _, r := range adds {
+			if _, removed := x.gone[k][r.id]; removed {
+				continue
+			}
+			x.commitWork++
+			if len(l) == 0 || l[len(l)-1].less(r) {
+				l = append(l, r)
+			} else {
+				l = slices.Insert(l, search(l, r), r)
+			}
+		}
+		x.base[k] = l
 	}
 }
 

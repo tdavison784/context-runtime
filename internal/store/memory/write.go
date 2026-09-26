@@ -223,8 +223,8 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 		t.supersededBy.add(r.ToID, r.FromID)
 	}
 	t.rels.put(r.ID, r)
-	t.relsFrom.add(r.FromID, r.ID)
-	t.relsTo.add(r.ToID, r.ID)
+	t.relsFrom.add(relKey{r.Type, r.FromID}, r.ID)
+	t.relsTo.add(relKey{r.Type, r.ToID}, r.ID)
 	t.relsByType.add(r.Type, r.ID)
 	// A superseded or duplicate item is no longer live (F1).
 	switch r.Type {

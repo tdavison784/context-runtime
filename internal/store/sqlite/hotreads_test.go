@@ -39,6 +39,18 @@ func TestHotReadsUseTheirBuilders(t *testing.T) {
 		if want, _ := obligationVersionsQuery("s", "o"); tx.lastQuery != want {
 			t.Errorf("ObligationVersions ran %q", tx.lastQuery)
 		}
+		if _, err := tx.ObligationsBySource("item", 2); err != nil {
+			return err
+		}
+		if want, _ := obligationsBySourceQuery("s", "item", 2); tx.lastQuery != want {
+			t.Errorf("ObligationsBySource ran %q", tx.lastQuery)
+		}
+		if _, err := tx.CurrentVersions("task", domain.NamespaceDirective, "d"); err != nil {
+			return err
+		}
+		if want, _ := currentVersionsQuery("s", "task", domain.NamespaceDirective, "d"); tx.lastQuery != want {
+			t.Errorf("CurrentVersions ran %q", tx.lastQuery)
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
