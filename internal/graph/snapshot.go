@@ -142,17 +142,21 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 		}
 	}
 
+	// Validate in (Seq, ID) order, so when several planned retirements
+	// would fail the error is always the earliest one's (DUR-1.7).
 	olds := make([]domain.ContextItem, 0, len(retired))
 	for _, old := range retired {
+		olds = append(olds, old)
+	}
+	slices.SortFunc(olds, bySeqID)
+	for _, old := range olds {
 		if err := domain.AuthorizeSupersession(actor, retire[old.ID], old); err != nil {
 			return SnapshotResult{}, err
 		}
 		if _, err := planObligationRetirement(tx, actor, old.ID); err != nil {
 			return SnapshotResult{}, err
 		}
-		olds = append(olds, old)
 	}
-	slices.SortFunc(olds, bySeqID)
 
 	var res SnapshotResult
 	for _, old := range olds {
