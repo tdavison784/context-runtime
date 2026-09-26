@@ -328,6 +328,7 @@ func TestSupersedeSnapshot_TaskMismatch(t *testing.T) {
 		wrongTask := storetest.NewItem(sess, "wrong-task-item", tx.NextSeq(), "text")
 		wrongTask.Kind = domain.KindTaskState
 		wrongTask.Section = domain.SectionWorking
+		wrongTask.Namespace = domain.NamespaceDirective
 		wrongTask.DirectiveID = "wd-wrong-task-item"
 		wrongTask.TaskID = "some-other-task"
 		mustInsert(t, tx, wrongTask)
@@ -1571,6 +1572,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 			g := storetest.NewGoal(sess, "goal1", tx.NextSeq(), "Ship it")
 			g.DirectiveID = dirID
 			g.Section = domain.SectionGoal
+			g.Namespace = domain.NamespaceDirective
 			goalID = g.ID
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, dirID, g.ID, "evt")
@@ -1602,6 +1604,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 			hidden := agentScopedItem(sess, "hidden-goal", tx.NextSeq(), "agent-b")
 			hidden.DirectiveID = dirID
 			hidden.Section = domain.SectionPinned
+			hidden.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, hidden)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-b"), taskID, dirID, hidden.ID, "evt")
 			return err
@@ -1636,6 +1639,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 			private := agentScopedItem(sess, "d-private", tx.NextSeq(), "agent-a")
 			private.DirectiveID = dirID
 			private.Section = domain.SectionPinned
+			private.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, private)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID, private.ID, "evt-private")
 			return err
@@ -1648,6 +1652,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 			taskWide := taskItem(sess, "d-task-wide", tx.NextSeq(), domain.AuthorityHarness)
 			taskWide.DirectiveID = dirID
 			taskWide.Section = domain.SectionPinned
+			taskWide.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, taskWide)
 			// A HARNESS/task-wide principal cannot see agent-a's private
 			// version, so this must succeed (round-1 AUTH-2.1 property: a
@@ -1701,6 +1706,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
 			g.Section = domain.SectionGoal
+			g.Namespace = domain.NamespaceDirective
 			goalID = g.ID
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
@@ -1758,6 +1764,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
 			g.Section = domain.SectionGoal
+			g.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
 			return err
@@ -1798,6 +1805,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
 			g.Section = domain.SectionGoal
+			g.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
 			return err

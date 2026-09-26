@@ -104,6 +104,7 @@ func TestR13_CheckBoundaryConflict(t *testing.T) {
 			task := newDirective(sess, "d-task", dirID, tx.NextSeq(), "task-wide")
 			hidden := agentScopedItem(sess, "h-hidden", tx.NextSeq(), "agent-b")
 			hidden.DirectiveID, hidden.Section = "h", domain.SectionPinned
+			hidden.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, task, hidden)
 			mustFile(t, tx, task, hidden)
 			return nil

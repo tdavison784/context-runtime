@@ -59,7 +59,7 @@ func fileGoal(t *testing.T, tx store.Tx, actor domain.Principal, id, dirID, text
 	g.Namespace = domain.NamespaceDirective
 	g.Scope = domain.ScopeTask
 	g.Access = storetest.DirectiveBoundary(actor.SessionID)
-	mustInsert(t, tx, g)
+	mustCreate(t, tx, g)
 	if _, err := ReplaceDirective(tx, actor, g.TaskID, dirID, g.ID, "evt-"+id); err != nil {
 		t.Fatalf("ReplaceDirective(%s): %v", id, err)
 	}
@@ -99,9 +99,10 @@ func TestD10_DuplicateDirectiveNeverCurrent(t *testing.T) {
 			dup = storetest.NewGoal(sess, "g2", tx.NextSeq(), "Ship it")
 			dup.DirectiveID = dirID
 			dup.Section = domain.SectionGoal
+			dup.Namespace = domain.NamespaceDirective
 			dup.Scope = domain.ScopeTask
 			dup.Access = storetest.DirectiveBoundary(sess)
-			mustInsert(t, tx, dup)
+			mustCreate(t, tx, dup)
 			rawDuplicateOf(t, tx, dup.ID, canonical.ID)
 			return nil
 		})
@@ -231,6 +232,7 @@ func TestD10_CurrentVersionsDeterministicAndFiltered(t *testing.T) {
 			private := agentScopedItem(sess, "z-private", tx.NextSeq(), "agent-a")
 			private.DirectiveID = dirID
 			private.Section = domain.SectionPinned
+			private.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, private)
 			if _, err := ReplaceDirective(tx, agentA, "task", dirID, private.ID, "evt-1"); err != nil {
 				return err
@@ -238,6 +240,7 @@ func TestD10_CurrentVersionsDeterministicAndFiltered(t *testing.T) {
 			hidden := agentScopedItem(sess, "b-hidden", tx.NextSeq(), "agent-b")
 			hidden.DirectiveID = dirID
 			hidden.Section = domain.SectionPinned
+			hidden.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, hidden)
 			if _, err := ReplaceDirective(tx, agentB, "task", dirID, hidden.ID, "evt-2"); err != nil {
 				return err
@@ -245,6 +248,7 @@ func TestD10_CurrentVersionsDeterministicAndFiltered(t *testing.T) {
 			taskWide := taskItem(sess, "a-task", tx.NextSeq(), domain.AuthorityHarness)
 			taskWide.DirectiveID = dirID
 			taskWide.Section = domain.SectionPinned
+			taskWide.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, taskWide)
 			_, err := ReplaceDirective(tx, harness, "task", dirID, taskWide.ID, "evt-3")
 			return err
@@ -307,9 +311,10 @@ func TestD10_MappedDuplicateNeverCurrent(t *testing.T) {
 			dup = storetest.NewGoal(sess, "g2", tx.NextSeq(), "Ship it")
 			dup.DirectiveID = dirID
 			dup.Section = domain.SectionGoal
+			dup.Namespace = domain.NamespaceDirective
 			dup.Scope = domain.ScopeTask
 			dup.Access = storetest.DirectiveBoundary(sess)
-			mustInsert(t, tx, dup)
+			mustCreate(t, tx, dup)
 			rawDuplicateOf(t, tx, dup.ID, canonical.ID)
 			// Bypass ReplaceDirective: point the map at the duplicate.
 			if err := tx.SetCurrentVersion(dup.ID); err != nil {
