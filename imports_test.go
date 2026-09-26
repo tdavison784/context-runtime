@@ -23,6 +23,7 @@ func TestPackageBoundaries(t *testing.T) {
 	// Direct-import allow lists for module-internal packages.
 	allowOnly := map[string][]string{
 		"internal/domain":    {},
+		"internal/directive": {"internal/domain"},
 		"internal/provider":  {"internal/domain"},
 		"internal/telemetry": {"internal/domain"},
 	}
