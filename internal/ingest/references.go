@@ -163,7 +163,9 @@ func (r *run) linkPendingReferences(si int, actor domain.Principal, target domai
 // the reference's boundary is within the target's; otherwise it writes
 // nothing and reports nothing.
 func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextItem) (stop bool, err error) {
-	if r.refLinks >= r.g.maxReferenceLinks() {
+	// Optional links spend the event's own MaxReferenceLinks budget, never
+	// MaxRelationships (ruling 1); the receipt records it with the limits.
+	if r.refLinks >= r.limits.MaxReferenceLinks {
 		return true, nil
 	}
 	if !ref.Access.Permits(actor) || !target.Access.Permits(actor) || !ref.Access.Within(target.Access) {

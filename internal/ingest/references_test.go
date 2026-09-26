@@ -167,7 +167,7 @@ func TestReferenceLinkBudget_Ruling1(t *testing.T) {
 			f.mustIngest(user, e)
 		}
 
-		f.in.MaxReferenceLinks = 2
+		f.in.Limits = domain.Limits{MaxReferenceLinks: 2}
 		r := f.mustIngest(user, userEvent("r1", "## References\n- a.md\n", true))
 		if got := f.references(semantic(r)[0].ID); len(got) != 2 {
 			t.Errorf("links = %d, want the budget of 2", len(got))
@@ -184,7 +184,6 @@ func TestReferenceLinkBudget_Ruling1(t *testing.T) {
 
 		// Two essential DERIVED_FROM edges exactly fill MaxRelationships;
 		// four optional links must not push either out.
-		f.in.MaxReferenceLinks = 0
 		f.in.Limits = domain.Limits{MaxRelationships: 2}
 		r2, err := f.ingest(user, userEvent("r2", "## References\n- ./a.md\n## Remember\n- essential fact\n", true))
 		if err != nil {
@@ -192,6 +191,10 @@ func TestReferenceLinkBudget_Ruling1(t *testing.T) {
 		}
 		if got := f.references(semantic(r2)[0].ID); len(got) != 4 {
 			t.Errorf("links = %d, want all 4 within the default budget", len(got))
+		}
+		// The budget is an execution limit the receipt records.
+		if r.Versions.Limits.MaxReferenceLinks != 2 || r2.Versions.Limits.MaxReferenceLinks != 256 {
+			t.Errorf("recorded budgets = %d, %d; want 2, 256", r.Versions.Limits.MaxReferenceLinks, r2.Versions.Limits.MaxReferenceLinks)
 		}
 	})
 }
