@@ -576,3 +576,84 @@ func TestUpgradeGrantTargetIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeReconcilesLegacyMatcherSatisfaction checks migration 0026 on a
+// database migrated through 0025 (P3-41): a current version SATISFIED by a
+// legacy matcher transition, which has no establishable applicability proof,
+// returns to UNRESOLVED through one audited SYSTEM UPGRADE_RECONCILIATION
+// transition at the session's next sequence, keeping its original history;
+// a USER-asserted satisfaction and a retired version are untouched.
+func TestUpgradeReconcilesLegacyMatcherSatisfaction(t *testing.T) {
+	l := openLegacy(t, 25)
+	satisfied := func(id string, seq uint64) domain.ObligationVersion {
+		o := storetest.NewObligation("s", id, 1, seq, "src")
+		o.Status, o.EvidenceIDs, o.Revision = domain.ObligationSatisfied, []string{"ev"}, 2
+		return o
+	}
+	matcher, user, retired := satisfied("o-matcher", 1), satisfied("o-user", 2), satisfied("o-retired", 3)
+	retired.Current, retired.RetiredSeq = false, 9
+	for _, o := range []domain.ObligationVersion{matcher, user, retired} {
+		l.insert("obligation", o, nil)
+	}
+	tr := func(id, obl string, seq uint64, withMatcher bool) domain.ObligationTransition {
+		t := storetest.NewTransition("s", id, obl, 1, seq, domain.ObligationUnresolved, domain.ObligationSatisfied)
+		t.EvidenceIDs = []string{"ev"}
+		if withMatcher {
+			t.Matcher, t.GrantID = &domain.MatcherRef{Name: "tests_pass", Version: "1"}, "g"
+		} else {
+			t.Matcher, t.GrantID = nil, ""
+		}
+		return t
+	}
+	l.insert("obligation_transition", tr("t-matcher", "o-matcher", 4, true), nil)
+	l.insert("obligation_transition", tr("t-user", "o-user", 5, false), nil)
+	l.insert("obligation_transition", tr("t-retired", "o-retired", 6, true), nil)
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		if tx.LastSeq() != 101 {
+			t.Errorf("LastSeq = %d, want 101 (one reconciliation at the next sequence)", tx.LastSeq())
+		}
+		got, err := tx.Obligation("o-matcher")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != domain.ObligationUnresolved || got.Revision != 3 || len(got.EvidenceIDs) != 0 {
+			t.Errorf("reconciled version = %+v, want UNRESOLVED at revision 3 without evidence", got)
+		}
+		trs, err := tx.ObligationTransitions("o-matcher")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(trs) != 2 || trs[0].ID != "t-matcher" {
+			t.Fatalf("history = %+v, want the original transition kept and one reconciliation", trs)
+		}
+		rec := trs[1]
+		if rec.Cause != domain.CauseUpgradeReconciliation || rec.From != domain.ObligationSatisfied || rec.To != domain.ObligationUnresolved ||
+			rec.Actor.Authority != domain.AuthoritySystem || rec.Seq != 101 || rec.ReasonCode != domain.ReasonUpgradeReconciliation {
+			t.Errorf("reconciliation transition = %+v", rec)
+		}
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := r.TransitionDetail(rec.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Cause != domain.CauseUpgradeReconciliation || d.Seq != 101 || d.Target.ObligationID != "o-matcher" {
+			t.Errorf("reconciliation detail = %+v", d)
+		}
+		for _, id := range []string{"o-user", "o-retired"} {
+			o, err := tx.Obligation(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if o.Status != domain.ObligationSatisfied || o.Revision != 2 {
+				t.Errorf("%s changed: %+v", id, o)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
