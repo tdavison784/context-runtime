@@ -701,6 +701,106 @@ Answers to `p2-contract`'s implementation questions, appended to
   once, outside any retried transaction callback — R16 raised no change
   here, only confirmed it against a `p2-contract` question.
 
+### 22. Round 4 rulings: R17 (p2-parser questions) and R18 (p2-store questions)
+
+**R17 (p2-parser questions, all accepted):**
+
+- **Validation ownership (refines §2/§21, D2/M2/R16).** `internal/directive`
+  owns syntax-level attribute validation and executability (an attribute
+  the grammar disallows, or a malformed value, is already rejected at
+  parse time); `policy.ForDirective` (§2) remains a fail-closed,
+  defense-in-depth re-check in `internal/ingest`, not the primary
+  validator — R16's cross-check (a directive `internal/directive` accepts
+  must also be `policy.ForDirective`-accepted) is how the two are kept
+  from silently drifting. `p2-contract`'s work group 3 already closed the
+  case-folding/TTL divergence between the two packages that made this
+  cross-check necessary in the first place.
+- **Diagnostic-cap application order (refines §13, D17).**
+  `internal/ingest` merges a span's parse units in part order before
+  applying D17's per-span cap: 256 diagnostics plus one truncation marker
+  are (re-)applied per span across its merged parts, then the whole-event
+  total cap (§13's finite versioned limit) is applied over every span's
+  merged, already-capped diagnostics — a single well-defined two-stage
+  cap, not an ambiguous interaction between per-part, per-span, and
+  per-event limits.
+- **Stricter-than-CommonMark choices kept (refines §4, D5/D6).**
+  Confirmed, not changed: a fence opens on any 3-or-more identical
+  backtick/tilde run (D5's "≥3" is exact, not a minimum CommonMark also
+  relaxes elsewhere); a heading line with a trailing closing sequence of
+  `#` characters (CommonMark's optional "closing ATX hashes") is malformed
+  here, not stripped and accepted; a Setext-style heading (text underlined
+  with `=`/`-`) never closes or opens a section, because D6 already
+  excludes it from being a directive heading at all — these are recorded
+  as parser-v1's deliberate, narrower-than-CommonMark grammar, not gaps to
+  widen later without an explicit ADR change.
+- **Fail-closed surprises kept (refines §4/§8, D7/M4/D12/R1).** Confirmed:
+  two list items sharing one explicit ID within a section are *both*
+  dropped (not "first wins, second diagnosed") — M4's "repeated directive
+  IDs within a single list are malformed and no member under that
+  repeated ID is applied" means neither survives; a fence-opening or
+  block-quote marker at column 0 inside what is otherwise a list body
+  makes that whole section malformed rather than being tolerated as list
+  content; an out-of-range `ttl` (R1's 1..2147483647 bound) is fatal to
+  the event, not a per-attribute diagnostic that leaves the item live with
+  no TTL.
+- **Parser version pinning (new, refines §3/§12/§13).** The parser version
+  this ADR's records reference throughout (recorded with every item,
+  diagnostic, and receipt) is `directive/v1`, defined as exactly the
+  behavior this ADR and `internal/directive/doc.go` document; a future
+  grammar change is a new version string, never a silent reinterpretation
+  of `directive/v1`.
+
+**R18 (p2-store questions, all accepted):**
+
+- **Retiring the untyped namespace methods (refines §17, M6/R6/R10 — in
+  progress).** `p2-store` has landed the typed methods
+  `store.CurrentVersion(domain.CurrentKey)` and
+  `store.CurrentVersions(taskID, ns, id)`; the pre-M6
+  `CurrentDirective`/`CurrentDirectives`/`SetCurrentDirective` methods are
+  marked `Deprecated` in `internal/store/store.go` but not yet removed.
+  R18 confirms the sequence: `internal/graph` and `internal/ingest` switch
+  every call site to the typed methods (retiring R10's
+  `ErrNamespaceConflict` transitional fail-closed rule, which was never
+  actually implemented since the switch was still pending), and only then
+  does `p2-store` delete the deprecated methods. As of this ADR revision,
+  `internal/graph` (`graph.go`) still calls the deprecated methods; the
+  switch is `p2-graph`'s outstanding work, not yet done.
+- **Obligation retirement lookup, named (confirms §9/§20, D13/R9).**
+  `store.ObligationsBySource(sourceItemID string, limit int)
+  ([]domain.ObligationVersion, error)` and
+  `store.RetireObligationVersion(obligationID string, version,
+  expectedRevision uint64, event domain.LifecycleEvent)
+  (domain.ObligationVersion, error)` are the landed methods
+  (`internal/store/memory`, `internal/store/sqlite`) R9 called for — the
+  `limit` parameter is D17's bounded-scan requirement made concrete.
+- **`domain.UnresolvedReference` and migration 0008 (refines §16, M5/R2 —
+  not yet landed).** `p2-contract` is to add `domain.UnresolvedReference`
+  (session, occurrence, span, and item IDs; lexical locator key and rule
+  version; owner access boundary and authority; `Seq`; an ID derived from
+  occurrence plus ordinal) and `p2-store` persists it in a new migration
+  0008, so an unresolved References item survives restart for later
+  linking (§16's "unresolved references persist" requirement, now given a
+  concrete shape). Neither the type nor migration 0008 exists as of this
+  ADR revision; `p2-tests` should not assume it when writing References
+  fixtures until it lands.
+- **`domain.TTLLive`'s zero-creation-turn guard (refines §19, M8 — not yet
+  landed).** `TTLLive(created, current uint64, n int) bool` is landed
+  (`internal/domain/item.go`) with D18's difference-form comparison, but
+  does not yet special-case `created == 0`: R18 rules that a pre-Phase-2
+  item with no recorded creation turn (`created == 0`) must report
+  `false` regardless of `current`/`n`, so a record migrated without turn
+  metadata is never treated as live by an invented default (M8) merely
+  because the difference formula happens to fall inside `n`. This guard
+  is not yet in the merged `TTLLive`; landing it is `p2-contract`'s
+  outstanding work.
+- **Bounded diagnostic/lifecycle-command list reads (refines §12/§1 —
+  deferred).** A future cross-event caller reading diagnostics or
+  lifecycle commands by list (rather than by one event's receipt) needs a
+  `Limit` parameter and an `ErrLimitExceeded` result, matching D17's
+  bounded-scan discipline elsewhere; R18 records this as accepted but
+  explicitly deferred — no such cross-event caller exists yet in Phase 2's
+  scope to require it.
+
 ## Alternatives considered
 
 - **D1:** the brief's read-only resolution without an explicit
@@ -952,6 +1052,26 @@ reconciles exact names in a later round.
   as mandatory by FR-DOM-007's policy-mandatory path; `internal/directive`'s
   `Item.TextRanges` and `internal/domain`'s `SourceRef.Slices` round-trip
   the same byte ranges for a canonical fixture.
+- **§22 (round 4 rulings, R17-R18):** `internal/ingest` — a directive
+  `internal/directive` accepts is also `policy.ForDirective`-accepted
+  (R17, reconfirming R16); a span whose diagnostics split across multiple
+  parts are capped per-span after merging in part order, then again at
+  the whole-event total, never per-part independently (R17); two list
+  items sharing one explicit ID are both absent from the result, not
+  one-survives-one-diagnosed (R17); a column-0 fence/quote marker inside a
+  list body malforms the whole section (R17); an out-of-range `ttl`
+  aborts the event rather than leaving the item live with no TTL (R17,
+  confirming R1); every persisted item/diagnostic/receipt records parser
+  version `directive/v1` (R17). `internal/store/storetest` —
+  `ObligationsBySource` with a `limit` lower than the bound source's
+  obligation count returns exactly `limit` versions, deterministically
+  ordered (R18). Deferred until landed: once `internal/graph`/
+  `internal/ingest` switch to `CurrentVersion`/`CurrentVersions`, a static
+  check asserts no remaining call site uses the deprecated
+  `CurrentDirective`/`CurrentDirectives`/`SetCurrentDirective` (R18); once
+  landed, `domain.TTLLive(0, current, n)` is `false` for every
+  `current`/`n` (R18); once landed, `domain.UnresolvedReference`
+  round-trips through migration 0008 and survives restart (R18).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
