@@ -193,10 +193,7 @@ func blobItem(sess, id string, seq uint64, b domain.Blob, size uint64) domain.Co
 func testItemBlobIntegrity(t *testing.T, s store.Store) {
 	b := NewBlob(sessA, []byte("document bytes"))
 	size := uint64(len(b.Data))
-	update(t, s, sessB, func(tx store.Tx) error {
-		noErr(t, tx.InsertBlob(NewBlob(sessB, b.Data)))
-		return audited(tx)
-	})
+	update(t, s, sessB, func(tx store.Tx) error { return tx.InsertBlob(NewBlob(sessB, b.Data)) })
 	cases := []struct {
 		name      string
 		storeBlob bool
@@ -228,10 +225,7 @@ func testItemBlobIntegrity(t *testing.T, s store.Store) {
 		}
 	}
 	// A blob committed by an earlier transaction satisfies the part.
-	update(t, s, sessA, func(tx store.Tx) error {
-		noErr(t, tx.InsertBlob(b))
-		return audited(tx)
-	})
+	update(t, s, sessA, func(tx store.Tx) error { return tx.InsertBlob(b) })
 	update(t, s, sessA, func(tx store.Tx) error {
 		return tx.InsertItem(blobItem(sessA, "doc", tx.NextSeq(), b, size))
 	})
@@ -610,7 +604,7 @@ func testBlobs(t *testing.T, s store.Store) {
 		noErr(t, tx.InsertBlob(b))
 		noErr(t, tx.InsertBlob(b)) // identical bytes: no-op
 		noErr(t, tx.InsertBlob(empty))
-		return audited(tx)
+		return nil
 	})
 	update(t, s, sessA, func(tx store.Tx) error {
 		noErr(t, tx.InsertBlob(b))
@@ -642,10 +636,7 @@ func testBlobs(t *testing.T, s store.Store) {
 		wantErr(t, err, domain.ErrNotFound)
 		return nil
 	})
-	update(t, s, sessB, func(tx store.Tx) error {
-		noErr(t, tx.InsertBlob(NewBlob(sessB, b.Data)))
-		return audited(tx)
-	})
+	update(t, s, sessB, func(tx store.Tx) error { return tx.InsertBlob(NewBlob(sessB, b.Data)) })
 	view(t, s, sessB, func(tx store.ReadTx) error {
 		got, err := tx.Blob(b.Hash)
 		noErr(t, err)

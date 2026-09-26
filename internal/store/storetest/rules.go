@@ -26,7 +26,6 @@ func testSemanticWriteRule(t *testing.T, s store.Store) {
 		name  string
 		write func(tx store.Tx) error
 	}{
-		{"InsertBlob", func(tx store.Tx) error { return tx.InsertBlob(blob) }},
 		{"SetCurrentDirective", func(tx store.Tx) error { return tx.SetCurrentDirective("task", "dir", "d") }},
 		{"UpdateObligationVersion", func(tx store.Tx) error {
 			next := o.Clone()
@@ -64,8 +63,6 @@ func testSemanticWriteRule(t *testing.T, s store.Store) {
 		}
 	}
 	view(t, s, sessA, func(tx store.ReadTx) error {
-		_, err := tx.Blob(blob.Hash)
-		noErr(t, err)
 		cur, err := tx.CurrentDirective("task", "dir", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "d" {
@@ -75,6 +72,24 @@ func testSemanticWriteRule(t *testing.T, s store.Store) {
 		noErr(t, err)
 		if !got.MaterializationDisabled || got.Revision != 2 {
 			t.Errorf("obligation = %+v, want MaterializationDisabled at revision 2", got)
+		}
+		return nil
+	})
+
+	// Blobs are exempt: they are inert until a sequenced record references
+	// them, so a blob-only transaction commits, and so does a ledger-only
+	// one that stores response or audit blobs.
+	update(t, s, sessA, func(tx store.Tx) error { return tx.InsertBlob(blob) })
+	ledgerBlob := NewBlob(sessA, []byte("provider response"))
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertBlob(ledgerBlob))
+		c := walk(t, tx, "blob-call", "blob-conv")
+		return tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "l-blob-call", c.PreparedSeq, domain.TargetCall, c.CallID))
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		for _, b := range []domain.Blob{blob, ledgerBlob} {
+			_, err := tx.Blob(b.Hash)
+			noErr(t, err)
 		}
 		return nil
 	})
