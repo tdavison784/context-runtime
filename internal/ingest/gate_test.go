@@ -155,3 +155,19 @@ func TestMixedAuthorityAndIsolation_M1(t *testing.T) {
 		}
 	})
 }
+
+// TestItemsPerSpanAcrossParts_D17: the per-span item bound covers all of a
+// span's text parts together, not each part separately.
+func TestItemsPerSpanAcrossParts_D17(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("u0", "hi", false))
+		f.in.Limits = domain.Limits{MaxItemsPerSpan: 2}
+		span := textSpan(domain.AuthorityUser, true, "## Remember\n- a\n- b\n")
+		span.Parts = append(span.Parts, domain.InputPart{Type: domain.PartText, MediaType: "text/plain", Text: "## Remember\n- c\n"})
+		_, err := f.ingest(user, domain.Event{EventID: "u1", Kind: domain.EventUser, Spans: []domain.Span{span}})
+		if !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Errorf("err = %v, want a limit rejection", err)
+		}
+	})
+}

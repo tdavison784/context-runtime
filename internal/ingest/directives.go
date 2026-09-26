@@ -219,6 +219,10 @@ func (r *run) linkDerived(c unitCtx, it domain.ContextItem) error {
 	if r.rels >= r.limits.MaxRelationships {
 		return errLimit("MaxRelationships")
 	}
+	// The parser bounds items per text part; the span bound spans parts.
+	if r.derived[c.si]++; r.derived[c.si] > r.limits.MaxItemsPerSpan {
+		return errLimit("MaxItemsPerSpan")
+	}
 	_, err := graph.LinkDerived(r.tx, c.actor, it.ID, []string{c.transcript.ID}, &domain.Coverage{}, r.graphEventID())
 	r.rels++
 	return err

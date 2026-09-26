@@ -28,7 +28,8 @@ type run struct {
 
 	items    []domain.ContextItem
 	rels     int
-	refs     int // unresolved references declared so far (ordinals)
+	refs     int         // unresolved references declared so far (ordinals)
+	derived  map[int]int // derived items per span (MaxItemsPerSpan across parts)
 	diags    diagnostics
 	commands []domain.LifecycleCommandRecord
 	dups     []domain.IngestLink
@@ -58,6 +59,7 @@ func (r *run) apply() (domain.IngestReceipt, error) {
 	r.seq = r.tx.NextSeq()
 	r.diags = newDiagnostics(r.limits)
 	r.suppliedBlobs = map[string]bool{}
+	r.derived = map[int]int{}
 
 	if err := r.advanceTask(); err != nil {
 		return domain.IngestReceipt{}, err
