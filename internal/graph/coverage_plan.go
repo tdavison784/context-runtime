@@ -67,19 +67,34 @@ func planDerivedCoverage(tx store.Tx, actor domain.Principal, derivedID string, 
 	plan.coverage = domain.CoverageRecord{SemanticMeta: domain.SemanticMeta{ID: deriveID("coverage", "context-runtime/graph/derived-coverage-id/v1", actor.SessionID, derivedID, eventID, string(purpose)), SessionID: actor.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq}, Purpose: purpose, Access: derived.Access}
 	for _, source := range plan.sources {
 		ref := domain.ItemContentRef{ItemID: source.ID, ContentHash: source.ContentHash}
-		member := domain.CoverageMember{SemanticMeta: domain.SemanticMeta{SessionID: actor.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq}, CoverageID: plan.coverage.ID, Source: &ref}
-		key, err := member.Key()
-		if err != nil {
-			return plan, err
+		members := []domain.CoverageMember{{Source: &ref}}
+		if source.Role == domain.RoleProjection {
+			deps, err := projectionDependencies(tx, actor, source, derived.Access)
+			if err != nil {
+				return plan, err
+			}
+			members = append(members, deps...)
 		}
-		member.ID = deriveID("member", "context-runtime/graph/coverage-member-id/v1", plan.coverage.ID, key)
-		plan.members = append(plan.members, member)
+		if len(members) > limit-len(plan.members) {
+			return plan, store.ErrLimitExceeded
+		}
+		for _, member := range members {
+			member.SemanticMeta = domain.SemanticMeta{SessionID: actor.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq}
+			member.CoverageID = plan.coverage.ID
+			key, err := member.Key()
+			if err != nil {
+				return plan, err
+			}
+			member.ID = deriveID("member", "context-runtime/graph/coverage-member-id/v1", plan.coverage.ID, key)
+			plan.members = append(plan.members, member)
+		}
 	}
 	slices.SortFunc(plan.members, func(a, b domain.CoverageMember) int {
 		ka, _ := a.Key()
 		kb, _ := b.Key()
 		return strings.Compare(ka, kb)
 	})
+	plan.members = slices.CompactFunc(plan.members, func(a, b domain.CoverageMember) bool { return a.ID == b.ID })
 	plan.coverage.MemberCount = uint64(len(plan.members))
 	plan.coverage.Signature, err = domain.CoverageSignature(plan.coverage, plan.members)
 	if err != nil {
