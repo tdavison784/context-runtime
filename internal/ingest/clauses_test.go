@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"errors"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
 	"github.com/tdavison784/context-runtime/internal/store/sqlite"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 )
 
 // Tests for ADR 19 clauses SPEC-1.10 found unlocked. Each asserts the
@@ -120,7 +120,7 @@ func TestTruncationPersistedAndReplayed(t *testing.T) {
 			return nil
 		})
 	}
-	path := filepath.Join(t.TempDir(), "trunc.db")
+	path := sqlitetest.Path(t)
 	for _, name := range []string{"memory", "sqlite"} {
 		t.Run(name, func(t *testing.T) {
 			open := func() store.Store {

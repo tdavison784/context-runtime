@@ -3,7 +3,6 @@ package ingest
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,7 +11,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
-	"github.com/tdavison784/context-runtime/internal/store/sqlite"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 )
 
 var ctx = context.Background()
@@ -35,12 +34,9 @@ func eachStore(t *testing.T, fn func(t *testing.T, f *fixture)) {
 		fn(t, newFixture(t, ms))
 	})
 	t.Run("sqlite", func(t *testing.T) {
-		ss, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "ingest.db"))
-		if err != nil {
-			t.Fatalf("sqlite.Open: %v", err)
-		}
-		t.Cleanup(func() { ss.Close() })
-		fn(t, newFixture(t, ss))
+		// One migrated template per test binary (W2 e6ac159): a fresh
+		// Open replays every migration, seconds each under -race.
+		fn(t, newFixture(t, sqlitetest.Open(t)))
 	})
 }
 

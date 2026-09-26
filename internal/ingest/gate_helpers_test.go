@@ -2,13 +2,12 @@ package ingest
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
-	"github.com/tdavison784/context-runtime/internal/store/sqlite"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 )
 
 // pending marks a Phase 3 gate test whose contract or service dependency has
@@ -57,12 +56,7 @@ func semanticStores(t *testing.T, fn func(t *testing.T, f *fixture)) {
 		run(t, ms)
 	})
 	t.Run("sqlite", func(t *testing.T) {
-		ss, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "gate.db"))
-		if err != nil {
-			t.Fatalf("sqlite.Open: %v", err)
-		}
-		t.Cleanup(func() { ss.Close() })
-		run(t, ss)
+		run(t, sqlitetest.Open(t))
 	})
 }
 
