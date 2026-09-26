@@ -232,10 +232,15 @@ hex digits — is the only derived-ID scheme, distinct from the opaque item
 ID of each occurrence/version. Derived IDs are published in
 diagnostics/inspection even with no other warning. D20: directive IDs are
 otherwise exact (case-sensitive); a user/system-supplied `[id]` that has the
-*shape* of a derived ID (lowercase keyword, hyphen, 64 lowercase hex) is
-rejected with `ErrMalformedDirective` and the item is dropped — not parsed
-with a fallback derived ID — so an explicit ID can never collide with, or
-be mistaken for, a derived one.
+*shape* of a derived ID (a lowercased content-section keyword — Goal,
+Pinned, Working, Remember, References, or Ephemeral, never Resolve/Unpin,
+since only content sections derive IDs (§6/D9) — a hyphen, and 64
+lowercase hex digits; SPEC-2.7 corrects "a lowercased keyword" to name the
+six-keyword scope explicitly, since `resolve-<64hex>`/`unpin-<64hex>` are
+ordinary explicit IDs, not derived-ID-shaped rejections) is rejected with
+`ErrMalformedDirective` and the item is dropped — not parsed with a
+fallback derived ID — so an explicit ID can never collide with, or be
+mistaken for, a derived one.
 
 Owner: `internal/directive` (shape check at parse time), `internal/domain`
 (`DerivedDirectiveID`, unchanged).
@@ -1219,7 +1224,11 @@ the code at this ADR's final-pass head.
   `form-heading-shaped-inert` (4-space/tab indentation, seven `#`, and
   `#5 bolt` are not heading-shaped and stay body text), and
   `form-heading-shaped-never-opens` (the same heading-shaped line closes
-  the prior section but never itself opens a new one).
+  the prior section but never itself opens a new one). **(SPEC-2.7)** This
+  round's other two R17 grammar deviations — trailing SP/HTAB tolerance
+  after heading metadata, and D20's derived-ID shape check applying only
+  to the six content-section keywords — are recorded next to this one in
+  §22's "Stricter-than-CommonMark choices kept" bullet, not repeated here.
 - **SPEC-1.10 ruling: parser/policy version-bump replay is covered by the
   general verbatim-receipt property; a real upgrade test is deferred
   (refines §10, D14).** SPEC-1.10 listed "replay after a policy/parser-
@@ -1843,11 +1852,19 @@ Five clarifications, applied in SDD v0.9 (R4):
   membership and its members' effective metadata; equal member text in an
   otherwise changed snapshot does not by itself make that member a
   duplicate."
-- **FR-DIR-002 (derived-ID-shaped explicit ID rejection, §6/D20):** added:
-  "An explicit [id] that has the derived-ID shape (a lowercased keyword, a
-  hyphen, and 64 lowercase hex digits) is rejected with an
-  ErrMalformedDirective diagnostic and the item is dropped, never assigned
-  a derived ID, so explicit and derived IDs can never collide."
+- **FR-DIR-002 (derived-ID-shaped explicit ID rejection, §6/D20; wording
+  corrected, SPEC-2.7):** added: "An explicit [id] that has the derived-ID
+  shape (a lowercased content-section keyword — Goal, Pinned, Working,
+  Remember, References, or Ephemeral — a hyphen, and 64 lowercase hex
+  digits) is rejected with an ErrMalformedDirective diagnostic and the
+  item is dropped, never assigned a derived ID, so explicit and derived
+  IDs can never collide." The original v0.9 text said "a lowercased
+  keyword," which read as covering every directive keyword including
+  Resolve/Unpin; only the six content sections ever derive an ID
+  (`internal/directive/items.go`'s `derivedShaped`), so
+  `resolve-<64hex>`/`unpin-<64hex>` are ordinary explicit IDs on a
+  lifecycle command, never derived-ID-shaped rejections (§22's R17
+  bullet, SPEC-2.7).
 - **FR-DIR-005 (unsupported-lifecycle vocabulary, §1/§4/M4):** added: "The
   unsupported-lifecycle vocabulary recognized for this diagnostic is
   Archive, Unarchive, Promote, Demote, Block, Unblock, Waive, CompleteTask,
