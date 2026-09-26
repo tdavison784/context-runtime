@@ -214,10 +214,11 @@ func TestDirectives_Residual_D8(t *testing.T) {
 				instr = append(instr, it)
 			}
 		}
-		// "Also cite sources." belongs to the Pinned section body (its
-		// list continues until a same/higher heading), so only the
-		// leading text is residue.
-		if len(instr) != 1 || instr[0].Parts[0].Text != "Be concise." || instr[0].Scope != domain.ScopeSession {
+		// "Also cite sources." is stray prose in the Pinned list, which
+		// makes that section malformed: its unwritten text joins the
+		// residue, byte for byte, while the written item [a] does not
+		// (R20.3).
+		if len(instr) != 1 || instr[0].Parts[0].Text != "  Be concise.\n## Pinned\nAlso cite sources.\n" || instr[0].Scope != domain.ScopeSession {
 			t.Fatalf("residual = %+v", instr)
 		}
 		h := f.mustIngest(sys, domain.Event{EventID: "h1", Kind: domain.EventHarness, Spans: []domain.Span{textSpan(domain.AuthorityHarness, false, "Use tabs.")}})
@@ -276,6 +277,27 @@ func TestNonDirectiveDuplicates_D10(t *testing.T) {
 		agent := f.mustIngest(user, domain.Event{EventID: "a1", Kind: domain.EventAgent, Spans: []domain.Span{textSpan(domain.AuthorityAgent, false, "yes")}})
 		if len(agent.Duplicates) != 0 {
 			t.Errorf("cross-authority duplicate: %v", agent.Duplicates)
+		}
+	})
+}
+
+// TestDuplicateLookupBound_R19: duplicate candidates come from the bounded
+// index; more identical prior occurrences than the lookup limit reject the
+// event (fail closed) instead of linking against a partial list.
+func TestDuplicateLookupBound_R19(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		for _, id := range []string{"y1", "y2", "y3"} {
+			f.mustIngest(user, userEvent(id, "yes", false))
+		}
+		f.in.LookupLimit = 3 // the new occurrence itself is a candidate too
+		before := f.lastSeq()
+		if _, err := f.ingest(user, userEvent("y4", "yes", false)); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
+			t.Errorf("over the bound: err = %v", err)
+		}
+		f.in.LookupLimit = 4
+		if r, err := f.ingest(user, userEvent("y4", "yes", false)); err != nil || len(r.Duplicates) != 1 {
+			t.Errorf("within the bound: %v, dups %v", err, r.Duplicates)
 		}
 	})
 }

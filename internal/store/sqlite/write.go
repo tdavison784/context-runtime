@@ -62,7 +62,29 @@ func (t *transaction) InsertItem(v domain.ContextItem) error {
 			return domain.ErrIntegrity
 		}
 	}
-	return t.put("item", v.ID, 0, v, false)
+	return t.atomic(func() error {
+		if err := t.put("item", v.ID, 0, v, false); err != nil {
+			return err
+		}
+		// item_sources indexes the item's source locator key (R19).
+		if v.Source != nil {
+			if key, ok := domain.LocatorKey(v.Source.Kind, v.Source.Locator); ok {
+				if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO item_sources(session_id,rule_version,locator_key,item_id) VALUES(?,?,?,?)", t.session, domain.LocatorRuleVersion, key, v.ID); err != nil {
+					return err
+				}
+			}
+		}
+		// item_blobs indexes each referenced blob once per item (R19).
+		for _, part := range v.Parts {
+			if part.BlobHash == "" {
+				continue
+			}
+			if _, err := t.conn.ExecContext(t.ctx, "INSERT OR IGNORE INTO item_blobs(session_id,blob_hash,item_id) VALUES(?,?,?)", t.session, part.BlobHash, v.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error) {
 	old, err := t.Item(id)
@@ -184,16 +206,6 @@ func (t *transaction) SetCurrentVersion(itemID string) error {
 		t.semanticWrite, t.wrote = true, true
 	}
 	return err
-}
-func (t *transaction) SetCurrentDirective(taskID, directiveID, itemID string) error {
-	v, err := t.Item(itemID)
-	if err != nil {
-		return err
-	}
-	if taskID == "" || v.TaskID != taskID || v.DirectiveID != directiveID {
-		return fmt.Errorf("%w: directive item mismatch", domain.ErrInvalidRecord)
-	}
-	return t.SetCurrentVersion(itemID)
 }
 func (t *transaction) InsertBlob(v domain.Blob) error {
 	if err := v.Validate(); err != nil {

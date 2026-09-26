@@ -238,3 +238,30 @@ func TestCallerBuffersCopied_D14(t *testing.T) {
 		})
 	})
 }
+
+// TestBlobReferenceLookupBound_R19: blob-reference authorization reads the
+// bounded blob index; more referrers than the lookup limit reject the event
+// (fail closed) instead of deciding on a partial list.
+func TestBlobReferenceLookupBound_R19(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		img := []byte("shared image")
+		part := domain.InputPart{Type: domain.PartImage, MediaType: "image/png", Data: img}
+		user := principal(domain.AuthorityUser)
+		for _, id := range []string{"i1", "i2", "i3"} {
+			f.mustIngest(user, domain.Event{EventID: id, Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(), Parts: []domain.InputPart{part}}}})
+		}
+		ref := domain.InputPart{Type: domain.PartImage, MediaType: "image/png", BlobHash: domain.HashBytes(img), BlobSize: uint64(len(img))}
+		e := domain.Event{EventID: "r1", Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(), Parts: []domain.InputPart{ref}}}}
+		f.in.LookupLimit = 2
+		before := f.lastSeq()
+		if _, err := f.ingest(user, e); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
+			t.Errorf("over the bound: err = %v", err)
+		}
+		// Within the blob bound; the image transcript's duplicate lookup
+		// also sees three identical earlier transcripts plus itself.
+		f.in.LookupLimit = 4
+		if _, err := f.ingest(user, e); err != nil {
+			t.Errorf("within the bound: %v", err)
+		}
+	})
+}

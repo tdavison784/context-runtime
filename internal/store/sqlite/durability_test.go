@@ -61,7 +61,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 		}
 		expected["items"] = []domain.ContextItem{item, second}
 		expected["blob"] = blob
-		if err := tx.SetCurrentDirective("task", "d1", "i1"); err != nil {
+		if err := tx.SetCurrentVersion("i1"); err != nil {
 			return err
 		}
 		expected["directive"] = "i1"
@@ -170,7 +170,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 			if m["blob"], err = tx.Blob(domain.HashBytes([]byte("blob"))); err != nil {
 				return err
 			}
-			if m["directive"], err = tx.CurrentDirective("task", "d1", item.Access); err != nil {
+			if m["directive"], err = tx.CurrentVersion(domain.CurrentKey{SessionID: "s", TaskID: "task", Access: item.Access, Namespace: domain.NamespaceDirective, ID: "d1"}); err != nil {
 				return err
 			}
 			if m["obligation"], err = tx.Obligation("o1"); err != nil {
@@ -270,6 +270,9 @@ var committedMigrations = map[string]string{
 	"0006_obligation_source_index.sql":    "edf28088fa126863e097258a17f80b88ea7d30ff1bb6ce19a5f70d3f8ba0ee1b",
 	"0007_ingestion_records.sql":          "1ad74ed0a49f73a42cd56e6fd3dd517139af1c464146efeef76aaa72ba93e836",
 	"0008_unresolved_references.sql":      "ff8f0422c61ffc45996c7b4fcf95cd4437a66e2141d3353f7a139fabfe538fa7",
+	"0009_item_blob_index.sql":            "0d1792ff5e3b159224ae2692af3ced94f5c06ad83cc454f912573000461d8fe5",
+	"0010_item_duplicate_index.sql":       "0a181a80b748f5c8c6797e0f58e015935d21c1df68f85754f2e356ac052c8197",
+	"0011_item_source_index.sql":          "f0cb7508d575adaa12a20009e9860ab96478f9b8fc52424a62fc846f420a583c",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {

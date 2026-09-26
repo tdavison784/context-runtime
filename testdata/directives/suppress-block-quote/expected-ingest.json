@@ -27,44 +27,6 @@
     {
       "ref": "event#1",
       "id": "itm_a9a8d798ae03f8d75e0c63251fbff65d",
-      "kind": "instruction",
-      "generation": "DURABLE",
-      "authority": "SYSTEM",
-      "scope": "SESSION",
-      "access": {
-        "scope": "SESSION",
-        "task_id": "T"
-      },
-      "residency": "RESIDENT",
-      "retention": "HIGH",
-      "created_turn": 1,
-      "has_turn_id": true,
-      "parts": [
-        {
-          "text": "\u003e ## Pinned\n\u003e - hidden\n\u003e## Goal\n   \u003e ## Working\n\u003e \u003e ## Remember\n\u003e quote"
-        }
-      ],
-      "content_hash": "sha256:9d7f563a61ba88ac8e0edcf982cbadfa00154e90d7257bf3ba4eefa5e1b56d7f",
-      "source_ranges": [
-        {
-          "transcript": "event#0",
-          "part": 0,
-          "range": [
-            0,
-            71
-          ],
-          "slices": [
-            [
-              0,
-              71
-            ]
-          ]
-        }
-      ]
-    },
-    {
-      "ref": "event#2",
-      "id": "itm_f2f866732a6ccc0e80ce87b1ae68441a",
       "kind": "evidence",
       "section": "EPHEMERAL",
       "directive_id": "ephemeral-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
@@ -97,6 +59,44 @@
             [
               87,
               91
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_f2f866732a6ccc0e80ce87b1ae68441a",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "\u003e ## Pinned\n\u003e - hidden\n\u003e## Goal\n   \u003e ## Working\n\u003e \u003e ## Remember\n\u003e quote\n"
+        }
+      ],
+      "content_hash": "sha256:6e04907f26e01f9e3c1ad1433f0812526ef29f4e480f5d22b56c61a1432aa6a1",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            72
+          ],
+          "slices": [
+            [
+              0,
+              72
             ]
           ]
         }

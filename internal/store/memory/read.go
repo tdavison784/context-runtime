@@ -43,6 +43,10 @@ type readTx struct {
 	receipts     table[string, domain.IngestReceipt]
 	envelopes    table[string, domain.EventEnvelope]
 	references   table[string, domain.UnresolvedReference]
+	itemsByBlob  index[string]
+	duplicates   index[duplicateKey]
+	refsByKey    index[string]
+	itemsByKey   index[string]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -73,6 +77,10 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		receipts:     newTable(st.receipts, writable, domain.IngestReceipt.Clone),
 		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
 		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
+		itemsByBlob:  newIndex(st.itemsByBlob, writable),
+		duplicates:   newIndex(st.duplicates, writable),
+		refsByKey:    newIndex(st.refsByKey, writable),
+		itemsByKey:   newIndex(st.itemsByKey, writable),
 	}
 }
 
@@ -222,21 +230,6 @@ func (r *readTx) CurrentVersions(taskID string, ns domain.DirectiveNamespace, id
 	}
 	slices.Sort(out)
 	return out, nil
-}
-
-func (r *readTx) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
-	if err := r.check(); err != nil {
-		return "", err
-	}
-	id, err := r.current(taskID, directiveID, boundary, domain.NamespaceDirective)
-	if errors.Is(err, domain.ErrNotFound) {
-		return r.current(taskID, directiveID, boundary, domain.NamespaceAgentKey)
-	}
-	return id, err
-}
-
-func (r *readTx) CurrentDirectives(taskID, directiveID string) ([]string, error) {
-	return currentDirectives(r, taskID, directiveID)
 }
 
 // current looks up one pointer. A boundary in another session names nothing
@@ -435,21 +428,6 @@ func (r *readTx) CallAttempts(callID string) ([]domain.CallAttempt, error) {
 	return out, nil
 }
 
-// currentDirectives is the deprecated namespace-agnostic view: the pointers
-// of both namespaces, ordered by item ID.
-func currentDirectives(r store.ReadTx, taskID, directiveID string) ([]string, error) {
-	var out []string
-	for _, ns := range []domain.DirectiveNamespace{domain.NamespaceDirective, domain.NamespaceAgentKey} {
-		ids, err := r.CurrentVersions(taskID, ns, directiveID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, ids...)
-	}
-	slices.Sort(out)
-	return out, nil
-}
-
 func (r *readTx) Receipt(occurrenceID string) (domain.IngestReceipt, error) {
 	if err := r.check(); err != nil {
 		return domain.IngestReceipt{}, err
@@ -541,9 +519,27 @@ func (r *readTx) UnresolvedReferences(f store.ReferenceFilter) ([]domain.Unresol
 	if f.Limit <= 0 {
 		return nil, invalid("unresolved references: limit must be positive")
 	}
+	// A locator key lookup reads the key's index entry, never every
+	// reference (R19).
+	candidates := func(yield func(domain.UnresolvedReference) bool) {
+		if f.LocatorKey != "" {
+			for id := range r.refsByKey.lookup(f.LocatorKey) {
+				v, _ := r.references.peek(id)
+				if !yield(v) {
+					return
+				}
+			}
+			return
+		}
+		for _, v := range r.references.all() {
+			if !yield(v) {
+				return
+			}
+		}
+	}
 	out := []domain.UnresolvedReference{}
-	for _, v := range r.references.all() {
-		if f.LocatorKey != "" && v.LocatorKey != f.LocatorKey || f.RuleVersion != "" && v.RuleVersion != f.RuleVersion {
+	for v := range candidates {
+		if f.RuleVersion != "" && v.RuleVersion != f.RuleVersion {
 			continue
 		}
 		if len(out) == f.Limit {
@@ -552,6 +548,54 @@ func (r *readTx) UnresolvedReferences(f store.ReferenceFilter) ([]domain.Unresol
 		out = append(out, v)
 	}
 	slices.SortFunc(out, func(a, b domain.UnresolvedReference) int {
+		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
+	})
+	return out, nil
+}
+
+func (r *readTx) ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || !domain.ValidHash(blobHash) {
+		return nil, invalid("items by blob: positive limit and valid hash required")
+	}
+	return r.indexedItems(r.itemsByBlob.lookup(blobHash), limit)
+}
+
+func (r *readTx) ItemsBySourceKey(locatorKey string, limit int) ([]domain.ContextItem, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || locatorKey == "" || len(locatorKey) > domain.MaxLocatorKeyBytes {
+		return nil, invalid("items by source key: positive limit and a locator key required")
+	}
+	return r.indexedItems(r.itemsByKey.lookup(locatorKey), limit)
+}
+
+func (r *readTx) DuplicateCandidates(f store.DuplicateFilter) ([]domain.ContextItem, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if err := f.Validate(); err != nil {
+		return nil, err
+	}
+	key := duplicateKey{f.TaskID, f.Section, f.Role, f.Authority, f.Access, f.ContentHash}
+	return r.indexedItems(r.duplicates.lookup(key), f.Limit)
+}
+
+// indexedItems loads at most limit indexed items, ordered by Seq then ID;
+// more fail with store.ErrLimitExceeded.
+func (r *readTx) indexedItems(ids iter.Seq[string], limit int) ([]domain.ContextItem, error) {
+	out := []domain.ContextItem{}
+	for id := range ids {
+		if len(out) == limit {
+			return nil, store.ErrLimitExceeded
+		}
+		it, _ := r.items.get(id)
+		out = append(out, it)
+	}
+	slices.SortFunc(out, func(a, b domain.ContextItem) int {
 		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
 	})
 	return out, nil

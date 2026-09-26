@@ -41,22 +41,22 @@
       "has_turn_id": true,
       "parts": [
         {
-          "text": "## Pinned\n- hidden\n\t## Goal\nhidden\n    ## Working\n- hidden"
+          "text": " ## Pinned\n- hidden\n\t## Goal\nhidden\n    ## Working\n- hidden\n"
         }
       ],
-      "content_hash": "sha256:d1512e3c82a1fc269d5ad681f68ec80669389c2d5278e5249b23ec10042f6678",
+      "content_hash": "sha256:4673edd7b36cc2a7bcd7046ca6bb7ebf9225890f2c6d3e6904de8b6c61300931",
       "source_ranges": [
         {
           "transcript": "event#0",
           "part": 0,
           "range": [
-            1,
-            59
+            0,
+            60
           ],
           "slices": [
             [
-              1,
-              59
+              0,
+              60
             ]
           ]
         }

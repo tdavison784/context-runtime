@@ -36,7 +36,7 @@
 //     another session than the transaction's, breaks the sequence rule, or
 //     carries an audit event that does not target the record it describes.
 //   - domain.ErrNotFound: a single-record getter, or a write, names a record
-//     missing from this session (an item for SetCurrentDirective, an
+//     missing from this session (an item for SetCurrentVersion, an
 //     obligation version for a transition, a call for an attempt).
 //   - domain.ErrImmutable: an immutable record's ID is reused, or a write
 //     changes a field outside those its method may change (obligation fields
@@ -65,6 +65,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
@@ -160,6 +161,30 @@ type CommandFilter struct {
 	OccurrenceID string
 }
 
+// DuplicateFilter selects duplicate candidates (R19, D10, FR-ING-005):
+// items of this session whose task, directive section (which fixes the
+// directive namespace), role, authority, exact access boundary, and content
+// hash all equal the filter's. Every field is compared exactly, including
+// empty ones, so a candidate never crosses task, section, role, authority,
+// or boundary. Limit is required as in ReferenceFilter.
+type DuplicateFilter struct {
+	TaskID      string
+	Section     domain.DirectiveSection
+	Role        domain.ItemRole
+	Authority   domain.Authority
+	Access      domain.AccessBoundary
+	ContentHash string
+	Limit       int
+}
+
+// Validate checks the filter's enums, boundary, hash, and limit.
+func (f DuplicateFilter) Validate() error {
+	if f.Limit <= 0 || !domain.ValidHash(f.ContentHash) || !f.Section.Valid() || !f.Role.Valid() || !f.Authority.Valid() {
+		return fmt.Errorf("%w: duplicate filter: positive limit and valid hash, section, role, and authority required", domain.ErrInvalidRecord)
+	}
+	return f.Access.Validate()
+}
+
 // ReferenceFilter selects unresolved references (M5, R2). Empty
 // LocatorKey or RuleVersion does not filter; both compare exact bytes.
 // Limit is required: it must be positive (domain.ErrInvalidRecord
@@ -194,6 +219,25 @@ type ReadTx interface {
 
 	Item(id string) (domain.ContextItem, error)
 	Items(f ItemFilter) ([]domain.ContextItem, error)
+	// ItemsByBlob returns every item in the session with a part referencing
+	// the blob hash, each once, ordered by Seq then ID (R19, R5). It is
+	// bounded like ObligationsBySource: limit must be positive and a
+	// malformed hash is domain.ErrInvalidRecord; more matches than limit
+	// fail with ErrLimitExceeded. Callers filter by access: possession of a
+	// hash authorizes nothing.
+	ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, error)
+	// ItemsBySourceKey returns every item whose source locator has the given
+	// key under domain.LocatorRuleVersion (domain.LocatorKey of its
+	// Source.Kind and Locator), ordered by Seq then ID (R19, M5, R2). Items
+	// without a source, or whose source is not a linkable locator, are never
+	// returned. Bounded like ItemsByBlob: an empty or over-long key or a
+	// non-positive limit is domain.ErrInvalidRecord; more matches than limit
+	// fail with ErrLimitExceeded. Callers apply access and authorization.
+	ItemsBySourceKey(locatorKey string, limit int) ([]domain.ContextItem, error)
+	// DuplicateCandidates returns the items f selects, ordered by Seq then
+	// ID; more than f.Limit fail with ErrLimitExceeded. Callers apply the
+	// remaining duplicate rules (directive ID, metadata, currentness, D10).
+	DuplicateCandidates(f DuplicateFilter) ([]domain.ContextItem, error)
 	Relationships(f RelationshipFilter) ([]domain.Relationship, error)
 	Event(eventID string) (domain.EventRecord, error)
 	// Blob returns the blob with the given hash after verifying its bytes;
@@ -215,20 +259,6 @@ type ReadTx interface {
 	// principal cannot see stays invisible (FR-DIR-002, FR-DIR-005). An
 	// invalid namespace is ErrInvalidRecord.
 	CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error)
-	// CurrentDirective is the namespace-agnostic view that predates M6: the
-	// DIRECTIVE pointer for (task, directive ID, boundary) if there is one,
-	// else the AGENT_KEY pointer. Callers must check the returned item's
-	// namespace (domain.ContextItem.DirectiveNamespace).
-	//
-	// Deprecated: use CurrentVersion; lifecycle resolution must consider
-	// only the DIRECTIVE namespace (R6).
-	CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error)
-	// CurrentDirectives is the namespace-agnostic view that predates M6: the
-	// pointers of both namespaces for (task, directive ID), ordered by item
-	// ID. Callers must filter by the items' namespaces.
-	//
-	// Deprecated: use CurrentVersions.
-	CurrentDirectives(taskID, directiveID string) ([]string, error)
 	// Obligation returns the latest version of an obligation.
 	Obligation(obligationID string) (domain.ObligationVersion, error)
 	ObligationVersions(obligationID string) ([]domain.ObligationVersion, error)
@@ -344,12 +374,6 @@ type Tx interface {
 	// (domain.ErrNotFound) and have a valid key (domain.ErrInvalidRecord). It
 	// is a semantic write.
 	SetCurrentVersion(itemID string) error
-	// SetCurrentDirective is SetCurrentVersion for an item that belongs to
-	// taskID and carries directiveID (domain.ErrInvalidRecord otherwise); the
-	// namespace still comes from the item.
-	//
-	// Deprecated: use SetCurrentVersion.
-	SetCurrentDirective(taskID, directiveID, itemID string) error
 
 	// InsertBlob stores an immutable blob after verifying its hash.
 	// Inserting identical bytes again is a no-op.

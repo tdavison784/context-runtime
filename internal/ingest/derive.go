@@ -3,6 +3,7 @@ package ingest
 import (
 	"errors"
 	"slices"
+	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/graph"
 
@@ -14,7 +15,6 @@ import (
 // Working snapshots, and lifecycle commands apply in source order (M3).
 type step struct {
 	pos     int
-	residue bool
 	item    int // index into Result.Items, or -1
 	section int // index of a Working section, or -1
 	command int // index into Result.Lifecycle, or -1
@@ -41,12 +41,21 @@ func (r *run) deriveSpan(si int, span domain.Span, transcript domain.ContextItem
 		if !u.ParsesDirectives() && (len(res.Items) > 0 || len(res.Lifecycle) > 0) {
 			return domain.ErrInvalidRecord // parser gate defect: fail closed
 		}
-		for _, d := range res.Diagnostics {
-			r.diags.add(d)
-		}
 		c := unitCtx{si: si, pi: pi, span: span, actor: actor, transcript: transcript, res: res, text: part.Text}
+		r.unitDiags, r.written, r.refused = nil, map[domain.ByteRange]bool{}, map[int]bool{}
 		if err := r.applyUnit(c); err != nil {
 			return err
+		}
+		for _, d := range res.Diagnostics {
+			// A derived-ID notice describes an item; ingestion reports it
+			// only for items it actually wrote (R20.2).
+			if d.Code == domain.DirectiveIDDerived && !r.written[d.Range] {
+				continue
+			}
+			r.diags.add(d)
+		}
+		for _, d := range r.unitDiags {
+			r.diags.add(d)
 		}
 	}
 	return nil
@@ -64,10 +73,6 @@ type unitCtx struct {
 
 func (r *run) applyUnit(c unitCtx) error {
 	var steps []step
-	residual := residualSlices(c.text, c.res.Sections)
-	if len(residual) > 0 && (c.span.Authority == domain.AuthoritySystem || c.span.Authority == domain.AuthorityHarness) {
-		steps = append(steps, step{pos: residual[0].Start, residue: true, item: -1, section: -1, command: -1})
-	}
 	for i, s := range c.res.Sections {
 		if s.Keyword == directive.Working {
 			steps = append(steps, step{pos: s.Range.Start, item: -1, section: i, command: -1})
@@ -86,8 +91,6 @@ func (r *run) applyUnit(c unitCtx) error {
 	for _, s := range steps {
 		var err error
 		switch {
-		case s.residue:
-			err = r.residualInstruction(c, residual)
 		case s.item >= 0:
 			err = r.directiveItem(c, c.res.Items[s.item])
 		case s.section >= 0:
@@ -99,47 +102,136 @@ func (r *run) applyUnit(c unitCtx) error {
 			return err
 		}
 	}
-	return nil
+	return r.residue(c)
 }
 
-// residualSlices returns the unit's bytes outside every recognized section
-// (valid, malformed, or lifecycle), trimmed of leading and trailing ASCII
-// whitespace. Malformed section bytes are never salvaged into an
-// instruction: only text the parser did not claim is residual (D8).
-func residualSlices(text string, sections []directive.Section) []domain.ByteRange {
+// residue writes the unit's residual instruction, if it has one, after
+// the unit's directives are applied (D8, R20.3). Only SYSTEM and HARNESS
+// units have residue. It is every byte not claimed by an accepted section
+// (valid and not refused by ingestion) or by an item that was written, so
+// text inside a malformed or refused trusted section becomes instruction
+// text rather than silently vanishing, while written items are never
+// duplicated into it. Lifecycle commands (Resolve, Unpin, valid or
+// malformed, and unsupported lifecycle words) and the bare heading of an
+// empty malformed section are never residue (R21): they stay transcript-only
+// with their diagnostics. The bytes are kept exactly; a residue of only
+// ASCII whitespace and a leading BOM creates no item.
+func (r *run) residue(c unitCtx) error {
+	if c.span.Authority != domain.AuthoritySystem && c.span.Authority != domain.AuthorityHarness {
+		return nil
+	}
+	var claimed []domain.ByteRange
+	for i, s := range c.res.Sections {
+		switch {
+		case s.Keyword == directive.Resolve || s.Keyword == directive.Unpin:
+			// Lifecycle commands, valid or malformed, are never shown to
+			// the model as trusted instructions (R21).
+			claimed = append(claimed, s.Range)
+		case !s.Malformed && !r.refused[i]:
+			claimed = append(claimed, s.Range)
+		case blankBytes(c.text, s.BodyRange):
+			// An empty malformed section's heading alone carries no
+			// requirement (R21).
+			claimed = append(claimed, s.Range)
+		}
+	}
+	for _, d := range c.res.Diagnostics {
+		if d.Reason == domain.ReasonUnsupportedLifecycle {
+			claimed = append(claimed, lifecycleRegion(c.text, d.Range))
+		}
+	}
+	for rng := range r.written {
+		claimed = append(claimed, rng)
+	}
+	rs := complement(len(c.text), claimed)
+	if blankResidue(c.text, rs) {
+		return nil
+	}
+	return r.residualInstruction(c, rs)
+}
+
+// blankBytes reports whether text's bytes in rg are all ASCII whitespace.
+func blankBytes(text string, rg domain.ByteRange) bool {
+	for i := rg.Start; i < rg.End; i++ {
+		if b := text[i]; b != ' ' && b != '\t' && b != '\r' && b != '\n' {
+			return false
+		}
+	}
+	return true
+}
+
+// lifecycleRegion returns the extent of an unsupported lifecycle command
+// whose heading the parser diagnosed at heading (R21): from the heading to
+// the next column-zero ATX heading of the same or a higher level, or the
+// unit's end. Lines break at LF, CRLF, and lone CR (D3). This mirrors the
+// parser's inert region conservatively: a heading-looking line inside a
+// fence may end it early, which only returns inert text to the residue.
+func lifecycleRegion(text string, heading domain.ByteRange) domain.ByteRange {
+	level := 0
+	for heading.Start+level < len(text) && text[heading.Start+level] == '#' {
+		level++
+	}
+	for p := nextLine(text, heading.End); p < len(text); p = nextLine(text, p) {
+		n := 0
+		for p+n < len(text) && text[p+n] == '#' && n < 7 {
+			n++
+		}
+		if n >= 1 && n <= level && (p+n == len(text) || strings.IndexByte(" \t\r\n", text[p+n]) >= 0) {
+			return domain.ByteRange{Start: heading.Start, End: p}
+		}
+	}
+	return domain.ByteRange{Start: heading.Start, End: len(text)}
+}
+
+// nextLine returns the start of the line after position p.
+func nextLine(text string, p int) int {
+	for ; p < len(text); p++ {
+		switch text[p] {
+		case '\n':
+			return p + 1
+		case '\r':
+			if p+1 < len(text) && text[p+1] == '\n' {
+				return p + 2
+			}
+			return p + 1
+		}
+	}
+	return len(text)
+}
+
+// complement returns the non-empty ranges of [0, n) outside every range in
+// claimed, in order.
+func complement(n int, claimed []domain.ByteRange) []domain.ByteRange {
+	slices.SortFunc(claimed, func(a, b domain.ByteRange) int { return a.Start - b.Start })
 	var out []domain.ByteRange
 	pos := 0
-	for _, s := range sections {
-		if s.Range.Start > pos {
-			out = append(out, domain.ByteRange{Start: pos, End: s.Range.Start})
+	for _, c := range claimed {
+		if c.Start > pos {
+			out = append(out, domain.ByteRange{Start: pos, End: c.Start})
 		}
-		pos = max(pos, s.Range.End)
+		pos = max(pos, c.End)
 	}
-	if pos < len(text) {
-		out = append(out, domain.ByteRange{Start: pos, End: len(text)})
-	}
-	space := func(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
-	for len(out) > 0 {
-		f := &out[0]
-		for f.Start < f.End && space(text[f.Start]) {
-			f.Start++
-		}
-		if f.Start < f.End {
-			break
-		}
-		out = out[1:]
-	}
-	for len(out) > 0 {
-		l := &out[len(out)-1]
-		for l.End > l.Start && space(text[l.End-1]) {
-			l.End--
-		}
-		if l.End > l.Start {
-			break
-		}
-		out = out[:len(out)-1]
+	if pos < n {
+		out = append(out, domain.ByteRange{Start: pos, End: n})
 	}
 	return out
+}
+
+// blankResidue reports whether the residue holds only ASCII whitespace and
+// a UTF-8 BOM at byte zero, which the parser skips (D3).
+func blankResidue(text string, rs []domain.ByteRange) bool {
+	bom := strings.HasPrefix(text, "\xef\xbb\xbf")
+	for _, rg := range rs {
+		for i := rg.Start; i < rg.End; i++ {
+			switch b := text[i]; {
+			case b == ' ' || b == '\t' || b == '\r' || b == '\n':
+			case bom && i < 3:
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // workingSection applies one Working section as a single snapshot
@@ -173,6 +265,7 @@ func (r *run) workingSection(c unitCtx, si int) error {
 		members = append(members, it)
 	}
 	if conflict {
+		r.refused[si] = true
 		return nil
 	}
 	ids := make([]string, 0, len(members))
@@ -189,6 +282,9 @@ func (r *run) workingSection(c unitCtx, si int) error {
 	res, err := graph.SupersedeSnapshot(r.tx, c.actor, ids, r.p.TaskID, r.graphEventID())
 	if err != nil {
 		return err
+	}
+	for _, ii := range sec.ItemIndexes {
+		r.written[c.res.Items[ii].Range] = true
 	}
 	for _, rel := range res.Supersedes {
 		r.repls = append(r.repls, domain.IngestLink{ItemID: rel.FromID, TargetID: rel.ToID})
@@ -226,7 +322,7 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 		LifecycleCommand: cmd,
 	}
 	diag := func(code domain.DiagnosticCode, reason domain.DiagnosticReason) {
-		r.diags.add(domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range})
+		r.unitDiags = append(r.unitDiags, domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range})
 	}
 	auth, err := graph.AuthorizeLifecycleCommand(r.tx, r.p, r.p.TaskID, cmd)
 	switch {

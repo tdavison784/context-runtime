@@ -44,7 +44,7 @@ func (t *transaction) UnresolvedReferences(f store.ReferenceFilter) ([]domain.Un
 		q += " AND f_rule_version=?"
 		args = append(args, f.RuleVersion)
 	}
-	rows, err := t.conn.QueryContext(t.ctx, q+" ORDER BY f_seq, id LIMIT ?", append(args, f.Limit+1)...)
+	rows, err := t.conn.QueryContext(t.ctx, q+referenceOrderSQL, append(args, f.Limit+1)...)
 	if err != nil {
 		return nil, err
 	}
@@ -62,3 +62,7 @@ func (t *transaction) UnresolvedReferences(f store.ReferenceFilter) ([]domain.Un
 	}
 	return out, rows.Err()
 }
+
+// referenceOrderSQL ends every reference query; with a locator key the
+// reference_locator index (migration 0008) serves both filter and order.
+const referenceOrderSQL = " ORDER BY f_seq, id LIMIT ?"

@@ -26,7 +26,7 @@ func testSemanticWriteRule(t *testing.T, s store.Store) {
 		name  string
 		write func(tx store.Tx) error
 	}{
-		{"SetCurrentDirective", func(tx store.Tx) error { return tx.SetCurrentDirective("task", "dir", "d") }},
+		{"SetCurrentVersion", func(tx store.Tx) error { return tx.SetCurrentVersion("d") }},
 		{"UpdateObligationVersion", func(tx store.Tx) error {
 			next := o.Clone()
 			next.MaterializationDisabled = true
@@ -63,10 +63,10 @@ func testSemanticWriteRule(t *testing.T, s store.Store) {
 		}
 	}
 	view(t, s, sessA, func(tx store.ReadTx) error {
-		cur, err := tx.CurrentDirective("task", "dir", DirectiveBoundary(sessA))
+		cur, err := currentDirective(tx, "task", "dir", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "d" {
-			t.Errorf("CurrentDirective = %q, want d", cur)
+			t.Errorf("CurrentVersion(DIRECTIVE) = %q, want d", cur)
 		}
 		got, err := tx.Obligation("o")
 		noErr(t, err)

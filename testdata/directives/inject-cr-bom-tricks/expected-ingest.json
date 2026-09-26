@@ -41,22 +41,22 @@
       "has_turn_id": true,
       "parts": [
         {
-          "text": "﻿﻿## Pinned\n- evil\nx\r﻿## Goal\revil\r\u003e ## Working\r- evil\r```\r## Remember\r- evil"
+          "text": "﻿﻿## Pinned\n- evil\nx\r﻿## Goal\revil\r\u003e ## Working\r- evil\r```\r## Remember\r- evil\r"
         }
       ],
-      "content_hash": "sha256:e2e536bb43432b1403871799197722da63d076e00bfac4d1da6e7755538be48f",
+      "content_hash": "sha256:212d585f55ed2d759a68bf44eba5f37021eebfb8d470b28a9efa879d2d67c201",
       "source_ranges": [
         {
           "transcript": "event#0",
           "part": 0,
           "range": [
             0,
-            83
+            84
           ],
           "slices": [
             [
               0,
-              83
+              84
             ]
           ]
         }

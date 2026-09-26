@@ -72,6 +72,9 @@ var suite = []testCase{
 	{"ItemLosslessText", testItemLosslessText},
 	{"ByteExactStringLists", testByteExactStringLists},
 	{"ItemProvenance", testItemProvenance},
+	{"ItemsByBlob", testItemsByBlob},
+	{"DuplicateCandidates", testDuplicateCandidates},
+	{"ItemsBySourceKey", testItemsBySourceKey},
 	{"ItemInsertRules", testItemInsertRules},
 	{"ItemBlobIntegrity", testItemBlobIntegrity},
 	{"ItemsFilterOrder", testItemsFilterOrder},
@@ -84,7 +87,7 @@ var suite = []testCase{
 	{"Blobs", testBlobs},
 	{"DirectiveReplacement", testDirectiveReplacement},
 	{"DirectiveBoundaries", testDirectiveBoundaries},
-	{"CurrentDirectivesOrder", testCurrentDirectivesOrder},
+	{"CurrentVersions(DIRECTIVE)Order", testCurrentDirectivesOrder},
 	{"CurrentNamespaces", testCurrentNamespaces},
 
 	// Ingestion records.

@@ -79,7 +79,7 @@ func (r *run) buildDirective(c unitCtx, item directive.Item) (domain.ContextItem
 
 // diagnose records an ingestion diagnostic for a parser item.
 func (r *run) diagnose(c unitCtx, item directive.Item, code domain.DiagnosticCode, reason domain.DiagnosticReason) {
-	r.diags.add(domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason,
+	r.unitDiags = append(r.unitDiags, domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason,
 		Section: string(item.Section), DirectiveID: item.DirectiveID, Range: item.Range})
 }
 
@@ -112,6 +112,7 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	if err != nil {
 		return err
 	}
+	r.written[item.Range] = true
 	if err := r.linkDerived(c, it); err != nil {
 		return err
 	}
@@ -271,18 +272,22 @@ func (r *run) residualInstruction(c unitCtx, slices []domain.ByteRange) error {
 // same content, role, kind, authority, scope, and exact boundary in the
 // same session and task (FR-ING-005, D10). It is detection only: the new
 // occurrence stays current pending input with its own turn and metadata,
-// and nothing crosses an authority, boundary, or task.
+// and nothing crosses an authority, boundary, or task. Candidates come from
+// the store's bounded duplicate index (R19); more than the lookup limit
+// rejects the event (store.ErrLimitExceeded, D17).
 func (r *run) detectDuplicate(actor domain.Principal, it domain.ContextItem) error {
 	if !it.Access.Permits(actor) {
 		return nil
 	}
-	items, err := r.tx.Items(store.ItemFilter{TaskID: it.TaskID})
+	items, err := r.tx.DuplicateCandidates(store.DuplicateFilter{
+		TaskID: it.TaskID, Section: domain.SectionNone, Role: it.Role, Authority: it.Authority,
+		Access: it.Access, ContentHash: it.ContentHash, Limit: r.g.lookupLimit(),
+	})
 	if err != nil {
 		return err
 	}
 	for _, c := range items {
-		if c.ID == it.ID || c.Seq >= it.Seq || c.DirectiveID != "" || c.ContentHash != it.ContentHash || c.Role != it.Role ||
-			c.Kind != it.Kind || c.Authority != it.Authority || c.Scope != it.Scope || c.Access != it.Access {
+		if c.ID == it.ID || c.Seq >= it.Seq || c.DirectiveID != "" || c.Kind != it.Kind || c.Scope != it.Scope {
 			continue
 		}
 		if r.rels >= r.limits.MaxRelationships {

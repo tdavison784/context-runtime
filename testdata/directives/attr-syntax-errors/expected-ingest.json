@@ -133,20 +133,6 @@
         164
       ],
       "access_scope": "TASK"
-    },
-    {
-      "span": 0,
-      "part": 0,
-      "index": 8,
-      "code": "DirectiveIDDerived",
-      "reason": "derived_id",
-      "section": "WORKING",
-      "directive_id": "working-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
-      "range": [
-        164,
-        189
-      ],
-      "access_scope": "TASK"
     }
   ]
 }

@@ -26,14 +26,21 @@ type run struct {
 	hasTask    bool
 	openedTurn uint64
 
-	items    []domain.ContextItem
-	rels     int
-	refs     int         // unresolved references declared so far (ordinals)
-	derived  map[int]int // derived items per span (MaxItemsPerSpan across parts)
-	diags    diagnostics
-	commands []domain.LifecycleCommandRecord
-	dups     []domain.IngestLink
-	repls    []domain.IngestLink
+	items   []domain.ContextItem
+	rels    int
+	refs    int         // unresolved references declared so far (ordinals)
+	derived map[int]int // derived items per span (MaxItemsPerSpan across parts)
+
+	// Per parse unit: ingestion diagnostics are reported after the
+	// parser's, and a parser notice about an item survives only if that
+	// item was written (R20.2).
+	unitDiags []domain.Diagnostic
+	written   map[domain.ByteRange]bool // ranges of parser items written
+	refused   map[int]bool              // sections ingestion refused
+	diags     diagnostics
+	commands  []domain.LifecycleCommandRecord
+	dups      []domain.IngestLink
+	repls     []domain.IngestLink
 
 	suppliedBlobs map[string]bool // blob hashes whose bytes this event supplied
 }
@@ -280,7 +287,9 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 // capability, so a reference is accepted only when an item the principal
 // can access already references that blob and the new item's boundary is
 // within that item's. Missing and inaccessible references fail identically
-// with the bare domain.ErrNotFound, checked before the blob is read.
+// with the bare domain.ErrNotFound, checked before the blob is read. The
+// referrers come from the store's bounded blob index (R19); more than the
+// lookup limit rejects the event (store.ErrLimitExceeded, D17).
 func (r *run) blob(part domain.InputPart, access domain.AccessBoundary) error {
 	cp := part.Snapshot()
 	if part.Data != nil {
@@ -290,7 +299,7 @@ func (r *run) blob(part domain.InputPart, access domain.AccessBoundary) error {
 	if r.suppliedBlobs[cp.BlobHash] {
 		return nil
 	}
-	items, err := r.tx.Items(store.ItemFilter{})
+	items, err := r.tx.ItemsByBlob(cp.BlobHash, r.g.lookupLimit())
 	if err != nil {
 		return err
 	}
