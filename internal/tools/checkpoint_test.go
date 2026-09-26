@@ -19,6 +19,11 @@ func summary(request, manifest, text string) domain.CheckpointIntent {
 func checkpointConversation(t *testing.T, ack bool) (store.Store, *Service, domain.ToolInvocation, string) {
 	t.Helper()
 	st, i := toolFixture(t)
+	return checkpointConversationOn(t, st, i, ack)
+}
+
+func checkpointConversationOn(t *testing.T, st store.Store, i domain.ToolInvocation, ack bool) (store.Store, *Service, domain.ToolInvocation, string) {
+	t.Helper()
 	s := testService(t)
 	update(t, st, func(tx store.Tx) error {
 		_, err := insertGoal(tx, "F1", domain.GoalOpen)
