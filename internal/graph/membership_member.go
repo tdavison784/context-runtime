@@ -8,12 +8,15 @@ import (
 // RegisterExchangeMember authenticates explicit receipt/output membership. An
 // OUTPUT starts EXECUTING; TOOL_CALLs name that exact output source and call.
 // Further members advance conversation membership, not the exchange state CAS.
-func (s *MembershipService) RegisterExchangeMember(tx store.Tx, actor domain.Principal, intent domain.RegisterExchangeMemberIntent) (result domain.RecordResult, err error) {
+func (s *MembershipService) RegisterExchangeMember(tx store.Tx, actor domain.Principal, intent domain.RegisterExchangeMemberIntent, seq uint64) (result domain.RecordResult, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
 		}
 	}()
+	if err = checkOperationSeq(tx, seq); err != nil {
+		return result, err
+	}
 	sem, receipt, replay, err := prepareMembershipReceipt(tx, actor, intent.RequestID, "RegisterExchangeMember", intent, s.policy)
 	if err != nil {
 		return result, err
@@ -24,7 +27,6 @@ func (s *MembershipService) RegisterExchangeMember(tx store.Tx, actor domain.Pri
 	if err = intent.Validate(); err != nil {
 		return result, err
 	}
-	seq := tx.NextSeq()
 	x, err := readControlledExchange(sem, tx.SessionID(), actor, intent.ExchangeID)
 	if err != nil {
 		return result, err

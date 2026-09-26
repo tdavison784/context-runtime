@@ -11,7 +11,7 @@ import (
 func TestMembershipMemberPlanRequiresExactStoredSourceAndCompleteBoundedReads(t *testing.T) {
 	s, service, actor, registration := membershipTestStore(t)
 	update(t, s, "s", func(tx store.Tx) error {
-		result, err := service.RegisterExchange(tx, actor, registration)
+		result, err := service.RegisterExchange(tx, actor, registration, tx.NextSeq())
 		if err != nil {
 			return err
 		}

@@ -38,7 +38,7 @@ func membershipCompletedOutput(tx store.Tx, x domain.LogicalExchange) (domain.Co
 func TestMembershipMemberRegistrationProvidesW6ExecutionAssociation(t *testing.T) {
 	s, service, actor, registration := membershipTestStore(t)
 	update(t, s, "s", func(tx store.Tx) error {
-		registered, err := service.RegisterExchange(tx, actor, registration)
+		registered, err := service.RegisterExchange(tx, actor, registration, tx.NextSeq())
 		if err != nil {
 			return err
 		}
@@ -49,13 +49,13 @@ func TestMembershipMemberRegistrationProvidesW6ExecutionAssociation(t *testing.T
 			return err
 		}
 		output := domain.RegisterExchangeMemberIntent{RequestID: "output", ExchangeID: x.ID, ExpectedRevision: 1, Position: 1, Role: domain.MemberOutput, Source: storetest.ContentRef(it), CallID: call.CallID}
-		original, err := service.RegisterExchangeMember(tx, actor, output)
+		original, err := service.RegisterExchangeMember(tx, actor, output, tx.NextSeq())
 		if err != nil {
 			return err
 		}
 		tool := output
 		tool.RequestID, tool.ExpectedRevision, tool.Position, tool.Role, tool.ToolCallID = "tool", 2, 2, domain.MemberToolCall, "provider-tool-id"
-		if _, err := service.RegisterExchangeMember(tx, actor, tool); err != nil {
+		if _, err := service.RegisterExchangeMember(tx, actor, tool, tx.NextSeq()); err != nil {
 			return err
 		}
 		x, _ = sem.LogicalExchange(x.ID)
@@ -68,8 +68,8 @@ func TestMembershipMemberRegistrationProvidesW6ExecutionAssociation(t *testing.T
 			t.Fatal("W6 association differs", members)
 		}
 		before := tx.LastSeq()
-		replayed, err := service.RegisterExchangeMember(tx, actor, output)
-		if err != nil || replayed.IDs[0] != original.IDs[0] || before != tx.LastSeq() {
+		replayed, err := service.RegisterExchangeMember(tx, actor, output, tx.NextSeq())
+		if err != nil || replayed.IDs[0] != original.IDs[0] || before+1 != tx.LastSeq() {
 			t.Fatalf("replay: %+v, %v", replayed, err)
 		}
 		return nil

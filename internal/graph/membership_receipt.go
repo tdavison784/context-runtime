@@ -54,6 +54,15 @@ func finishMembershipReceipt(tx store.Tx, sem store.SemanticTx, receipt domain.M
 	return sem.InsertMutationReceipt(receipt)
 }
 
+// checkOperationSeq requires the caller-allocated operation sequence (W7-5):
+// it must belong to this transaction, never a predicted LastSeq()+1 (P3-1).
+func checkOperationSeq(tx store.Tx, seq uint64) error {
+	if seq == 0 || !tx.Allocated(seq) {
+		return domain.ErrInvalidRecord
+	}
+	return nil
+}
+
 func membershipMeta(session, id string, seq uint64) domain.SemanticMeta {
 	return domain.SemanticMeta{ID: id, SessionID: session, Seq: seq, SchemaVersion: domain.SemanticSchemaV1}
 }

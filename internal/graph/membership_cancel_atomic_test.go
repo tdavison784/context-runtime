@@ -13,7 +13,7 @@ func TestMembershipCancellationPoisonsEveryPartialWrite(t *testing.T) {
 		s, service, actor, registration := membershipTestStore(t)
 		var intent domain.CancelExchangeIntent
 		update(t, s, "s", func(tx store.Tx) error {
-			result, err := service.RegisterExchange(tx, actor, registration)
+			result, err := service.RegisterExchange(tx, actor, registration, tx.NextSeq())
 			if err == nil {
 				intent = domain.CancelExchangeIntent{RequestID: "cancel", ExchangeID: result.IDs[0], ExpectedRevision: 1, Reason: domain.ExchangeAbandoned}
 			}
@@ -27,7 +27,7 @@ func TestMembershipCancellationPoisonsEveryPartialWrite(t *testing.T) {
 				return err
 			}
 			fault := &membershipFaultWriter{SemanticTx: sem, failAt: failAt}
-			if _, err = service.CancelExchange(membershipFaultTx{tx, fault}, actor, intent); !errors.Is(err, errMembershipWrite) {
+			if _, err = service.CancelExchange(membershipFaultTx{tx, fault}, actor, intent, tx.NextSeq()); !errors.Is(err, errMembershipWrite) {
 				t.Fatalf("write %d: %v", failAt, err)
 			}
 			return nil
@@ -47,7 +47,7 @@ func TestMembershipCancellationPoisonsEveryPartialWrite(t *testing.T) {
 			if _, err := sem.MutationReceipt(domain.MutationMembership, intent.RequestID); !errors.Is(err, domain.ErrNotFound) {
 				t.Fatal("receipt survived", err)
 			}
-			_, err = service.CancelExchange(tx, actor, intent)
+			_, err = service.CancelExchange(tx, actor, intent, tx.NextSeq())
 			return err
 		})
 	}
@@ -57,7 +57,7 @@ func TestMembershipReceiptOverflowRollsBackRegistration(t *testing.T) {
 	s, service, actor, intent := membershipTestStore(t)
 	service.policy.MaxReceiptBytes = 1
 	err := s.Update(ctx, "s", func(tx store.Tx) error {
-		_, err := service.RegisterExchange(tx, actor, intent)
+		_, err := service.RegisterExchange(tx, actor, intent, tx.NextSeq())
 		if !errors.Is(err, domain.ErrResourceLimit) {
 			t.Fatalf("receipt bound: %v", err)
 		}
@@ -67,5 +67,8 @@ func TestMembershipReceiptOverflowRollsBackRegistration(t *testing.T) {
 		t.Fatalf("oversized receipt committed: %v", err)
 	}
 	service.policy.MaxReceiptBytes = membershipTestPolicy().MaxReceiptBytes
-	update(t, s, "s", func(tx store.Tx) error { _, err := service.RegisterExchange(tx, actor, intent); return err })
+	update(t, s, "s", func(tx store.Tx) error {
+		_, err := service.RegisterExchange(tx, actor, intent, tx.NextSeq())
+		return err
+	})
 }
