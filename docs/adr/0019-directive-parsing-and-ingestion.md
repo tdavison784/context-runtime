@@ -2198,7 +2198,7 @@ fixed.
   `lookup_working`, `lookup_source`, and (on a duplicate) `lookup_blob`;
   their primary keys start with the lookup key, not the item ID, so those
   `DELETE`s searched the whole session. Migration
-  `0016_lookup_item_indexes.sql` adds a `(session_id, item_id)` index to
+  `0017_lookup_item_indexes.sql` adds a `(session_id, item_id)` index to
   each of the four tables. Test: `TestRetireLookupsUseIndex`
   (`internal/store/sqlite/access_lookups_test.go`, via the named
   `retireLookupSQL` builder the plan guard runs).

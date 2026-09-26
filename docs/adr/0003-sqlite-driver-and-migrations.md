@@ -211,7 +211,7 @@ preserve valid state.
     migrated-layout parity fixture: a relationship and items stored before
     0015 read back correctly through the new indexes after upgrade, and
     the three superseded indexes are confirmed gone.
-  - `0016_lookup_item_indexes.sql` (SPEC-3.1 item 1) adds a `(session_id,
+  - `0017_lookup_item_indexes.sql` (SPEC-3.1 item 1) adds a `(session_id,
     item_id)` index to each of `lookup_canonical`/`lookup_working`/
     `lookup_source`/`lookup_blob`. Every `SUPERSEDES`/`DUPLICATE_OF` edge
     deletes the retired item's rows from these tables by item ID, but
