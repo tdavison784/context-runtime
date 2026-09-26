@@ -196,7 +196,11 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 	for i, st := range steps {
 		update(t, s, sessA, func(tx store.Tx) error {
 			tr := NewTransition(sessA, st.id, "o", 1, tx.NextSeq(), st.from, st.to)
-			got, err := tx.AppendObligationTransition(tr)
+			// A matcher that evaluated an earlier revision cannot apply.
+			if i > 0 {
+				wantErr(t, errOf(tx.AppendObligationTransition(tr, uint64(i))), domain.ErrVersionConflict)
+			}
+			got, err := tx.AppendObligationTransition(tr, uint64(i+1))
 			noErr(t, err)
 			history = append(history, tr)
 			want := NewObligation(sessA, "o", 1, 1, "src")
@@ -231,7 +235,7 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 	}
 	for _, tc := range rejects {
 		err := s.Update(ctx, sessA, func(tx store.Tx) error {
-			return errOf(tx.AppendObligationTransition(tc.tr(tx.NextSeq())))
+			return errOf(tx.AppendObligationTransition(tc.tr(tx.NextSeq()), uint64(len(steps)+1)))
 		})
 		if !errors.Is(err, tc.want) {
 			t.Errorf("%s: error = %v, want %v", tc.name, err, tc.want)
@@ -255,20 +259,20 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 	// Transition IDs are immutable: reuse fails even for a valid transition.
 	err := s.Update(ctx, sessA, func(tx store.Tx) error {
 		return errOf(tx.AppendObligationTransition(NewTransition(sessA, "t1", "o2", 1, tx.NextSeq(),
-			domain.ObligationUnresolved, domain.ObligationBlocked)))
+			domain.ObligationUnresolved, domain.ObligationBlocked), 1))
 	})
 	wantErr(t, err, domain.ErrImmutable)
 	// A transition's Seq must be allocated in its transaction.
 	err = s.Update(ctx, sessA, func(tx store.Tx) error {
 		tx.NextSeq()
 		return errOf(tx.AppendObligationTransition(NewTransition(sessA, "w", "o2", 1, 1,
-			domain.ObligationUnresolved, domain.ObligationBlocked)))
+			domain.ObligationUnresolved, domain.ObligationBlocked), 1))
 	})
 	wantErr(t, err, domain.ErrInvalidRecord)
 	// A satisfied obligation cannot be marked BLOCKED directly.
 	err = s.Update(ctx, sessA, func(tx store.Tx) error {
 		return errOf(tx.AppendObligationTransition(NewTransition(sessA, "y", "o2", 1, tx.NextSeq(),
-			domain.ObligationSatisfied, domain.ObligationBlocked)))
+			domain.ObligationSatisfied, domain.ObligationBlocked), 1))
 	})
 	wantErr(t, err, domain.ErrInvalidTransition)
 	// A retired version no longer transitions (FR-OBL-006).
@@ -280,7 +284,7 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 	})
 	err = s.Update(ctx, sessA, func(tx store.Tx) error {
 		return errOf(tx.AppendObligationTransition(NewTransition(sessA, "z", "o2", 1, tx.NextSeq(),
-			domain.ObligationUnresolved, domain.ObligationBlocked)))
+			domain.ObligationUnresolved, domain.ObligationBlocked), 2))
 	})
 	wantErr(t, err, domain.ErrInvalidTransition)
 	view(t, s, sessA, func(tx store.ReadTx) error {
@@ -323,15 +327,29 @@ func testGrants(t *testing.T, s store.Store) {
 		return tx.InsertGrant(NewGrant(sessA, "g6", 1, "i1"))
 	})
 	wantErr(t, err, domain.ErrInvalidRecord)
+	revocation := func(id string, seq uint64, target string) domain.LifecycleEvent {
+		return NewLifecycleEvent(sessA, id, seq, domain.TargetGrant, target)
+	}
+	var audit domain.LifecycleEvent
 	update(t, s, sessA, func(tx store.Tx) error {
 		seq := tx.NextSeq()
-		wantErr(t, tx.RevokeGrant("g2", 1), domain.ErrInvalidRecord)
-		noErr(t, tx.RevokeGrant("g2", seq))
-		wantErr(t, tx.RevokeGrant("g2", seq), domain.ErrInvalidTransition)
-		wantErr(t, tx.RevokeGrant("missing", seq), domain.ErrNotFound)
+		// The revocation's audit event must target the grant with a Seq
+		// allocated in this transaction.
+		wantErr(t, errOf(tx.RevokeGrant("g2", revocation("lr", 1, "g2"))), domain.ErrInvalidRecord)
+		wantErr(t, errOf(tx.RevokeGrant("g2", revocation("lr", seq, "g1"))), domain.ErrInvalidRecord)
+		wrongKind := NewLifecycleEvent(sessA, "lr", seq, domain.TargetItem, "g2")
+		wantErr(t, errOf(tx.RevokeGrant("g2", wrongKind)), domain.ErrInvalidRecord)
+		audit = revocation("lr", seq, "g2")
+		got, err := tx.RevokeGrant("g2", audit)
+		noErr(t, err)
+		want := g2.Clone()
+		want.RevokedSeq = seq
+		assertEqual(t, "RevokeGrant result", got, want)
+		wantErr(t, errOf(tx.RevokeGrant("g2", revocation("lr2", seq, "g2"))), domain.ErrInvalidTransition)
+		wantErr(t, errOf(tx.RevokeGrant("missing", revocation("lr3", seq, "missing"))), domain.ErrNotFound)
 		return nil
 	})
-	err = s.Update(ctx, sessA, func(tx store.Tx) error { return tx.RevokeGrant("g2", tx.NextSeq()) })
+	err = s.Update(ctx, sessA, func(tx store.Tx) error { return errOf(tx.RevokeGrant("g2", revocation("lr4", tx.NextSeq(), "g2"))) })
 	wantErr(t, err, domain.ErrInvalidTransition)
 	g2.RevokedSeq = 2
 	view(t, s, sessA, func(tx store.ReadTx) error {
@@ -341,6 +359,9 @@ func testGrants(t *testing.T, s store.Store) {
 		all, err := tx.Grants()
 		noErr(t, err)
 		assertEqual(t, "Grants", all, []domain.MutationGrant{g1, g2})
+		evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetGrant})
+		noErr(t, err)
+		assertEqual(t, "revocation audit", evs, []domain.LifecycleEvent{audit})
 		for _, id := range []string{"g3", "g6"} {
 			_, err = tx.Grant(id)
 			wantErr(t, err, domain.ErrNotFound)
@@ -349,14 +370,23 @@ func testGrants(t *testing.T, s store.Store) {
 	})
 }
 
-// testTasks checks PutTask under the compare-and-swap rule: the store
-// writes expected+1 itself and returns the stored record.
+// testTasks checks PutTask under the compare-and-swap rule (the store
+// writes expected+1 itself and returns the stored record) and its audit
+// rule: creation and status changes carry a TargetTask event, other changes
+// carry none.
 func testTasks(t *testing.T, s store.Store) {
+	taskEvent := func(id string, seq uint64) *domain.LifecycleEvent {
+		e := NewLifecycleEvent(sessA, id, seq, domain.TargetTask, "task")
+		return &e
+	}
 	task := NewTask(sessA, "task")
 	task.Version = 0 // ignored: the store writes expected+1
+	var created domain.LifecycleEvent
 	update(t, s, sessA, func(tx store.Tx) error {
-		tx.NextSeq() // so seq 1 is stale in later transactions
-		got, err := tx.PutTask(task, 0)
+		seq := tx.NextSeq()
+		wantErr(t, errOf(tx.PutTask(task, 0, nil)), domain.ErrInvalidRecord)
+		created = *taskEvent("l1", seq)
+		got, err := tx.PutTask(task, 0, &created)
 		noErr(t, err)
 		want := task
 		want.Version = 1
@@ -368,39 +398,63 @@ func testTasks(t *testing.T, s store.Store) {
 	})
 	next := task
 	next.Turn, next.TurnID, next.Version = 2, "turn-2", 42
+	completed := func(seq uint64) domain.TaskState {
+		x := next
+		x.Status, x.CompletedSeq = domain.TaskCompleted, seq
+		return x
+	}
 	cases := []struct {
 		name     string
-		t        domain.TaskState
+		t        func(seq uint64) domain.TaskState
 		expected uint64
+		event    func(seq uint64) *domain.LifecycleEvent
 		want     []error
 	}{
-		{"create existing", task, 0, []error{domain.ErrVersionConflict}},
-		{"stale version", next, 2, []error{domain.ErrVersionConflict}},
-		{"missing task", NewTask(sessA, "other"), 1, []error{domain.ErrVersionConflict, domain.ErrNotFound}},
-		{"completed without seq", func() domain.TaskState { x := next; x.Status = domain.TaskCompleted; return x }(), 1, []error{domain.ErrInvalidRecord}},
-		{"completed at an earlier seq", func() domain.TaskState {
-			x := next
-			x.Status, x.CompletedSeq = domain.TaskCompleted, 1
-			return x
-		}(), 1, []error{domain.ErrInvalidRecord}},
+		{"create existing", func(uint64) domain.TaskState { return task }, 0,
+			func(seq uint64) *domain.LifecycleEvent { return taskEvent("lx", seq) }, []error{domain.ErrVersionConflict}},
+		{"stale version", func(uint64) domain.TaskState { return next }, 2,
+			func(uint64) *domain.LifecycleEvent { return nil }, []error{domain.ErrVersionConflict}},
+		{"missing task", func(uint64) domain.TaskState { return NewTask(sessA, "other") }, 1,
+			func(uint64) *domain.LifecycleEvent { return nil }, []error{domain.ErrVersionConflict, domain.ErrNotFound}},
+		{"completed without seq", func(uint64) domain.TaskState { return completed(0) }, 1,
+			func(seq uint64) *domain.LifecycleEvent { return taskEvent("lx", seq) }, []error{domain.ErrInvalidRecord}},
+		{"completed at an earlier seq", func(uint64) domain.TaskState { return completed(1) }, 1,
+			func(seq uint64) *domain.LifecycleEvent { return taskEvent("lx", seq) }, []error{domain.ErrInvalidRecord}},
+		{"status change without event", completed, 1,
+			func(uint64) *domain.LifecycleEvent { return nil }, []error{domain.ErrInvalidRecord}},
+		{"event without status change", func(uint64) domain.TaskState { return next }, 1,
+			func(seq uint64) *domain.LifecycleEvent { return taskEvent("lx", seq) }, []error{domain.ErrInvalidRecord}},
+		{"event for another task", completed, 1, func(seq uint64) *domain.LifecycleEvent {
+			e := NewLifecycleEvent(sessA, "lx", seq, domain.TargetTask, "other")
+			return &e
+		}, []error{domain.ErrInvalidRecord}},
+		{"event of another kind", completed, 1, func(seq uint64) *domain.LifecycleEvent {
+			e := NewLifecycleEvent(sessA, "lx", seq, domain.TargetItem, "task")
+			return &e
+		}, []error{domain.ErrInvalidRecord}},
+		{"event at an earlier seq", completed, 1,
+			func(uint64) *domain.LifecycleEvent { return taskEvent("lx", 1) }, []error{domain.ErrInvalidRecord}},
+		{"event ID reused", completed, 1,
+			func(seq uint64) *domain.LifecycleEvent { return taskEvent("l1", seq) }, []error{domain.ErrImmutable}},
 	}
 	for _, tc := range cases {
 		err := s.Update(ctx, sessA, func(tx store.Tx) error {
-			tx.NextSeq()
-			return errOf(tx.PutTask(tc.t, tc.expected))
+			seq := tx.NextSeq()
+			return errOf(tx.PutTask(tc.t(seq), tc.expected, tc.event(seq)))
 		})
 		oneOf(t, tc.name, err, tc.want...)
 	}
 	var done domain.TaskState
+	var completion domain.LifecycleEvent
 	update(t, s, sessA, func(tx store.Tx) error {
-		got, err := tx.PutTask(next, 1)
+		got, err := tx.PutTask(next, 1, nil)
 		noErr(t, err)
 		if got.Version != 2 || got.Turn != 2 {
 			t.Errorf("PutTask result = %+v, want Version 2, Turn 2", got)
 		}
-		done = next
-		done.Status, done.CompletedSeq = domain.TaskCompleted, tx.NextSeq()
-		done, err = tx.PutTask(done, 2)
+		seq := tx.NextSeq()
+		completion = *taskEvent("l2", seq)
+		done, err = tx.PutTask(completed(seq), 2, &completion)
 		noErr(t, err)
 		return nil
 	})
@@ -411,6 +465,9 @@ func testTasks(t *testing.T, s store.Store) {
 		if got.Version != 3 {
 			t.Errorf("Version = %d, want 3", got.Version)
 		}
+		evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetTask})
+		noErr(t, err)
+		assertEqual(t, "task audit events", evs, []domain.LifecycleEvent{created, completion})
 		_, err = tx.Task("other")
 		wantErr(t, err, domain.ErrNotFound)
 		return nil
@@ -522,331 +579,6 @@ func testConversations(t *testing.T, s store.Store) {
 		}
 		_, err = tx.Conversation("c2")
 		wantErr(t, err, domain.ErrNotFound)
-		return nil
-	})
-}
-
-// advance returns c moved to state with the fields a ledger would set.
-func advance(tx store.Tx, c domain.CallRecord, state domain.CallState) domain.CallRecord {
-	if state.Terminal() {
-		return Finish(c, state, tx.NextSeq())
-	}
-	next := c.Clone()
-	next.State = state
-	if state == domain.CallSent {
-		next.Attempts++
-	}
-	return next
-}
-
-func testCalls(t *testing.T, s store.Store) {
-	// Test data keeps at most one reserving call per conversation
-	// (FR-CALL-005) except where ErrCallInFlight is the point.
-	var c1, c2, c3 domain.CallRecord
-	update(t, s, sessA, func(tx store.Tx) error {
-		n := seqs(tx, 3)
-		c1 = NewCall(sessA, "call-b", "conv1", n[0])
-		c2 = Reseal(func() domain.CallRecord {
-			c := NewCall(sessA, "call-a", "conv2", n[1])
-			c.Operation = domain.OperationCompaction
-			return c
-		}())
-		noErr(t, tx.InsertCall(c2))
-		noErr(t, tx.InsertCall(c1))
-		wantErr(t, tx.InsertCall(NewCall(sessA, "call-a", "conv9", n[2])), domain.ErrImmutable)
-		wantErr(t, tx.InsertCall(NewCall(sessA, "call-x", "conv1", n[2])), domain.ErrCallInFlight)
-		badHash := NewCall(sessA, "call-d", "conv9", n[2])
-		badHash.Request = []byte("tampered")
-		wantErr(t, tx.InsertCall(badHash), domain.ErrInvalidRecord)
-		badProposal := NewCall(sessA, "call-d", "conv9", n[2])
-		badProposal.Epoch = 5 // not resealed
-		wantErr(t, tx.InsertCall(badProposal), domain.ErrInvalidRecord)
-		return nil
-	})
-	// A new call's PreparedSeq must be allocated in its transaction.
-	err := s.Update(ctx, sessA, func(tx store.Tx) error {
-		tx.NextSeq()
-		return tx.InsertCall(NewCall(sessA, "call-d", "conv9", 1))
-	})
-	wantErr(t, err, domain.ErrInvalidRecord)
-
-	// Walk c1 through PREPARED -> SENT -> PREPARED (retry) -> SENT ->
-	// UNKNOWN -> COMPLETED, checking CAS at each step. The Revision in the
-	// argument is ignored and the stored record is returned.
-	path := []domain.CallState{domain.CallSent, domain.CallPrepared, domain.CallSent, domain.CallUnknown, domain.CallCompleted}
-	cur := c1
-	for _, to := range path {
-		update(t, s, sessA, func(tx store.Tx) error {
-			next := advance(tx, cur, to)
-			next.Revision = 1000
-			wantErr(t, errOf(tx.UpdateCall(next, cur.Revision+1)), domain.ErrVersionConflict)
-			got, err := tx.UpdateCall(next, cur.Revision)
-			noErr(t, err)
-			next.Revision = cur.Revision + 1
-			assertEqual(t, "UpdateCall result", got, next)
-			wantErr(t, errOf(tx.UpdateCall(next, cur.Revision)), domain.ErrVersionConflict)
-			cur = got
-			return nil
-		})
-	}
-	view(t, s, sessA, func(tx store.ReadTx) error {
-		got, err := tx.Call("call-b")
-		noErr(t, err)
-		assertEqual(t, "completed Call", got, cur)
-		return nil
-	})
-
-	// Terminal states admit nothing; an unchanged state is always allowed.
-	for _, to := range []domain.CallState{domain.CallSent, domain.CallFailed, domain.CallUnknown, domain.CallPrepared} {
-		err := s.Update(ctx, sessA, func(tx store.Tx) error {
-			next := cur.Clone()
-			next.State = to
-			if !to.Terminal() {
-				next.FinishedSeq = 0
-			}
-			if to != domain.CallCompleted {
-				next.Outcome, next.OutcomeHash = nil, ""
-			}
-			return errOf(tx.UpdateCall(next, cur.Revision))
-		})
-		wantErr(t, err, domain.ErrInvalidTransition)
-	}
-	update(t, s, sessA, func(tx store.Tx) error {
-		next := cur.Clone()
-		next.Reason = "annotated"
-		var err error
-		cur, err = tx.UpdateCall(next, cur.Revision)
-		noErr(t, err)
-		// c1 no longer reserves conv1, so a new call may.
-		c3 = NewCall(sessA, "call-c", "conv1", tx.NextSeq())
-		noErr(t, tx.InsertCall(c3))
-		return nil
-	})
-
-	transitions := []struct {
-		from, to domain.CallState
-		ok       bool
-	}{
-		{domain.CallPrepared, domain.CallFailed, true},
-		{domain.CallPrepared, domain.CallCompleted, false},
-		{domain.CallPrepared, domain.CallUnknown, false},
-		{domain.CallPrepared, domain.CallAbandoned, false},
-		{domain.CallSent, domain.CallFailed, true},
-		{domain.CallSent, domain.CallAbandoned, false},
-		{domain.CallSent, domain.CallSent, true},
-		{domain.CallUnknown, domain.CallFailed, true},
-		{domain.CallUnknown, domain.CallAbandoned, true},
-		{domain.CallUnknown, domain.CallSent, false},
-		{domain.CallUnknown, domain.CallPrepared, false},
-		{domain.CallUnknown, domain.CallUnknown, true},
-	}
-	// reach lists the valid path from PREPARED to a non-terminal state.
-	reach := map[domain.CallState][]domain.CallState{
-		domain.CallPrepared: nil,
-		domain.CallSent:     {domain.CallSent},
-		domain.CallUnknown:  {domain.CallSent, domain.CallUnknown},
-	}
-	for _, tc := range transitions {
-		err := s.Update(ctx, sessA, func(tx store.Tx) error {
-			c := NewCall(sessA, "tt", "conv-tt", tx.NextSeq())
-			noErr(t, tx.InsertCall(c))
-			for _, st := range reach[tc.from] {
-				var err error
-				c, err = tx.UpdateCall(advance(tx, c, st), c.Revision)
-				noErr(t, err)
-			}
-			if err := errOf(tx.UpdateCall(advance(tx, c, tc.to), c.Revision)); err != nil {
-				return err
-			}
-			return errRollback
-		})
-		if tc.ok {
-			wantErr(t, err, errRollback)
-		} else {
-			wantErr(t, err, domain.ErrInvalidTransition)
-		}
-	}
-
-	// Frozen proposal fields cannot change even with a consistent
-	// ProposalHash, and a stale ProposalHash is itself invalid.
-	immutable := []struct {
-		name string
-		edit func(c *domain.CallRecord)
-	}{
-		{"conversation", func(c *domain.CallRecord) { c.ConversationID = "conv9" }},
-		{"operation", func(c *domain.CallRecord) { c.Operation = domain.OperationInference }},
-		{"principal", func(c *domain.CallRecord) { c.Principal.AgentID = "other" }},
-		{"service actor", func(c *domain.CallRecord) { c.ServiceActor.AgentID = "other" }},
-		{"base version", func(c *domain.CallRecord) { c.BaseConversationVersion++ }},
-		{"semantic seq", func(c *domain.CallRecord) { c.SemanticSeq++ }},
-		{"epoch", func(c *domain.CallRecord) { c.Epoch++ }},
-		{"policy version", func(c *domain.CallRecord) { c.PolicyVersion = "p2" }},
-		{"request", func(c *domain.CallRecord) {
-			c.Request = []byte("new request")
-			c.RequestHash = domain.HashBytes(c.Request)
-		}},
-		{"manifest", func(c *domain.CallRecord) { c.ManifestHash = domain.HashBytes([]byte("other")) }},
-	}
-	for _, tc := range immutable {
-		err := s.Update(ctx, sessA, func(tx store.Tx) error {
-			next := c2.Clone()
-			tc.edit(&next)
-			wantErr(t, errOf(tx.UpdateCall(next, 1)), domain.ErrInvalidRecord)
-			return errOf(tx.UpdateCall(Reseal(next), 1))
-		})
-		if !errors.Is(err, domain.ErrImmutable) {
-			t.Errorf("changing %s: error = %v, want ErrImmutable", tc.name, err)
-		}
-	}
-	err = s.Update(ctx, sessA, func(tx store.Tx) error {
-		next := c2.Clone()
-		next.PreparedSeq = tx.NextSeq()
-		return errOf(tx.UpdateCall(next, 1))
-	})
-	oneOf(t, "changing prepared seq", err, domain.ErrImmutable, domain.ErrInvalidRecord)
-	err = s.Update(ctx, sessA, func(tx store.Tx) error {
-		return errOf(tx.UpdateCall(NewCall(sessA, "missing", "conv1", 1), 1))
-	})
-	wantErr(t, err, domain.ErrNotFound)
-	// A new FinishedSeq must be allocated in the transaction.
-	err = s.Update(ctx, sessA, func(tx store.Tx) error {
-		tx.NextSeq()
-		return errOf(tx.UpdateCall(Finish(c2, domain.CallFailed, 1), 1))
-	})
-	wantErr(t, err, domain.ErrInvalidRecord)
-
-	view(t, s, sessA, func(tx store.ReadTx) error {
-		ids := func(f store.CallFilter) []string {
-			got, err := tx.Calls(f)
-			noErr(t, err)
-			var out []string
-			for _, c := range got {
-				out = append(out, c.CallID)
-			}
-			return out
-		}
-		cases := []struct {
-			name string
-			f    store.CallFilter
-			want []string
-		}{
-			{"all", store.CallFilter{}, []string{"call-b", "call-a", "call-c"}},
-			{"conversation", store.CallFilter{ConversationID: "conv1"}, []string{"call-b", "call-c"}},
-			{"states", store.CallFilter{States: []domain.CallState{domain.CallPrepared, domain.CallSent}}, []string{"call-a", "call-c"}},
-			{"conjunction", store.CallFilter{ConversationID: "conv1", States: []domain.CallState{domain.CallCompleted}}, []string{"call-b"}},
-			{"no match", store.CallFilter{ConversationID: "conv3"}, nil},
-		}
-		for _, tc := range cases {
-			if got := ids(tc.f); !slices.Equal(got, tc.want) {
-				t.Errorf("Calls %s = %v, want %v", tc.name, got, tc.want)
-			}
-		}
-		all, err := tx.Calls(store.CallFilter{})
-		noErr(t, err)
-		assertEqual(t, "Calls", all, []domain.CallRecord{cur, c2, c3})
-		return nil
-	})
-}
-
-// testCallReservation checks FR-CALL-005 as enforced by the store: at most
-// one PREPARED, SENT, or UNKNOWN call per conversation.
-func testCallReservation(t *testing.T, s store.Store) {
-	update(t, s, sessA, func(tx store.Tx) error {
-		c1 := NewCall(sessA, "c1", "conv", tx.NextSeq())
-		noErr(t, tx.InsertCall(c1))
-		// Every reserving state blocks a second reservation.
-		for _, st := range []domain.CallState{domain.CallPrepared, domain.CallSent, domain.CallUnknown} {
-			if st != domain.CallPrepared {
-				var err error
-				c1, err = tx.UpdateCall(advance(tx, c1, st), c1.Revision)
-				noErr(t, err)
-			}
-			wantErr(t, tx.InsertCall(NewCall(sessA, "c2", "conv", tx.NextSeq())), domain.ErrCallInFlight)
-		}
-		// Other conversations and non-reserving calls are unaffected.
-		noErr(t, tx.InsertCall(NewCall(sessA, "c3", "other", tx.NextSeq())))
-		noErr(t, tx.InsertCall(Finish(NewCall(sessA, "c4", "conv", tx.NextSeq()), domain.CallFailed, tx.NextSeq())))
-		// A same-state update of the reserving call does not conflict with
-		// itself.
-		var err error
-		c1, err = tx.UpdateCall(c1, c1.Revision)
-		noErr(t, err)
-		// Releasing the reservation frees the conversation.
-		c1, err = tx.UpdateCall(Finish(c1, domain.CallAbandoned, tx.NextSeq()), c1.Revision)
-		noErr(t, err)
-		noErr(t, tx.InsertCall(NewCall(sessA, "c2", "conv", tx.NextSeq())))
-		return nil
-	})
-	// The rule holds across transactions too.
-	err := s.Update(ctx, sessA, func(tx store.Tx) error {
-		return tx.InsertCall(NewCall(sessA, "c5", "conv", tx.NextSeq()))
-	})
-	wantErr(t, err, domain.ErrCallInFlight)
-}
-
-func testCallAttempts(t *testing.T, s store.Store) {
-	var a1, a2 domain.CallAttempt
-	update(t, s, sessA, func(tx store.Tx) error {
-		n := seqs(tx, 3)
-		noErr(t, tx.InsertCall(NewCall(sessA, "call1", "conv", n[0])))
-		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "missing", 1, n[1])), domain.ErrNotFound)
-		// Attempts are dense from 1.
-		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call1", 2, n[1])), domain.ErrInvalidRecord)
-		a1 = NewAttempt(sessA, "call1", 1, n[1])
-		noErr(t, tx.PutCallAttempt(a1))
-		a2 = NewAttempt(sessA, "call1", 2, n[2])
-		noErr(t, tx.PutCallAttempt(a2))
-		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call1", 4, n[2])), domain.ErrInvalidRecord)
-		wantErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call1", 0, n[2])), domain.ErrInvalidRecord)
-		bad := NewAttempt(sessA, "call1", 3, n[2])
-		bad.State = "LOST"
-		wantErr(t, tx.PutCallAttempt(bad), domain.ErrInvalidRecord)
-		return nil
-	})
-	// A new attempt's SentSeq must be allocated in its transaction.
-	err := s.Update(ctx, sessA, func(tx store.Tx) error {
-		tx.NextSeq()
-		return tx.PutCallAttempt(NewAttempt(sessA, "call1", 3, 1))
-	})
-	wantErr(t, err, domain.ErrInvalidRecord)
-
-	// Upsert: a later write replaces the attempt, and closing it with an
-	// outcome freezes its state and OutcomeHash (INV-09).
-	outcome := domain.CallOutcome{Attempt: 1, State: domain.CallFailed, FailureReason: "timeout", Retryable: true}
-	update(t, s, sessA, func(tx store.Tx) error {
-		a1.State, a1.FinishedSeq, a1.FinishedAt = domain.AttemptFailed, tx.NextSeq(), T0.Add(1e9)
-		a1.OutcomeHash = outcome.OutcomeHash()
-		return tx.PutCallAttempt(a1)
-	})
-	other := domain.CallOutcome{Attempt: 1, State: domain.CallFailed, FailureReason: "reset"}
-	rejects := []struct {
-		name string
-		edit func(a *domain.CallAttempt)
-	}{
-		{"state", func(a *domain.CallAttempt) { a.State = domain.AttemptCompleted }},
-		{"outcome hash", func(a *domain.CallAttempt) { a.OutcomeHash = other.OutcomeHash() }},
-		{"cleared outcome hash", func(a *domain.CallAttempt) { a.OutcomeHash = "" }},
-	}
-	for _, tc := range rejects {
-		err := s.Update(ctx, sessA, func(tx store.Tx) error {
-			a := a1
-			tc.edit(&a)
-			return tx.PutCallAttempt(a)
-		})
-		if !errors.Is(err, domain.ErrImmutable) {
-			t.Errorf("changing a closed attempt's %s: error = %v, want ErrImmutable", tc.name, err)
-		}
-	}
-	// Repeating the identical closed attempt is allowed.
-	update(t, s, sessA, func(tx store.Tx) error { return tx.PutCallAttempt(a1) })
-	view(t, s, sessA, func(tx store.ReadTx) error {
-		got, err := tx.CallAttempts("call1")
-		noErr(t, err)
-		assertEqual(t, "CallAttempts", got, []domain.CallAttempt{a1, a2})
-		missing, err := tx.CallAttempts("missing")
-		if (err != nil && !errors.Is(err, domain.ErrNotFound)) || len(missing) != 0 {
-			t.Errorf("CallAttempts(missing) = %v, %v; want empty or ErrNotFound", missing, err)
-		}
 		return nil
 	})
 }

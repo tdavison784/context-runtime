@@ -25,7 +25,10 @@ func testDeepCopies(t *testing.T, s store.Store) {
 	// fresh returns the records as stored after the first transaction; the
 	// obligation reflects transition t.
 	fresh := func() fixture {
-		call := Finish(NewCall(sessA, "call", "conv", 1), domain.CallCompleted, 2)
+		// The call is completed through one attempt sent at seq 4.
+		call := NewCall(sessA, "call", "conv", 1)
+		call.Attempts, call.Revision = 1, 3
+		call = Finish(call, domain.CallCompleted, 5)
 		in := int64(10)
 		call.Outcome.Usage = []domain.UsageIteration{{Iteration: 1, InputTokens: &in}}
 		call.OutcomeHash = call.Outcome.OutcomeHash()
@@ -108,7 +111,7 @@ func testDeepCopies(t *testing.T, s store.Store) {
 	}
 
 	update(t, s, sessA, func(tx store.Tx) error {
-		seqs(tx, 3)
+		seqs(tx, 5)
 		f := fresh()
 		noErr(t, tx.InsertBlob(richBlob(sessA)))
 		noErr(t, tx.InsertItem(f.item))
@@ -120,11 +123,19 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		obl := NewObligation(sessA, "o", 1, 1, "rich")
 		noErr(t, tx.InsertObligationVersion(obl))
 		obl.Matcher.Name = "scribbled"
-		applied, err := tx.AppendObligationTransition(f.tr)
+		applied, err := tx.AppendObligationTransition(f.tr, 1)
 		noErr(t, err)
 		applied.EvidenceIDs[0] = "scribbled"
 		noErr(t, tx.InsertGrant(f.grant))
-		noErr(t, tx.InsertCall(f.call))
+		noErr(t, tx.InsertCall(NewCall(sessA, "call", "conv", 1)))
+		noErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call", 1, 4)))
+		sent := NewCall(sessA, "call", "conv", 1)
+		sent.State, sent.Attempts = domain.CallSent, 1
+		_, err = tx.UpdateCall(sent, 1)
+		noErr(t, err)
+		noErr(t, tx.PutCallAttempt(CloseAttempt(NewAttempt(sessA, "call", 1, 4), domain.AttemptCompleted, f.call.OutcomeHash, 5)))
+		_, err = tx.UpdateCall(f.call, 2)
+		noErr(t, err)
 
 		scribble(&f)
 		check(t, tx, "after mutating inserted records")

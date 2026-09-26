@@ -80,10 +80,13 @@ func populate(tx store.Tx, sess string) error {
 		func() error { return tx.InsertObligationVersion(NewObligation(sess, "o1", 1, s[4], "i2")) },
 		func() error {
 			return errOf(tx.AppendObligationTransition(NewTransition(sess, "t1", "o1", 1, s[5],
-				domain.ObligationUnresolved, domain.ObligationBlocked)))
+				domain.ObligationUnresolved, domain.ObligationBlocked), 1))
 		},
 		func() error { return tx.InsertGrant(NewGrant(sess, "g1", s[6], "i1")) },
-		func() error { return errOf(tx.PutTask(NewTask(sess, "task"), 0)) },
+		func() error {
+			e := NewLifecycleEvent(sess, "lt", s[11], domain.TargetTask, "task")
+			return errOf(tx.PutTask(NewTask(sess, "task"), 0, &e))
+		},
 		func() error {
 			return tx.AppendLifecycleEvent(NewLifecycleEvent(sess, "l1", s[7], domain.TargetItem, "i1"))
 		},
@@ -274,8 +277,8 @@ func testReadOwnWrites(t *testing.T, s store.Store) {
 		noErr(t, err)
 		evs, err := tx.LifecycleEvents(store.LifecycleFilter{})
 		noErr(t, err)
-		if len(evs) != 2 {
-			t.Errorf("LifecycleEvents = %d, want 2", len(evs))
+		if len(evs) != 3 {
+			t.Errorf("LifecycleEvents = %d, want 3", len(evs))
 		}
 		it, err := tx.Item("i1")
 		noErr(t, err)
@@ -435,8 +438,8 @@ func testSessionIsolation(t *testing.T, s store.Store) {
 		wantErr(t, tx.SetCurrentDirective("task", "dir", "i2"), domain.ErrNotFound)
 		// Obligation transitions and call attempts need records in this session.
 		wantErr(t, errOf(tx.AppendObligationTransition(NewTransition(sessB, "t1", "o1", 1, seq,
-			domain.ObligationUnresolved, domain.ObligationBlocked))), domain.ErrNotFound)
-		wantErr(t, tx.RevokeGrant("g1", seq), domain.ErrNotFound)
+			domain.ObligationUnresolved, domain.ObligationBlocked), 1)), domain.ErrNotFound)
+		wantErr(t, errOf(tx.RevokeGrant("g1", NewLifecycleEvent(sessB, "lg", seq, domain.TargetGrant, "g1"))), domain.ErrNotFound)
 		_, err := tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessB, "l1", seq, "i1"))
 		wantErr(t, err, domain.ErrNotFound)
 		return nil
@@ -467,16 +470,18 @@ func testForeignSessionRecords(t *testing.T, s store.Store) {
 	}
 	update(t, s, sessB, func(tx store.Tx) error {
 		n := tx.NextSeq()
+		lx := NewLifecycleEvent(sessA, "lw", n, domain.TargetTask, "tx")
 		checks := map[string]error{
 			"InsertItem":         tx.InsertItem(NewItem(sessA, "x", n, "x")),
 			"InsertRelationship": tx.InsertRelationship(NewRelationship(sessA, "rx", domain.RelDerivedFrom, "i1", "i2", n)),
 			"InsertBlob":         tx.InsertBlob(NewBlob(sessA, []byte("x"))),
 			"InsertObligation":   tx.InsertObligationVersion(NewObligation(sessA, "ox", 1, n, "i1")),
 			"AppendTransition": errOf(tx.AppendObligationTransition(NewTransition(sessA, "tx", "o1", 1, n,
-				domain.ObligationBlocked, domain.ObligationUnresolved))),
+				domain.ObligationBlocked, domain.ObligationUnresolved), 2)),
 			"UpdateItem":           errOf(tx.UpdateItem("i1", 2, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "ly", n, "i1"))),
 			"InsertGrant":          tx.InsertGrant(NewGrant(sessA, "gx", n, "i1")),
-			"PutTask":              errOf(tx.PutTask(NewTask(sessA, "tx"), 0)),
+			"PutTask":              errOf(tx.PutTask(NewTask(sessA, "tx"), 0, &lx)),
+			"RevokeGrant":          errOf(tx.RevokeGrant("g1", NewLifecycleEvent(sessA, "lz", n, domain.TargetGrant, "g1"))),
 			"AppendLifecycleEvent": tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "lx", n, domain.TargetItem, "i1")),
 			"PutConversation":      errOf(tx.PutConversation(NewConversation(sessA, "cx"), 0)),
 			"InsertCall":           tx.InsertCall(NewCall(sessA, "callx", "c1", n)),

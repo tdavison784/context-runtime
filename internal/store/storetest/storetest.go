@@ -88,6 +88,7 @@ var suite = []testCase{
 	{"Conversations", testConversations},
 	{"Calls", testCalls},
 	{"CallReservation", testCallReservation},
+	{"CallEvidence", testCallEvidence},
 	{"CallAttempts", testCallAttempts},
 }
 
