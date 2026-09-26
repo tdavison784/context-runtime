@@ -155,7 +155,7 @@ preserve valid state.
     bounded lookups — `item_blobs`, an index on
     `rec_item(content_hash, task, section, role, authority, access
     boundary)`, and `item_sources` respectively, the last via a **Go
-    migration step** (`backfillItemSources`) run inside the same
+    migration step** (`backfillItemSourcesV1`) run inside the same
     transaction as the SQL. **This generation was superseded one review
     round later and no longer exists** (below); it is kept in this list
     because a committed migration is a historical fact this ADR's rule
@@ -190,7 +190,9 @@ preserve valid state.
     records the `domain.Limits.MaxReferenceLinks` budget an event's
     References edges were checked against (D14/D17); a pre-0014 receipt
     reads NULL as 0 (unrecorded), never backfilled with the current
-    default (M8).
+    default (M8). `TestUpgradeReceiptLimits`
+    (`internal/store/sqlite/upgrade_test.go`, SPEC-2.6: previously
+    uncited) locks the pre-0014-reads-as-0 upgrade path.
 
   **The access-filtered lookup API (F1), landed:** `store.BlobReferrer`,
   `CanonicalCandidates`, `CurrentWorking`, and `SourceItems`
@@ -206,7 +208,10 @@ preserve valid state.
   `store.VisibleReferences` follows the same shape for References.
   `store.PermittedOwners` turns `domain.AccessBoundary.Permits` into the
   indexed equality clause every lookup issues. `TestAccessLookupsUseIndex`
-  asserts each lookup's exact query plan; `TestUpgradeAccessLookups`
+  asserts each lookup's `EXPLAIN QUERY PLAN` uses an index and never falls
+  back to an unindexed table scan (SPEC-2.1: it does not pin the exact
+  index/key columns chosen — a session-prefix-only `SEARCH` would also
+  pass); `TestUpgradeAccessLookups`
   checks the 0012 backfill end to end (a canonical item, a blob referrer,
   and a sourced item, each found post-upgrade); `TestUpgradeItemBlobIndex`/
   `TestUpgradeDuplicateIndex`/`TestUpgradeItemSourceIndex` still exist and
@@ -261,16 +266,22 @@ preserve valid state.
   exported field name, and a nil slice/pointer is JSON `null` — so
   arbitrary byte sequences (invalid UTF-8, an embedded NUL) round-trip
   exactly instead of being silently corrupted by `encoding/json`'s UTF-8
-  repair. Decoding is strict: an unknown/missing field, invalid hex, a
-  wrong JSON type, or trailing data fails as `domain.ErrIntegrity` at the
-  caller rather than a value being invented, so extending a listed type
-  needs a forward migration (M8), not a decoder that silently accepts old
-  and new shapes alike. Migrations 0002/0003 rewrote every row stored in
-  the old plain-JSON form; a row `0001` had already corrupted (e.g. a
-  content part whose hash no longer matches its now-`\uFFFD`-repaired
-  text) reads back as `domain.ErrIntegrity` after upgrade rather than a
-  silently wrong value, matching M8's "no invented executable state for a
-  record that predates new metadata."
+  repair. Decoding the wire format itself is strict: an unknown/missing
+  field, invalid hex, a wrong JSON type, or trailing data fails as
+  `domain.ErrIntegrity` at the caller rather than a value being invented,
+  so extending a listed type needs a forward migration (M8), not a decoder
+  that silently accepts old and new shapes alike. Migrations 0002/0003
+  rewrote every row stored in the old plain-JSON form; a row `0001` had
+  already corrupted a *content part* (its hash no longer matches its
+  now-`\uFFFD`-repaired text) reads back as `domain.ErrIntegrity` after
+  upgrade rather than a silently wrong value, matching M8's "no invented
+  executable state for a
+  record that predates new metadata." **(SPEC-2.6) This content-hash check
+  is content-part-specific** (`verifyItemContent`, below): a lossless
+  tag/ID list corrupted the same way decodes cleanly (the wire format
+  itself is intact) and is returned as-is with no `ErrIntegrity`, since
+  nothing compares it against a separate hash \u2014 see
+  `TestUpgradeLosslessStringLists` below.
 ## Alternatives considered
 
 - **`mattn/go-sqlite3` (cgo).** Rejected for V1: faster in some benchmarks,
@@ -400,8 +411,9 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all eleven migrations replay on a fresh database (SPEC-1.9:
-    corrected from an earlier, stale "seven"), still matches every Go
+    after all fourteen migrations replay on a fresh database (SPEC-2.6:
+    corrected from an earlier, stale "eleven", itself corrected from a
+    stale "seven"), still matches every Go
     struct field exactly, locking the no-opaque-copy design above against
     every migration added since Phase 1, not only 0001.
   - `TestFileCreatedPrivate` asserts a freshly created database file is mode
@@ -463,9 +475,13 @@ preserve valid state.
   from a fresh database.
 - `internal/store/sqlite/access_lookups_test.go` (F1: SEC-1.1, SEC-1.2,
   DUR-1.1, DUR-1.4, SPEC-1.3): `TestAccessLookupsUseIndex` asserts every
-  access-filtered lookup's exact query plan (`lookup_blob`,
-  `lookup_canonical`, `lookup_working`, `lookup_source`, `rec_reference`
-  by locator key, `rec_relationship` by type/target); `TestUpgradeAccessLookups`
+  access-filtered lookup's `EXPLAIN QUERY PLAN` uses an index and never an
+  unindexed scan (`lookup_blob`, `lookup_canonical`, `lookup_working`,
+  `lookup_source`, `rec_reference` by locator key, `rec_relationship` by
+  type/target) — SPEC-2.1: this does not pin the exact index or key
+  columns chosen, only that some index is used, so it would not by itself
+  catch a query that regressed to a same-session-prefix scan;
+  `TestUpgradeAccessLookups`
   checks migration 0012's backfill end to end — a canonical item, a blob
   referrer, and a sourced item are each found through the new API after
   upgrade, while a `DUPLICATE_OF` item is not; `TestLegacyUnverifiedNeverBlocks`
