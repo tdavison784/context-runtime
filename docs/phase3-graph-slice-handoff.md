@@ -93,3 +93,50 @@ This list excludes this handoff document's own final commit.
 - `917a379` fix(domain): forbid caller request IDs in submitted operation payloads (P3-2/34 W7-d)
 - `6594958` feat(graph): centralize immutable creation declaration acceptance (P3-4/25 W7-e)
 - `41444e6` fix(graph): use canonical coverage member keys as IDs (P3-6 W5)
+
+## Resume batch (W1 on Claude, 2026-09-26)
+
+Queued contract requests:
+
+- W4-1 `62811e4`: RecordResult accepts OBSERVATION_RUN, OBSERVATION and
+  RESOURCE_BINDING.
+- W4-2 `e356683`: ReportResourceChangeIntent.PathContents
+  `[]ResourcePathContent{Path, ContentHash}` is a canonical set bound into
+  the v3 request hash. Each path is canonical and unique, and is covered by
+  ChangedPaths unless the report is AllPaths or a resynchronization.
+  Duplicate ChangedPaths are now rejected.
+
+Graph regressions after merging p3/persistence: the failing graph tests were
+legacy fixtures that predate the explicit-namespace (P3-3), creation
+declaration (P3-4), poisoning (P3-1) and normalized coverage (P3-6)
+contracts. No production graph code needed a semantic change. Fixtures now
+set namespaces explicitly and declare creation through `mustCreate`
+(DeclareCreation in the creating transaction). Three obsolete expectations
+were replaced by the binding rule:
+
+- An identical goal restated after Resolve is a noncurrent duplicate and
+  stays RESOLVED (P3-4/C-1). The former ResolvedCanonicalAbsorbsNoOpenGoal
+  rejection is gone.
+- The obligation-claim duplicate test varies the declared obligation hash.
+  The legacy claim argument is ignored.
+- An AGENT filing a non-`agent.`-prefixed ID in its own AGENT_KEY slot is
+  legitimate, because display prefixes confer nothing. The test now asserts
+  that an AGENT cannot file into the DIRECTIVE namespace.
+
+`derivedRelationshipID` is extracted with byte-identical output.
+
+Remaining graph failures are SQLite-only and caused by W2. The SQLite
+`ExactObligation` (P3-12..18 facet) is still `errUnsupported`, so the SQLite
+variants of TestReplaceDirective_ObligationFanOut/256 and
+TestD13_{ReplacementRetiresBoundObligations,
+SnapshotIDReplacementRetiresObligations,
+UnauthorizedIndirectRetirementAbortsReplacement} fail. Their memory variants
+pass. TestOneLargeEventScalesLinearly moved to W7 (ingest producer path).
+
+The full race run (`go test -race ./...`) also fails in `internal/ingest`.
+Ingest sets no explicit Namespace and never calls graph.DeclareCreation, so
+keyed writes are rejected with `invalid record` (P3-3/4). The package also
+exceeds the default 10-minute timeout under -race, because each SQLite Open
+costs about 4.5s. This is the pending W7 producer integration and is not a
+graph regression. The SQLite TestOneLargeEventScalesLinearly failure has the
+same producer cause and is owned by W7.

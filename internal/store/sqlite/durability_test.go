@@ -229,7 +229,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 
 func openTemp(t *testing.T) (*Store, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "state.db")
+	path := freshPath(t)
 	s, err := Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)

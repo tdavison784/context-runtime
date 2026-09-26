@@ -12,7 +12,7 @@ type RecordResult struct {
 func (r RecordResult) Clone() RecordResult { r.IDs = slices.Clone(r.IDs); return r }
 func (r RecordResult) Validate() error {
 	switch r.Kind {
-	case "GRANT", "RESOURCE_UPDATE", "WORKSPACE_BINDING", "OBLIGATION_DECLARATION", "REEVALUATION", "MEMBERSHIP", "REPLACEMENT", "MATERIALIZATION":
+	case "GRANT", "RESOURCE_UPDATE", "WORKSPACE_BINDING", "OBLIGATION_DECLARATION", "REEVALUATION", "MEMBERSHIP", "REPLACEMENT", "MATERIALIZATION", "OBSERVATION_RUN", "OBSERVATION", "RESOURCE_BINDING":
 	default:
 		return invalid("record result: unknown family")
 	}
