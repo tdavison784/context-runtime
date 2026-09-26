@@ -488,7 +488,8 @@ Owner: `internal/directive` (per-span/per-parse-unit limits),
 totals, graph-scan bounds).
 
 **Deferred ruling: `tx.Grants()` per obligation retirement/lifecycle
-command (SPEC-1.3, part of F1's bounded-lookup findings).** `graph
+command, and four sibling whole-session reads (SPEC-1.3/SPEC-2.1, part of
+F1's bounded-lookup findings).** `graph
 /obligation.go`'s retirement path and `graph/lifecycle.go`'s command
 authorization both call `tx.Grants()` once per call — an unfiltered,
 whole-session read of every `MutationGrant`, not an exact-key lookup —
@@ -501,6 +502,23 @@ see, and an unbounded grant count neither locks out a legitimate mutation
 (it still succeeds, just slower) nor leaks anything (no boundary or
 authority check is skipped). It is indexed in Phase 3, alongside that
 phase's other obligation/grant work (ADR 8), rather than in this round.
+**SPEC-2.1 found four more reads with the same shape, ruled deferred on
+the same reasoning — none of them run on the per-item ingest path, only
+on an explicit cross-event listing call:** `store.ObligationTransitions`
+(every transition ever recorded, filtered in Go by obligation ID),
+`store.LifecycleEvents` (every lifecycle event, filtered by target/`MinSeq`),
+`store.Obligations(taskID)` (every obligation version in the session,
+reduced to the latest per obligation and filtered by task — distinct
+from the per-ID `Obligation`/`ObligationVersions` and per-source
+`ObligationsBySource` reads §26 already covers, which SPEC-2.1's fix
+made key-based), and `store.Diagnostics`/`LifecycleCommands` called with
+no `OccurrenceID` (`visibleReceipts` then lists every receipt in the
+session rather than looking one up). Each is a caller-facing inspection
+API, never called by `Ingester.Apply` itself; R18's deferred-read ruling
+above already anticipated exactly this shape ("a `Limit` parameter and an
+`ErrLimitExceeded` result... no such cross-event caller exists yet in
+Phase 2's scope"), and these four are recorded next to `tx.Grants()`
+rather than opening a new deferral.
 
 ### 14. Turn advancement (D18)
 
@@ -905,12 +923,22 @@ Answers to `p2-ingest`'s implementation questions, appended to
   records the full migration sequence and every locking test. SPEC-1.3
   also found that *other* graph/ingest reads issued once per ingested item
   or section — `Relationships`/`Items` filtered by type/task — were not
-  indexed even though the named lookups were; migration 0012's
-  `relationship_to` index and an item-by-task index close this
-  (`TestGraphReadsUseIndex`). `tx.Grants()` remains an unfiltered
-  whole-session read, deliberately deferred to Phase 3 (§13 records the
-  ruling in full: a grant can only be created by an authorized issuer, so
-  the read discloses nothing and only costs time, never correctness).
+  indexed even though the named lookups were. **Migration 0012's own
+  `relationship_to`/item-task indexes did not actually close this
+  (SPEC-2.1): they carried the key but not the `(Seq, ID)` order, so
+  SQLite still preferred a session-wide order index over them to avoid
+  sorting, and each read still grew with the session — `migration 0015`
+  (`0015_ordered_graph_indexes.sql`, p2-store) fixes it properly with
+  composite key-plus-order indexes, and a strengthened `assertIndexed`
+  plan guard (`TestGraphReadsUseIndex`) now requires the exact key columns
+  in the search constraint, catching the session-prefix-only plan the
+  original guard missed.** `tx.Grants()`, `ObligationTransitions`,
+  `LifecycleEvents`, `Obligations(taskID)`, and
+  `Diagnostics`/`LifecycleCommands` with no `OccurrenceID` remain
+  unfiltered whole-session reads, deliberately deferred — none on the
+  per-item ingest path (§13 records the full ruling: a grant can only be
+  created by an authorized issuer, so the read discloses nothing and only
+  costs time, never correctness).
 - **Locator identity has no repository namespace in V1 (resolves the §16
   open question, M5/R2).** Sharpens this ADR's earlier "References
   base-directory policy — resolved, deferred" open-question answer with
@@ -1099,8 +1127,11 @@ the code at this ADR's final-pass head.
   `run.go:304` (`BlobReferrer`). Separately, SPEC-1.3 found that
   `internal/ingest`'s *other* per-item reads — `Relationships` filtered by
   type/from/to, `Items` filtered by task — were not indexed even though
-  the three named R19 lookups were; migration 0012's `relationship_to`
-  index and an item-by-task index close this. Tests:
+  the three named R19 lookups were; migration 0012's key-only
+  `relationship_to`/item-task indexes did not close this on their own
+  (SPEC-2.1: no `(Seq, ID)` order, so SQLite still sorted a session-wide
+  index instead) — migration 0015's composite key-plus-order indexes do.
+  Tests:
   `TestAccessLookupsUseIndex`, `TestUpgradeAccessLookups`,
   `TestGraphReadsUseIndex`, `TestLegacyLookupsDropped`
   (`internal/store/sqlite/access_lookups_test.go`,
@@ -1752,8 +1783,16 @@ for the whole section.
   reference, duplicate-candidate, working-snapshot, and source-key lookups
   each run in bounded time via `TestAccessLookupsUseIndex` and
   `TestGraphReadsUseIndex` (`internal/store/sqlite/access_lookups_test.go`),
-  independent of session size and of the calling principal's visibility —
-  see ADR 3.
+  independent of session size and of the calling principal's visibility.
+  **(SPEC-2.1/SPEC-2.2) This claim holds for every read on the per-item
+  ingest path** — including `Relationships`/`Items` by type/task, fixed by
+  migration 0015's composite key-plus-order indexes after 0012's own
+  indexes turned out not to be enough on their own — **but not for the
+  five reads §13 records as deliberately deferred** (`tx.Grants()`,
+  `ObligationTransitions`, `LifecycleEvents`, `Obligations(taskID)`,
+  `Diagnostics`/`LifecycleCommands` with no `OccurrenceID`): none of those
+  run during ingestion, so "independent of session size" was never meant
+  to, and does not, cover them. See ADR 3.
 - **§24 (round 6 ruling, R20 — all landed, SPEC-1.4):** `internal/domain
   /ingest_test.go:TestEventIDRejectsReservedPrefixes` — an `EventID` equal
   to or prefixed like `evc_`, `eva_`, any `IDDomain` prefix, or `lce_`
