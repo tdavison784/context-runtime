@@ -109,3 +109,75 @@ chain successfully: the second call's `usage.input_tokens` (25) is far smaller t
 resend would cost, implying server-side state reuse, and returns the correct answer (`"cobalt"`).
 Implication for the descriptor: `previous_response_id` continuation requires `store: true`;
 `store: false` responses are not retrievable by ID even moments later.
+
+## Cache reads (C1-C4)
+
+**C1 — minimum cacheable prefix: bracketed between 1023 and 1034 tokens for both models.**
+`probes/descriptor/openai/main.go` `cache()` builds a deterministic filler prefix repeated `n`
+times and calls `/responses/input_tokens` (the counter) then `/responses` twice. Observed
+`input_tokens` (== counter output, see "Counter endpoint" below) and
+`usage.input_tokens_details.cached_tokens` for the *first* call at each length:
+
+| n (repeats) | input_tokens | astra cached_tokens (first) | luna cached_tokens (first) |
+|---|---|---|---|
+| 75 | 914 | 0 | 0 |
+| 84 | 1022 | 0 | 0 |
+| 85 | 1034 | 1031 | 1031 |
+| 100 | 1214 | 1211 | 1211 |
+
+(`gpt_6_{astra,luna}_c1_{75,84,85,100}_{count,first,repeat}.json`.) The jump from 0 to a
+near-total cache hit happens between 1022 and 1034 input tokens for both models, so the minimum
+cacheable prefix is in that range (consistent with a 1024-token floor, though the fixtures only
+bracket it, they do not pin the exact boundary — **NOT DETERMINED** more precisely than
+[1023, 1034]).
+
+Note: the *first* call at n=85/100 already shows the same `cached_tokens` as the *repeat* call.
+This is because this exact deterministic filler text had been sent in earlier probe runs
+(committed history shows this fixture set has been re-run — see the fixture re-run commit
+immediately before this doc). It is incidental evidence that the cache persists across separate
+process invocations, not just within one run, but the fixtures do not pin how long — **NOT
+DETERMINED** beyond "longer than one script invocation."
+
+**C2 — identical prefix twice: cache-read tokens reported in `usage.input_tokens_details`.**
+Both `cached_tokens` (read) and `cache_write_tokens` (write) are present on every response's
+`usage.input_tokens_details`, populated or zero as appropriate (see C1 table and C3 below). No
+separate cache-specific endpoint or header is used; it is inline in the standard `/responses`
+usage block.
+
+**C3 — append preserves the cache read; editing early content invalidates it.**
+`cache()`'s second probe (`*_c3_seed/_repeat/_append/_edit`) seeds a prefix marked `"The marker is
+BLUE."`, repeats it, appends a suffix after it, and separately edits the marker to `"RED"`:
+
+| step | input_tokens | cached_tokens | cache_write_tokens |
+|---|---|---|---|
+| seed | 1645 | 0 | 1642 |
+| repeat (same prefix) | 1645 | 1642 | 0 |
+| append (suffix added) | 1648 | 1633 | 12 |
+| edit (prefix changed) | 1645 | 0 | 1642 |
+
+(`gpt_6_astra_c3_*.json`; `gpt_6_luna_c3_*.json` matches for repeat/append/edit — `luna`'s `seed`
+call hit `max_output_tokens` before emitting a message, `status: "incomplete"`, and reported
+`usage: {input_tokens: 0, ...}` for that one call, an anomaly worth flagging rather than treating
+as a cache-write measurement; `astra`'s seed and `luna`'s later repeat/append/edit calls agree, so
+this doesn't put the C3 conclusion in doubt.) Verdict: append-only continuation preserves nearly
+all of the prior cache read (1633/1642 ≈ 99%, the remainder is the small new write for the
+appended suffix); editing content *before* the cached prefix's end drops the cache read to 0 and
+forces a full re-write. This matches the FR-MAT/FR-CAP assumption that only strictly-appended
+history keeps cache reads.
+
+**C4 — TTL options: only `"30m"` accepted by the API for gpt-6-\*; documented pricing multipliers
+0.1x read / 1.25x write.**
+`gpt_6_{astra,luna}_c4_ttl_30m.json` (`prompt_cache_options: {ttl: "30m"}`) succeeds. `*_ttl_24h.json`
+gets a 400:
+```
+"message": "Invalid value: '24h'. Supported values are: '30m'.",
+"code": "invalid_value"
+```
+identical for both models. This is **OBSERVED** from the API. The write pricing multiplier is not
+present in any usage/response field, so it is **DOCUMENTED**, not observed: OpenAI's prompt-caching
+guide (fetched 2026-09-26, `https://developers.openai.com/api/docs/guides/prompt-caching`) states
+that for GPT-5.6 and later (which includes the gpt-6-\* family probed here) "the only supported
+value, `30m`, is also the default," with cache reads charged at "0.1x the uncached input-token
+rate" and cache writes at "1.25x the uncached input-token rate." Earlier model families
+additionally support `"in_memory"` and `"24h"` retention per that page, but that does not apply to
+`gpt-6-astra`/`gpt-6-luna`, matching the rejection observed above.
