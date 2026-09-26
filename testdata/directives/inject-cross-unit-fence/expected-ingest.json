@@ -44,22 +44,22 @@
       "has_turn_id": true,
       "parts": [
         {
-          "text": "```"
+          "text": "```\n"
         }
       ],
-      "content_hash": "sha256:a1c7d7cd138d359923e0f3e2a4ce2a92a495e8182721fb985a7c4aa5b0456d4d",
+      "content_hash": "sha256:ec65814b7c7e580b2c712ab05303271dfed00161d7432d604e1d16d19e19a896",
       "source_ranges": [
         {
           "transcript": "event#0",
           "part": 0,
           "range": [
             0,
-            3
+            4
           ],
           "slices": [
             [
               0,
-              3
+              4
             ]
           ]
         }

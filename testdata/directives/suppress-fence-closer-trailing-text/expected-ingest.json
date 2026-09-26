@@ -41,22 +41,22 @@
       "has_turn_id": true,
       "parts": [
         {
-          "text": "```\n``` trailing\n## Pinned\n- hidden"
+          "text": "```\n``` trailing\n## Pinned\n- hidden\n"
         }
       ],
-      "content_hash": "sha256:a7ac86a5ca6edbe0766bb7f7381026f771aa49905225d451334c0f42ae97e6a3",
+      "content_hash": "sha256:dea39f3a5c1bff125e951b5453d2c0888be4215bf6ab5cb5fb0bf180e5929afd",
       "source_ranges": [
         {
           "transcript": "event#0",
           "part": 0,
           "range": [
             0,
-            35
+            36
           ],
           "slices": [
             [
               0,
-              35
+              36
             ]
           ]
         }

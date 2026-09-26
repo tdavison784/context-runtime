@@ -27,48 +27,6 @@
     {
       "ref": "event#1",
       "id": "itm_4693843efebd120022a3489e77d34044",
-      "kind": "instruction",
-      "generation": "DURABLE",
-      "authority": "SYSTEM",
-      "scope": "SESSION",
-      "access": {
-        "scope": "SESSION",
-        "task_id": "T"
-      },
-      "residency": "RESIDENT",
-      "retention": "HIGH",
-      "created_turn": 1,
-      "has_turn_id": true,
-      "parts": [
-        {
-          "text": "```\n\u003c!--\n```\n## Notes\n\u003c!--\n```\n--\u003e"
-        }
-      ],
-      "content_hash": "sha256:fe29ab39a229b6696af11c306ed05c3c29e71bfc246fabf0cd23dfb1871f6ad0",
-      "source_ranges": [
-        {
-          "transcript": "event#0",
-          "part": 0,
-          "range": [
-            0,
-            53
-          ],
-          "slices": [
-            [
-              0,
-              13
-            ],
-            [
-              32,
-              53
-            ]
-          ]
-        }
-      ]
-    },
-    {
-      "ref": "event#2",
-      "id": "itm_2035db7e2112daa3212fbcb62b2c5c86",
       "kind": "fact",
       "section": "REMEMBER",
       "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
@@ -107,8 +65,8 @@
       ]
     },
     {
-      "ref": "event#3",
-      "id": "itm_b4da5c957d1bbc2741926809abf48af5",
+      "ref": "event#2",
+      "id": "itm_2035db7e2112daa3212fbcb62b2c5c86",
       "kind": "evidence",
       "section": "EPHEMERAL",
       "directive_id": "ephemeral-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
@@ -141,6 +99,48 @@
             [
               69,
               73
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#3",
+      "id": "itm_b4da5c957d1bbc2741926809abf48af5",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "```\n\u003c!--\n```\n## Notes\n\u003c!--\n```\n--\u003e\n"
+        }
+      ],
+      "content_hash": "sha256:3972af299abbe036ba220e0601c45350b157f7d96368971d7cfd23422e97139f",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            54
+          ],
+          "slices": [
+            [
+              0,
+              13
+            ],
+            [
+              32,
+              54
             ]
           ]
         }

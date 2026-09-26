@@ -27,44 +27,6 @@
     {
       "ref": "event#1",
       "id": "itm_1aa93b2596b6a17733f5a9686af39f26",
-      "kind": "instruction",
-      "generation": "DURABLE",
-      "authority": "SYSTEM",
-      "scope": "SESSION",
-      "access": {
-        "scope": "SESSION",
-        "task_id": "T"
-      },
-      "residency": "RESIDENT",
-      "retention": "HIGH",
-      "created_turn": 1,
-      "has_turn_id": true,
-      "parts": [
-        {
-          "text": "~~~~\n## Pinned\n- hidden\n~~~\n## Goal\nhidden\n  ~~~~~"
-        }
-      ],
-      "content_hash": "sha256:aa8fac1ab58f32c7a41ab58640c4129268196cce94d5a9ebf964ee8e3b5a4185",
-      "source_ranges": [
-        {
-          "transcript": "event#0",
-          "part": 0,
-          "range": [
-            3,
-            53
-          ],
-          "slices": [
-            [
-              3,
-              53
-            ]
-          ]
-        }
-      ]
-    },
-    {
-      "ref": "event#2",
-      "id": "itm_9b065ccf9ff3500501a9f08eef3498c0",
       "kind": "fact",
       "section": "REMEMBER",
       "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
@@ -97,6 +59,44 @@
             [
               70,
               74
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_9b065ccf9ff3500501a9f08eef3498c0",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "   ~~~~\n## Pinned\n- hidden\n~~~\n## Goal\nhidden\n  ~~~~~ \t\n"
+        }
+      ],
+      "content_hash": "sha256:b8d72c1401e479baf28145dbd9ddfc469e61bb314b33faec31b717a2d808de20",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            56
+          ],
+          "slices": [
+            [
+              0,
+              56
             ]
           ]
         }

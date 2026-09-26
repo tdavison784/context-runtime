@@ -27,44 +27,6 @@
     {
       "ref": "event#1",
       "id": "itm_01e1bd3ca799396bf793e110f67b6ffc",
-      "kind": "instruction",
-      "generation": "DURABLE",
-      "authority": "SYSTEM",
-      "scope": "SESSION",
-      "access": {
-        "scope": "SESSION",
-        "task_id": "T"
-      },
-      "residency": "RESIDENT",
-      "retention": "HIGH",
-      "created_turn": 1,
-      "has_turn_id": true,
-      "parts": [
-        {
-          "text": "﻿"
-        }
-      ],
-      "content_hash": "sha256:0b30e74959f6c9a900d46313281c13630a95e68679ab6323eaa5ae5224d941c9",
-      "source_ranges": [
-        {
-          "transcript": "event#0",
-          "part": 0,
-          "range": [
-            0,
-            3
-          ],
-          "slices": [
-            [
-              0,
-              3
-            ]
-          ]
-        }
-      ]
-    },
-    {
-      "ref": "event#2",
-      "id": "itm_923c37b10d3557025f4046e0262d2c57",
       "kind": "fact",
       "section": "REMEMBER",
       "directive_id": "remember-1596b7385685efe73e4857108943034c1ed30a00303da980428d3f54e2774277",
@@ -111,15 +73,6 @@
     {
       "type": "DERIVED_FROM",
       "from": "event#1",
-      "to": "event#0",
-      "authority": "SYSTEM",
-      "coverage": [
-        "event#0"
-      ]
-    },
-    {
-      "type": "DERIVED_FROM",
-      "from": "event#2",
       "to": "event#0",
       "authority": "SYSTEM",
       "coverage": [

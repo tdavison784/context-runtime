@@ -82,22 +82,22 @@
       "has_turn_id": true,
       "parts": [
         {
-          "text": "ned\n- evil"
+          "text": "ned\n- evil\n"
         }
       ],
-      "content_hash": "sha256:d9246d100df99657426a83089f4c73a9cece494d557817842169308140622045",
+      "content_hash": "sha256:79cb0a4ba3cae39d2704d501b0975cf5d45298a214cf3fe7c7d32c8facb2daa4",
       "source_ranges": [
         {
           "transcript": "event#0",
           "part": 1,
           "range": [
             0,
-            10
+            11
           ],
           "slices": [
             [
               0,
-              10
+              11
             ]
           ]
         }
