@@ -90,7 +90,7 @@ func (r DiagnosticReason) Valid() bool {
 		ReasonDuplicateAttribute, ReasonDuplicateID, ReasonNestedHeading:
 		return true
 	}
-	return false
+	return r == ReasonBoundaryConflict || r == ReasonTargetMismatch
 }
 
 // Diagnostic is parser/ingestion output without source content (D16).
@@ -135,6 +135,15 @@ func (d Diagnostic) Message() string {
 	}
 	return string(d.Code) + " (" + string(d.Reason) + ")"
 }
+
+// Ingestion reasons (R13, R14). A same-ID write whose boundary differs from
+// a visible current version is dropped with boundary_conflict; a Resolve on a
+// non-OPEN goal or an Unpin on a non-pinned target is target_mismatch. Both
+// are diagnostics, not aborts.
+const (
+	ReasonBoundaryConflict DiagnosticReason = "boundary_conflict"
+	ReasonTargetMismatch   DiagnosticReason = "target_mismatch"
+)
 
 // DiagnosticSchemaVersion versions the persisted DiagnosticRecord layout.
 const DiagnosticSchemaVersion = "diagnostic/v1"
@@ -245,6 +254,9 @@ const (
 	TargetResolved  TargetResolution = "RESOLVED"
 	TargetNotFound  TargetResolution = "NOT_FOUND"
 	TargetAmbiguous TargetResolution = "AMBIGUOUS"
+	// TargetMismatch names an accessible current target of the wrong kind or
+	// state for the action (R14), for example Resolve on a non-OPEN goal.
+	TargetMismatch TargetResolution = "MISMATCH"
 )
 
 // LifecycleCommandSchemaVersion versions the persisted command record.
@@ -307,7 +319,7 @@ func (r LifecycleCommandRecord) Validate() error {
 		return invalid("lifecycle command record: commands are never executed in this phase")
 	}
 	switch r.Resolution {
-	case TargetResolved:
+	case TargetResolved, TargetMismatch:
 		if r.ResolvedItemID == "" || r.ResolvedVersion == 0 {
 			return invalid("lifecycle command record: a resolved target needs its item version")
 		}

@@ -27,6 +27,12 @@ func TestPackageBoundaries(t *testing.T) {
 		"internal/provider":  {"internal/domain"},
 		"internal/telemetry": {"internal/domain"},
 	}
+	// Policy is pure like the parser. Ingestion reaches stores only through
+	// the internal/store interface, never a concrete store. The root package
+	// re-exports domain types and nothing else.
+	allowOnly["internal/policy"] = []string{"internal/domain"}
+	allowOnly["internal/ingest"] = []string{"internal/domain", "internal/directive", "internal/policy", "internal/store", "internal/graph"}
+	allowOnly["."] = []string{"internal/domain"}
 	for pkg, allowed := range allowOnly {
 		for _, dep := range graph[pkg] {
 			if !slices.Contains(allowed, dep) {
