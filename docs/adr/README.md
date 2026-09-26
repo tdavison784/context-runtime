@@ -58,9 +58,6 @@ review found the brief's decisions needed a dedicated ADR beyond that list,
 and the commander added it by ruling (`phase2-amendments.md` R4). It gates
 Phase 2 exit the same way ADRs 1-18 gate their phases.
 
-**Additional ADRs:** ADR 19 (directive parsing and ingestion, Phase 2) is
-being written, beyond the 18 required by SDD §15.
-
 Phase 1 (Contracts, domain, and stores) requires ADRs 1, 3, 4, 6, 13, 16, 17,
 all written here. Phase 1's exit gate (state-transition, restart, graph, and
 concurrency tests for the foundational event traces) is tracked in
