@@ -20,6 +20,11 @@ type tx struct {
 	// records a write of a record carrying a sequence number allocated in
 	// this transaction. Update enforces the semantic-write rule with them.
 	semantic, sequenced bool
+	// semSeqs are the sequences of Phase 3 companion writes, for the
+	// TargetCall sharing check; deferred are their commit-time reference
+	// checks (semantic.go).
+	semSeqs  []uint64
+	deferred []func() error
 }
 
 func (t *tx) markSemantic()  { t.semantic = true }
@@ -33,7 +38,7 @@ func (t *tx) commit(st *state) bool {
 	wrote := t.items.dirty() || t.rels.dirty() || t.events.dirty() || t.blobs.dirty() ||
 		t.directives.dirty() || t.obligations.dirty() || t.transitions.dirty() || t.grants.dirty() ||
 		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty() ||
-		t.receipts.dirty() || t.envelopes.dirty() || t.references.dirty()
+		t.receipts.dirty() || t.envelopes.dirty() || t.references.dirty() || t.sem.dirty()
 	t.items.commit()
 	t.rels.commit()
 	t.supersedes.commit()
@@ -64,6 +69,7 @@ func (t *tx) commit(st *state) bool {
 	t.receipts.commit()
 	t.envelopes.commit()
 	t.references.commit()
+	t.sem.commit()
 	st.lastSeq = t.lastSeq
 	return wrote
 }
@@ -575,6 +581,7 @@ func (t *tx) InsertCall(c domain.CallRecord) error {
 		}
 	}
 	t.calls.put(c.CallID, c)
+	t.noteReservation(domain.CallRecord{}, c)
 	return nil
 }
 
@@ -627,6 +634,7 @@ func (t *tx) UpdateCall(c domain.CallRecord, expectedRevision uint64) (domain.Ca
 		}
 	}
 	t.calls.put(c.CallID, c)
+	t.noteReservation(cur, c)
 	return c, nil
 }
 
@@ -744,7 +752,7 @@ func (t *tx) checkLedgerSeqs() error {
 	if len(ledger) == 0 {
 		return nil
 	}
-	var seqs []uint64
+	seqs := slices.Clone(t.semSeqs)
 	for _, it := range t.items.over {
 		seqs = append(seqs, it.Seq)
 	}

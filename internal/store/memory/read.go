@@ -51,6 +51,7 @@ type readTx struct {
 	oblsBySource liveIndex[string, obligationKey]
 	refOwners    orderedIndex[sourceKey]
 	itemsByTask  index[string]
+	sem          semView
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -59,6 +60,7 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 	return &readTx{
 		sessionID:    sessionID,
 		lastSeq:      st.lastSeq,
+		sem:          newSemView(st.sem, writable),
 		items:        newTable(st.items, writable, domain.ContextItem.Clone),
 		rels:         newTable(st.rels, writable, domain.Relationship.Clone),
 		supersedes:   newIndex(st.supersedes, writable),
