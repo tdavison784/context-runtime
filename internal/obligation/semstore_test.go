@@ -686,3 +686,29 @@ func (b *semBackend) AppendSemanticObligationTransition(t domain.ObligationTrans
 	})
 	return out, err
 }
+
+// --- current pointers ---
+
+func (b *semBackend) SetCurrentVersion(itemID, expectedPrior string) error {
+	return b.write(nil, func() error {
+		it, err := b.rtx.Item(itemID)
+		if err != nil {
+			return err
+		}
+		key, ok := it.CurrentKey()
+		if !ok {
+			return domain.ErrInvalidRecord
+		}
+		prior, err := b.rtx.CurrentVersion(key)
+		if errors.Is(err, domain.ErrNotFound) {
+			prior, err = "", nil
+		}
+		if err != nil {
+			return err
+		}
+		if prior != expectedPrior {
+			return domain.ErrVersionConflict
+		}
+		return b.tx.Tx.SetCurrentVersion(itemID)
+	})
+}

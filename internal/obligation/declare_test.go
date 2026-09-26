@@ -292,6 +292,7 @@ func TestDeclarePinnedReplacementVersions(t *testing.T) {
 	var v2 *domain.ObligationRef
 	mustUpdate(t, st, func(tx store.Tx) error {
 		it := storetest.NewDirective(testSession, "p2", "tests", tx.NextSeq(), "All tests must pass")
+		it.Namespace = domain.NamespaceDirective
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
