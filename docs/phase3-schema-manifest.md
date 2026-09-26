@@ -70,8 +70,8 @@ semantic completeness/applicability, and outward redaction. W1 owns all types.
 | Checkpoint / ID and ItemID | CHECKPOINT-role item; source coverage and distinct closed-exchange coverage; generation manifest; issuing/open round excluded; prior checkpoint chain | W5 |
 | OwnerRegistration / (kind, owner ID) | Trusted registration/source and optional workflow; immutable session-lifetime association | W3/W7 |
 | RetrievalLease / ID | Exact holder including authority, conversation/turn, immutable source/content, issued logical-inference index, finite allowance/policy; holder/source indices | W6; liveness solely W3 policy |
-| RetrievalResult / ID | Exact lease/projection/event/invocation; frozen observed item revision/status; intersected access | W6 |
-| ProjectionRecord / ID and ItemID | TOOL PROJECTION item; exact source/lease/dependency coverage/invocation and registered delivery policy | W6 |
+| RetrievalResult / ID | Exact lease/projection/event and RetrievalOrigin; ValidateOriginEvent binds holder/request/source/result; invocation required for AGENT, absent only for authenticated HARNESS; frozen observed revision/status | W6 |
+| ProjectionRecord / ID and ItemID | TOOL PROJECTION item; exact source/lease/dependency coverage; Origin equals referenced retrieval result's Origin (including invocation presence/fields); intersected access and registered delivery policy | W6 |
 | RetrievalEvent / ID | Principal/trigger/invocation/request; success references result/source; denial carries no source identity or count | W6 |
 | MutationReceipt / (Family, RequestID) | Exact principal/method/canonical arguments/hash schema/policy and typed immutable result; referenced result records exist | W3/W4/W5/W6 |
 | ToolExecutionReceipt / composite invocation ID | Completed logical output/call + tool-call + conversation, authenticated principal, mutation receipt and frozen result | W5 |

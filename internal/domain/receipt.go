@@ -73,6 +73,12 @@ func NewEventEnvelope(p Principal, occurrenceID string, e Event) (EventEnvelope,
 	if err != nil {
 		return EventEnvelope{}, err
 	}
+	e = snapshotEventBlobs(e)
+	env := EventEnvelope{SessionID: p.SessionID, OccurrenceID: occurrenceID, EventID: e.EventID, Principal: p, Event: e, PayloadHash: hash, SchemaVersion: EventEnvelopeSchemaVersion}
+	return env, env.Validate()
+}
+
+func snapshotEventBlobs(e Event) Event {
 	e = e.Clone()
 	for i := range e.Spans {
 		for j, part := range e.Spans[i].Parts {
@@ -82,8 +88,7 @@ func NewEventEnvelope(p Principal, occurrenceID string, e Event) (EventEnvelope,
 			}
 		}
 	}
-	env := EventEnvelope{SessionID: p.SessionID, OccurrenceID: occurrenceID, EventID: e.EventID, Principal: p, Event: e, PayloadHash: hash, SchemaVersion: EventEnvelopeSchemaVersion}
-	return env, env.Validate()
+	return e
 }
 
 // Validate recomputes the payload hash and checks the occurrence key.

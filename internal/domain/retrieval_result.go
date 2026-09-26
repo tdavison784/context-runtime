@@ -5,13 +5,17 @@ package domain
 type RetrievalResult struct {
 	SemanticMeta
 	RequestID, LeaseID, ProjectionID, RetrievalEventID string
-	Invocation                                         ToolInvocation
+	Origin                                             RetrievalOrigin
 	Observed                                           ObservedItemState
 	Access                                             AccessBoundary
 	PolicyVersion                                      string
 }
 
-func (r RetrievalResult) Clone() RetrievalResult { r.Observed = r.Observed.Clone(); return r }
+func (r RetrievalResult) Clone() RetrievalResult {
+	r.Observed = r.Observed.Clone()
+	r.Origin = r.Origin.Clone()
+	return r
+}
 func (r RetrievalResult) Validate() error {
 	if err := r.SemanticMeta.Validate(); err != nil {
 		return err
@@ -21,16 +25,39 @@ func (r RetrievalResult) Validate() error {
 			return invalid("retrieval result: incomplete references")
 		}
 	}
-	if err := r.Invocation.Validate(); err != nil {
+	if err := r.Origin.Validate(); err != nil {
 		return err
 	}
-	if r.Invocation.SessionID != r.SessionID || !r.Access.Permits(r.Invocation.Principal) {
+	if r.Origin.Holder.SessionID != r.SessionID || !r.Access.Permits(r.Origin.Holder) {
 		return invalid("retrieval result: holder mismatch")
 	}
 	if err := r.Observed.Validate(); err != nil {
 		return err
 	}
 	return semanticBoundary(r.SessionID, r.Access)
+}
+
+// ValidateOriginEvent binds the result to its immutable successful retrieval
+// audit. Both backends enforce this link at commit, including HARNESS requests
+// without tool invocations; services authenticate the principal and originating turn.
+func (r RetrievalResult) ValidateOriginEvent(e RetrievalEvent) error {
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if err := e.Validate(); err != nil {
+		return err
+	}
+	if e.ID != r.RetrievalEventID || e.SessionID != r.SessionID || e.RequestID != r.RequestID || e.ResultID != r.ID || e.Principal != r.Origin.Holder || e.Source == nil || *e.Source != r.Observed.Source || e.ErrorCode != "" {
+		return invalid("retrieval result: origin event mismatch")
+	}
+	invocationID := ""
+	if r.Origin.Invocation != nil {
+		invocationID, _ = r.Origin.Invocation.ID()
+	}
+	if e.InvocationID != invocationID {
+		return invalid("retrieval result: invocation event mismatch")
+	}
+	return nil
 }
 
 // ProjectionRecord is the immutable companion to runtime-created TOOL content.
@@ -40,10 +67,15 @@ type ProjectionRecord struct {
 	ItemID                                           string
 	Source                                           ItemContentRef
 	LeaseID, RetrievalResultID, DependencyCoverageID string
-	Invocation                                       ToolInvocation
+	Origin                                           RetrievalOrigin
 	Access                                           AccessBoundary
 	DeliveryPolicyVersion                            string
 	OmittedBytes                                     uint64
+}
+
+func (p ProjectionRecord) Clone() ProjectionRecord {
+	p.Origin = p.Origin.Clone()
+	return p
 }
 
 func (p ProjectionRecord) Validate() error {
@@ -58,11 +90,11 @@ func (p ProjectionRecord) Validate() error {
 	if err := p.Source.Validate(); err != nil {
 		return err
 	}
-	if err := p.Invocation.Validate(); err != nil {
+	if err := p.Origin.Validate(); err != nil {
 		return err
 	}
-	if p.Invocation.SessionID != p.SessionID {
-		return invalid("projection: invocation session mismatch")
+	if p.Origin.Holder.SessionID != p.SessionID || !p.Access.Permits(p.Origin.Holder) {
+		return invalid("projection: origin holder mismatch")
 	}
 	return semanticBoundary(p.SessionID, p.Access)
 }
@@ -94,8 +126,15 @@ func (e RetrievalEvent) Validate() error {
 	if err := semanticActor(e.SessionID, e.TriggeringActor); err != nil {
 		return err
 	}
-	if !semanticID(e.RequestID) || !semanticID(e.InvocationID) {
+	if !semanticID(e.RequestID) {
 		return invalid("retrieval event: request identity required")
+	}
+	if e.Principal.Authority == AuthorityHarness {
+		if e.InvocationID != "" || e.TriggeringActor != e.Principal {
+			return invalid("retrieval event: exact trusted harness origin required")
+		}
+	} else if e.Principal.Authority != AuthorityAgent || !semanticID(e.InvocationID) {
+		return invalid("retrieval event: model tool invocation required")
 	}
 	if e.ErrorCode != "" {
 		if !e.ErrorCode.Valid() || e.Source != nil || e.ResultID != "" {
