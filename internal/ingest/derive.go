@@ -305,7 +305,7 @@ func (r *run) causeAccess(base domain.AccessBoundary, causes []domain.AccessBoun
 
 // derivedSlotHeldAbove reports whether a Working member with a derived ID
 // would collide with a current version of another authority that its own
-// authority does not dominate (DUR-1.5, ruling option A). A derived ID
+// authority does not dominate (DUR-1.5). A derived ID
 // carries no authority, so identical text under two authorities shares one
 // current-version slot: a same-or-higher authority supersedes it by ID as
 // usual, but a lower one must not abort its whole event, so its section is

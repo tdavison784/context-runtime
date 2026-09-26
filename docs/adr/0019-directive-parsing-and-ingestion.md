@@ -949,7 +949,7 @@ Answers to `p2-ingest`'s implementation questions, appended to
   replaced item that carries an obligation
   (`internal/ingest/directives.go:130` → `graph.go:222` →
   `graph/obligation.go:43`) and once per lifecycle command
-  (`derive.go:356` → `graph/lifecycle.go:122`) — so it is deferred as a
+  (`derive.go:357` → `graph/lifecycle.go:122`) — so it is deferred as a
   performance-only item precisely *despite* running on that path, not
   because it doesn't (§13 records the full ruling: a grant can only be
   created by an authorized issuer, so the read discloses nothing and only
@@ -1139,7 +1139,7 @@ the code at this ADR's final-pass head.
   `VisibleReferenceFilter` — each carrying a `Viewer domain.Principal`.
   The `ReadTx` methods `BlobReferrer`, `CanonicalCandidates`,
   `CurrentWorking`, `SourceItems`, and `VisibleReferences`
-  (`store.go:184-195`) replace the deleted `ItemsByBlob`/
+  (`store.go:186-197`) replace the deleted `ItemsByBlob`/
   `DuplicateCandidates`/`ItemsBySourceKey`/`UnresolvedReferences` and the
   `freezePartitions` task scan; SQLite filters by owner columns on new
   tables (migration 0012's `lookup_blob`/`lookup_canonical`/
@@ -1155,7 +1155,7 @@ the code at this ADR's final-pass head.
   the same write that retires it, so repeated identical content never
   grows them (DUR-1.1). **(SPEC-3.3, corrected) `lookup_blob` is not the
   same:** `retireLookups(itemID, duplicate bool)`
-  (`internal/store/sqlite/access_lookups.go:54-58`) removes its own rows
+  (`internal/store/sqlite/access_lookups.go:56-60`) removes its own rows
   only when the retiring item is itself classified a duplicate
   (`duplicate == true`) — a superseded (non-duplicate) item's `lookup_blob`
   row is deliberately kept, since the canonical item's exact content and
@@ -1166,7 +1166,7 @@ the code at this ADR's final-pass head.
   removed retroactively. Ingest call
   sites: `internal/ingest/directives.go:269` (`CanonicalCandidates`),
   `references.go:42` (`SourceItems`), `references.go:137`
-  (`VisibleReferences`), `run.go:304` (`BlobReferrer`). Separately,
+  (`VisibleReferences`), `run.go:306` (`BlobReferrer`). Separately,
   SPEC-1.3 found that `internal/ingest`'s *other* per-item reads —
   `Relationships` filtered by type/from/to, `Items` filtered by task — were
   not indexed even though the three named R19 lookups were; the key-only
@@ -1215,18 +1215,25 @@ the code at this ADR's final-pass head.
   separately named test does exist and §16 already cites it, contradicting
   this paragraph's earlier claim that it doesn't).
 - **F6 (SEC-1.3 — diagnostic/lifecycle-command record access, refines
-  §12/§1, D16/D1; landed).** A diagnostic or lifecycle-command record's
-  access is now the *narrower* of the source span's boundary and the
-  boundary of the content or target it describes, not the span boundary
-  alone: diagnostics carry a `scopedDiag{d, access}`
+  §12/§1, D16/D1; diagnostic half landed; command half superseded by
+  SEC-3.2, §31 below — SPEC-4.2 corrects this paragraph, which had drifted
+  out of sync with the code).** A diagnostic's access is the *narrower* of
+  the source span's boundary and the boundary of the content it describes,
+  not the span boundary alone: diagnostics carry a `scopedDiag{d, access}`
   (`internal/ingest/diagnostics.go`) computed per diagnostic rather than
-  defaulting to the span's transcript access, and a lifecycle command's
-  record narrows via `domain.Intersect(scope, spanAccess, targetAccess)`
-  (`internal/domain/principal.go:101`, `internal/ingest/derive.go:349`)
-  when its target resolves to a narrower-boundary item. This closes the
-  over-disclosure SEC-1.3 found: a span-boundary-only access field could
-  let a principal who can see the span, but not a narrower-boundary target
-  it describes, learn the target exists. Reads filter on the narrowed
+  defaulting to the span's transcript access, using
+  `domain.Intersect(scope, spanAccess, targetAccess)`
+  (`internal/domain/principal.go:101`, `internal/ingest/derive.go:297`)
+  when the diagnostic's cause resolves to a narrower-boundary item. This
+  closes the over-disclosure SEC-1.3 found: a span-boundary-only access
+  field could let a principal who can see the span, but not a
+  narrower-boundary target it describes, learn the target exists.
+  **A lifecycle-command record does not narrow its own `Access` this way**
+  — `rec.Access` stays at the transcript boundary regardless of outcome
+  (`internal/ingest/derive.go:351`, `rec.Access = c.transcript.Access`); §31
+  below records SEC-3.2, the mechanism that actually replaced F6's original
+  per-command narrowing (a separate `DetailAccess` field and redaction,
+  not an `Access` intersection). Reads filter on the narrowed
   boundary like any other access-checked record. Test:
   `TestRecordsAtNarrowerBoundary_F6` (`internal/ingest/fixes_r1_test.go`).
 - **F5 (DUR-1.8, SPEC-1.9 — migration 0011's Go-step checksum) is recorded
@@ -1249,7 +1256,7 @@ the code at this ADR's final-pass head.
   `domain.ErrEventIDConflict`
   (`errors.New("event ID conflict")`, `internal/domain/errors.go:24`),
   returned bare with no ID, principal, or session detail
-  (`internal/ingest/ingest.go:242,249`) — `p2-contract` verifies this with
+  (`internal/ingest/ingest.go:233,240`) — `p2-contract` verifies this with
   a test. **Accepted residual risk, recorded here:** an `EventID` is a
   session-wide idempotency key, not a per-principal one; a harness that
   lets predictable, cross-principal-guessable `EventID`s reach the runtime
@@ -1346,9 +1353,10 @@ the code at this ADR's final-pass head.
   (`internal/domain/limits_test.go` — D17's 8 MiB/4096-item defaults);
   `TestReplaceDirective_ObligationFanOut` (`internal/graph/fanout_test.go`
   — R9's large-fan-out obligation retirement); `TestConcurrentSupersession`
-  (`internal/ingest/supersession_test.go`, SPEC-3.6: previously uncited —
-  `n` concurrent events each replacing one Working pin serialize into one
-  supersession chain on both stores: exactly one current pin, one
+  (`internal/ingest/supersession_test.go`, SPEC-3.6: previously uncited,
+  SPEC-4.5: "one Working pin" corrected — the fixture uses `## Pinned`) —
+  `n` concurrent events each replacing one `## Pinned` directive serialize
+  into one supersession chain on both stores: exactly one current pin, one
   `SUPERSEDES` edge per replacement, every old version retired exactly
   once); `TestRetryIdentity_SessionScopedRich`
   (`internal/ingest/retry_test.go` — TEST-1.2's session-scoped rich-event
@@ -1362,7 +1370,7 @@ each with its own fix and test.
 - **DUR-1.3: the poison primitive (refines §10, D14).** `Apply`/`apply`
   (`internal/ingest/ingest.go`) is failure-atomic: once the core has
   started writing, any error calls `tx.Poison(err)`
-  (`store.Tx.Poison(err error)`, `store.go:263-272`) before returning, so
+  (`store.Tx.Poison(err error)`, `store.go:274`) before returning, so
   the caller's `Update` rolls back everything the transaction wrote even
   if the caller ignores the returned error — no partial ingestion result
   can ever commit. `store.Guard` (`internal/store/guard.go`) implements
@@ -1400,25 +1408,34 @@ each with its own fix and test.
   written entirely or not at all). The rest of the *event* still applies
   (other sections/items commit normally): this is a section-level
   refusal, not an event abort, and never `ErrInvalidAuthorityPromotion`.
-  **Why this is a recorded deviation, and why it is still safe under
-  FR-DIR-007 and FR-AUTH-001 (SPEC-3.5):** FR-DIR-007 scopes a Working
-  snapshot's supersession to the *same* authority, with by-ID supersession
-  additionally available only for *explicit* IDs — it does not itself
-  describe a derived-ID collision *across* authorities at all, so
-  same-or-higher-authority derived-ID supersession is new ground this ADR
-  covers, not a reading of FR-DIR-007's existing text; it is deliberately
-  symmetric with explicit-ID behavior (a higher authority may always
-  supersede a lower one's directive) rather than inventing a different
-  rule for the derived-ID case. The lower-authority case is a refusal, not
-  a supersession, so it does not touch FR-DIR-007's supersession rule at
-  all. Refusing the whole section (rather than only the colliding member,
-  or aborting the event) is consistent with FR-AUTH-001 because **this is
-  an identity/boundary conflict refusal, not an executed unauthorized
-  mutation**: FR-AUTH-001 requires atomicity for a mutation that actually
-  runs — nothing is partially written here, either for the section (all
-  its members are refused together) or for the event (every other
-  section/item still commits), so there is no partial-authorization state
-  for FR-AUTH-001 to guard against in the first place. Explicit-ID members
+  **Why this is a recorded deviation from FR-DIR-007 *and* FR-AUTH-001,
+  and why the deviation is safe (SPEC-3.5, reworded per SPEC-4.5 —
+  "consistent with FR-AUTH-001" was wrong: the rule below departs from its
+  literal text, deliberately, not merely from an unaddressed gap):**
+  FR-DIR-007 scopes a Working snapshot's supersession to the *same*
+  authority, with by-ID supersession additionally available only for
+  *explicit* IDs — it does not itself describe a derived-ID collision
+  *across* authorities at all, so same-or-higher-authority derived-ID
+  supersession is new ground this ADR covers, not a reading of
+  FR-DIR-007's existing text; it is deliberately symmetric with
+  explicit-ID behavior (a higher authority may always supersede a lower
+  one's directive) rather than inventing a different rule for the
+  derived-ID case. The lower-authority case is a refusal, not a
+  supersession, so it does not touch FR-DIR-007's supersession rule at
+  all. **FR-AUTH-001 is the literal deviation:** it requires "unauthorized
+  operations fail atomically with `ErrInvalidAuthorityPromotion`," and
+  FR-DIR-002 makes ID reuse (which a derived-ID collision is) explicitly
+  "subject to FR-AUTH-001" — but the code returns
+  `ErrMalformedDirective`/`ReasonBoundaryConflict`, refusing only the
+  Working section, never `ErrInvalidAuthorityPromotion`, and never the
+  whole event. The deviation is deliberate and safe because **this is an
+  identity/boundary conflict refusal, not an executed unauthorized
+  mutation**: nothing is partially written here, either for the section
+  (all its members are refused together) or for the event (every other
+  section/item still commits) — there is no partial-authorization state
+  for FR-AUTH-001's atomicity guarantee to protect, because no
+  authorization decision was actually acted on for the refused member.
+  Explicit-ID members
   are unaffected by any of this (they still go through only the ordinary
   boundary-conflict check). Test:
   `TestWorking_DerivedIDAcrossAuthorities_DUR15`
@@ -2044,8 +2061,10 @@ isn't covered), that is called out explicitly rather than left silent.
   `TestEventMetadataBounds_SEC14`/`TestEventMetadataCharsets_SEC14`/
   `TestMaxReferenceLinks` (SEC-1.4); `TestSuppressedListContent`(`_Ingest`)
   (SPEC-1.1); `TestLinkDuplicate_ComparesObligationClaim` (SPEC-1.12);
-  `TestD10_MappedDuplicateNeverCurrent`/`TestDiagnosticsCapTruncates`
-  (TEST-1.1/1.3).
+  `TestD10_MappedDuplicateNeverCurrent` (TEST-1.1);
+  `TestLateLimitRejectionIsAtomic`/`TestDiagnosticsCapTruncates`
+  (TEST-1.3, its two halves — SPEC-4.5: previously credited to
+  `TestDiagnosticsCapTruncates` alone).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
@@ -2087,26 +2106,39 @@ mechanisms, or new tests below had been recorded in this ADR until now.
   `TestSizeGateMatchesValidateFor_SEC21` (`checkSizes` accepts exactly what
   `Event.ValidateFor`'s limit accounting accepts, at the edge, on both
   sides) — both `internal/ingest/fixes_r1_test.go`.
-- **SEC-2.2: an ambiguous lifecycle record and a boundary-conflict
-  diagnostic are readable only where their causes are (completes SEC-1.3,
-  refines §7/§1/§20, D10/D1/R13/R14).** `graph.AuthorizeLifecycleCommand`
-  now reports the access boundaries of the accessible current versions
-  that made a target ambiguous, and `graph.CheckBoundaryConflict` returns
-  the conflicting version's boundary alongside `ErrBoundaryConflict`
+- **SEC-2.2: an ambiguous lifecycle record's diagnostic and a
+  boundary-conflict diagnostic are readable only where their causes are
+  (completes SEC-1.3, refines §7/§1/§20, D10/D1/R13/R14; text corrected,
+  SPEC-4.2 — see §31 below for what this round's SEC-3.2 changed about the
+  *command record* itself).** `graph.AuthorizeLifecycleCommand` now
+  reports the access boundaries of the accessible current versions that
+  made a target ambiguous, and `graph.CheckBoundaryConflict` returns the
+  conflicting version's boundary alongside `ErrBoundaryConflict`
   (`internal/graph/graph.go`, `internal/graph/lifecycle.go`). Ingest
-  stamps the `AMBIGUOUS` command record, its diagnostic, and a
-  `boundary_conflict` diagnostic at the base (transcript) boundary
-  intersected with every cause boundary, rather than the base boundary
-  alone — so another agent can no longer learn that a version it cannot
-  see exists, merely because it caused an ambiguity or conflict the agent
-  *can* see the outcome of; the source actor whose write caused it still
-  reads both records normally. Test:
+  stamps the `AMBIGUOUS` diagnostic and the `boundary_conflict` diagnostic
+  at the base (transcript) boundary intersected with every cause boundary,
+  rather than the base boundary alone — so another agent can no longer
+  learn that a version it cannot see exists, merely because it caused an
+  ambiguity or conflict the agent *can* see the outcome of.
+  **The `AMBIGUOUS` *command record* is a different case, changed again by
+  SEC-3.2 (§31): it no longer narrows its own `Access`; instead its
+  resolution is what narrows, via `DetailAccess`, and a viewer outside it
+  reads the record redacted (`WITHHELD`), not omitted** — so "another
+  agent... shows neither record" no longer describes the command-record
+  half correctly: agent B now reads the `AMBIGUOUS` command record too,
+  redacted. The source actor whose write caused it reads every record and
+  diagnostic unredacted. Test:
   `TestRecordsNeverRevealHiddenVersions_SEC22`
-  (`internal/ingest/fixes_r1_test.go`) — reproduces both cases (an
+  (`internal/ingest/fixes_r1_test.go`, **SPEC-4.2: description corrected to
+  match the test's current assertions**) — sets up both cases (an
   agent-private `[plan]` making a task-wide `[plan]` ambiguous; an
-  agent-private `[q]` boundary-conflicting with a task-wide restatement)
-  and asserts a different agent's `LifecycleCommands`/`Diagnostics` read
-  shows neither record.
+  agent-private `[q]` boundary-conflicting with a task-wide restatement),
+  then asserts the SEC-3.2 redaction property with a third pair in the same
+  test (a hidden vs. a merely missing Unpin target): a different agent's
+  `LifecycleCommands`/`Diagnostics` read is structurally identical for the
+  hidden and the missing case — one redacted command record and the same
+  diagnostics either way — while the source actor's own read still shows
+  the full resolution.
 - **DUR-2.1: bounded-lookup and bounded-cursor work, addressing part of
   SPEC-2.1's remaining store-side gaps (refines §26, F1; completed by
   SPEC-3.1, §30 below).** Two of three fixes in this batch landed here:
@@ -2202,27 +2234,70 @@ fixed.
   each of the four tables. Test: `TestRetireLookupsUseIndex`
   (`internal/store/sqlite/access_lookups_test.go`, via the named
   `retireLookupSQL` builder the plan guard runs).
-- **SPEC-3.1 item 2: one large event is no longer quadratic in SQLite
-  (refines §5/§7, D8/D10).** Every derived item's `graph.LinkDerived`
-  loaded and fully decoded its span's growing transcript item again, and
-  `InsertRelationship` did the same to check both endpoints exist — for
-  `n` derived items from one transcript, that is `O(n)` reloads of a
-  transcript whose own size is also growing, i.e. quadratic. Two changes:
-  `InsertRelationship` now checks an endpoint's existence with a
-  primary-key probe (`SELECT 1 FROM rec_item WHERE session_id=? AND id=?
-  AND subkey=0`), never a full decode; and each `*transaction` keeps an
-  `itemCache` of items it has already decoded and verified this
-  transaction (`Item` returns a clone from the cache when present,
-  populates it otherwise), so a transcript is decoded once per
-  transaction rather than once per derived item — `UpdateItem` refreshes
-  its entry, and a rolled-back store-method savepoint clears the whole
-  cache, so a cached value is never stale relative to what the
-  transaction itself has written. Store-level item bytes loaded, 500 vs.
-  4000 derived items from one transcript: x65.5 before, x8.0 after (linear
-  in item count, not transcript size too); end-to-end SQLite ingest of one
-  event, 500 vs. 4000 Pinned items: x32 before (0.40s/12.8s), x9.1 after
-  (0.12s/1.06s). Test: `TestDerivedLinksLoadTranscriptOnce`
-  (`internal/store/sqlite/scaling_test.go`).
+- **SPEC-3.1 item 2: one large event is no longer quadratic in SQLite,
+  and the fix's own two follow-on gaps are closed (refines §5/§7, D8/D10;
+  this bullet is the final, converged behavior — SPEC-4.1/SPEC-4.4 changed
+  it twice more since the paragraph below was first written).** Every
+  derived item's `graph.LinkDerived` loaded and fully decoded its span's
+  growing transcript item again, and `InsertRelationship` did the same to
+  check both endpoints exist — for `n` derived items from one transcript,
+  that is `O(n)` reloads of a transcript whose own size is also growing,
+  i.e. quadratic. The fix: each `*transaction` keeps an `itemCache` of
+  items it has already decoded and verified this transaction (`Item`
+  returns a clone from the cache when present, populates it otherwise), so
+  a transcript is decoded once per transaction rather than once per
+  derived item — `UpdateItem` deletes its entry (`write.go:100`, the next
+  read decodes the updated row), and a rolled-back store-method savepoint
+  clears the whole cache, so a cached value is never stale relative to
+  what the transaction itself has written.
+  **SPEC-4.1 (D17): the cache is now bounded, not unbounded.** A first
+  version cached every item `Item()` ever decoded for the life of the
+  transaction with no limit — `scanLookup` called `Item()` for every
+  indexed row it paged through, including rows the viewer can't see, so
+  one transaction paging thousands of large sourced items grew ingest
+  memory with the session's matching items, not with the event (a
+  resource bound moved from time to memory, D17's concern either way).
+  `itemcache.go`'s `itemCache` is now a genuine LRU, capped at 1024
+  entries and 16 MiB of item text (roughly two maximum-size spans') —
+  an item over the byte cap is never cached at all; `scanLookup` now
+  calls the internal `loadItem(id, cache=false)` instead of `Item`, so
+  paging past many matches neither grows the cache nor evicts the one
+  transcript derived-linking actually re-reads. **SPEC-4.4: `InsertRelationship`
+  verifies both endpoints again, not only that they exist.** SPEC-3.1
+  item 2's own first fix replaced the endpoint check with an
+  existence-only primary-key probe to avoid a full decode — but that
+  silently dropped the pre-existing guarantee that linking a corrupted
+  legacy item (e.g. migration 0001's `�`-repaired text) fails
+  `ErrIntegrity` rather than linking it. `InsertRelationship` now loads
+  each endpoint through `loadItem(id, cache=true)` (`domain.ErrNotFound`
+  becomes `ErrDanglingRelationship` as before; a verification failure is
+  `ErrIntegrity`), so both endpoints are decoded and hashed at most once
+  per transaction while cached rather than once per edge — the same cache
+  that already keeps the transcript hot, so this restores the integrity
+  guarantee without reopening the quadratic cost SPEC-3.1 item 2 fixed.
+  `store.go`'s `InsertRelationship` contract now states the integrity
+  requirement explicitly. Store-level item bytes loaded, 500 vs.
+  4000 derived items from one transcript: x65.5 before caching, x8.0 with
+  the (then-unbounded) cache (linear in item count, not transcript size
+  too); end-to-end SQLite ingest of one event, 500 vs. 4000 Pinned items:
+  x32 before, x9.1 with the unbounded cache, x10.5-x10.8 with the current
+  bounded cache plus restored endpoint verification (still linear, not the
+  original x32). Tests: `TestDerivedLinksLoadTranscriptOnce`
+  (`internal/store/sqlite/scaling_test.go`, the store-level bytes-loaded
+  check); `TestOneLargeEventScalesLinearly`
+  (`internal/store/sqlite/event_scaling_test.go`, **SPEC-4.2: previously
+  uncited** — the same property end to end through `Ingester.Ingest`,
+  asserting about x8 for 4000 items vs. 500, not the roughly x32 a
+  per-item transcript reload costs); `TestItemCacheBounded_SPEC41`
+  (one transaction pages `SourceItems` over 48 sourced items of 512 KiB
+  each — 24 MiB total, above the byte cap — then reads each directly; the
+  cache's own entry/byte footprint, exposed via `itemCacheFootprint`,
+  never exceeds its caps at any stage), `TestItemCacheEntryCap_SPEC41`,
+  `TestItemCacheLRU` (eviction order, oversize-item exclusion, and byte
+  accounting) — all `internal/store/sqlite/itemcache_test.go`;
+  `TestRolledBackMethodClearsItemCache`
+  (`internal/store/sqlite/itemcache_test.go`) locks the savepoint-rollback
+  cache clear above, previously asserted only in prose.
 - **SPEC-3.1 item 3: the memory ordered-index commit is now proportional
   to the change, not the key's existing size (refines DUR-2.1 above,
   which this supersedes).** `orderedIndex.commit` previously rebuilt each
@@ -2232,12 +2307,20 @@ fixed.
   in place: a removal (now located by its `Seq`, tracked in `gone
   map[K]map[string]seqRef`) is deleted by binary search, and an addition
   is appended when it is newest (the common case, since additions are
-  usually new) or inserted by binary search otherwise — work proportional
-  to the size of the *change*, never the key's existing entry count.
-  `Update` holds the session's write lock for the whole transaction, so an
-  in-place edit to a committed slice never races a concurrent `View`.
-  Committing one more referrer of a blob that already has 20,001: 347µs
-  before, 4.7µs after. Test: `TestOrderedIndexCommitMerges`
+  usually new) or inserted by binary search otherwise. **(SPEC-4.5:
+  corrected)** This is not unconditionally "never proportional to the
+  key's existing entry count" — `slices.Delete`/`slices.Insert`
+  (`index.go:209,224`) still move every entry after the affected position,
+  so a removal, or an addition that is not the newest, costs work
+  proportional to how much of the list sits after it. It is the common
+  case this fixes: an addition is (almost) always newest in practice
+  (append-only ingestion), and this no longer costs a full-list rebuild
+  regardless of position, which is what made *every* commit proportional
+  to the key's size before. `Update` holds the session's write lock for
+  the whole transaction, so an in-place edit to a committed slice never
+  races a concurrent `View`. Committing one more referrer (append case) of
+  a blob that already has 20,001: 347µs before, 4.7µs after. Test:
+  `TestOrderedIndexCommitMerges`
   (`internal/store/memory/bounded_test.go`).
 - **SPEC-3.1 item 4: SQLite lookup cursors now seek inside the index
   search instead of sorting a union (refines §26, F1).** A lookup's owner
@@ -2279,38 +2362,164 @@ fixed.
   `scanLookup` now also returns the cursor position of every unverified
   row it skipped; `SourceItems` keeps only those at or before its actual
   `Next` (via the new `after` cursor-order helper) and defers the rest to
-  the next page, which will see them again starting from `Next`. Test:
+  the next page, which will see them again starting from `Next`. Tests:
   `TestSourceItemsReportsUnverifiedOnce`
   (`internal/store/sqlite/access_lookups_test.go` — pages one at a time
   through sources interleaved with altered rows and asserts each
-  unverified ID is reported exactly once across every page).
+  unverified ID is reported exactly once across every page); **(SPEC-4.2:
+  previously uncited)** `internal/ingest`'s complementary, ingest-level
+  half of the same fix — `r.unverified map[string]bool` (`run.go`) records
+  each unverified ID once per event, for both lookups
+  (`reportUnverified`) and Working snapshots (`workingSection`), so even a
+  store that (like SQLite's page lookahead, or a future store) reports the
+  same ID from more than one call still yields one `ItemUnverified`
+  diagnostic in the receipt, not one per sighting. Test:
+  `TestUnverifiedReportedOncePerEvent_DUR31`
+  (`internal/ingest/lookups_test.go`).
 - **SPEC-3.2: regression guards for every SPEC-2.1 read, closing the gaps
-  the second review found (refines §29).** Four gaps, each now caught by a
-  test that fails on the specific mutation the review reproduced: (1)
+  the second review found, plus the four further gaps a third review round
+  later found in these same guards (refines §29; SPEC-4.3's fixes folded
+  in below, per the commander's relay).** (1)
   `TestKeyedReadsDoNotScan` (memory) is extended past `CurrentVersions`/
-  `ObligationsBySource` to also cover per-item relationship/item reads,
-  and now also fails if `Relationships` is keyed by type alone (SPEC-3.1
-  item 5), not only by a full scan — it counts both the typed index's
-  yields and the by-type index scan. (2)
-  `TestSupersessionCycleCheckIsLocal` now measures the cycle check *from
-  outside* the function it tests: every `*transaction` records `rowsRead`
+  `ObligationsBySource` to also cover per-item `Relationships`/`Items`
+  reads, keyed or full-scan (**SPEC-4.5: corrected — its fixture carries
+  no relationships, so it cannot also guard the type-keying property**);
+  `TestRelationshipsReadTheirTypedKey` (`internal/store/memory/scan_test.go`)
+  is the guard for SPEC-3.1 item 5 specifically: it counts both the typed
+  index's own yields and its underlying scan, so serving a typed read from
+  an endpoint-only or type-only index — either would return the right
+  answer while walking the wrong amount of work — fails it. **(SPEC-4.3)**
+  Its fixture initially carried no *unrelated* edges of the queried type,
+  so a type-only index still returned the right (empty) answer without
+  extra work and the mutation survived; it now adds 200 unrelated
+  `SUPERSEDES` edges into the same target first, so a type-only index
+  visits them and fails. (2) `TestSupersessionCycleCheckIsLocal` now
+  measures the cycle check *from outside* the function it tests: every
+  `*transaction` records `rowsRead`
   across every multi-row query the transaction issues (a `countedRows`
   wrapper around `*sql.Rows` behind the shared `t.query` helper every
   multi-row `SELECT` — `queryRecords`, `listRecords`, `nextRows` — now
   goes through), so a mutation that made the check load the whole
   `SUPERSEDES` graph but still *report* only the nodes it walked (which
   the prior guard, trusting the function's own `visited` count, could not
-  catch) now fails on rows actually read. (3) `CurrentVersions` gets its
-  own named builder (`currentVersionsQuery`) and joins
-  `ObligationsBySource` in `TestHotReadsUseTheirBuilders`'s per-item-read
-  guard, so reverting either to an ad hoc query fails there even if a
-  separate plan test would not catch it. (4)
+  catch) now fails on rows actually read. **(SPEC-4.3)** `rowsRead` was
+  originally asserted only around the insert that returns before walking
+  (a new version with no incoming edge); it now also bounds the
+  cycle-closing insert and a walking insert that finds no cycle, so
+  loading the whole graph inside the walk while reporting only the
+  visited count (a mutation only these two cases could catch) fails too.
+  (3) `CurrentVersions` gets its
+  own named builder (`currentVersionsQuery`), a plan guard
+  (`TestCurrentVersionsUseIndex`, **SPEC-4.2: previously uncited** —
+  `internal/store/sqlite/access_lookups_test.go`, locking the read to its
+  `(session_id, task_id, namespace, directive_id)` primary-key prefix),
+  and joins `ObligationsBySource` in `TestHotReadsUseTheirBuilders`'s
+  per-item-read guard, so reverting either to an ad hoc query fails there
+  even if the plan test alone would not catch it. (4)
   `TestUpgradeOrderedGraphIndexes` (`internal/store/sqlite/upgrade_test.go`)
-  is the missing migrated-layout parity fixture for 0014→0015: a
+  is the migrated-layout parity fixture for 0014→0015: a
   relationship and items stored before 0015 are read back correctly
   through the new `relationship_from_seq`/`relationship_to_seq`/
   `item_task_seq` indexes after upgrade, and the three indexes 0015
-  replaced are confirmed gone.
+  replaced are confirmed gone. **(SPEC-4.3) It stopped at 0015 — 0016 and
+  0017 had no upgrade-parity test at all.**
+  `TestUpgradeCommandDetailAndLookupItemIndexes`
+  (`internal/store/sqlite/upgrade_test.go`) closes this: upgrading from
+  14, 15, and 16 each to head confirms `rec_command`'s five
+  `f_detail_access_*` columns (0016) and all four `lookup_*_item` indexes
+  (0017) exist afterward, a command record stored before 0016 reads its
+  NULL detail columns back as the zero `DetailAccess` and still validates,
+  and (from 14) the same fixture also exercises 0015's indexes in the same
+  pass.
+  **(5, SPEC-4.3) The memory ordered-index commit's own regression guard
+  didn't check *how* it stayed fast.** `TestOrderedIndexCommitMerges`
+  counted only `commitWork`'s own increments, so a mutation that kept
+  `commitWork` low by `slices.Clone`-ing the touched key's list first (an
+  extra full-list copy on every commit, defeating the point) survived. It
+  now also asserts the key's backing array is unchanged after a commit
+  that only removes then adds within capacity — a copy would move it to a
+  new array. A mid-list removal or non-newest addition still legitimately
+  shifts the tail in place (no allocation, but not free either — §30 item
+  3 above records this honestly).
+  **(6, SPEC-4.3) No committed test paged a lookup across more than one
+  owner combination.** `TestConformance/SourceItemsMixedOwners`
+  (`internal/store/storetest/access_lookups.go`) interleaves visible
+  items across five owner-boundary shapes (session, workflow, task,
+  agent, task+agent) with hidden ones and pages at sizes 1-4 on both
+  stores, requiring one merged `(Seq, ID)` order with no duplicates or
+  skips — dropping the per-combination merge in SQLite's `nextRows` fails
+  it.
+
+### 31. PR #5 review round 4: SEC-3.1 (retry admission hardened), SEC-3.2 (command-detail redaction) — all landed, recorded here per SPEC-4.2
+
+A fourth external review round found that round 3's admission gate and
+round 1's diagnostic/command narrowing (F6, §26) each had a residual gap;
+both are now fixed. Migration 0016 adds the columns SEC-3.2 needs; ADR 3
+records it in the migration list. No SDD amendment is needed for either:
+FR-ING-006's retry identity is unchanged (SEC-3.1 only narrows *which*
+retries are admitted before validation, not what counts as a match), and
+FR-DIR-005 doesn't specify diagnostic readership, so narrowing where its
+unknown-target diagnostic is readable is this ADR's decision to make, the
+same as F6/SEC-1.3/SEC-2.2 already were.
+
+- **SEC-3.1: an over-limit event can no longer smuggle an oversized
+  payload past the limit gate by reusing a known `EventID` with a
+  different payload (refines §29's SEC-2.1, §13, D17/F3).** §29's
+  admission gate let an over-limit event through as a retry once it found
+  *any* receipt stored under the caller's `EventID` — it never checked
+  that the new event actually matches what that receipt was for. A
+  different principal, or the same principal with a larger payload under
+  the same `EventID`, could therefore still reach `Clone`/`PayloadHash`/the
+  write transaction. `admitKnownRetry` (`internal/ingest/sizes.go`) now
+  requires, from cheap reads alone before anything is copied or hashed:
+  the stored receipt's `Principal` must equal the caller's, and the new
+  event's *shape* — `Kind`, `TurnBoundary`, span count, and per-span
+  authority/part-count/every-byte-length (`sameShape`) — must equal the
+  stored envelope's exactly. Anything else is a bare `ErrEventIDConflict`
+  from the read, never a limit error, so a mismatched retry attempt
+  discloses nothing about why it failed; an exact retry still replays
+  (F3), for the same principal only. Test:
+  `TestKnownEventIDCannotSmuggleOversizePayload_SEC31`
+  (`internal/ingest/fixes_r1_test.go`) — the same principal and a
+  different principal both fail `ErrEventIDConflict` when retrying a known
+  `EventID` with an oversized payload, and neither enters a write
+  transaction.
+- **SEC-3.2: a lifecycle-command record's resolution is redacted outside a
+  narrower detail boundary, instead of the whole record narrowing (refines
+  F6/§26, SEC-1.3/SEC-2.2/§29; supersedes both for the *command record*
+  specifically — see the corrections above).** F6/SEC-2.2 narrowed a
+  command record's own `Access` to the intersection of every cause
+  boundary. That means the record's very *existence* — not only its
+  resolution — became invisible to a reader outside that intersection, so
+  a lifecycle command a source actor issued could vanish entirely for
+  another reader of the same transcript, an inconsistency with every other
+  record type (which is always readable at its transcript boundary; only
+  *some* fields narrow further). `domain.LifecycleCommandRecord` now
+  carries a separate `DetailAccess` field: `Access` stays at the
+  transcript boundary always (`rec.Access = c.transcript.Access`,
+  `internal/ingest/derive.go:351`, never narrowed), and `DetailAccess` is
+  computed per outcome via `causeAccess` — `RESOLVED`/`MISMATCH` narrow to
+  the resolved target's boundary, `AMBIGUOUS` to the intersection of every
+  candidate's boundary, and **`NOT_FOUND` narrows to the *source actor's
+  own* boundary** (`actorOwn`, `internal/ingest/derive.go:356-365`) — a new
+  narrowing this round adds, since a genuinely missing target has no
+  target boundary to narrow to. A reader outside `DetailAccess` calls
+  `LifecycleCommandRecord.Redacted(viewer)` (`internal/domain/diagnostic.go`)
+  and gets the record back with `Resolution: WITHHELD`, no resolved item
+  ID or version, and `DetailAccess` reset to `Access` — the same shape
+  whether the real resolution was hidden or the target never existed, so
+  `WITHHELD` never itself discloses which. `TargetWithheld` is a value
+  ingestion never stores; it exists only as `Redacted`'s output.
+  `internal/store/sqlite/ingestion.go` and `internal/store/memory/read.go`
+  both call `Redacted(f.Viewer)` on every record `Access` already permits,
+  in `LifecycleCommands`. Migration `0016_command_detail_access.sql` adds
+  `rec_command`'s five `f_detail_access_*` columns; a record written
+  before 0016 reads them back NULL, which decodes as the zero
+  `AccessBoundary`, which `Redacted` treats as "no narrowing beyond
+  `Access`" (M8: pre-existing records keep exactly the visibility they had
+  before `DetailAccess` existed, never an invented narrower or wider
+  default). Test: `TestCommandRecordDetailRedaction`
+  (`internal/domain/diagnostic_test.go`).
 
 ## Open questions
 
@@ -2386,7 +2595,8 @@ Five clarifications, applied in SDD v0.9 (R4):
 These five are the exact insertions applied to SDD.md as v0.9; see that
 file's v0.9 diff for placement.
 
-**A sixth, later SDD.md edit (SPEC-1.13/SPEC-2.4), not part of the
+**A sixth, later SDD.md edit (2026-09-26; SPEC-1.13/SPEC-2.4; date added
+per SPEC-4.5, previously missing), not part of the
 original v0.9 batch above and previously unrecorded here:** commit
 `18e1b69`, after Phase 2 code landed and this ADR's own Status was still
 `Proposed`, added "ADR 19." to §11 item 2's phase-2 ADR list and item 19
@@ -2398,8 +2608,9 @@ phase/ADR index lists gained ADR 19's entry, keeping SDD.md internally
 consistent with an ADR that otherwise existed but was absent from both
 lists.
 
-**A seventh, later SDD.md edit (SPEC-2.7, then repaired here per
-SPEC-3.4): FR-DIR-002's derived-ID-shape wording, scoped to content-section
+**A seventh, later SDD.md edit (2026-09-26; SPEC-2.7, then repaired here
+per SPEC-3.4; date added per SPEC-4.5, previously missing): FR-DIR-002's
+derived-ID-shape wording, scoped to content-section
 keywords.** Commit `404c379` changed three FR-DIR-002 sentences (this is a
 content change, unlike the sixth edit above — the FR-DIR-002 bullet in the
 original five above is deliberately left quoting the *pre-404c379* text,
