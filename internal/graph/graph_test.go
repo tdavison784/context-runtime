@@ -865,7 +865,8 @@ func TestSupersedeSnapshot_FRDIR007(t *testing.T) {
 		w1a = workingItem(sess, "w1a", tx.NextSeq(), domain.AuthorityUser)
 		otherAgentItem = agentScopedWorkingItem(sess, "agent-restricted", tx.NextSeq(), domain.AuthorityUser, "agent-b")
 		w2 = workingItem(sess, "w2", tx.NextSeq(), domain.AuthorityUser)
-		mustInsert(t, tx, w1a, otherAgentItem, w2)
+		mustInsert(t, tx, w1a, otherAgentItem)
+		mustCreate(t, tx, w2)
 		mustFile(t, tx, w1a, otherAgentItem)
 
 		res, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
@@ -921,7 +922,8 @@ func TestSupersedeSnapshot_MultipleOldItems(t *testing.T) {
 		w1a := workingItem(sess, "m-w1a", tx.NextSeq(), domain.AuthorityUser)
 		w1b := workingItem(sess, "m-w1b", tx.NextSeq(), domain.AuthorityUser)
 		w2 := workingItem(sess, "m-w2", tx.NextSeq(), domain.AuthorityUser)
-		mustInsert(t, tx, w1a, w1b, w2)
+		mustInsert(t, tx, w1a, w1b)
+		mustCreate(t, tx, w2)
 		mustFile(t, tx, w1a, w1b)
 
 		res, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
@@ -980,7 +982,8 @@ func TestSupersedeSnapshot_ConversationKindAndIndependentTaskState(t *testing.T)
 		oldConv = workingConversationItem(sess, "old-conv", tx.NextSeq(), domain.AuthorityUser)
 		independent = independentTaskStateItem(sess, "independent", tx.NextSeq(), domain.AuthorityUser)
 		newConv = workingConversationItem(sess, "new-conv", tx.NextSeq(), domain.AuthorityUser)
-		mustInsert(t, tx, oldConv, independent, newConv)
+		mustInsert(t, tx, oldConv, independent)
+		mustCreate(t, tx, newConv)
 		mustFile(t, tx, oldConv)
 
 		res, err := SupersedeSnapshot(tx, actor, []string{newConv.ID}, taskID, "evt-conv")
@@ -1879,7 +1882,7 @@ func TestResolveLifecycleTarget_StaleDirectivePointerNotReturned(t *testing.T) {
 	// map at all.
 	err = s.Update(ctx, sess, func(tx store.Tx) error {
 		w2 := workingItem(sess, "w2", tx.NextSeq(), domain.AuthorityUser)
-		mustInsert(t, tx, w2)
+		mustCreate(t, tx, w2)
 		_, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
 		return err
 	})
@@ -1917,7 +1920,7 @@ func TestReplaceDirective_StalePointerDoesNotBlockNewBoundary(t *testing.T) {
 	var w1ID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		w1 := taskItem(sess, "w1", tx.NextSeq(), domain.AuthorityUser)
-		w1.DirectiveID = dirID
+		w1.DirectiveID, w1.Section, w1.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 		w1ID = w1.ID
 		mustInsert(t, tx, w1)
 		_, err := ReplaceDirective(tx, actor, taskID, dirID, w1.ID, "evt-w1")
@@ -1944,7 +1947,7 @@ func TestReplaceDirective_StalePointerDoesNotBlockNewBoundary(t *testing.T) {
 	// pointer to w1 would have wrongly been treated as a live conflict.
 	err = s.Update(ctx, sess, func(tx store.Tx) error {
 		turnScoped := taskItem(sess, "turn-version", tx.NextSeq(), domain.AuthorityUser)
-		turnScoped.DirectiveID = dirID
+		turnScoped.DirectiveID, turnScoped.Section, turnScoped.Namespace = dirID, domain.SectionPinned, domain.NamespaceDirective
 		turnScoped.Scope = domain.ScopeTurn
 		turnScoped.Access = domain.AccessBoundary{Scope: domain.ScopeTurn, SessionID: sess, TaskID: turnScoped.TaskID}
 		mustInsert(t, tx, turnScoped)
