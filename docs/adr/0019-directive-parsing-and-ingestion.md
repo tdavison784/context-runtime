@@ -2595,7 +2595,8 @@ Five clarifications, applied in SDD v0.9 (R4):
 These five are the exact insertions applied to SDD.md as v0.9; see that
 file's v0.9 diff for placement.
 
-**A sixth, later SDD.md edit (SPEC-1.13/SPEC-2.4), not part of the
+**A sixth, later SDD.md edit (2026-09-26; SPEC-1.13/SPEC-2.4; date added
+per SPEC-4.5, previously missing), not part of the
 original v0.9 batch above and previously unrecorded here:** commit
 `18e1b69`, after Phase 2 code landed and this ADR's own Status was still
 `Proposed`, added "ADR 19." to §11 item 2's phase-2 ADR list and item 19
@@ -2607,8 +2608,9 @@ phase/ADR index lists gained ADR 19's entry, keeping SDD.md internally
 consistent with an ADR that otherwise existed but was absent from both
 lists.
 
-**A seventh, later SDD.md edit (SPEC-2.7, then repaired here per
-SPEC-3.4): FR-DIR-002's derived-ID-shape wording, scoped to content-section
+**A seventh, later SDD.md edit (2026-09-26; SPEC-2.7, then repaired here
+per SPEC-3.4; date added per SPEC-4.5, previously missing): FR-DIR-002's
+derived-ID-shape wording, scoped to content-section
 keywords.** Commit `404c379` changed three FR-DIR-002 sentences (this is a
 content change, unlike the sixth edit above — the FR-DIR-002 bullet in the
 original five above is deliberately left quoting the *pre-404c379* text,
