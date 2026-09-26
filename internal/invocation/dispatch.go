@@ -97,7 +97,9 @@ func auditOf(callID string, attempt int, late bool, o domain.CallOutcome) outcom
 //     UNKNOWN call is terminal, because UNKNOWN -> PREPARED is not a valid
 //     transition.
 //
-// Repeating an identical outcome for the same attempt returns the current
+// An outcome's ResponseHash is filled from its Response bytes before its
+// OutcomeHash is taken, so reporting a response by bytes or by hash is the
+// same outcome. Repeating an identical outcome for the same attempt returns the current
 // record without writing; a different outcome for an attempt that already
 // has one fails with domain.ErrCallOutcomeConflict. An outcome for a PREPARED
 // call's unsent attempt fails with domain.ErrInvalidTransition. An outcome

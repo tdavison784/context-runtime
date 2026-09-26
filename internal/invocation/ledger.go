@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -72,15 +73,11 @@ const (
 // compare-and-swap revisions.
 type Ledger struct {
 	store store.Store
-	ids   domain.IDGenerator
 	now   func() time.Time
 }
 
 // Option configures a Ledger.
 type Option func(*Ledger)
-
-// WithIDs sets the generator for lifecycle event IDs.
-func WithIDs(g domain.IDGenerator) Option { return func(l *Ledger) { l.ids = g } }
 
 // WithClock sets the clock for attempt timestamps. Timestamps are
 // observations only and never influence a decision (SDD section 10).
@@ -88,7 +85,7 @@ func WithClock(now func() time.Time) Option { return func(l *Ledger) { l.now = n
 
 // New returns a ledger over s.
 func New(s store.Store, opts ...Option) *Ledger {
-	l := &Ledger{store: s, ids: domain.RandomIDs{}, now: time.Now}
+	l := &Ledger{store: s, now: time.Now}
 	for _, o := range opts {
 		o(l)
 	}
@@ -193,12 +190,20 @@ func (l *Ledger) transition(tx store.Tx, c domain.CallRecord, to domain.CallStat
 
 // appendEvent writes a call lifecycle event at seq.
 func (l *Ledger) appendEvent(tx store.Tx, c domain.CallRecord, seq uint64, ev domain.LifecycleEvent) error {
-	ev.ID = l.ids.NewID("lce")
+	ev.ID = lifecycleEventID(c.SessionID, seq)
 	ev.SessionID = c.SessionID
 	ev.Seq = seq
 	ev.TargetKind = domain.TargetCall
 	ev.TargetID = c.CallID
 	return tx.AppendLifecycleEvent(ev)
+}
+
+// lifecycleEventID derives a call lifecycle event's ID from its session and
+// sequence number, which identify it uniquely, so replay and a restarted
+// process reproduce the same IDs (ADR 4, INV-09).
+func lifecycleEventID(sessionID string, seq uint64) string {
+	h := domain.NewCanonicalEncoder("context-runtime/call-lifecycle-id/v1").String(sessionID).Uint(seq).Hash()
+	return "lce_" + strings.TrimPrefix(h, "sha256:")[:32]
 }
 
 // releaseReservation clears the conversation's in-flight call if it is c,
