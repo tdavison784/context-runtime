@@ -23,14 +23,18 @@ func (p Principal) Validate() error {
 }
 
 // AccessBoundary is the immutable set of ownership constraints that govern
-// who can read an item, including from the archive (FR-DOM-003). The owner
-// fields that the scope does not use must be empty.
+// who can read an item, including from the archive (FR-DOM-003). It is a
+// conjunction: a principal must be in the session and match every non-empty
+// owner field. Scope sets the minimum constraints (TURN and TASK need a task,
+// WORKFLOW a workflow, AGENT an agent); derived content may carry extra
+// constraints so its boundary is no broader than the intersection of its
+// sources (FR-REL-008), for example a checkpoint bound to one task and agent.
 type AccessBoundary struct {
 	Scope      Scope
 	SessionID  string
-	WorkflowID string // WORKFLOW scope
-	TaskID     string // TURN and TASK scope
-	AgentID    string // AGENT scope
+	WorkflowID string
+	TaskID     string
+	AgentID    string
 }
 
 // BoundaryFor returns the access boundary an item of scope s receives when
@@ -48,7 +52,7 @@ func BoundaryFor(s Scope, p Principal) AccessBoundary {
 	return b
 }
 
-// Validate checks that the boundary names exactly the owners its scope needs.
+// Validate checks that the boundary carries the owners its scope requires.
 func (b AccessBoundary) Validate() error {
 	if !b.Scope.Valid() {
 		return invalid("access boundary: invalid scope %q", b.Scope)
@@ -56,59 +60,71 @@ func (b AccessBoundary) Validate() error {
 	if b.SessionID == "" {
 		return invalid("access boundary: session ID is required")
 	}
-	needTask := b.Scope == ScopeTurn || b.Scope == ScopeTask
-	needWorkflow := b.Scope == ScopeWorkflow
-	needAgent := b.Scope == ScopeAgent
-	if needTask != (b.TaskID != "") {
-		return invalid("access boundary: scope %s task owner mismatch", b.Scope)
-	}
-	if needWorkflow != (b.WorkflowID != "") {
-		return invalid("access boundary: scope %s workflow owner mismatch", b.Scope)
-	}
-	if needAgent != (b.AgentID != "") {
-		return invalid("access boundary: scope %s agent owner mismatch", b.Scope)
+	switch {
+	case (b.Scope == ScopeTurn || b.Scope == ScopeTask) && b.TaskID == "":
+		return invalid("access boundary: scope %s requires a task owner", b.Scope)
+	case b.Scope == ScopeWorkflow && b.WorkflowID == "":
+		return invalid("access boundary: scope %s requires a workflow owner", b.Scope)
+	case b.Scope == ScopeAgent && b.AgentID == "":
+		return invalid("access boundary: scope %s requires an agent owner", b.Scope)
 	}
 	return nil
 }
 
-// Permits reports whether principal p may read content inside b. Access
-// always requires the same session; TURN and TASK also require the same
-// task, WORKFLOW the same workflow, and AGENT the same agent (FR-DOM-003).
-// Access says nothing about context eligibility, which the planner checks
-// separately.
+// Permits reports whether principal p may read content inside b: same
+// session and every owner constraint matches (FR-DOM-003). Access says
+// nothing about context eligibility, which the planner checks separately.
 func (b AccessBoundary) Permits(p Principal) bool {
-	if b.SessionID == "" || p.SessionID != b.SessionID {
+	if b.Validate() != nil || p.SessionID != b.SessionID {
 		return false
 	}
-	switch b.Scope {
-	case ScopeTurn, ScopeTask:
-		return p.TaskID != "" && p.TaskID == b.TaskID
-	case ScopeWorkflow:
-		return p.WorkflowID != "" && p.WorkflowID == b.WorkflowID
-	case ScopeAgent:
-		return p.AgentID != "" && p.AgentID == b.AgentID
-	case ScopeSession:
-		return true
-	}
-	return false
+	return matches(b.WorkflowID, p.WorkflowID) && matches(b.TaskID, p.TaskID) && matches(b.AgentID, p.AgentID)
 }
 
-// Within reports whether every principal b permits is also permitted by
-// outer: b is no broader than outer. Derived content must satisfy Within for
-// each source boundary (FR-REL-008).
+func matches(constraint, actual string) bool { return constraint == "" || constraint == actual }
+
+// Within reports whether b is no broader than outer: same session and b
+// carries every owner constraint outer carries. Derived content must be
+// Within each source boundary (FR-REL-008).
 func (b AccessBoundary) Within(outer AccessBoundary) bool {
 	if b.SessionID != outer.SessionID {
 		return false
 	}
-	switch outer.Scope {
-	case ScopeSession:
-		return true
-	case ScopeWorkflow:
-		return b.Scope == ScopeWorkflow && b.WorkflowID == outer.WorkflowID
-	case ScopeAgent:
-		return b.Scope == ScopeAgent && b.AgentID == outer.AgentID
-	case ScopeTask, ScopeTurn:
-		return (b.Scope == ScopeTask || b.Scope == ScopeTurn) && b.TaskID == outer.TaskID
+	return (outer.WorkflowID == "" || outer.WorkflowID == b.WorkflowID) &&
+		(outer.TaskID == "" || outer.TaskID == b.TaskID) &&
+		(outer.AgentID == "" || outer.AgentID == b.AgentID)
+}
+
+// Intersect returns the narrowest boundary that is Within both a and b, with
+// the given scope, or ok=false when no principal could satisfy both (for
+// example, two different tasks or sessions).
+func Intersect(scope Scope, a, b AccessBoundary) (AccessBoundary, bool) {
+	if a.SessionID != b.SessionID {
+		return AccessBoundary{}, false
 	}
-	return false
+	out := AccessBoundary{Scope: scope, SessionID: a.SessionID}
+	var ok bool
+	if out.WorkflowID, ok = merge(a.WorkflowID, b.WorkflowID); !ok {
+		return AccessBoundary{}, false
+	}
+	if out.TaskID, ok = merge(a.TaskID, b.TaskID); !ok {
+		return AccessBoundary{}, false
+	}
+	if out.AgentID, ok = merge(a.AgentID, b.AgentID); !ok {
+		return AccessBoundary{}, false
+	}
+	if out.Validate() != nil {
+		return AccessBoundary{}, false
+	}
+	return out, true
+}
+
+func merge(x, y string) (string, bool) {
+	switch {
+	case x == "":
+		return y, true
+	case y == "" || x == y:
+		return x, true
+	}
+	return "", false
 }
