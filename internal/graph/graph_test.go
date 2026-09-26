@@ -1451,7 +1451,7 @@ func TestLinkDerived_AllOrNothing(t *testing.T) {
 		mustInsert(t, tx, derived, s1, s2)
 
 		decoy := domain.Relationship{
-			ID:        relationshipID(sess, domain.RelDerivedFrom, derived.ID, s2.ID, eventID),
+			ID:        derivedRelationshipID(sess, derived.ID, s2.ID, eventID, domain.CoverageProvenance),
 			SessionID: sess,
 			Type:      domain.RelDerivedFrom,
 			FromID:    derived.ID,
