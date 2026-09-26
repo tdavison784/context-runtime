@@ -151,9 +151,15 @@ const testDeclarationPolicy = "graph-test/1"
 // rejected by DeclareCreation, so callers cannot use this for prior state.
 func mustCreate(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
 	t.Helper()
+	mustCreateWith(t, tx, CreationAcceptance{PolicyVersion: testDeclarationPolicy}, items...)
+}
+
+// mustCreateWith is mustCreate with explicit accepted creation inputs.
+func mustCreateWith(t *testing.T, tx store.Tx, accepted CreationAcceptance, items ...domain.ContextItem) {
+	t.Helper()
 	for _, it := range items {
 		mustInsert(t, tx, it)
-		if _, err := DeclareCreation(tx, it, CreationAcceptance{PolicyVersion: testDeclarationPolicy}); err != nil {
+		if _, err := DeclareCreation(tx, it, accepted); err != nil {
 			t.Fatalf("DeclareCreation(%s): %v", it.ID, err)
 		}
 	}
