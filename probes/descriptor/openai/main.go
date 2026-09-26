@@ -48,9 +48,6 @@ func main() {
 			p.compaction(model)
 		}
 	}
-	if err := write("index", object{"sdk": "github.com/openai/openai-go/v3 v3.66.0", "observations": p.notes}); err != nil {
-		panic(err)
-	}
 	fmt.Printf("wrote %d observations to %s\n", len(p.notes), *out)
 }
 
