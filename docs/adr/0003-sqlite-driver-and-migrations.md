@@ -6,7 +6,7 @@ Date: 2026-09-25
 ## Context
 
 FR-PER-001 requires in-memory and SQLite stores implementing the same
-`store.Store` interface (`internal/store/store.go:26`), with Postgres
+`store.Store` interface (`internal/store/store.go`), with Postgres
 possible later behind the same contract. FR-PER-002/003/004 require the
 store to persist every listed record type, reconstruct identical logical
 state on restart, and preserve integrity under concurrent mutation. FR-CALL-002
@@ -31,7 +31,7 @@ preserve valid state.
   `synchronous=FULL` (required for FR-CALL-002's SENT durability guarantee —
   `NORMAL` risks losing a committed WAL frame on power loss, which would
   make a SENT call vanish rather than surface as UNKNOWN on restart). One
-  writer connection; `Update` (`internal/store/store.go:28`) issues
+  writer connection; `Update` (`internal/store/store.go`) issues
   `BEGIN IMMEDIATE` so writer serialization is enforced by SQLite itself, not
   only by the in-process mutex.
 - File permissions: the database file is created `0600` (§9: "SQLite files
@@ -100,7 +100,7 @@ preserve valid state.
   version.
 - One writer connection plus `BEGIN IMMEDIATE` means writer throughput is
   bounded by SQLite's single-writer model. `store.Store.Update`
-  (`internal/store/store.go:41-46`) now documents different sessions as
+  (`internal/store/store.go`) now documents different sessions as
   "independent logically but may be serialized by the implementation (the
   SQLite store has a single writer)" — the contract requires *correctness*
   under concurrent cross-session writes (no lost updates, no corruption), not

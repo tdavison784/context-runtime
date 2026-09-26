@@ -25,7 +25,7 @@ requires the SQLite file be owned by one process (0600 permissions).
   public API is Go methods in package contextruntime; a wire protocol is
   deferred").
 - Stores are single-process: the SQLite file is owned by exactly one OS
-  process. `store.Store.Update` (`internal/store/store.go:26-30`) documents
+  process. `store.Store.Update` (`internal/store/store.go`) documents
   per-session write serialization; V1 implements that serialization as an
   in-process mutex combined with SQLite's own `BEGIN IMMEDIATE` (ADR 3),
   not as a distributed lock. This means exactly one process may open a
@@ -89,7 +89,7 @@ requires the SQLite file be owned by one process (0600 permissions).
 - What the eventual sidecar's authentication mechanism will be (mTLS,
   Unix-socket peer credentials, a bearer token minted by the embedding
   process) — deferred, but worth flagging now since `Principal` construction
-  (`internal/domain/principal.go:9-15`) already assumes a trusted caller and
+  (`internal/domain/principal.go`) already assumes a trusted caller and
   will need a distinct "who constructed this principal, and do we trust
   them" story once a process boundary exists.
 - Whether `cmd/context-runtime` ships in this module or a separate `tools/`

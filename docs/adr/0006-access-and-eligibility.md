@@ -19,27 +19,27 @@ affects inherited content.
 
 ## Decision
 
-- `AccessBoundary` (`internal/domain/principal.go:26-36`) is a **conjunction**
+- `AccessBoundary` (`internal/domain/principal.go`) is a **conjunction**
   of owner constraints `{session, workflow?, task?, agent?}`, not a single
   scope tag. `Scope` sets the *minimum* constraints a boundary of that scope
   must carry: TURN/TASK require a task, WORKFLOW a workflow, AGENT an agent,
   SESSION requires none beyond the session
-  (`AccessBoundary.Validate`, `internal/domain/principal.go:57-72`).
-  `BoundaryFor` (`internal/domain/principal.go:41-51`) constructs the
+  (`AccessBoundary.Validate`, `internal/domain/principal.go`).
+  `BoundaryFor` (`internal/domain/principal.go`) constructs the
   boundary a given scope receives from an ingesting principal. Derived
   content may carry *extra* constraints beyond its nominal scope's minimum —
   a checkpoint is TASK-scoped but additionally agent-bound, matching
   FR-TOOL-004's "the conversation's" boundary, because a single scope cannot
   express a task-AND-agent intersection but a conjunction of constraints can.
-- `AccessBoundary.Permits(principal)` (`internal/domain/principal.go:75-80`)
+- `AccessBoundary.Permits(principal)` (`internal/domain/principal.go`)
   is the access check: same session and every non-empty owner constraint
   matches. This is what FR-DOM-003's "access" means and what
   `AuthorizeMutation` checks first for every target
-  (`internal/domain/authz.go:180-183`), returning `ErrNotFound` on failure so
+  (`internal/domain/authz.go`), returning `ErrNotFound` on failure so
   an unauthorized caller cannot distinguish "target doesn't exist" from
   "target exists but you can't see it" (§9).
-- `AccessBoundary.Within(outer)` (`internal/domain/principal.go:88-93`) and
-  `Intersect(scope, a, b)` (`internal/domain/principal.go:97-116`) implement
+- `AccessBoundary.Within(outer)` (`internal/domain/principal.go`) and
+  `Intersect(scope, a, b)` (`internal/domain/principal.go`) implement
   FR-REL-008: `Within` checks that a derived boundary carries every
   constraint its source carries (no broader); `Intersect` computes the
   narrowest boundary satisfying two sources simultaneously, failing
@@ -63,18 +63,18 @@ affects inherited content.
 
   This table is recorded now (Phase 1) even though the eligibility engine
   (active task/turn tracking, lease issuance) is Phase 3/4 work
-  (`domain.TaskState`, `internal/domain/records.go:150-165`, is the Phase 1
+  (`domain.TaskState`, `internal/domain/records.go`, is the Phase 1
   building block; turn/lease enforcement is not yet implemented).
 - Unauthorized reads return `domain.ErrNotFound`
-  (`internal/domain/errors.go:12`), never a distinct "forbidden" error, at
+  (`internal/domain/errors.go`), never a distinct "forbidden" error, at
   every layer: `AccessBoundary.Permits` false short-circuits to
   `ErrNotFound` in `AuthorizeMutation`
-  (`internal/domain/authz.go:180-183`), and the same discipline is expected
-  of `store.ReadTx` getters (documented at `internal/store/store.go:76`:
+  (`internal/domain/authz.go`), and the same discipline is expected
+  of `store.ReadTx` getters (documented at `internal/store/store.go`:
   "Every getter returns domain.ErrNotFound ... when the record does not
   exist in this session").
 - Epoch validation: `domain.Conversation.RequireNewEpoch`
-  (`internal/domain/call.go:87-89`) is the Phase 1 field that records "the
+  (`internal/domain/call.go`) is the Phase 1 field that records "the
   next operation must rebase" (set today by abandonment, per ADR 17); the
   broader FR-ASM-010 rule — that a principal/authorization change or a loss
   of eligibility of *inherited* content also forces a rebase — is enforced
