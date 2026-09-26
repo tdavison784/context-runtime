@@ -42,6 +42,15 @@ type fixture struct {
 	evidence domain.ContextItem // task-wide TOOL evidence
 }
 
+// newBareFixture has principals, a task, and a store, but no resources or
+// obligations.
+func newBareFixture(t *testing.T) fixture {
+	t.Helper()
+	f := fixture{s: newTestService(t), st: newTestStore(t), harness: actorOf(domain.AuthorityHarness), system: actorOf(domain.AuthoritySystem), userP: actorOf(domain.AuthorityUser)}
+	seedTask(t, f.st, "task")
+	return f
+}
+
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	f := fixture{s: newTestService(t), st: newTestStore(t), harness: actorOf(domain.AuthorityHarness), system: actorOf(domain.AuthoritySystem), userP: actorOf(domain.AuthorityUser)}

@@ -134,3 +134,20 @@ func seedItemTx(tx store.Tx, id, dirID string, a domain.Authority, text string) 
 func equalTargetPtr(a, b *domain.TargetSpec) bool {
 	return a == nil && b == nil || a != nil && b != nil && equalTarget(*a, *b)
 }
+
+// seedEvidenceAs stores TOOL evidence with an arbitrary boundary, aligning
+// the item's owner fields with it.
+func seedEvidenceAs(t *testing.T, st store.Store, id string, access domain.AccessBoundary) domain.ContextItem {
+	t.Helper()
+	var it domain.ContextItem
+	mustUpdate(t, st, func(tx store.Tx) error {
+		it = storetest.NewItem(testSession, id, tx.NextSeq(), "PASS 42 tests")
+		it.Kind, it.Authority, it.Scope, it.Access = domain.KindToolResult, domain.AuthorityTool, access.Scope, access
+		it.TaskID, it.WorkflowID, it.AgentID = access.TaskID, access.WorkflowID, access.AgentID
+		if it.TaskID == "" {
+			it.TaskID = "task"
+		}
+		return tx.InsertItem(it)
+	})
+	return it
+}

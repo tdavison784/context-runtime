@@ -10,29 +10,25 @@ import (
 
 var errProbeRollback = errors.New("probe rollback")
 
-// w4FamiliesSupported probes whether the backend implements W4's proof,
-// resource, and observation facet families (W2 publishes SQLite after memory).
-func w4FamiliesSupported(t *testing.T, st store.Store) bool {
+// familySupported probes whether the backend implements a facet family,
+// using a read that is ErrUnsupportedSchema until W2 publishes it.
+func familySupported(t *testing.T, st store.Store, probe func(store.SemanticReader) error) bool {
 	t.Helper()
-	supported := true
+	supported := false
 	_ = st.View(t.Context(), testSession, func(tx store.ReadTx) error {
 		r, err := store.ReadSemantic(tx)
-		if err != nil {
-			supported = false
-			return nil
-		}
-		for _, err := range []error{
-			func() error { _, err := r.ResourceBinding("probe"); return err }(),
-			func() error { _, err := r.ApplicabilityProof("probe"); return err }(),
-			func() error { _, err := r.ObservationRun("probe"); return err }(),
-		} {
-			if errors.Is(err, domain.ErrUnsupportedSchema) {
-				supported = false
-			}
+		if err == nil {
+			supported = !errors.Is(probe(r), domain.ErrUnsupportedSchema)
 		}
 		return nil
 	})
 	return supported
+}
+
+// resourceOnly lists subtests that need only the resource/workspace family.
+var resourceOnly = map[string]bool{
+	"ReceiptReplayAndConflict": true, "BindWorkspace": true, "ResolveWorkspace": true,
+	"RegisterResource": true, "RegisterResourceReceipt": true,
 }
 
 // observationNamespaceSupported probes whether the backend can file an
@@ -68,7 +64,15 @@ func TestSQLiteSuite(t *testing.T) {
 	prev := backendFactory
 	backendFactory = sqliteBackend
 	t.Cleanup(func() { backendFactory = prev })
-	families := w4FamiliesSupported(t, sqliteBackend(t))
+	resources := familySupported(t, sqliteBackend(t), func(r store.SemanticReader) error {
+		_, err := r.ResourceBinding("probe")
+		return err
+	})
+	proofs := familySupported(t, sqliteBackend(t), func(r store.SemanticReader) error {
+		_, err := r.ExactObligation(domain.ObligationRef{SessionID: testSession, ObligationID: "probe", Version: 1})
+		return err
+	})
+	families := resources && proofs
 	observations := families && observationNamespaceSupported(t, sqliteBackend(t))
 	observationsUnsupported = !observations
 	t.Cleanup(func() { observationsUnsupported = false })
@@ -101,6 +105,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"ResourceInvalidationPagingAndLimit", TestResourceInvalidationPagingAndLimit, false},
 		{"RegisterRun", TestRegisterRun, false},
 		{"ReportObservation", TestReportObservation, false},
+		{"TurnScopedEvidence", TestTurnScopedEvidence, true},
 		{"ObservationStateChain", TestObservationStateChain, true},
 		{"ObservationStateGating", TestObservationStateGating, true},
 		{"MatcherGrantT06", TestMatcherGrantT06, true},
@@ -126,8 +131,11 @@ func TestSQLiteSuite(t *testing.T) {
 		{"ConcurrentINV16", TestConcurrentINV16, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if !families && tc.name != "ReceiptReplayAndConflict" {
-				t.Skip("blocked on W2: SQLite proof/resource/observation facet not yet published")
+			switch {
+			case resourceOnly[tc.name] && !resources && tc.name != "ReceiptReplayAndConflict":
+				t.Skip("blocked on W2: SQLite resource/workspace facet not yet published")
+			case !resourceOnly[tc.name] && !families:
+				t.Skip("blocked on W2: SQLite obligation/proof facet not yet published")
 			}
 			if tc.obs && !observations {
 				t.Skip("blocked on W2: SQLite migration 0005 CHECK rejects the OBSERVATION namespace")

@@ -33,6 +33,10 @@ func TestFileSubjectIgnoresMode(t *testing.T) {
 	if cur != fixed || fixed != fixed2 {
 		t.Errorf("file subject depends on mode/hash: %s %s %s", cur, fixed, fixed2)
 	}
+	split := domain.TargetSpec{File: &domain.FileTarget{Locator: domain.ResourceLocator{ResourceID: "repo1", BaseDir: "docs", Path: "a.md"}, Mode: domain.FileCurrentContent}}
+	if mustSubjectKey(split) != cur {
+		t.Error("base-directory split changed the file subject")
+	}
 	if mustSubjectKey(fileTarget("repo2", "docs/a.md", domain.FileCurrentContent, "")) == cur {
 		t.Error("different resources share a file subject")
 	}

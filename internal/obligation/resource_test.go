@@ -303,7 +303,7 @@ func TestResourceInvalidationPagingAndLimit(t *testing.T) {
 }
 
 func TestRegisterResource(t *testing.T) {
-	f := newFixture(t)
+	f := newBareFixture(t)
 	session := domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: testSession}
 	reg := func(actor domain.Principal, in domain.RegisterResourceIntent) (domain.ResourceBinding, error) {
 		var b domain.ResourceBinding
@@ -346,7 +346,7 @@ func TestRegisterResourceReceipt(t *testing.T) {
 	if (domain.RecordResult{Kind: resultResourceBinding, IDs: []string{"x"}}).Validate() != nil {
 		t.Skipf("RecordResult kind %s not yet accepted by W1", resultResourceBinding)
 	}
-	f := newFixture(t)
+	f := newBareFixture(t)
 	rep := sessionReporter()
 	in := domain.RegisterResourceIntent{RequestID: "reg1", ResourceID: "repo3", Reporter: rep, Access: domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: testSession}}
 	var first, again domain.MutationResult
