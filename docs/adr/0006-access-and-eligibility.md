@@ -80,6 +80,16 @@ affects inherited content.
   of eligibility of *inherited* content also forces a rebase — is enforced
   starting Phase 5 (materialization), reusing this same field and the access/
   eligibility checks defined here.
+- **Deferred, recorded now:** conjunctive ownership alone (`Within`/
+  `Permits`) does not track *which turn or lease* admitted a piece of
+  inherited or opaque content into history. TURN and TASK boundaries share
+  the same owner fields, so ownership comparison cannot by itself tell that
+  a TURN-scoped item's owning turn has since ended, or that a retrieval
+  lease covering an opaque provider block has expired — a materialization
+  pass that checked only `Within`/`Permits` could let ineligible content
+  outlive its turn or lease inside already-rendered history (FR-ASM-010,
+  FR-RET-006). Phase 1 does not build this: no manifest/coverage-ID record
+  or lease type exists yet. See the open item below for the target phase.
 
 ## Alternatives considered
 
@@ -148,6 +158,15 @@ affects inherited content.
 
 ## Open questions
 
+- **Target: Phases 3/5.** Temporal eligibility of inherited/opaque content:
+  record covered source IDs or immutable manifest membership for derived
+  content and opaque provider blocks, and recheck inherited lease/turn
+  limits before transmission, forcing a rebase when covered content loses
+  eligibility (Codex finding 7). This does not require every durable fact
+  derived from old evidence to expire — only content whose *inclusion*
+  depended on now-lapsed turn/lease eligibility. Ingestion-time coverage
+  recording is Phase 3; the dispatch-time recheck is Phase 5
+  (materialization), alongside FR-ASM-010's rebase trigger.
 - Exact representation of a retrieval lease (FR-RET-006) — not yet a type in
   `internal/domain`; needed before Phase 6 (archive/retention) but the
   eligibility table above already assumes its shape (principal/task/agent/
@@ -156,3 +175,12 @@ affects inherited content.
   `internal/domain/item.go`) or needs a session-sequence-based expiry too for
   scopes without a turn concept (WORKFLOW/AGENT/SESSION-scoped ephemeral
   content, if any is ever introduced).
+
+## Review
+
+Scrutinized by Codex gpt-6-sol xhigh (`codex-decision-review-out.md`,
+finding 7). Verdict: conjunctive ownership, `Within`, and `Intersect` are
+correct for valid ownership boundaries (no change to the Decision section).
+Added: the deferred temporal-eligibility/covered-source-IDs gap as an
+explicit item above with a target phase, since ownership comparison alone
+cannot detect a lapsed turn or expired lease on inherited content.
