@@ -24,9 +24,11 @@ func referenceKey(text string) (string, bool) {
 // if its text is a locator and links every already ingested source it names
 // (M5, R2). The record is kept even when a source
 // matched, since every later ingestion of a matching source may add an
-// edge; references are never retired. Existing sources come from the
-// store's bounded source-key index (R19); more than the lookup limit
-// rejects the event (store.ErrLimitExceeded, D17).
+// edge; references are never retired. Existing sources are paged from the
+// store's exact-key source index, filtered to the source actor inside the
+// query (F1, SEC-1.1), so another principal's sources are never counted;
+// linking stops, without failing the event, once the event's relationship
+// budget (MaxRelationships, D17) is spent.
 func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
 	if err := r.referenceItemID(c, ref); err != nil {
 		return err
@@ -35,16 +37,28 @@ func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
 	if !ok {
 		return nil
 	}
-	targets, err := r.tx.ItemsBySourceKey(key, r.g.lookupLimit())
-	if err != nil {
-		return err
-	}
-	for _, target := range targets {
-		if target.ID == ref.ID {
-			continue
-		}
-		if err := r.linkReference(c.actor, ref, target); err != nil {
+	var after store.Cursor
+	for more := true; more; {
+		page, err := r.tx.SourceItems(store.SourceFilter{Viewer: c.actor, LocatorKey: key, Page: store.Page{After: after, Limit: r.g.lookupLimit()}})
+		if err != nil {
 			return err
+		}
+		r.reportUnverified(c.si, c.pi, domain.ByteRange{}, ref.Access, page.Unverified)
+		for _, target := range page.Items {
+			if target.ID == ref.ID {
+				continue
+			}
+			stop, err := r.linkReference(c.actor, ref, target)
+			if err != nil {
+				return err
+			}
+			if stop {
+				more = false
+				break
+			}
+		}
+		if more {
+			more, after = page.More, page.Next
 		}
 	}
 	ordinal := r.refs
@@ -89,7 +103,8 @@ func (r *run) referenceItemID(c unitCtx, ref domain.ContextItem) error {
 	case err != nil:
 		return err
 	}
-	return r.linkReference(c.actor, ref, target)
+	_, err = r.linkReference(c.actor, ref, target)
+	return err
 }
 
 // maxItemIDBytes bounds the text tried as an item ID.
@@ -101,10 +116,10 @@ const maxItemIDBytes = 256
 // current source actor must see the reference, and everyone who can see the
 // reference must already see the new source. Anything else is skipped
 // silently, so the event learns nothing about references it cannot see.
-// The references come from the store's bounded locator-key index (R19);
-// more than the lookup limit rejects the event (store.ErrLimitExceeded,
-// D17) rather than linking only some.
-func (r *run) linkPendingReferences(actor domain.Principal, target domain.ContextItem) error {
+// The references are paged from the store's exact-key index, filtered to
+// the source actor inside the query (F1, SEC-1.1); linking stops, without
+// failing the event, once the event's relationship budget is spent (D17).
+func (r *run) linkPendingReferences(si int, actor domain.Principal, target domain.ContextItem) error {
 	if target.Source == nil {
 		return nil
 	}
@@ -112,38 +127,49 @@ func (r *run) linkPendingReferences(actor domain.Principal, target domain.Contex
 	if !ok {
 		return nil
 	}
-	refs, err := r.tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: key, RuleVersion: domain.LocatorRuleVersion, Limit: r.g.lookupLimit()})
-	if err != nil {
-		return err
-	}
-	for _, ref := range refs {
-		it, err := r.tx.Item(ref.ItemID)
+	var after store.Cursor
+	for {
+		refs, more, next, err := r.tx.VisibleReferences(store.VisibleReferenceFilter{Viewer: actor, LocatorKey: key, Page: store.Page{After: after, Limit: r.g.lookupLimit()}})
 		if err != nil {
 			return err
 		}
-		if err := r.linkReference(actor, it, target); err != nil {
-			return err
+		for _, ref := range refs {
+			it, err := r.tx.Item(ref.ItemID)
+			switch {
+			case errors.Is(err, domain.ErrIntegrity):
+				r.reportUnverified(si, 0, domain.ByteRange{}, target.Access, []string{ref.ItemID})
+				continue
+			case err != nil:
+				return err
+			}
+			stop, err := r.linkReference(actor, it, target)
+			if err != nil || stop {
+				return err
+			}
 		}
+		if !more {
+			return nil
+		}
+		after = next
 	}
-	return nil
 }
 
 // linkReference writes one REFERENCES edge if actor can see both ends and
 // the reference's boundary is within the target's; otherwise it writes
 // nothing and reports nothing.
-func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextItem) error {
-	if !ref.Access.Permits(actor) || !target.Access.Permits(actor) || !ref.Access.Within(target.Access) {
-		return nil
-	}
+func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextItem) (stop bool, err error) {
 	if r.rels >= r.limits.MaxRelationships {
-		return errLimit("MaxRelationships")
+		return true, nil
 	}
-	_, err := graph.LinkReference(r.tx, actor, ref.ID, target.ID, r.graphEventID(), domain.LocatorRuleVersion)
+	if !ref.Access.Permits(actor) || !target.Access.Permits(actor) || !ref.Access.Within(target.Access) {
+		return false, nil
+	}
+	_, err = graph.LinkReference(r.tx, actor, ref.ID, target.ID, r.graphEventID(), domain.LocatorRuleVersion)
 	if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
-		return nil
+		return false, nil
 	}
 	if err == nil {
 		r.rels++
 	}
-	return err
+	return false, err
 }

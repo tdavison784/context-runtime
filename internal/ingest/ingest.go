@@ -31,11 +31,12 @@ type Ingester struct {
 	IDs domain.IDGenerator
 	// Now stamps CreatedAt, which is audit-only; nil means time.Now.
 	Now func() time.Time
-	// LookupLimit bounds every indexed store lookup ingestion makes (blob
-	// referrers, duplicate candidates, reference matches) (D17, R19); zero
-	// means DefaultLookupLimit. A lookup matching more records than this
-	// rejects the event (store.ErrLimitExceeded) rather than deciding on a
-	// partial answer.
+	// LookupLimit is the page size of the paged reference lookups and the
+	// bound on one exact-key candidate lookup (D17, F1); zero means
+	// DefaultLookupLimit. Every lookup is filtered to the source actor
+	// inside the store, and a candidate set holds only live items, so the
+	// bound is unreachable in routine use; exceeding it still rejects the
+	// event (store.ErrLimitExceeded) rather than deciding on a partial set.
 	LookupLimit int
 }
 

@@ -200,7 +200,7 @@ func (r *run) ingestSpan(si int) error {
 	if err := r.detectDuplicate(si, 0, actor, transcript); err != nil {
 		return err
 	}
-	if err := r.linkPendingReferences(actor, transcript); err != nil {
+	if err := r.linkPendingReferences(si, actor, transcript); err != nil {
 		return err
 	}
 	return r.deriveSpan(si, span, transcript)
