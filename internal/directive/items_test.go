@@ -198,13 +198,15 @@ func TestMalformedItemsAndLifecycle(t *testing.T) {
 	if len(p.items) != 1 || p.items[0].id == "heading" || p.diagnostics[0].reason != "heading ID on list section" {
 		t.Fatal(p)
 	}
-	for _, input := range []string{"## Working [heading]\n- text", "## Unpin [a]\n- [b]"} {
+	for _, input := range []string{"## Working [heading]\n- text", "## Unpin [a]\n- [b]", "## Goal [g]\n", "## Resolve [g]\ntext", "## Goal [goal-" + strings.Repeat("ab", 32) + "]\nx"} {
 		if r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem}); len(r.Sections) != 1 || r.Sections[0].DirectiveID != "" {
 			t.Fatalf("%q: ignored heading ID exported: %+v", input, r.Sections)
 		}
 	}
-	if r := Parse([]byte("## Goal [g]\nx"), Options{Authority: domain.AuthoritySystem}); r.Sections[0].DirectiveID != "g" {
-		t.Fatal(r.Sections)
+	for _, input := range []string{"## Goal [g]\nx", "## Resolve [g]"} {
+		if r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem}); r.Sections[0].DirectiveID != "g" {
+			t.Fatal(r.Sections)
+		}
 	}
 }
 func TestRepeatedIDsWithinList(t *testing.T) {

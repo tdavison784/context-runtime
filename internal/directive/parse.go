@@ -53,8 +53,16 @@ func Parse(input []byte, opts Options) Result {
 	if p.ttlOverflow {
 		return Result{Err: fmt.Errorf("%w: %w: directive parser: ttl exceeds %d turns", domain.ErrInvalidRecord, ErrRepresentationLimit, MaxTTLTurns)}
 	}
+	// Section.DirectiveID reports a heading ID only when it took effect: its
+	// single-body item or heading command survived (D7, D20).
+	applied := make(map[int]bool)
+	for _, it := range p.items {
+		if it.explicit && it.id == p.sections[it.sectionIndex].heading.id {
+			applied[it.sectionIndex] = true
+		}
+	}
 	var result Result
-	for _, s := range p.sections {
+	for si, s := range p.sections {
 		bodyStart := s.heading.end
 		if bodyStart < len(input) && input[bodyStart] == '\r' {
 			bodyStart++
@@ -64,7 +72,10 @@ func Parse(input []byte, opts Options) Result {
 		}
 		section := Section{Keyword: Keyword(strings.ToUpper(s.heading.section)), Level: s.heading.level, Range: ByteRange{Start: s.heading.start, End: s.end}, HeadingRange: ByteRange{Start: s.heading.start, End: bodyStart}, BodyRange: ByteRange{Start: bodyStart, End: s.end}, Malformed: s.malformed}
 		if s.heading.valid {
-			section.DirectiveID, section.Attributes = s.heading.id, exportAttributes(s.heading.attrs)
+			section.Attributes = exportAttributes(s.heading.attrs)
+			if applied[si] {
+				section.DirectiveID = s.heading.id
+			}
 		}
 		result.Sections = append(result.Sections, section)
 	}
