@@ -1587,6 +1587,168 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 	})
 }
 
+// TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective is SPEC-3.1:
+// checking the literal item ID before the directive ID, and returning on
+// any failure there, let a hidden item that merely shares an ID string with
+// an accessible directive change the result — an existence oracle that also
+// blocked an otherwise-authorized Resolve/Unpin. The literal-item lookup
+// must never short-circuit the directive-ID lookup; it can only add a
+// candidate, never remove the directive's.
+func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
+	const taskID, sharedID = "task", "shared-id"
+
+	// resolve sets up an accessible goal directive at sharedID, optionally
+	// inserts a second item invisible to the resolving actor whose actual
+	// item ID (not directive ID) is also the literal string sharedID, and
+	// returns what ResolveLifecycleTarget(sharedID) resolves to.
+	resolve := func(t *testing.T, withHiddenItem bool) (string, error) {
+		t.Helper()
+		s := memory.New()
+		defer s.Close()
+		sess := t.Name()
+		actor := principal(sess, domain.AuthorityUser)
+
+		var goalID string
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
+			g.DirectiveID = sharedID
+			goalID = g.ID
+			mustInsert(t, tx, g)
+			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("setup goal: %v", err)
+		}
+
+		if withHiddenItem {
+			err = s.Update(ctx, sess, func(tx store.Tx) error {
+				hidden := agentScopedItem(sess, sharedID, tx.NextSeq(), "agent-b")
+				return tx.InsertItem(hidden)
+			})
+			if err != nil {
+				t.Fatalf("setup hidden item: %v", err)
+			}
+		}
+
+		var got string
+		var resolveErr error
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			got, resolveErr = ResolveLifecycleTarget(tx, actor, taskID, sharedID)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("view: %v", err)
+		}
+		if resolveErr == nil && got != goalID {
+			t.Fatalf("got %q, want the goal %q", got, goalID)
+		}
+		return got, resolveErr
+	}
+
+	without, withoutErr := resolve(t, false)
+	if withoutErr != nil {
+		t.Fatalf("without hidden item: unexpected error %v", withoutErr)
+	}
+
+	with, withErr := resolve(t, true)
+	if withErr != nil {
+		t.Fatalf("err = %v, want nil (the hidden item must not block the directive)", withErr)
+	}
+	if with != without {
+		t.Errorf("with hidden item resolved to %q, without resolved to %q; a hidden item must never change the result", with, without)
+	}
+
+	t.Run("AccessibleItemAndAccessibleDirectiveCollideAmbiguous", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		sess := t.Name()
+		actor := principal(sess, domain.AuthorityUser)
+
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
+			g.DirectiveID = sharedID
+			mustInsert(t, tx, g)
+			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("setup goal: %v", err)
+		}
+
+		// A second, unrelated item whose own item ID (not directive ID) is
+		// the same string, and IS accessible to actor.
+		err = s.Update(ctx, sess, func(tx store.Tx) error {
+			it := taskItem(sess, sharedID, tx.NextSeq(), domain.AuthorityUser)
+			return tx.InsertItem(it)
+		})
+		if err != nil {
+			t.Fatalf("setup colliding item: %v", err)
+		}
+
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			_, err := ResolveLifecycleTarget(tx, actor, taskID, sharedID)
+			return err
+		})
+		if !errors.Is(err, ErrAmbiguousDirective) {
+			t.Fatalf("err = %v, want ErrAmbiguousDirective", err)
+		}
+	})
+
+	t.Run("NoncurrentLiteralItemTreatedAsAbsent", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		sess := t.Name()
+		actor := principal(sess, domain.AuthorityUser)
+
+		// A directive at sharedID, filed normally.
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
+			g.DirectiveID = sharedID
+			mustInsert(t, tx, g)
+			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("setup goal: %v", err)
+		}
+
+		// A now-superseded item whose own item ID happens to equal
+		// sharedID too: accessible, but not current, so it must not count
+		// as a candidate at all, and must not block the directive result.
+		var oldID, replacementID string
+		err = s.Update(ctx, sess, func(tx store.Tx) error {
+			old := taskItem(sess, sharedID, tx.NextSeq(), domain.AuthorityUser)
+			replacement := taskItem(sess, "replacement", tx.NextSeq(), domain.AuthorityUser)
+			oldID, replacementID = old.ID, replacement.ID
+			mustInsert(t, tx, old, replacement)
+			_, err := Supersede(tx, actor, replacement.ID, old.ID, "evt2", "")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("setup superseded item: %v", err)
+		}
+		_ = replacementID
+
+		err = s.View(ctx, sess, func(tx store.ReadTx) error {
+			if ok, err := IsCurrent(tx, oldID); err != nil || ok {
+				t.Fatalf("IsCurrent(old) = %v, %v; want false, nil (test setup invariant)", ok, err)
+			}
+			got, err := ResolveLifecycleTarget(tx, actor, taskID, sharedID)
+			if err != nil {
+				return err
+			}
+			if got == oldID {
+				t.Errorf("got the superseded item %q; it must be treated as absent", got)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("err = %v, want nil (the stale item must not block the directive)", err)
+		}
+	})
+}
+
 // -- deep chain -------------------------------------------------------------
 
 // TestSupersessionChain_DeepNoRecursion builds a 10,000-long supersession
