@@ -2377,8 +2377,9 @@ fixed.
   `TestUnverifiedReportedOncePerEvent_DUR31`
   (`internal/ingest/lookups_test.go`).
 - **SPEC-3.2: regression guards for every SPEC-2.1 read, closing the gaps
-  the second review found (refines §29).** Four gaps, each now caught by a
-  test that fails on the specific mutation the review reproduced: (1)
+  the second review found, plus the four further gaps a third review round
+  later found in these same guards (refines §29; SPEC-4.3's fixes folded
+  in below, per the commander's relay).** (1)
   `TestKeyedReadsDoNotScan` (memory) is extended past `CurrentVersions`/
   `ObligationsBySource` to also cover per-item `Relationships`/`Items`
   reads, keyed or full-scan (**SPEC-4.5: corrected — its fixture carries
@@ -2387,16 +2388,27 @@ fixed.
   is the guard for SPEC-3.1 item 5 specifically: it counts both the typed
   index's own yields and its underlying scan, so serving a typed read from
   an endpoint-only or type-only index — either would return the right
-  answer while walking the wrong amount of work — fails it. (2)
-  `TestSupersessionCycleCheckIsLocal` now measures the cycle check *from
-  outside* the function it tests: every `*transaction` records `rowsRead`
+  answer while walking the wrong amount of work — fails it. **(SPEC-4.3)**
+  Its fixture initially carried no *unrelated* edges of the queried type,
+  so a type-only index still returned the right (empty) answer without
+  extra work and the mutation survived; it now adds 200 unrelated
+  `SUPERSEDES` edges into the same target first, so a type-only index
+  visits them and fails. (2) `TestSupersessionCycleCheckIsLocal` now
+  measures the cycle check *from outside* the function it tests: every
+  `*transaction` records `rowsRead`
   across every multi-row query the transaction issues (a `countedRows`
   wrapper around `*sql.Rows` behind the shared `t.query` helper every
   multi-row `SELECT` — `queryRecords`, `listRecords`, `nextRows` — now
   goes through), so a mutation that made the check load the whole
   `SUPERSEDES` graph but still *report* only the nodes it walked (which
   the prior guard, trusting the function's own `visited` count, could not
-  catch) now fails on rows actually read. (3) `CurrentVersions` gets its
+  catch) now fails on rows actually read. **(SPEC-4.3)** `rowsRead` was
+  originally asserted only around the insert that returns before walking
+  (a new version with no incoming edge); it now also bounds the
+  cycle-closing insert and a walking insert that finds no cycle, so
+  loading the whole graph inside the walk while reporting only the
+  visited count (a mutation only these two cases could catch) fails too.
+  (3) `CurrentVersions` gets its
   own named builder (`currentVersionsQuery`), a plan guard
   (`TestCurrentVersionsUseIndex`, **SPEC-4.2: previously uncited** —
   `internal/store/sqlite/access_lookups_test.go`, locking the read to its
@@ -2405,11 +2417,38 @@ fixed.
   per-item-read guard, so reverting either to an ad hoc query fails there
   even if the plan test alone would not catch it. (4)
   `TestUpgradeOrderedGraphIndexes` (`internal/store/sqlite/upgrade_test.go`)
-  is the missing migrated-layout parity fixture for 0014→0015: a
+  is the migrated-layout parity fixture for 0014→0015: a
   relationship and items stored before 0015 are read back correctly
   through the new `relationship_from_seq`/`relationship_to_seq`/
   `item_task_seq` indexes after upgrade, and the three indexes 0015
-  replaced are confirmed gone.
+  replaced are confirmed gone. **(SPEC-4.3) It stopped at 0015 — 0016 and
+  0017 had no upgrade-parity test at all.**
+  `TestUpgradeCommandDetailAndLookupItemIndexes`
+  (`internal/store/sqlite/upgrade_test.go`) closes this: upgrading from
+  14, 15, and 16 each to head confirms `rec_command`'s five
+  `f_detail_access_*` columns (0016) and all four `lookup_*_item` indexes
+  (0017) exist afterward, a command record stored before 0016 reads its
+  NULL detail columns back as the zero `DetailAccess` and still validates,
+  and (from 14) the same fixture also exercises 0015's indexes in the same
+  pass.
+  **(5, SPEC-4.3) The memory ordered-index commit's own regression guard
+  didn't check *how* it stayed fast.** `TestOrderedIndexCommitMerges`
+  counted only `commitWork`'s own increments, so a mutation that kept
+  `commitWork` low by `slices.Clone`-ing the touched key's list first (an
+  extra full-list copy on every commit, defeating the point) survived. It
+  now also asserts the key's backing array is unchanged after a commit
+  that only removes then adds within capacity — a copy would move it to a
+  new array. A mid-list removal or non-newest addition still legitimately
+  shifts the tail in place (no allocation, but not free either — §30 item
+  3 above records this honestly).
+  **(6, SPEC-4.3) No committed test paged a lookup across more than one
+  owner combination.** `TestConformance/SourceItemsMixedOwners`
+  (`internal/store/storetest/access_lookups.go`) interleaves visible
+  items across five owner-boundary shapes (session, workflow, task,
+  agent, task+agent) with hidden ones and pages at sizes 1-4 on both
+  stores, requiring one merged `(Seq, ID)` order with no duplicates or
+  skips — dropping the per-combination merge in SQLite's `nextRows` fails
+  it.
 
 ### 31. PR #5 review round 4: SEC-3.1 (retry admission hardened), SEC-3.2 (command-detail redaction) — all landed, recorded here per SPEC-4.2
 
