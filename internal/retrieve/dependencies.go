@@ -126,15 +126,15 @@ func checkCoverageDependencies(d DependencySnapshot, rootID string, boundary dom
 					item.ContentHash != m.Source.ContentHash || !boundary.Within(item.Access) || item.Seq > d.SnapshotSeq {
 					return domain.ErrIncompleteCoverage
 				}
-				if m.LeaseID == "" {
-					if item.Role == domain.RoleProjection {
-						p, ok := d.Projections[item.ID]
-						if !ok || p.Validate() != nil || p.ItemID != item.ID || p.Access != item.Access || p.Origin.Holder != d.Principal ||
-							item.Source == nil || item.Source.Kind != domain.SourceItem || item.Source.Locator != p.Source.ItemID || item.Source.ContentHash != p.Source.ContentHash {
-							return domain.ErrIncompleteCoverage
-						}
-						copiedProjections = append(copiedProjections, p)
+				if item.Role == domain.RoleProjection {
+					p, ok := d.Projections[item.ID]
+					if !ok || p.Validate() != nil || p.ItemID != item.ID || p.Access != item.Access || p.Origin.Holder != d.Principal ||
+						item.Source == nil || item.Source.Kind != domain.SourceItem || item.Source.Locator != p.Source.ItemID || item.Source.ContentHash != p.Source.ContentHash {
+						return domain.ErrIncompleteCoverage
 					}
+					copiedProjections = append(copiedProjections, p)
+				}
+				if m.LeaseID == "" {
 					continue
 				}
 				lease, ok := d.Leases[m.LeaseID]

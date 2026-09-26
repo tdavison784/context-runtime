@@ -181,3 +181,20 @@ func TestDerivedRepresentationRetainsProjectionLeaseAndNestedCoverage(t *testing
 		t.Fatalf("missing projection companion = %v", err)
 	}
 }
+
+func TestProjectionSourceRequiresItsOriginalNestedLease(t *testing.T) {
+	d := dependencyFixture(t)
+	item := d.Sources["source"]
+	item.Role, item.Kind, item.Authority = domain.RoleProjection, domain.KindToolResult, domain.AuthorityTool
+	oldRef := domain.ItemContentRef{ItemID: "original", ContentHash: domain.HashBytes([]byte("original"))}
+	item.Source = &domain.SourceRef{Kind: domain.SourceItem, Locator: oldRef.ItemID, ContentHash: oldRef.ContentHash}
+	d.Sources[item.ID] = item
+	d.Projections = map[string]domain.ProjectionRecord{item.ID: {
+		SemanticMeta: domain.SemanticMeta{ID: "original-projection", SessionID: "s", Seq: 1, SchemaVersion: domain.SemanticSchemaV1},
+		ItemID:       item.ID, Source: oldRef, LeaseID: "original-lease", RetrievalResultID: "original-result",
+		DependencyCoverageID: "original-coverage", Origin: d.Projection.Origin, Access: item.Access, DeliveryPolicyVersion: "delivery",
+	}}
+	if err := CheckProjectionDependencies(d); !errors.Is(err, domain.ErrIncompleteCoverage) {
+		t.Fatalf("copied projection omitted original lease = %v", err)
+	}
+}
