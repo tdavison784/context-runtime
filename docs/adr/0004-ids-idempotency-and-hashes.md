@@ -384,7 +384,9 @@ item ID only when it actually occurs, is less disruptive and matches how
 - `internal/store/storetest/semantic.go:testCurrentDirectivesOrder`
   (`TestConformance/CurrentVersions(DIRECTIVE)Order` — SPEC-1.8: renamed
   from `CurrentDirectivesOrder` when the store switched to the typed
-  namespaced methods; the `-run` filter must use the new name) locks
+  namespaced methods; as a `go test -run` argument the parentheses must be
+  escaped, e.g. `-run 'TestConformance/CurrentVersions\(DIRECTIVE\)Order'`,
+  or the unescaped form is a regex group that matches nothing) locks
   `CurrentVersions`
   exactly: every current version's item ID across boundaries in a task,
   ordered by item ID, empty (not an error) when none exist. Both
