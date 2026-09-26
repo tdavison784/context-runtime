@@ -247,7 +247,7 @@ func (r *run) residualInstruction(c unitCtx, slices []domain.ByteRange) error {
 	if err := r.linkDerived(c, it); err != nil {
 		return err
 	}
-	return r.detectDuplicate(c.actor, it)
+	return r.detectDuplicate(c.si, c.pi, c.actor, it)
 }
 
 // detectDuplicate links a new non-directive item (a transcript or residual
@@ -256,21 +256,26 @@ func (r *run) residualInstruction(c unitCtx, slices []domain.ByteRange) error {
 // same session and task (FR-ING-005, D10). It is detection only: the new
 // occurrence stays current pending input with its own turn and metadata,
 // and nothing crosses an authority, boundary, or task. Candidates come from
-// the store's bounded duplicate index (R19); more than the lookup limit
-// rejects the event (store.ErrLimitExceeded, D17).
-func (r *run) detectDuplicate(actor domain.Principal, it domain.ContextItem) error {
+// the store's exact-key live-candidate index, filtered to the actor inside
+// the query (F1, SEC-1.1, DUR-1.1): every earlier identical occurrence is
+// either the canonical one or already DUPLICATE_OF it and so no longer a
+// candidate, so the set is the canonical item plus the new one however
+// often the content repeats, and the limit is unreachable in routine use.
+// Excluded unverified matches are reported as ItemUnverified (DUR-1.4).
+func (r *run) detectDuplicate(si, pi int, actor domain.Principal, it domain.ContextItem) error {
 	if !it.Access.Permits(actor) {
 		return nil
 	}
-	items, err := r.tx.DuplicateCandidates(store.DuplicateFilter{
-		TaskID: it.TaskID, Section: domain.SectionNone, Role: it.Role, Authority: it.Authority,
-		Access: it.Access, ContentHash: it.ContentHash, Limit: r.g.lookupLimit(),
+	found, err := r.tx.CanonicalCandidates(store.CanonicalFilter{
+		Viewer: actor, TaskID: it.TaskID, Section: domain.SectionNone, DirectiveID: "", Kind: it.Kind, Role: it.Role,
+		Authority: it.Authority, Access: it.Access, ContentHash: it.ContentHash, Limit: r.g.lookupLimit(),
 	})
 	if err != nil {
 		return err
 	}
-	for _, c := range items {
-		if c.ID == it.ID || c.Seq >= it.Seq || c.DirectiveID != "" || c.Kind != it.Kind || c.Scope != it.Scope {
+	r.reportUnverified(si, pi, domain.ByteRange{}, it.Access, found.Unverified)
+	for _, c := range found.Items {
+		if c.ID == it.ID || c.Seq >= it.Seq || c.Scope != it.Scope {
 			continue
 		}
 		if r.rels >= r.limits.MaxRelationships {
