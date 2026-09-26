@@ -107,3 +107,33 @@ func TestRecordsAtNarrowerBoundary_F6(t *testing.T) {
 		})
 	})
 }
+
+// TestApplyFailureAtomic_DUR13: Apply is failure-atomic inside a caller's
+// transaction. When it fails after its first write, it poisons the
+// transaction, so even a caller that swallows the error and returns nil
+// commits nothing, and the EventID is not poisoned: a later retry succeeds.
+func TestApplyFailureAtomic_DUR13(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("u0", "hi", false))
+		before, items := f.lastSeq(), len(f.items())
+		e := userEvent("partial", "## Pinned\n- one\n- two\n", true)
+
+		tight := f.in
+		tight.Limits = domain.Limits{MaxEventItems: 2} // fails after writing items
+		var applyErr error
+		updateErr := f.s.Update(ctx, sess, func(tx store.Tx) error {
+			_, applyErr = tight.Apply(tx, user, e, "")
+			return nil // a careless caller swallows the failure
+		})
+		if applyErr == nil || updateErr == nil {
+			t.Fatalf("apply err %v, update err %v; want both to fail", applyErr, updateErr)
+		}
+		if f.lastSeq() != before || len(f.items()) != items {
+			t.Errorf("a failed Apply committed partial writes")
+		}
+		if _, err := f.ingest(user, e); err != nil {
+			t.Errorf("retry of the EventID after a failed Apply: %v", err)
+		}
+	})
+}
