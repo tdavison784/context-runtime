@@ -288,7 +288,8 @@ type Tx interface {
 	// this session, with its Seq allocated in this transaction and its
 	// stored value equal to the snapshot; every link target and resolved
 	// command target must be a stored item (domain.ErrInvalidRecord
-	// otherwise). Reusing an occurrence fails with domain.ErrEventIDConflict
+	// otherwise); every blob the envelope references must be stored in this
+	// session with the referenced size (domain.ErrIntegrity otherwise). Reusing an occurrence fails with domain.ErrEventIDConflict
 	// when the payload hash differs and domain.ErrImmutable otherwise. It
 	// is a sequenced semantic write.
 	InsertIngestion(env domain.EventEnvelope, receipt domain.IngestReceipt) error

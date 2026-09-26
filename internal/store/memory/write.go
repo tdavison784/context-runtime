@@ -813,6 +813,16 @@ func (t *tx) InsertIngestion(env domain.EventEnvelope, r domain.IngestReceipt) e
 			return invalid("receipt %s: resolved command target is not stored", r.OccurrenceID)
 		}
 	}
+	for _, span := range env.Event.Spans {
+		for _, p := range span.Parts {
+			if p.BlobHash == "" {
+				continue
+			}
+			if b, ok := t.blobs.peek(p.BlobHash); !ok || uint64(len(b.Data)) != p.BlobSize {
+				return fmt.Errorf("envelope references blob %s, which is not stored: %w", p.BlobHash, domain.ErrIntegrity)
+			}
+		}
+	}
 	t.receipts.put(r.OccurrenceID, r)
 	t.envelopes.put(env.OccurrenceID, env)
 	t.markSequenced()

@@ -216,6 +216,16 @@ func testIngestionInsertRules(t *testing.T, s store.Store) {
 			c := &f.r.Lifecycle[0]
 			c.Resolution, c.ResolvedItemID, c.ResolvedVersion = domain.TargetResolved, "missing", 1
 		}, domain.ErrInvalidRecord},
+		{"envelope references a missing blob", func(_ store.Tx, f *fixture) {
+			f.env.Event.Spans[1].Parts[0].BlobHash = domain.HashBytes([]byte("absent"))
+			f.env.PayloadHash, _ = f.env.Event.PayloadHash(f.env.Principal)
+			f.r.PayloadHash = f.env.PayloadHash
+		}, domain.ErrIntegrity},
+		{"envelope blob size differs", func(_ store.Tx, f *fixture) {
+			f.env.Event.Spans[1].Parts[0].BlobSize++
+			f.env.PayloadHash, _ = f.env.Event.PayloadHash(f.env.Principal)
+			f.r.PayloadHash = f.env.PayloadHash
+		}, domain.ErrIntegrity},
 		{"foreign session", func(_ store.Tx, f *fixture) {
 			f.env, f.r = NewIngestion(sessB, "evt-2", domain.CallerOccurrenceID(sessB, "evt-2"), f.r.Seq)
 		}, domain.ErrInvalidRecord},
