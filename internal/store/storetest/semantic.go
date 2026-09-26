@@ -11,9 +11,12 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
+// richBlob is the blob richItem's image part references; insert it first.
+func richBlob(sess string) domain.Blob { return NewBlob(sess, []byte("image bytes")) }
+
 // richItem returns an item that uses every optional field.
 func richItem(sess, id string, seq uint64) domain.ContextItem {
-	blob := NewBlob(sess, []byte("image bytes"))
+	blob := richBlob(sess)
 	parts := []domain.ContentPart{
 		{Type: domain.PartText, MediaType: "text/plain", Text: "caption"},
 		{Type: domain.PartImage, MediaType: "image/png", BlobHash: blob.Hash, BlobSize: uint64(len(blob.Data))},
@@ -42,6 +45,7 @@ func testItemRichRoundTrip(t *testing.T, s store.Store) {
 	var want domain.ContextItem
 	update(t, s, sessA, func(tx store.Tx) error {
 		want = richItem(sessA, "rich", tx.NextSeq())
+		noErr(t, tx.InsertBlob(richBlob(sessA)))
 		noErr(t, tx.InsertItem(want))
 		got, err := tx.Item("rich")
 		noErr(t, err)
@@ -74,6 +78,7 @@ func testItemInsertRules(t *testing.T, s store.Store) {
 		{"version 0", func(it *domain.ContextItem) { it.Version = 0 }, domain.ErrInvalidRecord},
 		{"seq 0", func(it *domain.ContextItem) { it.Seq = 0 }, domain.ErrInvalidRecord},
 		{"unallocated seq", func(it *domain.ContextItem) { it.Seq = 1000 }, domain.ErrInvalidRecord},
+		{"seq from an earlier transaction", func(it *domain.ContextItem) { it.Seq = 1 }, domain.ErrInvalidRecord},
 		{"wrong content hash", func(it *domain.ContextItem) { it.ContentHash = domain.HashBytes(nil) }, domain.ErrInvalidRecord},
 		{"wrong semantic bytes", func(it *domain.ContextItem) { it.SemanticBytes++ }, domain.ErrInvalidRecord},
 		{"invalid kind", func(it *domain.ContextItem) { it.Kind = "bogus" }, domain.ErrInvalidRecord},
@@ -170,21 +175,77 @@ func testItemsFilterOrder(t *testing.T, s store.Store) {
 	})
 }
 
+// blobItem returns a fact whose single document part references b with
+// the given size.
+func blobItem(sess, id string, seq uint64, b domain.Blob, size uint64) domain.ContextItem {
+	it := NewItem(sess, id, seq, "")
+	it.Parts = []domain.ContentPart{{Type: domain.PartDocument, MediaType: "application/pdf", BlobHash: b.Hash, BlobSize: size}}
+	it.ContentHash = domain.ContentHash(it.Parts)
+	it.SemanticBytes = domain.SemanticBytes(it.Parts)
+	return it
+}
+
+// testItemBlobIntegrity checks FR-ING-007 at insertion: every blob part
+// references a blob stored in this session with the declared size.
+func testItemBlobIntegrity(t *testing.T, s store.Store) {
+	b := NewBlob(sessA, []byte("document bytes"))
+	size := uint64(len(b.Data))
+	update(t, s, sessB, func(tx store.Tx) error { return tx.InsertBlob(NewBlob(sessB, b.Data)) })
+	cases := []struct {
+		name      string
+		storeBlob bool
+		size      uint64
+		want      error
+	}{
+		{"missing blob", false, size, domain.ErrIntegrity},
+		{"missing blob, declared empty", false, 0, domain.ErrIntegrity},
+		{"blob only in another session", false, size, domain.ErrIntegrity},
+		{"size too small", true, size - 1, domain.ErrIntegrity},
+		{"size too large", true, size + 1, domain.ErrIntegrity},
+		{"stored earlier in the transaction", true, size, nil},
+	}
+	for _, tc := range cases {
+		err := s.Update(ctx, sessA, func(tx store.Tx) error {
+			if tc.storeBlob {
+				noErr(t, tx.InsertBlob(b))
+			}
+			if err := tx.InsertItem(blobItem(sessA, "doc", tx.NextSeq(), b, tc.size)); err != nil {
+				return err
+			}
+			return errRollback
+		})
+		if tc.want == nil {
+			tc.want = errRollback
+		}
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: error = %v, want %v", tc.name, err, tc.want)
+		}
+	}
+	// A blob committed by an earlier transaction satisfies the part.
+	update(t, s, sessA, func(tx store.Tx) error { return tx.InsertBlob(b) })
+	update(t, s, sessA, func(tx store.Tx) error {
+		return tx.InsertItem(blobItem(sessA, "doc", tx.NextSeq(), b, size))
+	})
+}
+
 func testUpdateItem(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		return tx.InsertItem(NewItem(sessA, "i1", tx.NextSeq(), "one"))
 	})
 	durable, archived, low, call := domain.GenerationDurable, domain.ResidencyArchived, domain.RetentionLow, uint64(9)
 	var updated domain.ContextItem
+	var audit domain.LifecycleEvent
 	update(t, s, sessA, func(tx store.Tx) error {
-		_, err := tx.UpdateItem("missing", 1, domain.ItemChange{})
+		n := seqs(tx, 4)
+		_, err := tx.UpdateItem("missing", 1, domain.ItemChange{}, NewItemEvent(sessA, "l0", n[0], "missing"))
 		wantErr(t, err, domain.ErrNotFound)
-		_, err = tx.UpdateItem("i1", 2, domain.ItemChange{AccessDelta: 1})
+		_, err = tx.UpdateItem("i1", 2, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "l0", n[0], "i1"))
 		wantErr(t, err, domain.ErrVersionConflict)
 
+		audit = NewItemEvent(sessA, "l1", n[1], "i1")
 		updated, err = tx.UpdateItem("i1", 1, domain.ItemChange{
 			Generation: &durable, Residency: &archived, Retention: &low, LastUsedCall: &call, AccessDelta: 2,
-		})
+		}, audit)
 		noErr(t, err)
 		want := NewItem(sessA, "i1", 1, "one")
 		want.Generation, want.Residency, want.Retention = durable, archived, low
@@ -193,38 +254,63 @@ func testUpdateItem(t *testing.T, s store.Store) {
 		got, err := tx.Item("i1")
 		noErr(t, err)
 		assertEqual(t, "Item after UpdateItem", got, want)
+		evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetID: "i1"})
+		noErr(t, err)
+		assertEqual(t, "audit event inside Update", evs, []domain.LifecycleEvent{audit})
 
 		// The stale version now conflicts.
-		_, err = tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1})
+		_, err = tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "l2", n[2], "i1"))
 		wantErr(t, err, domain.ErrVersionConflict)
 		return nil
 	})
 	bad := domain.Generation("bogus")
 	earlier := uint64(3)
 	open := domain.GoalOpen
+	valid := func(id string, seq uint64) domain.LifecycleEvent { return NewItemEvent(sessA, id, seq, "i1") }
 	cases := []struct {
 		name   string
 		change domain.ItemChange
+		event  func(seq uint64) domain.LifecycleEvent
 		want   error
 	}{
-		{"invalid generation", domain.ItemChange{Generation: &bad}, domain.ErrInvalidRecord},
-		{"negative access delta", domain.ItemChange{AccessDelta: -1}, domain.ErrInvalidTransition},
-		{"last used call regresses", domain.ItemChange{LastUsedCall: &earlier}, domain.ErrInvalidTransition},
-		{"goal status on a non-goal", domain.ItemChange{GoalStatus: &open}, domain.ErrInvalidTransition},
+		{"invalid generation", domain.ItemChange{Generation: &bad}, func(seq uint64) domain.LifecycleEvent { return valid("lx", seq) }, domain.ErrInvalidRecord},
+		{"negative access delta", domain.ItemChange{AccessDelta: -1}, func(seq uint64) domain.LifecycleEvent { return valid("lx", seq) }, domain.ErrInvalidTransition},
+		{"last used call regresses", domain.ItemChange{LastUsedCall: &earlier}, func(seq uint64) domain.LifecycleEvent { return valid("lx", seq) }, domain.ErrInvalidTransition},
+		{"goal status on a non-goal", domain.ItemChange{GoalStatus: &open}, func(seq uint64) domain.LifecycleEvent { return valid("lx", seq) }, domain.ErrInvalidTransition},
+		{"event targets another item", domain.ItemChange{AccessDelta: 1}, func(seq uint64) domain.LifecycleEvent {
+			return NewItemEvent(sessA, "lx", seq, "i2")
+		}, domain.ErrInvalidRecord},
+		{"event targets another kind", domain.ItemChange{AccessDelta: 1}, func(seq uint64) domain.LifecycleEvent {
+			return NewLifecycleEvent(sessA, "lx", seq, domain.TargetObligation, "i1")
+		}, domain.ErrInvalidRecord},
+		{"event seq from an earlier transaction", domain.ItemChange{AccessDelta: 1}, func(uint64) domain.LifecycleEvent {
+			return valid("lx", 1)
+		}, domain.ErrInvalidRecord},
+		{"event ID reused", domain.ItemChange{AccessDelta: 1}, func(seq uint64) domain.LifecycleEvent { return valid("l1", seq) }, domain.ErrImmutable},
+		{"invalid event", domain.ItemChange{AccessDelta: 1}, func(seq uint64) domain.LifecycleEvent {
+			e := valid("lx", seq)
+			e.Action = ""
+			return e
+		}, domain.ErrInvalidRecord},
 	}
 	for _, tc := range cases {
-		err := s.Update(ctx, sessA, func(tx store.Tx) error {
-			_, err := tx.UpdateItem("i1", 2, tc.change)
-			return err
+		// The rejected write leaves the transaction untouched, so committing
+		// afterwards must store neither the change nor the event.
+		update(t, s, sessA, func(tx store.Tx) error {
+			_, err := tx.UpdateItem("i1", 2, tc.change, tc.event(tx.NextSeq()))
+			if !errors.Is(err, tc.want) {
+				t.Errorf("%s: error = %v, want %v", tc.name, err, tc.want)
+			}
+			return nil
 		})
-		if !errors.Is(err, tc.want) {
-			t.Errorf("%s: error = %v, want %v", tc.name, err, tc.want)
-		}
 	}
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		got, err := tx.Item("i1")
 		noErr(t, err)
 		assertEqual(t, "Item after rejected changes", got, updated)
+		evs, err := tx.LifecycleEvents(store.LifecycleFilter{})
+		noErr(t, err)
+		assertEqual(t, "LifecycleEvents after rejected changes", evs, []domain.LifecycleEvent{audit})
 		return nil
 	})
 }
@@ -253,9 +339,9 @@ func testGoalLifecycle(t *testing.T, s store.Store) {
 		{"resolve again is a no-op status change", domain.ItemChange{GoalStatus: &resolved}, nil, resolved, resident, 5},
 	}
 	version := uint64(1)
-	for _, st := range steps {
+	for i, st := range steps {
 		err := s.Update(ctx, sessA, func(tx store.Tx) error {
-			_, err := tx.UpdateItem("g", version, st.change)
+			_, err := tx.UpdateItem("g", version, st.change, NewItemEvent(sessA, fmt.Sprintf("l%d", i), tx.NextSeq(), "g"))
 			return err
 		})
 		if !errors.Is(err, st.want) {
@@ -272,6 +358,14 @@ func testGoalLifecycle(t *testing.T, s store.Store) {
 			return nil
 		})
 	}
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetItem, TargetID: "g"})
+		noErr(t, err)
+		if len(evs) != 4 {
+			t.Errorf("audit events for g = %d, want 4 (one per applied change)", len(evs))
+		}
+		return nil
+	})
 }
 
 func testRelationships(t *testing.T, s store.Store) {
@@ -484,6 +578,7 @@ func testEvents(t *testing.T, s store.Store) {
 	}{
 		{"malformed payload hash", func(e *domain.EventRecord) { e.PayloadHash = "md5:x" }},
 		{"missing seq", func(e *domain.EventRecord) { e.Seq = 0 }},
+		{"seq from an earlier transaction", func(e *domain.EventRecord) { e.Seq = 1 }},
 		{"invalid principal", func(e *domain.EventRecord) { e.Principal.Authority = "" }},
 	}
 	for _, tc := range invalids {
@@ -603,6 +698,8 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		noErr(t, tx.InsertItem(NewItem(sessA, "plain", tx.NextSeq(), "no directive")))
 		wantErr(t, tx.SetCurrentDirective("task", "dep", "plain"), domain.ErrInvalidRecord)
 		wantErr(t, tx.SetCurrentDirective("task", "other", "p2"), domain.ErrInvalidRecord)
+		// The item must belong to the task it becomes current in.
+		wantErr(t, tx.SetCurrentDirective("task2", "dep", "p2"), domain.ErrInvalidRecord)
 		wantErr(t, tx.SetCurrentDirective("", "dep", "p2"), domain.ErrInvalidRecord)
 		wantErr(t, tx.SetCurrentDirective("task", "", "p2"), domain.ErrInvalidRecord)
 		_, err := tx.CurrentDirective("task", "other")
@@ -620,4 +717,67 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		return errRollback
 	})
 	wantErr(t, err, errRollback)
+}
+
+// testRelationshipFilters checks filtered relationship reads across
+// committed edges and a transaction's own edges, and that a rolled-back
+// transaction's edges never appear. Stores may answer filters from indexes;
+// the results must equal a full scan's.
+func testRelationshipFilters(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		for _, id := range []string{"a", "b", "c", "d"} {
+			noErr(t, tx.InsertItem(NewItem(sessA, id, tx.NextSeq(), id)))
+		}
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e1", domain.RelSupersedes, "a", "b", tx.NextSeq())))
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e2", domain.RelDerivedFrom, "a", "c", tx.NextSeq())))
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e3", domain.RelReferences, "c", "b", tx.NextSeq())))
+		return nil
+	})
+	cases := []struct {
+		f    store.RelationshipFilter
+		want []string
+	}{
+		{store.RelationshipFilter{FromID: "a"}, []string{"e1", "e2", "e5"}},
+		{store.RelationshipFilter{ToID: "b"}, []string{"e1", "e3", "e4"}},
+		{store.RelationshipFilter{Type: domain.RelSupersedes}, []string{"e1", "e4"}},
+		{store.RelationshipFilter{FromID: "a", Type: domain.RelReferences}, []string{"e5"}},
+		{store.RelationshipFilter{FromID: "a", ToID: "c"}, []string{"e2"}},
+		{store.RelationshipFilter{ToID: "b", Type: domain.RelReferences}, []string{"e3"}},
+		{store.RelationshipFilter{FromID: "b"}, nil},
+		{store.RelationshipFilter{}, []string{"e1", "e2", "e3", "e4", "e5"}},
+	}
+	check := func(tx store.ReadTx, when string) {
+		t.Helper()
+		for _, tc := range cases {
+			got, err := tx.Relationships(tc.f)
+			noErr(t, err)
+			var ids []string
+			for _, r := range got {
+				ids = append(ids, r.ID)
+			}
+			if !slices.Equal(ids, tc.want) {
+				t.Errorf("%s: Relationships(%+v) = %v, want %v", when, tc.f, ids, tc.want)
+			}
+		}
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e4", domain.RelSupersedes, "d", "b", tx.NextSeq())))
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e5", domain.RelReferences, "a", "d", tx.NextSeq())))
+		check(tx, "inside the writing transaction")
+		return nil
+	})
+	err := s.Update(ctx, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e6", domain.RelDuplicateOf, "a", "b", tx.NextSeq())))
+		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "e7", domain.RelSupersedes, "b", "c", tx.NextSeq())))
+		return errRollback
+	})
+	wantErr(t, err, errRollback)
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		check(tx, "after commit and rollback")
+		return nil
+	})
+	// The rolled-back SUPERSEDES edge b -> c must not count toward cycles.
+	update(t, s, sessA, func(tx store.Tx) error {
+		return tx.InsertRelationship(NewRelationship(sessA, "e8", domain.RelSupersedes, "c", "b", tx.NextSeq()))
+	})
 }

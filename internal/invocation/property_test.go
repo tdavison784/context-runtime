@@ -28,7 +28,7 @@ func runRandomOn(t *testing.T, l *Ledger, s store.Store, seed uint64, steps int)
 	var calls []string
 	ingests := 0
 	outcomes := []domain.CallOutcome{
-		completed("R1"), completed("R2"), failed("rate_limited", true), failed("bad_request", false),
+		completed(1, "R1"), completed(1, "R2"), failed(1, "rate_limited", true), failed(1, "bad_request", false),
 	}
 	pickCall := func() string {
 		if len(calls) == 0 {
@@ -79,9 +79,9 @@ func runRandomOn(t *testing.T, l *Ledger, s store.Store, seed uint64, steps int)
 			id := pickCall()
 			n := 1
 			if c, gerr := l.Call(ctx, harness, id); gerr == nil {
-				n = r.IntN(c.Attempts + 2) // 0 and Attempts+1 are invalid
+				n = 1 + r.IntN(c.Attempts+1) // Attempts+1 was never sent
 			}
-			_, err = l.RecordOutcome(ctx, harness, id, n, outcomes[r.IntN(len(outcomes))])
+			_, err = l.RecordOutcome(ctx, harness, id, forAttempt(outcomes[r.IntN(len(outcomes))], n))
 		case 6:
 			if r.IntN(2) == 0 {
 				_, err = l.Cancel(ctx, harness, pickCall(), "cancel")
@@ -241,6 +241,9 @@ func checkCallHistory(t *testing.T, tx store.ReadTx, c domain.CallRecord) {
 	}
 	for i, a := range as {
 		open := a.State == domain.AttemptSent || a.State == domain.AttemptUnknown
+		if (a.State == domain.AttemptCompleted || a.State == domain.AttemptFailed) != (a.OutcomeHash != "" && a.State != domain.AttemptAbandoned) {
+			t.Errorf("call %s: attempt %d is %s with outcome hash %q", c.CallID, a.Attempt, a.State, a.OutcomeHash)
+		}
 		last := i == len(as)-1
 		if open && !(last && (c.State == domain.CallSent || c.State == domain.CallUnknown)) {
 			t.Errorf("call %s: attempt %d open (%s) while call is %s", c.CallID, a.Attempt, a.State, c.State)

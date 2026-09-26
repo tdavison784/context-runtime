@@ -70,21 +70,27 @@ func populate(tx store.Tx, sess string) error {
 		func() error { return tx.InsertItem(NewItem(sess, "i1", s[1], "one")) },
 		func() error { return tx.InsertItem(NewDirective(sess, "i2", "dir", s[2], "two")) },
 		func() error {
+			return errOf(tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sess, "l0", s[10], "i1")))
+		},
+		func() error {
 			return tx.InsertRelationship(NewRelationship(sess, "r1", domain.RelSupersedes, "i2", "i1", s[3]))
 		},
 		func() error { return tx.SetCurrentDirective("task", "dir", "i2") },
 		func() error { return tx.InsertBlob(NewBlob(sess, []byte("blob"))) },
 		func() error { return tx.InsertObligationVersion(NewObligation(sess, "o1", 1, s[4], "i2")) },
 		func() error {
-			return tx.AppendObligationTransition(NewTransition(sess, "t1", "o1", 1, s[5],
-				domain.ObligationUnresolved, domain.ObligationBlocked))
+			return errOf(tx.AppendObligationTransition(NewTransition(sess, "t1", "o1", 1, s[5],
+				domain.ObligationUnresolved, domain.ObligationBlocked), 1))
 		},
 		func() error { return tx.InsertGrant(NewGrant(sess, "g1", s[6], "i1")) },
-		func() error { return tx.PutTask(NewTask(sess, "task"), 0) },
+		func() error {
+			e := NewLifecycleEvent(sess, "lt", s[11], domain.TargetTask, "task")
+			return errOf(tx.PutTask(NewTask(sess, "task"), 0, &e))
+		},
 		func() error {
 			return tx.AppendLifecycleEvent(NewLifecycleEvent(sess, "l1", s[7], domain.TargetItem, "i1"))
 		},
-		func() error { return tx.PutConversation(NewConversation(sess, "c1"), 0) },
+		func() error { return errOf(tx.PutConversation(NewConversation(sess, "c1"), 0)) },
 		func() error { return tx.InsertCall(NewCall(sess, "call1", "c1", s[8])) },
 		func() error { return tx.PutCallAttempt(NewAttempt(sess, "call1", 1, s[9])) },
 	}
@@ -105,10 +111,12 @@ func assertAbsent(t *testing.T, tx store.ReadTx) {
 			t.Errorf("%s: error = %v, want ErrNotFound", what, err)
 		}
 	}
-	emptyOrNotFound := func(what string, n int, err error) {
+	// List methods return empty results and no error, even for a missing
+	// parent.
+	empty := func(what string, n int, err error) {
 		t.Helper()
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			t.Errorf("%s: error = %v, want nil or ErrNotFound", what, err)
+		if err != nil {
+			t.Errorf("%s: error = %v, want nil", what, err)
 		}
 		if n != 0 {
 			t.Errorf("%s: %d records, want 0", what, n)
@@ -136,23 +144,23 @@ func assertAbsent(t *testing.T, tx store.ReadTx) {
 	notFound("Call", err)
 
 	items, err := tx.Items(store.ItemFilter{})
-	emptyOrNotFound("Items", len(items), err)
+	empty("Items", len(items), err)
 	rels, err := tx.Relationships(store.RelationshipFilter{})
-	emptyOrNotFound("Relationships", len(rels), err)
+	empty("Relationships", len(rels), err)
 	vers, err := tx.ObligationVersions("o1")
-	emptyOrNotFound("ObligationVersions", len(vers), err)
+	empty("ObligationVersions", len(vers), err)
 	obls, err := tx.Obligations("")
-	emptyOrNotFound("Obligations", len(obls), err)
+	empty("Obligations", len(obls), err)
 	trs, err := tx.ObligationTransitions("o1")
-	emptyOrNotFound("ObligationTransitions", len(trs), err)
+	empty("ObligationTransitions", len(trs), err)
 	grants, err := tx.Grants()
-	emptyOrNotFound("Grants", len(grants), err)
+	empty("Grants", len(grants), err)
 	evs, err := tx.LifecycleEvents(store.LifecycleFilter{})
-	emptyOrNotFound("LifecycleEvents", len(evs), err)
+	empty("LifecycleEvents", len(evs), err)
 	calls, err := tx.Calls(store.CallFilter{})
-	emptyOrNotFound("Calls", len(calls), err)
+	empty("Calls", len(calls), err)
 	atts, err := tx.CallAttempts("call1")
-	emptyOrNotFound("CallAttempts", len(atts), err)
+	empty("CallAttempts", len(atts), err)
 }
 
 func testRollbackOnError(t *testing.T, s store.Store) {
@@ -206,7 +214,7 @@ func testRollbackOnStoreError(t *testing.T, s store.Store) {
 // otherwise successful transaction leaves no partial state behind.
 func testFailedWriteLeavesNoTrace(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
-		n := seqs(tx, 3)
+		n := seqs(tx, 4)
 		noErr(t, tx.InsertItem(NewItem(sessA, "a", n[0], "a")))
 		noErr(t, tx.InsertItem(NewItem(sessA, "b", n[1], "b")))
 		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "r1", domain.RelSupersedes, "a", "b", n[2])))
@@ -215,13 +223,18 @@ func testFailedWriteLeavesNoTrace(t *testing.T, s store.Store) {
 			domain.ErrSupersessionCycle)
 		// Rejected: goal status on a non-goal.
 		resolved := domain.GoalResolved
-		_, err := tx.UpdateItem("a", 1, domain.ItemChange{GoalStatus: &resolved})
+		_, err := tx.UpdateItem("a", 1, domain.ItemChange{GoalStatus: &resolved}, NewItemEvent(sessA, "l1", n[3], "a"))
 		wantErr(t, err, domain.ErrInvalidTransition)
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		rels, err := tx.Relationships(store.RelationshipFilter{})
 		noErr(t, err)
+		evs, err := tx.LifecycleEvents(store.LifecycleFilter{})
+		noErr(t, err)
+		if len(evs) != 0 {
+			t.Errorf("LifecycleEvents = %+v, want none from the rejected UpdateItem", evs)
+		}
 		if len(rels) != 1 || rels[0].ID != "r1" {
 			t.Errorf("Relationships = %+v, want only r1", rels)
 		}
@@ -266,8 +279,13 @@ func testReadOwnWrites(t *testing.T, s store.Store) {
 		noErr(t, err)
 		evs, err := tx.LifecycleEvents(store.LifecycleFilter{})
 		noErr(t, err)
-		if len(evs) != 1 {
-			t.Errorf("LifecycleEvents = %d, want 1", len(evs))
+		if len(evs) != 3 {
+			t.Errorf("LifecycleEvents = %d, want 3", len(evs))
+		}
+		it, err := tx.Item("i1")
+		noErr(t, err)
+		if it.Version != 2 {
+			t.Errorf("item i1 Version = %d, want 2", it.Version)
 		}
 		_, err = tx.Conversation("c1")
 		noErr(t, err)
@@ -421,10 +439,10 @@ func testSessionIsolation(t *testing.T, s store.Store) {
 		// Directive targets must be items in this session.
 		wantErr(t, tx.SetCurrentDirective("task", "dir", "i2"), domain.ErrNotFound)
 		// Obligation transitions and call attempts need records in this session.
-		wantErr(t, tx.AppendObligationTransition(NewTransition(sessB, "t1", "o1", 1, seq,
-			domain.ObligationUnresolved, domain.ObligationBlocked)), domain.ErrNotFound)
-		wantErr(t, tx.RevokeGrant("g1", seq), domain.ErrNotFound)
-		_, err := tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1})
+		wantErr(t, errOf(tx.AppendObligationTransition(NewTransition(sessB, "t1", "o1", 1, seq,
+			domain.ObligationUnresolved, domain.ObligationBlocked), 1)), domain.ErrNotFound)
+		wantErr(t, errOf(tx.RevokeGrant("g1", NewLifecycleEvent(sessB, "lg", seq, domain.TargetGrant, "g1"))), domain.ErrNotFound)
+		_, err := tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessB, "l1", seq, "i1"))
 		wantErr(t, err, domain.ErrNotFound)
 		return nil
 	})
@@ -454,17 +472,20 @@ func testForeignSessionRecords(t *testing.T, s store.Store) {
 	}
 	update(t, s, sessB, func(tx store.Tx) error {
 		n := tx.NextSeq()
+		lx := NewLifecycleEvent(sessA, "lw", n, domain.TargetTask, "tx")
 		checks := map[string]error{
 			"InsertItem":         tx.InsertItem(NewItem(sessA, "x", n, "x")),
 			"InsertRelationship": tx.InsertRelationship(NewRelationship(sessA, "rx", domain.RelDerivedFrom, "i1", "i2", n)),
 			"InsertBlob":         tx.InsertBlob(NewBlob(sessA, []byte("x"))),
 			"InsertObligation":   tx.InsertObligationVersion(NewObligation(sessA, "ox", 1, n, "i1")),
-			"AppendTransition": tx.AppendObligationTransition(NewTransition(sessA, "tx", "o1", 1, n,
-				domain.ObligationUnresolved, domain.ObligationBlocked)),
+			"AppendTransition": errOf(tx.AppendObligationTransition(NewTransition(sessA, "tx", "o1", 1, n,
+				domain.ObligationBlocked, domain.ObligationUnresolved), 2)),
+			"UpdateItem":           errOf(tx.UpdateItem("i1", 2, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "ly", n, "i1"))),
 			"InsertGrant":          tx.InsertGrant(NewGrant(sessA, "gx", n, "i1")),
-			"PutTask":              tx.PutTask(NewTask(sessA, "tx"), 0),
+			"PutTask":              errOf(tx.PutTask(NewTask(sessA, "tx"), 0, &lx)),
+			"RevokeGrant":          errOf(tx.RevokeGrant("g1", NewLifecycleEvent(sessA, "lz", n, domain.TargetGrant, "g1"))),
 			"AppendLifecycleEvent": tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "lx", n, domain.TargetItem, "i1")),
-			"PutConversation":      tx.PutConversation(NewConversation(sessA, "cx"), 0),
+			"PutConversation":      errOf(tx.PutConversation(NewConversation(sessA, "cx"), 0)),
 			"InsertCall":           tx.InsertCall(NewCall(sessA, "callx", "c1", n)),
 			"PutCallAttempt":       tx.PutCallAttempt(NewAttempt(sessA, "call1", 2, n)),
 		}

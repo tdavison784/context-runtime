@@ -15,7 +15,10 @@ func TestPrepareCreatesConversationAndReserves(t *testing.T) {
 	if c.State != domain.CallPrepared || c.PreparedSeq != 1 || c.Revision != 1 {
 		t.Fatalf("call = %+v", c)
 	}
-	wantID := domain.DerivedCallID(sess, c.ConversationID, 1, domain.HashBytes([]byte("r1")))
+	if c.ProposalHash != domain.CallProposalHash(c) {
+		t.Fatalf("ProposalHash = %s, want %s", c.ProposalHash, domain.CallProposalHash(c))
+	}
+	wantID := domain.DerivedCallID(sess, c.ConversationID, 0, c.ProposalHash)
 	if c.CallID != wantID {
 		t.Fatalf("CallID = %s, want derived %s", c.CallID, wantID)
 	}
@@ -82,7 +85,7 @@ func TestPrepareVersionChecks(t *testing.T) {
 	// prepare/send/complete cycle leaves the preview at seq current.
 	_, err = l.MarkSent(ctx, harness, c.CallID, "p")
 	must(t, err)
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, completed("resp"))
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, completed(1, "resp"))
 	must(t, err)
 	if lastSeq(t, s) != seq+3 {
 		t.Fatalf("lastSeq = %d, want %d", lastSeq(t, s), seq+3)
@@ -107,7 +110,7 @@ func TestPrepareRejectsOlderEpoch(t *testing.T) {
 	must(t, err)
 	_, err = l.MarkSent(ctx, harness, c.CallID, "p")
 	must(t, err)
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, completed("resp"))
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, completed(1, "resp"))
 	must(t, err)
 	_, err = l.Prepare(ctx, request(agentA, "r2", 2, 0, 2))
 	wantErr(t, err, domain.ErrVersionConflict)
@@ -140,7 +143,7 @@ func TestCancel(t *testing.T) {
 	must(t, err)
 	got, err := l.Cancel(ctx, harness, c.CallID, "shutdown")
 	must(t, err)
-	if got.State != domain.CallFailed || got.CancelReason != "shutdown" || got.FinishedSeq == 0 {
+	if got.State != domain.CallFailed || got.Reason != "shutdown" || got.FinishedSeq == 0 {
 		t.Fatalf("cancelled call = %+v", got)
 	}
 	if conv := conversation(t, s, agentA); conv.InFlightCallID != "" || conv.Version != 1 {
@@ -163,41 +166,41 @@ func TestCancel(t *testing.T) {
 }
 
 func TestOutcomeValidation(t *testing.T) {
-	l, _ := newMemLedger(t)
+	l, s := newMemLedger(t)
 	c, err := l.Prepare(ctx, request(agentA, "r1", 1, 0, 0))
 	must(t, err)
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, completed("resp"))
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, completed(1, "resp"))
 	wantErr(t, err, domain.ErrInvalidTransition) // PREPARED has no sent attempt
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 0, completed("resp"))
-	wantErr(t, err, domain.ErrInvalidTransition)
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, completed(0, "resp"))
+	wantErr(t, err, domain.ErrInvalidRecord)
 	_, err = l.MarkSent(ctx, harness, c.CallID, "p")
 	must(t, err)
 
-	for name, o := range map[string]domain.CallOutcome{
-		"sent state":       {State: domain.CallSent, Response: []byte("x")},
-		"no response":      {State: domain.CallCompleted},
-		"retryable done":   {State: domain.CallCompleted, Response: []byte("x"), Retryable: true},
-		"hash mismatch":    {State: domain.CallCompleted, Response: []byte("x"), ResponseHash: domain.HashBytes([]byte("y"))},
-		"malformed hash":   {State: domain.CallCompleted, ResponseHash: "sha256:nope"},
-		"unknown attempt2": {},
+	for name, tc := range map[string]struct {
+		o    domain.CallOutcome
+		want error
+	}{
+		"sent state":      {domain.CallOutcome{Attempt: 1, State: domain.CallSent}, domain.ErrInvalidRecord},
+		"no response":     {domain.CallOutcome{Attempt: 1, State: domain.CallCompleted}, domain.ErrInvalidRecord},
+		"retryable done":  {forRetryable(completed(1, "x")), domain.ErrInvalidRecord},
+		"hash mismatch":   {withHash(completed(1, "x"), domain.HashBytes([]byte("y"))), domain.ErrIntegrity},
+		"bytes, no hash":  {withHash(failed(1, "x", false), ""), nil},
+		"unsent attempt2": {completed(2, "resp"), domain.ErrInvalidTransition},
 	} {
-		attempt := 1
-		if name == "unknown attempt2" {
-			o, attempt = completed("resp"), 2
+		if name == "bytes, no hash" {
+			tc.o.Response, tc.want = []byte("partial"), domain.ErrInvalidRecord
 		}
-		if _, err := l.RecordOutcome(ctx, harness, c.CallID, attempt, o); err == nil {
-			t.Errorf("%s: accepted", name)
+		_, err := l.RecordOutcome(ctx, harness, c.CallID, tc.o)
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: error = %v, want %v", name, err, tc.want)
 		}
 	}
-	// An outcome given by hash alone has the same identity as with bytes.
-	full := completed("resp")
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, full)
-	must(t, err)
-	byHash := full
-	byHash.Response, byHash.ResponseHash = nil, domain.HashBytes(full.Response)
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, byHash)
-	must(t, err)
+	wantState(t, s, c.CallID, domain.CallSent)
 }
+
+func forRetryable(o domain.CallOutcome) domain.CallOutcome { o.Retryable = true; return o }
+
+func withHash(o domain.CallOutcome, h string) domain.CallOutcome { o.ResponseHash = h; return o }
 
 func TestRetryableFailureLoop(t *testing.T) {
 	l, s := newMemLedger(t)
@@ -209,8 +212,8 @@ func TestRetryableFailureLoop(t *testing.T) {
 		t.Fatalf("attempt = %+v", a1)
 	}
 
-	rate := failed("rate_limited", true)
-	got, err := l.RecordOutcome(ctx, harness, c.CallID, 1, rate)
+	rate := failed(1, "rate_limited", true)
+	got, err := l.RecordOutcome(ctx, harness, c.CallID, forAttempt(rate, 1))
 	must(t, err)
 	if got.State != domain.CallPrepared || got.Outcome != nil {
 		t.Fatalf("after retryable failure: %+v", got)
@@ -220,7 +223,7 @@ func TestRetryableFailureLoop(t *testing.T) {
 	}
 	// Duplicate of the retryable failure is a no-op.
 	before := lastSeq(t, s)
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, rate)
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, forAttempt(rate, 1))
 	must(t, err)
 	if lastSeq(t, s) != before {
 		t.Fatal("duplicate outcome wrote")
@@ -233,18 +236,18 @@ func TestRetryableFailureLoop(t *testing.T) {
 	}
 	// A delayed duplicate of attempt 1's failure does not close attempt 2,
 	// even though attempt 2 could fail with the same reason.
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, rate)
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, forAttempt(rate, 1))
 	must(t, err)
 	wantState(t, s, c.CallID, domain.CallSent)
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, failed("other", false))
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, failed(1, "other", false))
 	wantErr(t, err, domain.ErrCallOutcomeConflict)
 
 	// Attempt 2 fails the same way; attempt 3 completes.
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 2, rate)
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, forAttempt(rate, 2))
 	must(t, err)
 	_, err = l.MarkSent(ctx, harness, c.CallID, "prov-3")
 	must(t, err)
-	done, err := l.RecordOutcome(ctx, harness, c.CallID, 3, completed("resp"))
+	done, err := l.RecordOutcome(ctx, harness, c.CallID, completed(3, "resp"))
 	must(t, err)
 	if done.State != domain.CallCompleted || done.Attempts != 3 {
 		t.Fatalf("completed = %+v", done)
@@ -272,7 +275,7 @@ func TestNonRetryableFailureReleases(t *testing.T) {
 	must(t, err)
 	_, err = l.MarkSent(ctx, harness, c.CallID, "p")
 	must(t, err)
-	got, err := l.RecordOutcome(ctx, harness, c.CallID, 1, failed("bad_request", false))
+	got, err := l.RecordOutcome(ctx, harness, c.CallID, failed(1, "bad_request", false))
 	must(t, err)
 	if got.State != domain.CallFailed || got.OutcomeHash == "" {
 		t.Fatalf("failed = %+v", got)
@@ -280,7 +283,7 @@ func TestNonRetryableFailureReleases(t *testing.T) {
 	if conv := conversation(t, s, agentA); conv.InFlightCallID != "" || conv.Version != 1 || conv.LogicalCalls != 0 {
 		t.Fatalf("conversation = %+v", conv)
 	}
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, completed("resp"))
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, completed(1, "resp"))
 	wantErr(t, err, domain.ErrCallOutcomeConflict)
 }
 
@@ -292,7 +295,7 @@ func TestCompactionDoesNotAdvanceLogicalCalls(t *testing.T) {
 	must(t, err)
 	_, err = l.MarkSent(ctx, harness, c.CallID, "p")
 	must(t, err)
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, completed("compacted"))
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, completed(1, "compacted"))
 	must(t, err)
 	conv := conversation(t, s, agentA)
 	if conv.Version != 2 || conv.LogicalCalls != 0 || conv.Epoch != 1 {
@@ -303,7 +306,7 @@ func TestCompactionDoesNotAdvanceLogicalCalls(t *testing.T) {
 	must(t, err)
 	_, err = l.MarkSent(ctx, harness, c.CallID, "p")
 	must(t, err)
-	_, err = l.RecordOutcome(ctx, harness, c.CallID, 1, completed("answer"))
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, completed(1, "answer"))
 	must(t, err)
 	conv = conversation(t, s, agentA)
 	if conv.Version != 3 || conv.LogicalCalls != 1 || conv.Epoch != 1 {
@@ -351,7 +354,7 @@ func TestServiceActorAuthorization(t *testing.T) {
 	must(t, err)
 
 	// A service actor of another session cannot see the call.
-	_, err = l.RecordOutcome(ctx, domain.Principal{SessionID: "other", Authority: domain.AuthorityHarness}, c.CallID, 1, completed("r"))
+	_, err = l.RecordOutcome(ctx, domain.Principal{SessionID: "other", Authority: domain.AuthorityHarness}, c.CallID, completed(1, "r"))
 	wantErr(t, err, domain.ErrNotFound)
 
 	_, err = l.Recover(ctx, harness)
@@ -373,11 +376,11 @@ func TestEveryTransitionHasOneEventAndDenseSeqs(t *testing.T) {
 		finish(c.CallID)
 	}
 	run(agentA, "a1", 1, func(id string) {
-		_, err := l.RecordOutcome(ctx, harness, id, 1, failed("429", true))
+		_, err := l.RecordOutcome(ctx, harness, id, failed(1, "429", true))
 		must(t, err)
 		_, err = l.MarkSent(ctx, harness, id, "p")
 		must(t, err)
-		_, err = l.RecordOutcome(ctx, harness, id, 2, completed("x"))
+		_, err = l.RecordOutcome(ctx, harness, id, completed(2, "x"))
 		must(t, err)
 	})
 	run(agentB, "b1", 1, func(id string) {
@@ -385,7 +388,7 @@ func TestEveryTransitionHasOneEventAndDenseSeqs(t *testing.T) {
 		must(t, err)
 		_, err = l.Abandon(ctx, harness, id, "gone", nil)
 		must(t, err)
-		_, err = l.RecordOutcome(ctx, harness, id, 1, completed("late"))
+		_, err = l.RecordOutcome(ctx, harness, id, completed(1, "late"))
 		wantErr(t, err, ErrLateOutcome)
 	})
 
@@ -405,4 +408,57 @@ func TestErrLateOutcomeWrapsInvalidTransition(t *testing.T) {
 	if !errors.Is(ErrLateOutcome, domain.ErrInvalidTransition) {
 		t.Fatal("ErrLateOutcome does not wrap ErrInvalidTransition")
 	}
+}
+
+// TestStaleDuplicatePreview: an identical repeat of a PREPARED call's
+// preview is idempotent only while the preview is current; after a semantic
+// change it fails as stale instead of returning the held call.
+func TestStaleDuplicatePreview(t *testing.T) {
+	l, s := newMemLedger(t)
+	req := request(agentA, "r1", 1, 0, 0)
+	c, err := l.Prepare(ctx, req)
+	must(t, err)
+	ingest(t, s)
+	_, err = l.Prepare(ctx, req)
+	wantErr(t, err, domain.ErrVersionConflict)
+	// A current preview meets the held reservation.
+	_, err = l.Prepare(ctx, request(agentA, "r2", 1, lastSeq(t, s), 0))
+	wantErr(t, err, domain.ErrCallInFlight)
+	wantState(t, s, c.CallID, domain.CallPrepared)
+}
+
+func TestCancelRecords(t *testing.T) {
+	l, s := newMemLedger(t)
+
+	// Never sent: FAILED with a reason, no attempts, no outcome.
+	c, err := l.Prepare(ctx, request(agentA, "r1", 1, 0, 0))
+	must(t, err)
+	got, err := l.Cancel(ctx, harness, c.CallID, "shutdown")
+	must(t, err)
+	if got.State != domain.CallFailed || got.Reason != "shutdown" || got.Attempts != 0 || got.Outcome != nil || got.OutcomeHash != "" {
+		t.Fatalf("cancelled unsent call = %+v", got)
+	}
+
+	// Waiting to retry: the last attempt's retryable failure is the outcome.
+	c, err = l.Prepare(ctx, request(agentA, "r2", 1, lastSeq(t, s), 0))
+	must(t, err)
+	_, err = l.MarkSent(ctx, harness, c.CallID, "p")
+	must(t, err)
+	fail := failed(1, "overloaded", true)
+	fail.Response = []byte("503 body")
+	fail.ResponseHash = domain.HashBytes(fail.Response)
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, fail)
+	must(t, err)
+	got, err = l.Cancel(ctx, harness, c.CallID, "stale after retry")
+	must(t, err)
+	if got.State != domain.CallFailed || got.Reason != "stale after retry" || got.Attempts != 1 ||
+		got.Outcome == nil || got.OutcomeHash != fail.OutcomeHash() || string(got.Outcome.Response) != "503 body" {
+		t.Fatalf("cancelled retried call = %+v", got)
+	}
+	if conv := conversation(t, s, agentA); conv.InFlightCallID != "" || conv.Version != 1 {
+		t.Fatalf("conversation = %+v", conv)
+	}
+	// The retried attempt's outcome is still idempotent.
+	_, err = l.RecordOutcome(ctx, harness, c.CallID, fail)
+	must(t, err)
 }

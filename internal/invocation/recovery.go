@@ -29,18 +29,17 @@ func (l *Ledger) Recover(ctx context.Context, actor domain.Principal) ([]domain.
 			if checkActorScope(actor, c) != nil {
 				continue
 			}
-			seq := tx.NextSeq()
-			if _, err := l.transition(tx, c, domain.CallUnknown, seq, domain.LifecycleEvent{
-				Action: ActionRecover, Actor: actor, Reason: "restart before outcome",
-			}); err != nil {
-				return err
-			}
 			a, err := attempt(tx, c.CallID, c.Attempts)
 			if err != nil {
 				return err
 			}
 			a.State = domain.AttemptUnknown
 			if err := tx.PutCallAttempt(a); err != nil {
+				return err
+			}
+			if _, err := l.transition(tx, c, domain.CallUnknown, tx.NextSeq(), domain.LifecycleEvent{
+				Action: ActionRecover, Actor: actor, Reason: "restart before outcome",
+			}); err != nil {
 				return err
 			}
 		}
@@ -95,18 +94,19 @@ func (l *Ledger) Abandon(ctx context.Context, actor domain.Principal, callID, re
 			return err
 		}
 		seq := tx.NextSeq()
-		next, err := l.transition(tx, c, domain.CallAbandoned, seq, domain.LifecycleEvent{
-			Action: ActionAbandon, Actor: actor, Reason: reason, PayloadHash: auditHash,
-		})
-		if err != nil {
-			return err
-		}
 		a, err := attempt(tx, callID, c.Attempts)
 		if err != nil {
 			return err
 		}
 		a.State, a.FinishedSeq, a.FinishedAt = domain.AttemptAbandoned, seq, l.now()
 		if err := tx.PutCallAttempt(a); err != nil {
+			return err
+		}
+		c.Reason = reason
+		next, err := l.transition(tx, c, domain.CallAbandoned, seq, domain.LifecycleEvent{
+			Action: ActionAbandon, Actor: actor, Reason: reason, PayloadHash: auditHash,
+		})
+		if err != nil {
 			return err
 		}
 		out = next

@@ -105,18 +105,16 @@ func TestT10CrashAndReconcile(t *testing.T) {
 	wantErr(t, err, domain.ErrCallInFlight)
 
 	// Reconciliation obtains R1.
-	r1 := completed("R1")
-	got, err := l.RecordOutcome(ctx, harness, c1.CallID, 1, r1)
+	r1 := completed(1, "R1")
+	got, err := l.RecordOutcome(ctx, harness, c1.CallID, r1)
 	must(t, err)
-	normalized := r1
-	normalized.ResponseHash = domain.HashBytes(r1.Response)
-	if got.State != domain.CallCompleted || got.OutcomeHash != normalized.OutcomeHash() || string(got.Outcome.Response) != "R1" {
+	if got.State != domain.CallCompleted || got.OutcomeHash != r1.OutcomeHash() || string(got.Outcome.Response) != "R1" {
 		t.Fatalf("reconciled = %+v", got)
 	}
 	// Crash after commit, before acknowledgment: record R1 again.
 	l = newLedger(s)
 	before := lastSeq(t, s)
-	dup, err := l.RecordOutcome(ctx, harness, c1.CallID, 1, r1)
+	dup, err := l.RecordOutcome(ctx, harness, c1.CallID, r1)
 	must(t, err)
 	if dup.Revision != got.Revision || lastSeq(t, s) != before {
 		t.Fatalf("duplicate outcome changed state: %+v", dup)
@@ -130,9 +128,9 @@ func TestT10CrashAndReconcile(t *testing.T) {
 		_, err := tx.Blob(domain.HashBytes([]byte("R1")))
 		return err
 	}))
-	_, err = l.RecordOutcome(ctx, harness, c1.CallID, 1, completed("R1-conflict"))
+	_, err = l.RecordOutcome(ctx, harness, c1.CallID, completed(1, "R1-conflict"))
 	wantErr(t, err, domain.ErrCallOutcomeConflict)
-	_, err = l.RecordOutcome(ctx, harness, c1.CallID, 1, failed("timeout", false))
+	_, err = l.RecordOutcome(ctx, harness, c1.CallID, failed(1, "timeout", false))
 	wantErr(t, err, domain.ErrCallOutcomeConflict)
 
 	want := []string{">PREPARED:prepare", "PREPARED>SENT:send", "SENT>UNKNOWN:recover", "UNKNOWN>COMPLETED:outcome"}
@@ -158,10 +156,10 @@ func TestT10AbandonedLateResponse(t *testing.T) {
 	usage := []domain.UsageIteration{{Iteration: 1, InputTokens: &in}}
 	got, err := l.Abandon(ctx, harness, c1.CallID, "no reconciliation", usage)
 	must(t, err)
-	if got.State != domain.CallAbandoned || got.FinishedSeq == 0 {
+	if got.State != domain.CallAbandoned || got.FinishedSeq == 0 || got.Reason != "no reconciliation" {
 		t.Fatalf("abandoned = %+v", got)
 	}
-	if as := attempts(t, s, c1.CallID); as[0].State != domain.AttemptAbandoned || as[0].FinishedSeq != got.FinishedSeq {
+	if as := attempts(t, s, c1.CallID); as[0].State != domain.AttemptAbandoned || as[0].FinishedSeq != got.FinishedSeq || as[0].OutcomeHash != "" {
 		t.Fatalf("attempt = %+v", as[0])
 	}
 	conv := conversation(t, s, agentA)
@@ -183,7 +181,7 @@ func TestT10AbandonedLateResponse(t *testing.T) {
 
 	// C1's late response arrives while C2 holds the conversation.
 	before := getCall(t, s, c1.CallID)
-	late, err := l.RecordOutcome(ctx, harness, c1.CallID, 1, completed("R1-late"))
+	late, err := l.RecordOutcome(ctx, harness, c1.CallID, completed(1, "R1-late"))
 	wantErr(t, err, ErrLateOutcome)
 	wantErr(t, err, domain.ErrInvalidTransition)
 	if late.State != domain.CallAbandoned || late.Revision != before.Revision {
@@ -209,7 +207,7 @@ func TestT10AbandonedLateResponse(t *testing.T) {
 	}))
 	// A duplicate late response is recorded once.
 	n := len(evs)
-	_, err = l.RecordOutcome(ctx, harness, c1.CallID, 1, completed("R1-late"))
+	_, err = l.RecordOutcome(ctx, harness, c1.CallID, completed(1, "R1-late"))
 	wantErr(t, err, ErrLateOutcome)
 	if len(callEvents(t, s, c1.CallID)) != n {
 		t.Fatal("duplicate late outcome appended an event")
@@ -218,7 +216,7 @@ func TestT10AbandonedLateResponse(t *testing.T) {
 	// C2 completes into the new epoch and clears the rebase requirement.
 	_, err = l.MarkSent(ctx, harness, c2.CallID, "p")
 	must(t, err)
-	_, err = l.RecordOutcome(ctx, harness, c2.CallID, 1, completed("R2"))
+	_, err = l.RecordOutcome(ctx, harness, c2.CallID, completed(1, "R2"))
 	must(t, err)
 	conv = conversation(t, s, agentA)
 	if conv.Version != 2 || conv.Epoch != 1 || conv.RequireNewEpoch || conv.LogicalCalls != 1 {
@@ -237,7 +235,7 @@ func TestReconciledRetryableFailureIsTerminal(t *testing.T) {
 	must(t, err)
 	_, err = l.Recover(ctx, harness)
 	must(t, err)
-	got, err := l.RecordOutcome(ctx, harness, c.CallID, 1, failed("overloaded", true))
+	got, err := l.RecordOutcome(ctx, harness, c.CallID, failed(1, "overloaded", true))
 	must(t, err)
 	if got.State != domain.CallFailed {
 		t.Fatalf("state = %s", got.State)

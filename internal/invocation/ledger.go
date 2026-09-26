@@ -31,13 +31,21 @@
 // the call lifecycle events after SemanticSeq, with no extra state to keep in
 // sync. Any other use of a sequence number, including one the ledger does not
 // recognize, counts as a semantic change; that errs toward rejecting a
-// preview. Only this package writes call lifecycle events.
+// preview. The store contract reserves call lifecycle events for this
+// package.
+//
+// # Service actors
+//
+// The ledger methods are not agent tools (SDD section 8). Every method takes
+// the service actor driving it, which must be SYSTEM or HARNESS; any
+// non-empty workflow, task, or agent on the actor must match the call's
+// inference principal. The conversation-specific service grant
+// (ActionDispatchCall) is an ADR 17 open item deferred to Phase 5.
 package invocation
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -177,8 +185,8 @@ func (l *Ledger) transition(tx store.Tx, c domain.CallRecord, to domain.CallStat
 	if to.Terminal() {
 		next.FinishedSeq = seq
 	}
-	next.Revision = c.Revision + 1
-	if err := tx.UpdateCall(next, c.Revision); err != nil {
+	next, err := tx.UpdateCall(next, c.Revision)
+	if err != nil {
 		return c, err
 	}
 	ev.From, ev.To = string(from), string(to)
@@ -222,8 +230,8 @@ func releaseReservation(tx store.Tx, c domain.CallRecord, adjust func(*domain.Co
 	if adjust != nil {
 		adjust(&next)
 	}
-	next.Revision = conv.Revision + 1
-	return tx.PutConversation(next, conv.Revision)
+	_, err = tx.PutConversation(next, conv.Revision)
+	return err
 }
 
 // attempt returns attempt n of a call.
@@ -240,27 +248,12 @@ func attempt(tx store.ReadTx, callID string, n int) (domain.CallAttempt, error) 
 	return domain.CallAttempt{}, fmt.Errorf("call %s attempt %d: %w", callID, n, domain.ErrNotFound)
 }
 
-// putAudit stores v as a JSON audit blob and returns its hash. Identical
-// audit records share a blob, which makes the blob usable as an idempotency
-// receipt.
+// putAudit stores v as a JSON audit blob and returns its hash.
 func putAudit(tx store.Tx, v any) (string, error) {
-	data, err := jsonBytes(v)
+	data, err := json.Marshal(v)
 	if err != nil {
 		return "", err
 	}
 	b := domain.Blob{SessionID: tx.SessionID(), Hash: domain.HashBytes(data), MediaType: auditMediaType, Data: data}
 	return b.Hash, tx.InsertBlob(b)
-}
-
-// jsonBytes is the audit encoding. encoding/json writes struct fields in
-// declaration order, so equal values encode identically.
-func jsonBytes(v any) ([]byte, error) { return json.Marshal(v) }
-
-// blobExists reports whether a blob with hash h is stored.
-func blobExists(tx store.ReadTx, h string) (bool, error) {
-	_, err := tx.Blob(h)
-	if errors.Is(err, domain.ErrNotFound) {
-		return false, nil
-	}
-	return err == nil, err
 }
