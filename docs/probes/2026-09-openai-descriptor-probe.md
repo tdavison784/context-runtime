@@ -258,3 +258,50 @@ spanning `gpt-5` through `gpt-6-sol`. The `gpt-6-*` family (`gpt-6-astra`, `gpt-
 selected as the probed flagship-reasoning and cheaper-tier models respectively (`gpt-6-sol` was not
 probed). The `30m`-only TTL rule documented for "GPT-5.6 and later" (see C4) applies to this whole
 probed family.
+
+## Descriptor implications for ADR 12
+
+Both probed models (`gpt-6-astra`, `gpt-6-luna`) showed the **same qualitative profile** in every
+question above; only token counts differed. One field (`gpt-6-luna`'s `c3_seed` call) was an
+isolated `max_output_tokens`-truncation anomaly, not a profile difference — see C3. The draft
+`Capabilities` below is therefore written once and applies to both `Model` values, with per-field
+provenance.
+
+| `Capabilities` field | Value (both models) | Provenance |
+|---|---|---|
+| `Provider` | `openai` | OBSERVED |
+| `Model` | `gpt-6-astra` / `gpt-6-luna` | OBSERVED (bare ID from `/models`; no dated snapshot ID exists for these yet) |
+| `Version` | bare alias only, no dated snapshot | OBSERVED (models.json has no `gpt-6-astra-YYYY-MM-DD` entries) |
+| `ContextWindow` | — | **NOT DETERMINED** — no fixture exercised a context-window limit or reported it; would need a docs fetch or an over-budget probe |
+| `MaxOutput` | — | **NOT DETERMINED** — `max_output_tokens` was a request parameter we chose (32-512), never the model's ceiling |
+| `Counter` | provider-exact via `/responses/input_tokens` | OBSERVED, but only for plain developer/user text turns (C1 table); NOT DETERMINED for tool- or reasoning-bearing requests |
+| `Caching.PrefixSemantics` | sequential prefix cache, no manual breakpoint parameter found in the Responses API surface used here | OBSERVED (implicit from C1/C3 behavior) for "no manual breakpoints"; ASSUMED that none exists elsewhere in the API — not exhaustively searched |
+| `Caching.MinimumLength` | between 1023 and 1034 input tokens | OBSERVED, bracketed not pinned |
+| `Caching.TTLs` | `"30m"` only (default); `"24h"` rejected | OBSERVED (both models identical 400) |
+| `Pricing.CacheRead` / `Pricing.CacheWrite` multiplier | 0.1x / 1.25x of uncached input rate | DOCUMENTED (OpenAI prompt-caching guide, fetched 2026-09-26), not observed in any usage field |
+| `Pricing.UncachedInput` / `Pricing.Output` ($ rates) | — | **NOT DETERMINED** — no fixture or fetch captured absolute per-token pricing |
+| `Reasoning.ReplayRequired` | false | OBSERVED (R5: dropping pre-last-turn reasoning is accepted and produces a correct answer) |
+| `Reasoning.BoundToPriorHistory` | false (bound only to the reasoning item's own encrypted content, not surrounding text) | OBSERVED (R3 corrupts the item itself → REJECTED; R4 edits surrounding text, leaves the item untouched → ACCEPTED) |
+| `Edits[APPEND]` | SAFE | OBSERVED (R1) |
+| `Edits[APPEND_SYSTEM]` | SAFE | OBSERVED (K2: a `developer`-role message inserted mid-history before the next inference is accepted and effective) |
+| `Edits[DROP_LEADING_REASONING]` | LOSSY | OBSERVED (R5-drop: accepted, fresh reasoning generated instead of the original) |
+| `Edits[DROP_ALL_REASONING]` | LOSSY | OBSERVED (R2: accepted, fresh reasoning generated instead of the original) |
+| `Edits[REWRITE]` | **SAFE when the rewrite doesn't touch the reasoning item itself** (narrower than the general REWRITE-drops-reasoning default) | OBSERVED (R4); flagged for ADR 12 as a provider-specific exception worth encoding explicitly rather than falling back to the framework default, since it is more permissive, not less |
+| `Edits[ADD_DEFERRED_TOOL]` | — | **NOT DETERMINED** — no probe added a tool mid-conversation after an initial reasoning turn without one |
+| `Edits[MOVE_CACHE_MARKERS]` | — | **NOT DETERMINED / likely N/A** — no manual cache-marker/breakpoint mechanism was found in this API surface to move |
+| `NativeCompaction` | true | OBSERVED (both `/responses/compact` and `context_management` compaction) |
+| `CompactionInstructions` | true | OBSERVED (`instructions` field on `/responses/compact`, honored in `k2_restore`'s successful marker recall) |
+| `CompactionProtocol` | **checkpoint/pause** via `/responses/compact` (separate operation, restoration message before next call demonstrated in K2); **inline** via `context_management` auto-compaction (no separate pause seam) | OBSERVED for both variants' *shape*; the automatic path's classification as a FR-MAT-006 "verified automatic mechanism guaranteeing the full mandatory set remains effective" is **ASSUMED, not verified** — only a single marker word was stress-tested, not a realistic mandatory-context set, so the runtime should not rely on the automatic path for FR-MAT-005/006 without further, harder probes |
+| `CompactionMinimumTrigger` | 1000 (units unconfirmed, presumably tokens) | OBSERVED, automatic path only (400 at `compact_threshold: 1`); manual endpoint's minimum untested |
+| `MandatoryPreservation` | a manually-inserted restoration message survives one compaction/restore round for a single fact | OBSERVED for that narrow case only; **ASSUMED** to generalize to a full mandatory set (policy/goals/pins/obligations) — untested, matches the caution above |
+| `ContextEditing` | — | **NOT DETERMINED / ASSUMED false** — no distinct context-editing primitive (separate from compaction) was found or probed |
+| `MidConversationSystem` | true | OBSERVED (K2's `developer`-role insertion mid-history, see `Edits[APPEND_SYSTEM]`) |
+| `NativeMemory` | — | **NOT DETERMINED / ASSUMED false** — not probed |
+
+**Recommendation for the adapter/strategy layer:** use `/responses/compact` (not automatic
+`context_management`) as the FR-MAT-005 checkpoint primitive for `gpt-6-astra`/`gpt-6-luna` until
+the automatic path is verified against a realistic mandatory-context set; treat `REWRITE` of
+content preceding an open reasoning/tool round as SAFE specifically for this profile (do not fall
+back to a REJECTED/LOSSY default that would force unnecessary resets); and continue to bracket
+tighter on the minimum cache prefix length before shipping a hard-coded threshold into
+`CachingRules`.
