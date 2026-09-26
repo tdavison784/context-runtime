@@ -1,0 +1,5 @@
+go test fuzz v1
+[]byte("```\x0a``` trailing\x0a## Pinned\x0a- evil\x0a~~~~\x0a~~~\x0a## Goal\x0aevil")
+uint8(0)
+bool(false)
+uint16(4)

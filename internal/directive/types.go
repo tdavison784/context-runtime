@@ -51,8 +51,8 @@ type Attribute struct {
 // Section records one recognized section, including empty/malformed sections
 // so ingestion can distinguish an empty Working snapshot from its absence.
 // Range includes heading and body; HeadingRange and BodyRange partition it.
-// A keyword at any depth closes it; an ordinary heading closes it only at the
-// same or shallower depth. ItemIndexes address Result.Items in input order.
+// Only a same-or-shallower heading (keyword or not) closes it; deeper headings
+// are body text (D6). ItemIndexes address Result.Items in input order.
 type Section struct {
 	Keyword      Keyword
 	Level        int
@@ -62,10 +62,17 @@ type Section struct {
 	DirectiveID  string
 	Attributes   []Attribute
 	ItemIndexes  []int
+	// Malformed is true when the heading was malformed or any body content
+	// yielded no directive (dropped item, empty body, stray list prose).
+	// Ingestion must not apply a Working snapshot replacement from a
+	// malformed section, so a parse error cannot retire an omitted member (D11).
+	Malformed bool
 }
 
 // Item is a syntactically valid content directive, before defaults/classifying.
-// Text follows D7 normalization; Range still addresses the original bytes.
+// Text is exactly the concatenation of input[r.Start:r.End] over TextRanges
+// (D7): recognized bullet/ID/attribute syntax and continuation indentation
+// are the only bytes removed. Range covers the whole item in the original bytes.
 // SectionIndex addresses Result.Sections. Attributes contains effective lexical
 // attributes after heading inheritance and item override, in stable source
 // order; policy may ignore invalid/disallowed values with diagnostics.
@@ -81,6 +88,14 @@ type Item struct {
 	ContentHash  string
 	Attributes   []Attribute
 	Range        ByteRange
+	TextRanges   []ByteRange
+	// Typed effective values of the validated Attributes (FR-DIR-004); the
+	// zero value means "not specified, apply defaults". TTLTurns is in
+	// 1..MaxTTLTurns when set.
+	Kind       domain.Kind
+	Scope      domain.Scope
+	TTLTurns   int
+	Obligation string
 }
 
 // Result retains source ordering in all slices. Recoverable malformed syntax

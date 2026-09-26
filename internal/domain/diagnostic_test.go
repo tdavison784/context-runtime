@@ -36,6 +36,11 @@ func TestDiagnosticValidation(t *testing.T) {
 			t.Errorf("accepted invalid diagnostic: %+v", d)
 		}
 	}
+	for _, r := range []DiagnosticReason{ReasonDuplicateAttribute, ReasonDuplicateID, ReasonNestedHeading} {
+		if !r.Valid() {
+			t.Errorf("rejected reason %q", r)
+		}
+	}
 	if !base.Range.Within(8) || base.Range.Within(7) || (ByteRange{-1, 0}).Within(1) {
 		t.Fatal("range bounds")
 	}
