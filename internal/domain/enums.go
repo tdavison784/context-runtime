@@ -228,11 +228,19 @@ const (
 	RelDuplicateOf RelationshipType = "DUPLICATE_OF"
 )
 
+// RelationshipTypes returns every valid relationship type in stable order.
+// Each call returns a new slice so callers cannot change the domain set.
+func RelationshipTypes() []RelationshipType {
+	return []RelationshipType{RelDerivedFrom, RelSupersedes, RelDependsOn,
+		RelReferences, RelSatisfies, RelDuplicateOf}
+}
+
 // Valid reports whether t is a known relationship type.
 func (t RelationshipType) Valid() bool {
-	switch t {
-	case RelDerivedFrom, RelSupersedes, RelDependsOn, RelReferences, RelSatisfies, RelDuplicateOf:
-		return true
+	for _, known := range RelationshipTypes() {
+		if t == known {
+			return true
+		}
 	}
 	return false
 }

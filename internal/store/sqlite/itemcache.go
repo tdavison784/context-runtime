@@ -6,9 +6,9 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
-// Caps on the per-transaction item cache (SPEC-4.1): two maximum-size
-// spans' transcripts, and a bounded number of entries. An item larger than
-// the byte cap is never cached.
+// Baseline caps on the per-transaction item cache (SPEC-4.1). The byte cap
+// grows to twice the largest transcript read, so configured spans above the
+// default size can still be cached. Other items never raise the cap.
 const (
 	itemCacheMaxBytes   = 16 << 20
 	itemCacheMaxEntries = 1024
@@ -16,13 +16,14 @@ const (
 
 // itemCache is a least-recently-used cache of verified items, bounded by
 // entry count and text bytes, so a transaction that touches many large
-// items keeps only a fixed amount of them (SPEC-4.1). Ingest re-reads a
-// span's transcript once per derived item (SPEC-3.1 item 2); that working
-// set is one transcript, well within the caps. A nil cache is empty.
+// items keeps only a bounded amount of them (SPEC-4.1). Ingest re-reads a
+// span's transcript once per derived item (SPEC-3.1 item 2), so the cache
+// accommodates two largest-seen transcripts. A nil cache is empty.
 type itemCache struct {
-	order   list.List // front is most recently used; values are *cacheEntry
-	entries map[string]*list.Element
-	bytes   int
+	order    list.List // front is most recently used; values are *cacheEntry
+	entries  map[string]*list.Element
+	bytes    int
+	maxBytes int
 }
 
 type cacheEntry struct {
@@ -57,17 +58,24 @@ func (c *itemCache) get(id string) (domain.ContextItem, bool) {
 func (c *itemCache) put(id string, v domain.ContextItem) {
 	c.remove(id)
 	cost := itemCost(v)
-	if cost > itemCacheMaxBytes {
+	if v.Role == domain.RoleTranscript && cost > itemCacheMaxBytes/2 {
+		if cost > int(^uint(0)>>1)/2 {
+			return // a cap that cannot represent two transcripts cannot be safe
+		}
+		c.maxBytes = max(c.maxBytes, 2*cost)
+	}
+	limit := max(itemCacheMaxBytes, c.maxBytes)
+	if cost > limit {
 		return
+	}
+	for c.order.Len() >= itemCacheMaxEntries || c.bytes > limit-cost {
+		c.remove(c.order.Back().Value.(*cacheEntry).id)
 	}
 	if c.entries == nil {
 		c.entries = map[string]*list.Element{}
 	}
 	c.entries[id] = c.order.PushFront(&cacheEntry{id: id, item: v, cost: cost})
 	c.bytes += cost
-	for c.order.Len() > itemCacheMaxEntries || c.bytes > itemCacheMaxBytes {
-		c.remove(c.order.Back().Value.(*cacheEntry).id)
-	}
 }
 
 // remove drops id if cached.

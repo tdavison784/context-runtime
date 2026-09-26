@@ -2258,8 +2258,11 @@ fixed.
   memory with the session's matching items, not with the event (a
   resource bound moved from time to memory, D17's concern either way).
   `itemcache.go`'s `itemCache` is now a genuine LRU, capped at 1024
-  entries and 16 MiB of item text (roughly two maximum-size spans') —
-  an item over the byte cap is never cached at all; `scanLookup` now
+  entries and a baseline 16 MiB of item text. The byte cap grows to
+  twice the largest transcript read in the transaction, so a configured
+  `MaxSpanBytes` above 16 MiB does not disable transcript caching;
+  non-transcript items cannot raise it, and an item over the current cap
+  is never cached. `scanLookup` now
   calls the internal `loadItem(id, cache=false)` instead of `Item`, so
   paging past many matches neither grows the cache nor evicts the one
   transcript derived-linking actually re-reads. **SPEC-4.4: `InsertRelationship`
@@ -2276,7 +2279,11 @@ fixed.
   that already keeps the transcript hot, so this restores the integrity
   guarantee without reopening the quadratic cost SPEC-3.1 item 2 fixed.
   `store.go`'s `InsertRelationship` contract now states the integrity
-  requirement explicitly. Store-level item bytes loaded, 500 vs.
+  requirement explicitly. Test:
+  `TestInsertRelationshipRejectsCorruptEndpoint_SPEC44`
+  (`internal/store/sqlite/endpoint_integrity_test.go`, corrupt endpoints
+  on either side fail with `ErrIntegrity` and write no edge).
+  Store-level item bytes loaded, 500 vs.
   4000 derived items from one transcript: x65.5 before caching, x8.0 with
   the (then-unbounded) cache (linear in item count, not transcript size
   too); end-to-end SQLite ingest of one event, 500 vs. 4000 Pinned items:
@@ -2294,7 +2301,12 @@ fixed.
   cache's own entry/byte footprint, exposed via `itemCacheFootprint`,
   never exceeds its caps at any stage), `TestItemCacheEntryCap_SPEC41`,
   `TestItemCacheLRU` (eviction order, oversize-item exclusion, and byte
-  accounting) — all `internal/store/sqlite/itemcache_test.go`;
+  accounting), `TestLookupScanDoesNotFillItemCache_SPEC41` (lookup pages
+  do not fill or evict the point-read cache) — all
+  `internal/store/sqlite/itemcache_test.go`;
+  `TestLargeTranscriptStaysCached_SPEC41`
+  (`internal/store/sqlite/scaling_test.go`, a 17 MiB transcript is decoded
+  once across eight derived links, with a 34 MiB byte cap);
   `TestRolledBackMethodClearsItemCache`
   (`internal/store/sqlite/itemcache_test.go`) locks the savepoint-rollback
   cache clear above, previously asserted only in prose.
@@ -2345,14 +2357,17 @@ fixed.
   by endpoint only, so reading `SUPERSEDES` into an item with thousands of
   unrelated `DUPLICATE_OF` edges into the same item walked all of them.
   Both maps are now keyed by `relKey{Type, ID}`; a read by endpoint alone
-  (no type filter) probes the (fixed, six-entry) `relationshipTypes` list
-  of keys instead. `Relationships(SUPERSEDES, ToID=c)` with 8,000
+  (no type filter) probes keys for every type returned by
+  `domain.RelationshipTypes()`, which `RelationshipType.Valid` also uses.
+  `Relationships(SUPERSEDES, ToID=c)` with 8,000
   `DUPLICATE_OF` edges into `c`: 257µs before. Test:
   `TestRelationshipsReadTheirTypedKey`
   (`internal/store/memory/scan_test.go` — a read by type and endpoint
   walks at most one index entry and scans zero edges, counted via the
   index's own yield counter, with 1,000 unrelated `DUPLICATE_OF` edges
-  into the same target present).
+  into the same target present);
+  `TestUntypedEndpointReadsAllRelationshipTypes_SPEC31` (iterates the
+  domain list and fails if either endpoint read misses a new type).
 - **DUR-3.1: `SourceItems` reports each unverified ID on exactly one page,
   not once per page it happens to be skipped past (refines DUR-1.4,
   §26).** A page reads one row past its limit only to learn whether more
