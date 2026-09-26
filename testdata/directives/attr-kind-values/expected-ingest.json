@@ -552,117 +552,91 @@
       "from": "event#1",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#2",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#3",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#4",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#5",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#6",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#7",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#8",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#9",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#10",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#11",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#12",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#13",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     }
   ],
   "obligations": [],
