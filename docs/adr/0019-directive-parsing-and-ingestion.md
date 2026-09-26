@@ -659,6 +659,48 @@ rather than replacing it.
   change itself, not as regressions to preserve — `p2-graph`/`p2-store`
   update them in place rather than special-casing the pre-namespace shape.
 
+### 21. Round 3 ruling (p2-contract questions): R16
+
+Answers to `p2-contract`'s implementation questions, appended to
+`phase2-amendments.md` as R16 (all accepted as recommended).
+
+- **Parser output is not self-certifying (refines §2, D2/M2).**
+  `internal/ingest` always re-checks a parsed directive against
+  `policy.ForDirective` before classification takes effect — the parser's
+  acceptance is necessary but not sufficient, since `internal/directive`
+  cannot itself apply FR-DIR-003's defaults or FR-DIR-006's attribute
+  allowlist. `p2-tests` adds a cross-check: every directive
+  `internal/directive` accepts must also be accepted by
+  `policy.ForDirective`, so the two packages' notions of "valid directive"
+  cannot silently diverge.
+- **A span cannot outrank its event kind (refines §11, D15).** An event's
+  own kind/authority envelope bounds every span it carries; a harness that
+  needs spans at genuinely different authorities sends separate events,
+  one per authority, rather than one event whose kind understates a
+  contained span's authority. This closes a variant of D15's
+  confused-deputy concern one level up: authority is bounded by the event
+  as a whole, not asserted per span inside a single envelope.
+- **Caller `EventID` representation (refines §10, D14).** A
+  caller-supplied `EventID` is printable ASCII, at most 256 bytes — a
+  syntax bound on the idempotency key itself, distinct from D14's
+  payload-hash/receipt semantics.
+- **HARNESS residual instructions are not mandatory (refines §5, D8).**
+  FR-DOM-007's mandatory-by-policy list names SYSTEM-authority
+  instructions only; a HARNESS-authority residual/transcript instruction
+  item (§5's transcript defaults) is eligible for scoring like any other
+  non-mandatory item, never automatically mandatory merely because it is
+  HARNESS.
+- **Parser item ranges become `SourceRange.Slices` (refines §4/§5,
+  D7/M1).** The parser's `Item.TextRanges` (D7's per-item byte ranges)
+  populate `SourceRef.Slices` on the derived item (§5's transcript-range
+  mapping) — one field name across the parser/domain boundary, so
+  `internal/directive` and `internal/domain` are not each inventing their
+  own range representation.
+- **Anonymous occurrence IDs (confirms §10, M3).** Reconfirms M3: an event
+  without a caller `EventID` gets its internal occurrence ID generated
+  once, outside any retried transaction callback — R16 raised no change
+  here, only confirmed it against a `p2-contract` question.
+
 ## Alternatives considered
 
 - **D1:** the brief's read-only resolution without an explicit
@@ -897,6 +939,19 @@ reconciles exact names in a later round.
   the whole event (R13); Resolve on a non-OPEN goal and Unpin on a
   non-pinned target each produce a diagnostic and commit the rest of the
   event, never an abort (R14).
+- **§21 (round 3 ruling, R16):** `internal/ingest` — a directive
+  `internal/directive` accepts but `policy.ForDirective` would reject
+  (e.g. a disallowed attribute combination the parser doesn't itself
+  enforce) is not classified as if accepted; `p2-tests` — a fuzz/property
+  cross-check that every `internal/directive`-accepted directive in
+  `testdata/directives/` is also `policy.ForDirective`-accepted; an event
+  whose kind implies lower authority than one of its spans is rejected
+  wholesale, never silently downgraded or upgraded; an `EventID` containing
+  non-printable-ASCII bytes or exceeding 256 bytes is rejected before any
+  idempotency lookup; a HARNESS residual instruction item is never selected
+  as mandatory by FR-DOM-007's policy-mandatory path; `internal/directive`'s
+  `Item.TextRanges` and `internal/domain`'s `SourceRef.Slices` round-trip
+  the same byte ranges for a canonical fixture.
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
