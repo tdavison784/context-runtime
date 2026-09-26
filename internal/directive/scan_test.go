@@ -1,6 +1,7 @@
 package directive
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -123,19 +124,54 @@ func TestDiagnosticCap(t *testing.T) {
 	}
 }
 
-// TestBareAndTabATXLines locks the parser-v1 behavior listed in doc.go's
-// deviations (SPEC-1.11): a bare or tab-separated ATX line is not a heading,
-// so it neither opens nor closes a section. In a list body it is stray prose
-// and marks the section Malformed; in a single body it is text.
-func TestBareAndTabATXLines(t *testing.T) {
-	for _, line := range []string{"#", "######", "#\tOther", "##\tPinned"} {
-		r := Parse([]byte("## Pinned\n- a\n"+line+"\n- b\n"), Options{Authority: domain.AuthoritySystem})
-		if len(r.Sections) != 1 || !r.Sections[0].Malformed || len(r.Items) != 2 || r.Items[1].Text != "b" {
-			t.Fatalf("%q in list: %+v", line, r)
+// TestHeadingShapedLinesClose (SPEC-1.11 ruling): a line shaped like a
+// CommonMark ATX heading (0-3 spaces, 1-6 '#', then SP, HTAB or end of
+// line) that is not a directive heading closes an open section of the same
+// or higher level, and never opens one. Fenced, quoted and commented lines,
+// tab or 4+ space indentation, and seven '#' are not heading-shaped. The
+// parser has no list-container model, so an indented heading-shaped line in
+// a list item also closes: closing early only removes directive text.
+func TestHeadingShapedLinesClose(t *testing.T) {
+	cases := []struct {
+		input string
+		texts []string // directive item texts
+		end   string   // the first section ends where this starts; "" = unit end
+	}{
+		{"## Pinned\n- a\n#\tOther\n- b\n", []string{"a"}, "#\tOther"},
+		{"## Pinned\n- a\n#\n- b\n", []string{"a"}, "#\n- b"},
+		{"## Pinned\n- a\n##\n- b\n", []string{"a"}, "##\n"},
+		{"## Pinned\n- a\n##\tPinned [p]\n- b\n", []string{"a"}, "##\t"},
+		{"## Remember\nx\n # Notes\ny\n", []string{"x"}, " # Notes"},
+		{"## Remember\nx\n   ## Notes\ny\n", []string{"x"}, "   ## Notes"},
+		{"## Pinned\n- a\n  ## Notes\n- b\n", []string{"a"}, "  ## Notes"},
+		// Not heading-shaped, or deeper: body text as before.
+		{"## Remember\nx\n    # Notes\ny\n", []string{"x\n    # Notes\ny"}, ""},
+		{"## Remember\nx\n\t# Notes\ny\n", []string{"x\n\t# Notes\ny"}, ""},
+		{"## Remember\nx\n####### Notes\ny\n", []string{"x\n####### Notes\ny"}, ""},
+		{"## Remember\nx\n#5 bolt\ny\n", []string{"x\n#5 bolt\ny"}, ""},
+		{"## Remember\nx\n###\ty\n", []string{"x\n###\ty"}, ""},
+		{"## Remember\nx\n```\n# Notes\n```\ny\n", []string{"x\n```\n# Notes\n```\ny"}, ""},
+		{"## Remember\nx\n> # Notes\ny\n", []string{"x\n> # Notes\ny"}, ""},
+		{"## Remember\nx\n<!-- -->\n# Notes <!-- -->\ny\n", []string{"x\n<!-- -->\n# Notes <!-- -->\ny"}, ""},
+	}
+	for _, tt := range cases {
+		r := Parse([]byte(tt.input), Options{Authority: domain.AuthoritySystem})
+		var texts []string
+		for _, it := range r.Items {
+			texts = append(texts, it.Text)
 		}
-		r = Parse([]byte("## Goal\nx\n"+line+"\ny\n"), Options{Authority: domain.AuthoritySystem})
-		if len(r.Sections) != 1 || len(r.Items) != 1 || r.Items[0].Text != "x\n"+line+"\ny" {
-			t.Fatalf("%q in single body: %+v", line, r)
+		end := len(tt.input)
+		if tt.end != "" {
+			end = strings.Index(tt.input, tt.end)
+		}
+		if r.Err != nil || !reflect.DeepEqual(texts, tt.texts) || len(r.Sections) == 0 || r.Sections[0].Range.End != end {
+			t.Fatalf("%q: items %q sections %+v, want %q ending at %d", tt.input, texts, r.Sections, tt.texts, end)
+		}
+	}
+	// Heading-shaped lines never open a section.
+	for _, input := range []string{"#\tPinned\n- b\n", "##\n- b\n", " # Pinned\n- b\n"} {
+		if r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem}); len(r.Sections) != 0 || len(r.Items) != 0 {
+			t.Fatalf("%q opened a section: %+v", input, r.Sections)
 		}
 	}
 }
