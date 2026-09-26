@@ -13,7 +13,7 @@ import (
 // receipt in creation order; the transaction makes it all-or-nothing.
 type run struct {
 	g          Ingester
-	tx         Tx
+	tx         store.Tx
 	p          domain.Principal
 	e          domain.Event
 	limits     domain.Limits
@@ -219,7 +219,8 @@ func (r *run) transcript(si int, span domain.Span) (domain.ContextItem, error) {
 	return r.newItem(it)
 }
 
-// commit writes the event record and the immutable receipt (D14).
+// commit writes the replayable envelope and the immutable receipt, with its
+// diagnostic and lifecycle-command records, in one store write (D14, D16).
 func (r *run) commit() (domain.IngestReceipt, error) {
 	rc := domain.IngestReceipt{
 		SessionID:     r.p.SessionID,
@@ -242,18 +243,6 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 	if len(rc.Diagnostics) > r.limits.MaxEventDiagnostics+len(r.e.Spans) {
 		return domain.IngestReceipt{}, errLimit("MaxEventDiagnostics")
 	}
-	if r.e.EventID != "" {
-		_, existed, err := r.tx.InsertEvent(domain.EventRecord{
-			SessionID: r.p.SessionID, EventID: r.e.EventID, Principal: r.p, PayloadHash: r.payload,
-			Seq: r.seq, ItemIDs: rc.ItemIDs(), CommittedAt: r.now,
-		})
-		if err != nil {
-			return domain.IngestReceipt{}, err
-		}
-		if existed {
-			return domain.IngestReceipt{}, domain.ErrEventIDConflict
-		}
-	}
 	if err := rc.Validate(); err != nil {
 		return domain.IngestReceipt{}, err
 	}
@@ -261,7 +250,7 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 	if err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	if err := r.tx.InsertReceipt(env, rc); err != nil {
+	if err := r.tx.InsertIngestion(env, rc); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	return rc.Clone(), nil

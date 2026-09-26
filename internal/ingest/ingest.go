@@ -72,11 +72,7 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 		anonymous = domain.NewAnonymousOccurrenceID(ids)
 	}
 	var out domain.IngestReceipt
-	err := s.Update(ctx, p.SessionID, func(stx store.Tx) error {
-		tx, ok := stx.(Tx)
-		if !ok {
-			return ErrLedgerUnsupported
-		}
+	err := s.Update(ctx, p.SessionID, func(tx store.Tx) error {
 		r, err := g.Apply(tx, p, e, anonymous)
 		if err != nil {
 			return err
@@ -95,7 +91,7 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 // otherwise; the caller generates it once per attempt, outside any retried
 // transaction callback. Apply revalidates e, so it is safe to call
 // directly. On error the caller must abort tx.
-func (g Ingester) Apply(tx Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
+func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
 	e = e.Clone()
 	limits := g.Limits.Effective()
 	if err := e.ValidateFor(p, limits); err != nil {
@@ -123,7 +119,7 @@ func (g Ingester) Apply(tx Tx, p domain.Principal, e domain.Event, anonymousOccu
 	// allocated (D14): a retry returns the original receipt as stored,
 	// without reparsing or reading mutable state.
 	if e.EventID != "" {
-		if r, found, err := lookupReceipt(tx, p, e.EventID, payload); found || err != nil {
+		if r, found, err := lookupReceipt(tx, p, occurrence, e.EventID, payload); found || err != nil {
 			return r, err
 		}
 	}
@@ -132,12 +128,13 @@ func (g Ingester) Apply(tx Tx, p domain.Principal, e domain.Event, anonymousOccu
 	return r.apply()
 }
 
-// lookupReceipt returns the stored receipt of a caller EventID if the
-// request matches it, domain.ErrEventIDConflict with no details if it does
-// not, and found=false if the EventID is new. A Phase 1 event record with
-// no receipt cannot reproduce its original result and is a conflict too.
-func lookupReceipt(tx Tx, p domain.Principal, eventID, payload string) (domain.IngestReceipt, bool, error) {
-	r, err := tx.Receipt(eventID)
+// lookupReceipt returns the stored receipt of a caller EventID (keyed by its
+// derived occurrence) if the request matches it, domain.ErrEventIDConflict
+// with no details if it does not, and found=false if the EventID is new. A
+// Phase 1 event record with no receipt cannot reproduce its original
+// result and is a conflict too.
+func lookupReceipt(tx store.Tx, p domain.Principal, occurrence, eventID, payload string) (domain.IngestReceipt, bool, error) {
+	r, err := tx.Receipt(occurrence)
 	switch {
 	case err == nil:
 		if r.Principal != p || r.PayloadHash != payload {

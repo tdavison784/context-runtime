@@ -2,31 +2,47 @@ package ingest
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite"
 )
 
 var ctx = context.Background()
 
 var t0 = time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
 
-// fixture is a memory store with the test ledger and a deterministic
-// ingester.
+// fixture is a store with a deterministic ingester.
 type fixture struct {
 	t  *testing.T
-	s  *ledgerStore
+	s  store.Store
 	in Ingester
 }
 
-func newFixture(t *testing.T) *fixture {
+// eachStore runs fn against a fresh memory store and a fresh SQLite store.
+func eachStore(t *testing.T, fn func(t *testing.T, f *fixture)) {
 	t.Helper()
-	ms := memory.New()
-	t.Cleanup(func() { ms.Close() })
-	return &fixture{t: t, s: newLedgerStore(ms), in: Ingester{IDs: &domain.SequentialIDs{}, Now: func() time.Time { return t0 }}}
+	t.Run("memory", func(t *testing.T) {
+		ms := memory.New()
+		t.Cleanup(func() { ms.Close() })
+		fn(t, newFixture(t, ms))
+	})
+	t.Run("sqlite", func(t *testing.T) {
+		ss, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "ingest.db"))
+		if err != nil {
+			t.Fatalf("sqlite.Open: %v", err)
+		}
+		t.Cleanup(func() { ss.Close() })
+		fn(t, newFixture(t, ss))
+	})
+}
+
+func newFixture(t *testing.T, s store.Store) *fixture {
+	return &fixture{t: t, s: s, in: Ingester{IDs: &domain.SequentialIDs{}, Now: func() time.Time { return t0 }}}
 }
 
 const sess = "S"
