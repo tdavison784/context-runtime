@@ -15,8 +15,8 @@ FR-PROV-004/005/006, FR-ASM-011 and traces T08/T12.
 | Betas exercised | `thinking-binding-controls-2026-08-01`, `compact-2026-09-04` (on-demand compaction), `compact-2026-01-12` (threshold compaction), `context-management-2025-06-27` |
 | Models | `claude-opus-5-5` (flagship: newest Opus listed, created 2026-09-21) and `claude-sonnet-5` (cheaper tier). Chosen from the live model list below |
 | Account profile | An organization created **before 2026-08-31**: the preserved-thinking prefix check is *recorded but not enforced* unless a request opts in (R4 below). Accounts created on/after that date are enforced by default (DOCUMENTED, not observable from this account) |
-| Fixtures | `probes/descriptor/testdata/anthropic/*.json`: request and response bodies only, no headers; thinking/compaction signatures reduced to prefix + length + sha256; `request_id` redacted; large filler text digested. `observations.{md,json}` is the raw run log |
-| Spend | $0.49 for the committed run, about $0.9 including development runs (usage × list price; see `recorder.go`) |
+| Fixtures | `probes/descriptor/testdata/anthropic/*.json`: request and response bodies only, no headers; thinking/compaction signatures reduced to prefix + length + sha256; `request_id` redacted; large filler text digested. `observations*.{md,json}` are the raw run logs (main run, `-threshold-edit`, `-rewrite`) |
+| Spend | $0.49 for the main committed run, $0.04 for the follow-ups (threshold edit, REWRITE), about $0.95 including development runs (usage × list price; see `recorder.go`) |
 | Rerun | `cd probes/descriptor && set -a; . ../../.env; set +a; go run ./anthropic -out testdata/anthropic/observations.md` |
 
 Every request in the reasoning group uses the same shape: a fixed system prompt, one client
@@ -72,11 +72,14 @@ from "not reported" when it sends the header.
 | opus-5-5 | 200, in=604 (-74) | 200, in=604, `[]` | Accepted; the reasoning is gone and **nothing reports it**. The model re-reasons (new thinking block in the answer) |
 | sonnet-5 | 200, in=618 (-94), out=162 vs 63 | 200, in=618, `[]`, out=183 | Same; output grew about 3x as the model re-planned |
 
-Verdict: Edits[DROP_ALL_REASONING] = **LOSSY, silent** (OBSERVED). It is not REJECTED even
-inside an open tool round, so an open round stays structurally valid without its reasoning
-(the T12 ALLOW_RESET path is representable). Removing a leading run of blocks is not a
-"mismatch" in the API's sense, which is why `drop_block` reports nothing; the runtime must
-record the reset itself (FR-ASM-011).
+Verdict (OBSERVED): the API accepts it and reports nothing, even inside an open tool round, so
+an open round stays structurally valid without its reasoning and the T12 ALLOW_RESET path is
+representable. Nothing the runtime sent was dropped by the provider, so in the strict
+FR-CAP-002 sense the edit is SAFE. It is, however, a reasoning reset by construction: the
+model loses and re-derives its plan. The descriptor should mark DROP_ALL_REASONING as LOSSY
+so that strategies only perform it under ALLOW_RESET, and the runtime records the reset
+itself (FR-ASM-011) because the provider never will. Removing a leading run of blocks is not a
+"mismatch" in the API's sense, which is why `drop_block` reports nothing.
 
 ### R3 - modify reasoning
 
@@ -125,9 +128,22 @@ Verdict for REWRITE (FR-CAP-002), per profile:
 | opus-5-5, legacy account, field unset | Accepted with stale reasoning, reported only under the header as `thinking_mismatch_allowed` - an unsafe fourth state; never run this profile |
 | sonnet-5, any setting | Accepted with stale reasoning, never reported - also unsafe |
 
-SDD FR-CAP-002 already requires a REWRITE to start a fresh epoch without old reasoning, so the
-runtime never relies on either unsafe state. The descriptor should still record them, so the
-adapter strips reasoning itself on REWRITE for models that don't check.
+Those rows replay reasoning produced *after* the edit point, which SDD REWRITE never does
+("a REWRITE always drops the reasoning of the rewritten range and everything after it"). The
+REWRITE form itself was probed separately (fixtures `rewrite__<model>__*.json`), every
+variant under `prefix_mismatch_behavior: "error"`, so any invalidated block would fail:
+
+| Probe | opus-5-5 | sonnet-5 |
+|---|---|---|
+| RW1: edit `u0`, strip all reasoning after it | 200, `[]` | 200, `[]` |
+| RW2: edit `u4` (in `H3`), replay reasoning *before* it (opus: `a1` and `a3` blocks), strip after it | **200, `[]`** | 200, `[]` (only `a1` had thinking) |
+| RW3 control: edit `u4`, replay reasoning after it | not applicable: `a5` had no thinking in either run | same |
+
+Verdict: Edits[REWRITE] with SDD semantics = **SAFE** on both models (OBSERVED). Blocks whose
+prefix ends before the edit point remain valid, so reasoning continuity is preserved up to the
+edit. Replaying post-edit reasoning is REJECTED (`error`) or LOSSY (`drop_block`) on Opus 5.5
+and silently stale on Sonnet 5 and on unenforced legacy defaults. The adapter must strip
+post-edit reasoning itself on every profile rather than rely on the provider check.
 
 ### Other edit kinds (all under `drop_block` + header, so any invalidation would be reported)
 
@@ -137,7 +153,7 @@ adapter strips reasoning itself on REWRITE for models that don't check.
 | APPEND_SYSTEM: `{"role":"system"}` message appended after the tool_result turn | 200, `[]`, in=695 | 200, `[]`, in=729 | SAFE on both. Sonnet 5 accepted it although the skill docs list it as unsupported there; that it acts with system authority is not verified |
 | MOVE_CACHE_MARKERS: `cache_control` added to `u0` | 200, `[]` | 200, `[]` | SAFE |
 | ADD_DEFERRED_TOOL: extra `defer_loading: true` tool, no tool search tool | 200, `[]`, in=771 (+93) | 200, `[]`, in=805 | SAFE, but the deferred definition was **billed** (+93 tokens) without a tool search tool |
-| DROP_LEADING_REASONING: remove `a1`'s thinking, keep `a3`'s (history `H3`) | 200, `[]` | 200, `[]` (only `a5` had thinking after `a1`) | SAFE (no drop reported; later block still valid) |
+| DROP_LEADING_REASONING: remove `a1`'s thinking, keep `a3`'s (history `H3`) | 200, `[]` | 200, `[]` (only `a5` had thinking after `a1`; Sonnet 5 runs no check, so uninformative) | SAFE on opus-5-5 (later block still verified). The removed reasoning was visible to the model (R5), so this is a deliberate loss of older reasoning |
 | Remove a non-leading block | not exercised: no run produced three thinking turns | - | DOCUMENTED as invalidating every later block |
 
 ### R5 - reasoning from turns before the last user message
@@ -321,7 +337,7 @@ re-inserted after the block must have their thinking removed or dropped.
 |---|---|---|---|
 | On-demand block | yes, `content` is plain text | **signed**: appending text to `content` -> 400 `` `compaction` block `content` does not match its `signature` ``, `error.details.error_code: "compaction_content_mismatch"` | `...K3-tamper-summary` |
 | Threshold block | yes | **unsigned and editable**: an edited summary (added "answer in words") was accepted and obeyed ("Sixty-two") | `...T4-threshold-block-edited` |
-| Either | - | a request carrying a compaction block with neither the on-demand beta nor a `compact_20260112` edit -> 400 ``compaction` blocks require a `compact_20260112` strategy in `context_management.edits`.`` | `...T4a-threshold-block-without-strategy` |
+| Either | - | a request carrying a compaction block with neither the on-demand beta nor a `compact_20260112` edit -> 400 `` `compaction` blocks require a `compact_20260112` strategy in `context_management.edits`. `` | `...T4a-threshold-block-without-strategy` |
 
 Coverage: both blocks are readable summaries, so the runtime can store the text and
 record its source coverage (the message range sent). What the summary actually retained is
