@@ -371,6 +371,14 @@ func TestLifecycleEventValidate(t *testing.T) {
 			ErrInvalidRecord,
 		},
 		{
+			"actor belongs to another session",
+			func(e LifecycleEvent) LifecycleEvent {
+				e.Actor = Principal{SessionID: "other", Authority: AuthoritySystem}
+				return e
+			},
+			ErrInvalidRecord,
+		},
+		{
 			"malformed payload hash when present",
 			func(e LifecycleEvent) LifecycleEvent { e.PayloadHash = "nope"; return e },
 			ErrInvalidRecord,

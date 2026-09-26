@@ -84,8 +84,7 @@ func populate(tx store.Tx, sess string) error {
 		},
 		func() error { return tx.InsertGrant(NewGrant(sess, "g1", s[6], "i1")) },
 		func() error {
-			e := NewLifecycleEvent(sess, "lt", s[11], domain.TargetTask, "task")
-			return errOf(tx.PutTask(NewTask(sess, "task"), 0, &e))
+			return errOf(tx.PutTask(NewTask(sess, "task"), 0, NewLifecycleEvent(sess, "lt", s[11], domain.TargetTask, "task")))
 		},
 		func() error {
 			return tx.AppendLifecycleEvent(NewLifecycleEvent(sess, "l1", s[7], domain.TargetItem, "i1"))
@@ -128,7 +127,7 @@ func assertAbsent(t *testing.T, tx store.ReadTx) {
 	notFound("Item", err)
 	_, err = tx.Item("i2")
 	notFound("Item", err)
-	_, err = tx.CurrentDirective("task", "dir")
+	_, err = tx.CurrentDirective("task", "dir", DirectiveBoundary(tx.SessionID()))
 	notFound("CurrentDirective", err)
 	_, err = tx.Blob(domain.HashBytes([]byte("blob")))
 	notFound("Blob", err)
@@ -259,7 +258,7 @@ func testReadOwnWrites(t *testing.T, s store.Store) {
 			_, err = tx.Item(id)
 			noErr(t, err)
 		}
-		cur, err := tx.CurrentDirective("task", "dir")
+		cur, err := tx.CurrentDirective("task", "dir", DirectiveBoundary(tx.SessionID()))
 		noErr(t, err)
 		if cur != "i2" {
 			t.Errorf("CurrentDirective = %q, want i2", cur)
@@ -482,7 +481,7 @@ func testForeignSessionRecords(t *testing.T, s store.Store) {
 				domain.ObligationBlocked, domain.ObligationUnresolved), 2)),
 			"UpdateItem":           errOf(tx.UpdateItem("i1", 2, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "ly", n, "i1"))),
 			"InsertGrant":          tx.InsertGrant(NewGrant(sessA, "gx", n, "i1")),
-			"PutTask":              errOf(tx.PutTask(NewTask(sessA, "tx"), 0, &lx)),
+			"PutTask":              errOf(tx.PutTask(NewTask(sessA, "tx"), 0, lx)),
 			"RevokeGrant":          errOf(tx.RevokeGrant("g1", NewLifecycleEvent(sessA, "lz", n, domain.TargetGrant, "g1"))),
 			"AppendLifecycleEvent": tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "lx", n, domain.TargetItem, "i1")),
 			"PutConversation":      errOf(tx.PutConversation(NewConversation(sessA, "cx"), 0)),

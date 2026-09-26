@@ -67,6 +67,54 @@ func TestValidObligationTransition_InvalidStatusesRejected(t *testing.T) {
 	}
 }
 
+// TestTransitionActionMatrix exhaustively checks TransitionAction against
+// every (from, to) pair among the four statuses (FR-OBL-002): every
+// transition ValidObligationTransition disallows must report ok=false with
+// an empty action, and every allowed transition must report the exact
+// action that authorizes it. to==WAIVED always wins (any status may be
+// waived, including from BLOCKED, which would otherwise report
+// unblock_obligation); to==BLOCKED is block_obligation; from==BLOCKED (to
+// UNRESOLVED) is unblock_obligation; everything else allowed (satisfaction
+// and revalidation) is assert_obligation.
+func TestTransitionActionMatrix(t *testing.T) {
+	want := map[[2]ObligationStatus]Action{
+		{ObligationUnresolved, ObligationSatisfied}: ActionAssertObligation,
+		{ObligationUnresolved, ObligationBlocked}:   ActionBlockObligation,
+		{ObligationUnresolved, ObligationWaived}:    ActionWaiveObligation,
+		{ObligationSatisfied, ObligationUnresolved}: ActionAssertObligation,
+		{ObligationSatisfied, ObligationWaived}:     ActionWaiveObligation,
+		{ObligationBlocked, ObligationUnresolved}:   ActionUnblockObligation,
+		{ObligationBlocked, ObligationWaived}:       ActionWaiveObligation,
+	}
+	statuses := []ObligationStatus{ObligationUnresolved, ObligationSatisfied, ObligationBlocked, ObligationWaived}
+	for _, from := range statuses {
+		for _, to := range statuses {
+			wantAction, wantOK := want[[2]ObligationStatus{from, to}]
+			gotAction, gotOK := TransitionAction(from, to)
+			if gotOK != wantOK {
+				t.Errorf("TransitionAction(%s, %s) ok = %v, want %v", from, to, gotOK, wantOK)
+				continue
+			}
+			if wantOK && gotAction != wantAction {
+				t.Errorf("TransitionAction(%s, %s) = %s, want %s", from, to, gotAction, wantAction)
+			}
+			if !wantOK && gotAction != "" {
+				t.Errorf("TransitionAction(%s, %s) = %q, want empty action when ok=false", from, to, gotAction)
+			}
+		}
+	}
+}
+
+func TestTransitionAction_InvalidStatusesRejected(t *testing.T) {
+	var bogus ObligationStatus = "BOGUS"
+	if _, ok := TransitionAction(bogus, ObligationSatisfied); ok {
+		t.Error("TransitionAction from an invalid status must report ok=false")
+	}
+	if _, ok := TransitionAction(ObligationUnresolved, bogus); ok {
+		t.Error("TransitionAction to an invalid status must report ok=false")
+	}
+}
+
 func TestMatcherRefEquality(t *testing.T) {
 	a := MatcherRef{Name: "tests_pass", Version: "1"}
 	b := MatcherRef{Name: "tests_pass", Version: "1"}
@@ -189,6 +237,7 @@ func validObligationTransition() ObligationTransition {
 		Seq:          1,
 		From:         ObligationUnresolved,
 		To:           ObligationSatisfied,
+		Action:       ActionAssertObligation,
 		Actor:        Principal{SessionID: "s1", Authority: AuthoritySystem},
 		EvidenceIDs:  []string{"e1"},
 	}
@@ -211,6 +260,139 @@ func TestObligationTransitionValidate(t *testing.T) {
 			"invalid actor propagates",
 			func(o ObligationTransition) ObligationTransition {
 				o.Actor = Principal{SessionID: "s1", Authority: "bogus"}
+				return o
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"actor in another session rejected",
+			func(o ObligationTransition) ObligationTransition {
+				o.Actor = Principal{SessionID: "other", Authority: AuthoritySystem}
+				return o
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"AGENT actor cannot change obligation status",
+			func(o ObligationTransition) ObligationTransition {
+				o.Actor = Principal{SessionID: "s1", Authority: AuthorityAgent}
+				return o
+			},
+			ErrInvalidAuthorityPromotion,
+		},
+		{
+			"TOOL actor cannot change obligation status",
+			func(o ObligationTransition) ObligationTransition {
+				o.Actor = Principal{SessionID: "s1", Authority: AuthorityTool}
+				return o
+			},
+			ErrInvalidAuthorityPromotion,
+		},
+		{
+			"RETRIEVED_CONTENT actor cannot change obligation status",
+			func(o ObligationTransition) ObligationTransition {
+				o.Actor = Principal{SessionID: "s1", Authority: AuthorityRetrievedContent}
+				return o
+			},
+			ErrInvalidAuthorityPromotion,
+		},
+		{
+			"HARNESS actor may assert",
+			func(o ObligationTransition) ObligationTransition {
+				o.Actor = Principal{SessionID: "s1", Authority: AuthorityHarness}
+				return o
+			},
+			nil,
+		},
+		{
+			"USER actor may assert",
+			func(o ObligationTransition) ObligationTransition {
+				o.Actor = Principal{SessionID: "s1", Authority: AuthorityUser}
+				return o
+			},
+			nil,
+		},
+		{
+			"action does not match what the transition requires (assert claimed as block)",
+			func(o ObligationTransition) ObligationTransition {
+				o.Action = ActionBlockObligation // From/To still require assert_obligation
+				return o
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"action does not match what the transition requires (block claimed as assert)",
+			func(o ObligationTransition) ObligationTransition {
+				o.To = ObligationBlocked
+				// o.Action stays ActionAssertObligation, but UNRESOLVED->BLOCKED requires block_obligation
+				return o
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"blocking uses block_obligation",
+			func(o ObligationTransition) ObligationTransition {
+				o.To = ObligationBlocked
+				o.Action = ActionBlockObligation
+				return o
+			},
+			nil,
+		},
+		{
+			"unblocking uses unblock_obligation",
+			func(o ObligationTransition) ObligationTransition {
+				o.From = ObligationBlocked
+				o.To = ObligationUnresolved
+				o.Action = ActionUnblockObligation
+				return o
+			},
+			nil,
+		},
+		{
+			"waiving from UNRESOLVED uses waive_obligation",
+			func(o ObligationTransition) ObligationTransition {
+				o.To = ObligationWaived
+				o.Action = ActionWaiveObligation
+				return o
+			},
+			nil,
+		},
+		{
+			"waiving from BLOCKED uses waive_obligation, not unblock",
+			func(o ObligationTransition) ObligationTransition {
+				o.From = ObligationBlocked
+				o.To = ObligationWaived
+				o.Action = ActionWaiveObligation
+				return o
+			},
+			nil,
+		},
+		{
+			"waiving from BLOCKED claimed as unblock_obligation rejected",
+			func(o ObligationTransition) ObligationTransition {
+				o.From = ObligationBlocked
+				o.To = ObligationWaived
+				o.Action = ActionUnblockObligation
+				return o
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"revalidation (SATISFIED -> UNRESOLVED) uses assert_obligation",
+			func(o ObligationTransition) ObligationTransition {
+				o.From = ObligationSatisfied
+				o.To = ObligationUnresolved
+				o.Action = ActionAssertObligation
+				return o
+			},
+			nil,
+		},
+		{
+			"a matcher may only assert: matcher present on a block transition rejected",
+			func(o ObligationTransition) ObligationTransition {
+				o.To = ObligationBlocked
+				o.Action = ActionBlockObligation
+				o.Matcher = &matcher
 				return o
 			},
 			ErrInvalidRecord,

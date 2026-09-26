@@ -12,6 +12,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -78,6 +79,7 @@ var suite = []testCase{
 	{"Events", testEvents},
 	{"Blobs", testBlobs},
 	{"DirectiveReplacement", testDirectiveReplacement},
+	{"DirectiveBoundaries", testDirectiveBoundaries},
 
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
@@ -89,6 +91,12 @@ var suite = []testCase{
 	{"Calls", testCalls},
 	{"CallReservation", testCallReservation},
 	{"CallEvidence", testCallEvidence},
+	{"CallAttemptBinding", testCallAttemptBinding},
+
+	// Store-wide rules.
+	{"SemanticWriteRule", testSemanticWriteRule},
+	{"Sessions", testSessions},
+	{"Cancellation", testCancellation},
 	{"CallAttempts", testCallAttempts},
 }
 
@@ -128,6 +136,14 @@ func noErr(t *testing.T, err error) {
 
 // errOf returns the error of a two-result call.
 func errOf[T any](_ T, err error) error { return err }
+
+// audited appends a lifecycle event with a fresh sequence number, so a
+// transaction whose other writes carry none satisfies the semantic-write
+// rule.
+func audited(tx store.Tx) error {
+	seq := tx.NextSeq()
+	return tx.AppendLifecycleEvent(NewLifecycleEvent(tx.SessionID(), fmt.Sprintf("audit-%d", seq), seq, domain.TargetItem, "audit"))
+}
 
 // seqs allocates n sequence numbers.
 func seqs(tx store.Tx, n int) []uint64 {

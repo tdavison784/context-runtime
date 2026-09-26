@@ -2,6 +2,7 @@ package invocation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -58,6 +59,40 @@ func (l *Ledger) Recover(ctx context.Context, actor domain.Principal) ([]domain.
 		return nil, err
 	}
 	return out, nil
+}
+
+// RecoverAll runs Recover for every session in the store (Store.Sessions),
+// so startup recovery does not depend on the harness tracking session IDs
+// elsewhere (T10 step 3). actorFor supplies the service actor for each
+// session; it must belong to that session. Each session is recovered in its
+// own transaction, and a failure in one session does not stop the others:
+// RecoverAll returns every UNKNOWN call it found, ordered by session, with
+// the joined errors.
+func (l *Ledger) RecoverAll(ctx context.Context, actorFor func(sessionID string) domain.Principal) ([]domain.CallRecord, error) {
+	sessions, err := l.store.Sessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []domain.CallRecord
+	var errs []error
+	for _, sessionID := range sessions {
+		actor := actorFor(sessionID)
+		if actor.SessionID != sessionID {
+			errs = append(errs, fmt.Errorf("session %s: service actor belongs to session %q: %w",
+				sessionID, actor.SessionID, domain.ErrInvalidAuthorityPromotion))
+			continue
+		}
+		calls, err := l.Recover(ctx, actor)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("session %s: %w", sessionID, err))
+			if ctx.Err() != nil {
+				break
+			}
+			continue
+		}
+		out = append(out, calls...)
+	}
+	return out, errors.Join(errs...)
 }
 
 // abandonAudit is the audit record of an abandonment and its uncertain

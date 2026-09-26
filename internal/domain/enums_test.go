@@ -270,6 +270,25 @@ func TestGoalStatusValid(t *testing.T) {
 	}
 }
 
+// TestDirectiveSectionValid checks the six named sections plus SectionNone
+// (the zero value, for items not created by a directive section) are valid,
+// and an unknown section is not.
+func TestDirectiveSectionValid(t *testing.T) {
+	for _, s := range []DirectiveSection{
+		SectionNone, SectionGoal, SectionPinned, SectionWorking,
+		SectionRemember, SectionReferences, SectionEphemeral,
+	} {
+		if !s.Valid() {
+			t.Errorf("DirectiveSection(%q).Valid() = false, want true", s)
+		}
+	}
+	for _, s := range []DirectiveSection{"bogus", "goal", "Working"} {
+		if s.Valid() {
+			t.Errorf("DirectiveSection(%q).Valid() = true, want false", s)
+		}
+	}
+}
+
 func TestRetentionClassValid(t *testing.T) {
 	for _, r := range []RetentionClass{RetentionProtected, RetentionHigh, RetentionNormal, RetentionLow} {
 		if !r.Valid() {
