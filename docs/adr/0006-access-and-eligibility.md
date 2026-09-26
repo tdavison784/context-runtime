@@ -3,6 +3,109 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
+## Amended in Phase 3 (ADR 8, 2026-09-26; proposed pending Phase 3 gate)
+
+Phase 3's binding decision record (`.worktrees/_commander/phase3-decisions.md`,
+P3-6, P3-7, P3-29, P3-31, P3-32, P3-33; commander rulings FROZEN 2026-09-26)
+implements this ADR's Phase 1 "decided now, built in Phases 3/5" temporal-
+eligibility rule and its two open items (the lease type, and what "the
+workflow's/agent's active-owner state" means). This section records the
+resulting decisions; ADR 8 (this repository's Phase 3 ADR) is the record of
+authorization/matcher-specific consequences and owns none of what follows.
+
+- **The retrieval lease is implemented in Phase 3, not deferred to Phase 6
+  (P3-29, P3-33; corrects this ADR's "Resolved at acceptance" note below).**
+  `RetrievalLease` binds an exact principal (including authority),
+  session/workflow/task/agent, conversation, the current requesting turn,
+  source occurrence/content identity, issue sequence, the issued completed-
+  inference index at issue time, and a bounded positive call allowance. Live
+  means exact holder and current active turn, and
+  `completedInferenceIndex - issuedIndex < allowance` under checked
+  nonnegative arithmetic; only completed inferences in that conversation
+  consume allowance — compaction, failure, retry, and other conversations do
+  not. Active-request coalescing may reuse a live lease but never extends
+  it; an idempotent retry returns the original result even after its lease
+  has expired; a genuinely new explicit request may issue a new lease over
+  the same immutable content. A lease never renews an old projection that
+  names an already-expired lease. Observed source lifecycle
+  revision/status is frozen on the retrieval result for audit, never used as
+  a lease-invalidation trigger by itself. This meets the shape this ADR's
+  eligibility table already assumed (principal/task/agent/turn-bound, with
+  an expiry); Phase 3 policy configures a finite positive default/max
+  allowance — zero or unlimited is invalid — and the effective values are
+  recorded.
+- **One pure `Eligibility` function replaces this ADR's table as the
+  authoritative decision surface (P3-31).**
+  `Eligibility(item, snapshot, principal, dispatchTurn)` consumes explicit
+  validated currentness, owning task/turn state, owner registration, resource
+  applicability where required, active leases, the conversation's completed-
+  inference index, and pending-input/representation context at one sequence
+  snapshot, and returns `Access`, `OrdinaryTemporal`, `LeaseAdmission`,
+  `NewSelection`, and closed reason codes as independent outputs — `Access`
+  is computed first, exactly as `AccessBoundary.Permits` already is in this
+  ADR. A lease may admit historical evidence without restoring independent
+  current-requirement eligibility or protection (ADR 16/FR-GC-003 territory).
+  An archived item can never enter ordinary new selection through a lease; a
+  historical or superseded goal/directive, or a retired obligation source,
+  never regains requirement status through one either. Missing required
+  snapshot state fails closed. No store access, wall clock, tokenizer, or
+  provider counter runs inside this function — it is exactly this ADR's
+  existing access/eligibility split (rules 1-3, unchanged), given one
+  callable, testable shape instead of the table format, with independent
+  outputs where the table's single row previously conflated them.
+- **WORKFLOW/AGENT "active-owner state" is session-lifetime registration,
+  not child-task liveness (P3-32).** A trusted registered workflow/agent
+  owner is ACTIVE for the session's lifetime once registered/first
+  associated; ending its last child task does not end it, and Phase 3 exposes
+  no general termination API. This resolves this ADR's eligibility-table row
+  ("WORKFLOW: the workflow's active-owner state"; "AGENT: the agent's
+  active-owner state") concretely: that state is an explicit, reconstructible
+  registration/association record (owner kind/id/session/source/sequence),
+  never inferred from whether any child conversation/task happens to be
+  active right now. Unknown legacy association fails closed for automatic
+  selection while retaining archive access. A future explicit termination
+  needs its own authorized, audited scope-end semantics and migration; V1
+  does not add one.
+- **`Coverage` gains purpose tagging and linear storage; conversation
+  membership becomes an explicit fact (P3-6, P3-7).** This ADR's rule 1
+  already requires `Coverage.ItemIDs` to be complete for the temporal-
+  eligibility recheck; Phase 3 adds distinct coverage *purposes*
+  (provenance, qualifying evidence support, raw/opaque representation
+  dependency, lease dependency, replaceable exchange coverage) stored once
+  per immutable `CoverageRecord` with indexed `CoverageMember` rows, so N
+  sources produce O(N) members rather than a union copied into every
+  dependent edge — the mechanism changes, the "complete `ItemIDs`, never a
+  range alone" requirement does not. Separately, conversation membership
+  (which items an agent actually received, closing an exchange) is a durable
+  authenticated fact recorded through `LogicalExchange`/`ExchangeMember`/
+  `AdmissionManifest` records, never inferred from task visibility or item
+  kind — visibility permits reading; it does not by itself prove an agent
+  received an item. This is a precondition for FR-TOOL-004's checkpoint
+  coverage (ADR 8 territory does not include checkpoints; that lands with
+  the semantic-tools worker), not a change to this ADR's access/eligibility
+  checks themselves.
+
+### SDD amendment (applied in v0.10)
+
+- **FR-DOM-003 / ADR 6.** Add: "V1 registered WORKFLOW and AGENT owners
+  remain active for the session lifetime; the absence of active child tasks
+  does not end their scope. Unknown required owner state forbids automatic
+  admission."
+- **FR-TOOL-004 / ADR 6.** Add: "Checkpoint source provenance and the
+  complete closed exchange prefix it may replace are recorded separately.
+  Membership is explicit; current requirements and pending/open exchanges
+  cannot be removed by coverage. Authored semantic knowledge may outlive
+  source expiry; raw/opaque/retrieval representations retain their source
+  and exact lease dependencies."
+- **FR-RET-006; T05 wording.** Add: "Retrieval leaves persisted Residency
+  unchanged; a holder-bound lease supplies temporary historical-evidence
+  admission. The lease binds immutable source occurrence/content, while the
+  retrieval result records observed lifecycle revision/status." T05's
+  optional residency flip becomes an explicit unchanged-residency
+  expectation (`docs/sdd-event-traces.md`'s own amendment, below).
+
+Applied to SDD.md as v0.10 (this ADR does not itself edit SDD.md).
+
 ## Context
 
 FR-DOM-003 requires access to always require the same session, with TURN/TASK

@@ -49,6 +49,92 @@ the AGENT-same-key supersession exception, obligation-transition
 authorization, `LinkDerived`'s actor-authority gate) are unaffected by
 Phase 2.
 
+## Amended in Phase 3 (ADR 8, 2026-09-26; proposed pending Phase 3 gate)
+
+Phase 3's binding decision record (`.worktrees/_commander/phase3-decisions.md`,
+P3-9, P3-10, P3-11, P3-23; commander rulings FROZEN 2026-09-26) resolves this
+ADR's "Resolved at acceptance" open item ("CompleteTask gets its own
+authorization function in Phase 3 built on `AuthorizeMutation` for each
+affected goal") and extends the grant/promotion machinery this ADR defines.
+ADR 8 owns the obligation-matcher/resource-invalidation-specific consequences
+of the last bullet below; this ADR remains the authorization-mechanism
+record.
+
+- **`CompleteTask` gets its own authorization function, built on
+  `AuthorizeMutation` per goal, exactly as this ADR's open item promised
+  (P3-9).** It requires SYSTEM/HARNESS/USER and the task's immutable
+  workflow ownership; on first execution the task must be ACTIVE. It
+  enumerates every current OPEN goal whose declared owning scope is
+  TURN/TASK and owning task is T — including goals the caller cannot
+  access — and authorizes `AuthorizeMutation`'s Resolve path for each at its
+  actual mutation sequence; any inaccessible or unauthorized member yields
+  the fixed `ErrInvalidAuthorityPromotion`, with no IDs or counts disclosed,
+  matching this ADR's existing non-disclosure discipline for graph-layer
+  errors. It then separately rejects any unresolved/blocked current
+  task-owned obligation (including one unpinned or materialization-disabled)
+  with the fixed `ErrUnfinishedObligations`. Owning scope comes from the
+  source record's declared scope, never merely from a source's originating
+  `TaskID` — a broad-scope source created during T is still task-owned by
+  scope even though its `TaskID` may differ. After authorization, an
+  in-flight operation or unacknowledged exchange (`ErrCallInFlight`) blocks
+  completion until reconciled/cancelled/abandoned through the ledger (ADR 17)
+  and the exchange is closed or cancelled. On success, goals resolve, the
+  task CASes to COMPLETED, and a durable GC request is written, all
+  atomically with the completion receipt; an identical completion replay
+  returns the original success, and a distinct request against an already-
+  completed task fails. `ActionCompleteTask` remains legacy/reserved with no
+  operational grant shortcut, unchanged from this ADR's existing grant
+  restrictions. As accepted consequences, not defects: the task-wide result
+  necessarily reveals aggregate completion feasibility even through a
+  generic error, and a USER may complete a no-goal task once its current
+  task-owned obligations permit, ending TASK pin protection including a
+  SYSTEM pin — both are documented here rather than silently accepted.
+- **Promotion/demotion are typed intents over a closed transition policy, not
+  arbitrary `ItemChange` (P3-10).** `ActionPromote`/`ActionDemote` are new
+  action values with their own validated intents; Promote allows
+  EPHEMERAL→WORKING, WORKING→DURABLE, and current constraint/instruction
+  DURABLE→PINNED; Demote allows DURABLE→WORKING and WORKING→EPHEMERAL for
+  nonrequirement semantic items. PINNED→DURABLE remains exclusively Unpin
+  (this ADR's existing rule, unchanged); goals, transcript/checkpoint/
+  projection records, and current obligation sources are excluded from
+  generic promotion/demotion, governed instead by this ADR's Resolve/Unpin
+  and ADR 8's obligation-transition rules. No promotion/demotion operation
+  changes authority, kind, access, scope, refreshes TTL, restores
+  currentness, or waives an obligation. Only trusted-principal grants may
+  delegate Promote/Demote; a matcher grant cannot, consistent with this
+  ADR's existing matcher-grant restriction to `ActionAssertObligation`
+  alone. Raw `ItemChange` remains an internal storage mechanism, never a
+  public mutation surface.
+- **Grant issuance/revocation are authenticated intents with runtime-derived
+  attribution, not caller-certified fields (P3-11).** `GrantIntent`/
+  `RevokeGrantIntent` carry the caller's requested action/target set; the
+  runtime, not the caller, derives `Issuer`/`Actor`, session, issued/revoked
+  sequence, and audit identity from authenticated source context, running
+  through this ADR's existing `AuthorizeGrantIssuance`/
+  `AuthorizeGrantRevocation` checks unchanged. A target named in a grant
+  intent must already exist or have been created earlier in the same
+  ordered transaction; a forward alias to a not-yet-existing target fails.
+  Revocation resolves the *original* target versions, including ones since
+  retired, rather than "whatever the target currently resolves to." An
+  unsupported action fails outright, and — reaffirming this ADR's existing
+  rule — directive text, an `obligation=` attribute, a matched claim, and
+  installing a matcher never themselves issue a grant; an unauthorized grant
+  operation aborts the entire enclosing event, not just that one write.
+- **A restricted, cause-based invalidation path exists alongside this ADR's
+  authorization matrix, and is deliberately not routed through it (P3-23,
+  ADR 8 §13).** Runtime invalidation of an already-accepted resource-bound
+  obligation proof, triggered by an authenticated resource report, is a
+  narrowly scoped consequence of that accepted proof — never a fresh
+  exercise of a grant that has since expired or been revoked, and never a
+  privilege this ADR's `findGrant`/`AuthorizeMutation` path would otherwise
+  grant a session-level resource reporter. It can only move the one
+  matching current SATISFIED obligation version to UNRESOLVED; it can never
+  waive, block, satisfy, or disclose an unrelated target, and it is recorded
+  with a historical `OriginAuthorizationRef` distinct from a live `GrantID`.
+  This is the one place in the runtime's mutation surface where a write to
+  obligation status legitimately occurs outside this ADR's `AuthorizeMutation`
+  entry point; ADR 8 owns its schema and test requirements in full.
+
 ## Context
 
 FR-AUTH-001 requires every mutation to check access to its targets and

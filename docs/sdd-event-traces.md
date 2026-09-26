@@ -1,6 +1,6 @@
 # Context Runtime V1: normative event traces
 
-These traces are part of [SDD v0.9](../SDD.md). They specify semantic state and the next provider-visible representation. Implementations must turn them into fixtures and tests; this document does not claim those tests already exist.
+These traces are part of [SDD v0.10](../SDD.md). They specify semantic state and the next provider-visible representation. Implementations must turn them into fixtures and tests; this document does not claim those tests already exist.
 
 All examples use session S, task T, and agent A unless stated otherwise. U means USER content, S means SYSTEM policy, H means HARNESS policy, and E means explicitly labeled historical evidence in a non-privileged message or valid tool result. Provider adapters translate these logical roles under FR-RND-002. Every fixture must assert actual serialized role/content placement and the complete inherited manifest, not merely item metadata. Fake-counter figures include all framing, schemas, and reservations; real adapters must verify their own whole-request counts.
 
@@ -70,7 +70,7 @@ Requirements: FR-DIR-005, FR-DOM-005, FR-RET-006, INV-08.
 3. GC changes Residency to ARCHIVED.
 4. The owner retrieves G to explain earlier work.
 
-Expected state: G is RESOLVED throughout steps 2–4. Retrieval may set Residency=RESIDENT and create a lease; it never changes GoalStatus or currentness.
+Expected state: G is RESOLVED throughout steps 2–4. Retrieval leaves persisted Residency unchanged (ARCHIVED) and creates a holder-bound lease that admits G as historical evidence; it never changes GoalStatus or currentness (SDD v0.10 amends this trace's residency expectation: an earlier optional Residency=RESIDENT flip on retrieval is replaced by this explicit unchanged-residency rule, ADR 6/FR-RET-006).
 
 Expected request: E(G, status=RESOLVED), never G in the active-goal set. An explicit authorized replacement G2 is required to create an OPEN goal again.
 

@@ -27,6 +27,77 @@ applies — grouped by subsystem, for Phase 2's five worker branches
 Sources: `phase2-brief.md` (D1-D20), `phase2-decision-review.md`
 (amendments and M1-M8), `phase2-amendments.md` (R1-R8, binding).
 
+## Amended in Phase 3 (ADR 8, 2026-09-26; proposed pending Phase 3 gate)
+
+Phase 3's binding decision record (`.worktrees/_commander/phase3-decisions.md`,
+P3-4, with commander ruling C-1 FROZEN 2026-09-26) restates and extends this
+ADR's §7 (D10's deduplication/replacement rule): the accepted Q1 ruling that
+predates the Phase 3 decision record, plus a new explicit replacement
+operation Q1 did not itself provide.
+
+**Q1, restated (already accepted before this Phase 3 record, unchanged
+here):** "Reopening requires a changed version (different content or
+attributes) under FR-DIR-002['s] authorized replacement." Ordinary identical
+restatement — the same content and the same accepted attributes as the
+current version's immutable creation declaration (§7's `SameDirectiveSemantics`
+comparison, now formalized as a persisted `CreationDeclaration` per ADR 8's
+domain-work; see that ADR's §P3-4 in the binding record) — never reopens,
+re-pins, unarchives, or rebinds an obligation merely by being reingested. A
+new TURN/TTL eligibility origin remains, as it always has been under §7's
+D10, a meaningful identity change, not a refresh of the old occurrence in
+place.
+
+**C-1's addition (new in Phase 3): an explicit authenticated typed
+replacement intent may reuse identical content.** `ActionReplaceDirective`
+is a new mutation naming an expected current occurrence and version (CAS),
+carrying its own idempotent request identity (§10/D14's idempotency
+discipline, unchanged), authorized exactly as any other lifecycle mutation
+under this ADR's §11/D15 source-actor rule and ADR 16's `AuthorizeMutation`.
+Unlike ordinary D10 restatement, it may legally recreate a version whose
+content and attributes are byte-identical to the version it replaces — this
+is not automatic reopening through re-ingestion, because it requires an
+explicit, authenticated, CAS'd operation naming exactly which occurrence/
+version it replaces, the same discipline this ADR's §7 already requires for
+every other authorized replacement. It is audited together with all
+indirect consequences: every obligation version bound to the retired source
+is authorized and retired in the same operation (§9/D13, unchanged), and the
+new version starts fresh (a new OPEN goal, or a new UNRESOLVED obligation
+with no inherited proof or grant), exactly as any other D10 replacement
+already does. This is not a new textual `Reopen` directive keyword — §1/M4's
+closed unsupported-lifecycle vocabulary (`Archive, Unarchive, Promote,
+Demote, Block, Unblock, Waive, CompleteTask, Reopen`) is unchanged, and
+`Reopen` remains an `ErrUnsupportedDirective` diagnostic when written as a
+directive heading; `ActionReplaceDirective` is a typed mutation-service
+operation, not directive-grammar surface.
+
+**Alternative considered and rejected.** Claude M9 had originally
+recommended "keep[ing] the spec-literal behavior (it is an authorized
+replacement)" — treating an identical-content restatement itself as an
+authorized replacement, which Q1 already overrode before this Phase 3 record
+existed. The Phase 3 cross-check's proposal — "[an authenticated intent] may
+reuse identical content, and is checked/audited as `ActionReplaceDirective`,
+including all indirect obligation retirements" — is what C-1 adopts, as an
+*additional* explicit escape hatch alongside Q1's changed-content
+requirement, not a reversal of Q1. **Trade-off:** Q1's changed-content rule
+alone is simple and prevents accidental reopening, but requires an artificial
+edit merely to recommission identical work or rebind a legacy claim; adding
+the explicit typed intent preserves Q1's default while giving an authorized
+principal a deliberate, audited way to do exactly that when it is actually
+needed. **Commander ruling (FROZEN 2026-09-26): ADOPT the recommendation and
+amend Q1 to add this explicit escape hatch, without weakening Q1's default.**
+
+### SDD amendment (applied in v0.10)
+
+- **FR-DIR-005 / FR-ING-005.** Add: "Ordinary identical restatement compares
+  the immutable creation declaration and does not reopen, re-pin, unarchive,
+  or rebind an obligation. TURN/TTL eligibility origin remains part of
+  semantic identity." Retain Q1's changed-content/attributes requirement as
+  the default; `ActionReplaceDirective` (above) is the one authorized
+  exception, itself recorded at FR-AUTH-001/FR-DIR-002 rather than as a
+  weakening of this sentence.
+
+Applied to SDD.md as v0.10 (this ADR does not itself edit SDD.md).
+
 ## Decision
 
 Grouped by subsystem. Each group names the requirements it answers, the

@@ -40,7 +40,7 @@ Codex) has scrutinized it, noting which findings changed the decision.
 | 5 | Semantic scoring weights, SemanticBytes encoding, fixed-point scale, relevance threshold, resident-byte limits, soft-pressure fraction, retrieval-call windows, stub budget, checkpoint size limit, decision-trace retention | Phase 4 | pending — gates Phase 4 |
 | 6 | Access-boundary and context-eligibility matrix, historical leases, expiry, epoch validation | Phase 1 | [Accepted](0006-access-and-eligibility.md) |
 | 7 | Lexical index and normalization rules | Phase 4 | pending — gates Phase 4 |
-| 8 | Observation identities, obligation matcher/claim versions, evidence applicability fingerprints, mutation grants, invalidation rules | Phase 3 | pending — gates Phase 3 |
+| 8 | Observation identities, obligation matcher/claim versions, evidence applicability fingerprints, mutation grants, invalidation rules | Phase 3 | [Proposed](0008-observations-obligations-applicability-grants.md) — gates Phase 3 |
 | 9 | Provider transport libraries, retry policy, OpenAI API surface, verified reasoning replay rules | Phase 5 | pending — gates Phase 5 |
 | 10 | Benchmark fixture/oracle, comparative statistics and run counts, baseline profiles, shared resource limits/projections, reproducible hardware/data profile | Phase 5 (initial fixture/profile); finalized Phase 8 | pending — gates Phase 5 |
 | 11 | Render templates and delimiters per provider | Phase 5 | pending — gates Phase 5 |
@@ -70,6 +70,14 @@ Phase 2 (Directives and ingestion) requires ADR 19, written here. Phase 2's
 exit gate (canonical directive examples, parser fuzzing, retry identity,
 and injection resistance) is tracked in `internal/directive`,
 `internal/ingest`, and `testdata/directives`, not in this directory.
+
+Phase 3 (Semantic state engine) requires ADR 8, written here as Status:
+Proposed pending the Phase 3 gate, and amends ADR 6, 16, and 19 (each keeps
+its own Accepted Status from its own phase; the amendment records what
+Phase 3 adds on top). Phase 3's exit gate (replacement, resolution/
+rehydration, evidence invalidation, and mutation-authority traces against
+event traces T02/T06/T07) is tracked in the new `internal/obligation` and
+`internal/lifecycle` packages, not in this directory.
 
 ## SDD conflicts found and applied (v0.6)
 
@@ -108,6 +116,44 @@ and injection resistance) is tracked in `internal/directive`,
     six content sections and excluding Resolve/Unpin) — this one **did**
     change FR text, scoping D20's rejection rule to the keywords that
     actually derive IDs.
+
+## SDD conflicts found and applied (v0.10)
+
+Phase 3's binding decision record
+(`.worktrees/_commander/phase3-decisions.md`, P3-1 through P3-42, commander
+rulings C-1 through C-21 FROZEN 2026-09-26) approved its "Required normative
+amendments at freeze" table for SDD v0.10 in full, with C-1's text for the
+first row. Applied:
+
+- [0008](0008-observations-obligations-applicability-grants.md#sdd-amendment-applied-in-v010):
+  FR-REL-001/§7 (SATISFIES becomes a typed derived relation, not a
+  Relationship row), FR-AUTH-002/FR-OBL-002 (exact-version grants and the
+  restricted cause-based invalidation path), and FR-OBL-005 (authenticated
+  resource reporting and explicit assertion modes).
+- [0006](0006-access-and-eligibility.md#sdd-amendment-applied-in-v010):
+  FR-DOM-003 (session-lifetime WORKFLOW/AGENT owners), FR-TOOL-004 (split
+  checkpoint source/coverage provenance), and FR-RET-006 (retrieval leaves
+  Residency unchanged; a lease supplies admission instead — replacing this
+  spec's earlier optional Residency=RESIDENT flip on retrieval, and
+  `docs/sdd-event-traces.md`'s T05 accordingly).
+- [0019](0019-directive-parsing-and-ingestion.md#sdd-amendment-applied-in-v010):
+  FR-DIR-005/FR-ING-005 (C-1: ordinary identical restatement compares the
+  immutable creation declaration and never reopens/re-pins/unarchives/
+  rebinds by itself; an explicit authenticated `ActionReplaceDirective`
+  intent may reuse identical content as an authorized exception).
+- FR-TOOL-002 and FR-TOOL-003 (SDD.md directly; no dedicated ADR owns the
+  keyed-write/completion-claim result wording specifically) gained the
+  duplicate/unsupported-status clarification and the actual-observed-status
+  result wording the table's C-19/C-18 rows record.
+- §8 and §11 (SDD.md directly) record that Phase 3's internal mutation
+  services gain typed request identities/intents ahead of any public
+  `Runtime` signature change, and that basic retrieval leases and logical
+  conversation membership land in Phase 3 rather than Phase 6.
+
+ADR 8 itself remains Status: Proposed — these SDD.md edits are applied now,
+per the commander's freeze ruling, independently of ADR 8 reaching Accepted
+at the Phase 3 gate, the same precedent ADR 19's v0.9 edits set for this
+repository (below).
 
 Independent review: Codex gpt-6-sol xhigh reviewed all seven Phase 1 ADRs
 against the committed code and the SDD in two passes — the initial review
