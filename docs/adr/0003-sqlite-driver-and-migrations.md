@@ -268,23 +268,20 @@ preserve valid state.
 - `internal/store/sqlite/contract_review_test.go:TestSessionsListsCommittedRecords`
   covers `Store.Sessions` (DUR-1.8, ADR 17) SQLite-specifically.
 
-**Known regression found during verification, not one of the four DUR
-findings above:** `TestConformance/DirectiveBoundaries` — new round-1
-coverage for ADR 4's boundary-keyed directive identity — fails on
-`internal/store/sqlite` only. Querying `CurrentDirective` with a boundary
-from a different session than the transaction's returns `invalid record:
-record belongs to another session` instead of the `ErrNotFound` the memory
-store and the test both expect; this is the AUTH-1.3 existence-disclosure
-pattern recurring in a new code path. `go test ./internal/store/sqlite/...`
-fails on this subtest as of this update. See ADR 4/17 for the full
-citation; flagging here too since it is this package's bug.
+A regression found independently during verification, not one of the four
+DUR findings above, is now also fixed: `TestConformance/DirectiveBoundaries`
+— round-1 coverage for ADR 4's boundary-keyed directive identity — briefly
+failed on `internal/store/sqlite` only (`CurrentDirective` reported a
+different-session boundary as `ErrInvalidRecord` instead of `ErrNotFound`,
+the AUTH-1.3 existence-disclosure pattern recurring in a new code path);
+fixed in `a8e895f`. Passes on both stores now.
 
 ## Open questions
 
 None remaining for this ADR's original scope; `busy_timeout` (5s default,
 `WithBusyTimeout` to override) is decided in code. Round 1's four DUR
-findings are fixed and tested; the `DirectiveBoundaries` regression above
-is the one open item against this package.
+findings, and the independently-found `DirectiveBoundaries` regression, are
+all fixed and tested.
 
 ## Review
 
@@ -321,6 +318,6 @@ Verified against the merged `sqlite-worker` branch: all four DUR findings
 now have a passing test (`TestCancelledUpdateRollsBack`,
 `TestScanCancellationIsOperationalError`, `TestConcurrentFirstOpen`,
 `TestInterruptedMigrationReplays`), cited in the "Round 1 additions"
-subsection. One regression found independently while verifying, not one
-of the four DUR findings: `TestConformance/DirectiveBoundaries` fails on
-this package (see Tests, above, and ADR 4/17 for the full citation).
+subsection. One regression found independently while verifying,
+`TestConformance/DirectiveBoundaries`, is also fixed (`a8e895f`) and now
+passes on this package.
