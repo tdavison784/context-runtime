@@ -1,0 +1,10 @@
+{
+  "description": "Lines that are not CommonMark ATX headings, deeper ones, and fenced or quoted ones stay body text.",
+  "requirements": [
+    "FR-DIR-006",
+    "D6",
+    "SPEC-1.11"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}
