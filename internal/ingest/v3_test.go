@@ -2,7 +2,9 @@ package ingest
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -239,4 +241,38 @@ func TestV3_DefaultPolicy(t *testing.T) {
 	if r.RequestHashVersion != domain.RequestHashV3 || r.Versions.Semantic == nil || *r.Versions.Semantic != policy.DefaultPhase3Policy() {
 		t.Fatalf("receipt policy %+v under %q", r.Versions.Semantic, r.RequestHashVersion)
 	}
+}
+
+// TestV3_DerivedPinnedListDeclared (P3-3/4, SPEC-3.1 producer path): a plain
+// Pinned list with derived IDs, the shape of the event-scaling test, is
+// accepted on both stores; every item carries the explicit DIRECTIVE
+// namespace and an immutable creation declaration, which W1's graph
+// requires of every semantic producer (the Phase 2 producer path failed
+// here with invalid record).
+func TestV3_DerivedPinnedListDeclared(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		var b strings.Builder
+		b.WriteString("## Pinned\n")
+		for i := range 25 {
+			fmt.Fprintf(&b, "- pinned requirement number %d\n", i)
+		}
+		r := f.mustIngest(principal(domain.AuthoritySystem), sysEvent("pins", b.String()))
+		pins := semantic(r)
+		if len(pins) != 25 {
+			t.Fatalf("semantic items = %d", len(pins))
+		}
+		f.view(func(tx store.ReadTx) error {
+			sem, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			for _, it := range pins {
+				d, err := sem.CreationDeclaration(it.ID)
+				if it.Namespace != domain.NamespaceDirective || err != nil || !d.LegacyKnown || d.ItemID != it.ID {
+					t.Errorf("%s: namespace %q declaration %+v (%v)", it.ID, it.Namespace, d, err)
+				}
+			}
+			return nil
+		})
+	})
 }
