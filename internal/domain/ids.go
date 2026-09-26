@@ -44,12 +44,16 @@ func DerivedItemID(sessionID, eventID string, index int) string {
 		String(sessionID).String(eventID).Int(int64(index)))
 }
 
-// DerivedCallID is the deterministic ID of a prepared call: repeating an
-// identical PrepareCall against the same conversation version returns the
-// same logical call (FR-CALL-001).
-func DerivedCallID(sessionID, conversationID string, baseVersion uint64, requestHash string) string {
-	return "call_" + shortHash(NewCanonicalEncoder("context-runtime/call-id/v1").
-		String(sessionID).String(conversationID).Uint(baseVersion).String(requestHash))
+// DerivedCallID is the deterministic ID of a prepared call. It covers the
+// conversation's revision when the reservation was taken and the complete
+// frozen proposal (CallProposalHash), so a later operation at the same
+// conversation version (after a cancellation or failure released the
+// reservation) gets a new ID, while a retried PrepareCall of the identical
+// proposal is recognized through the conversation's in-flight record
+// (FR-CALL-001).
+func DerivedCallID(sessionID, conversationID string, conversationRevision uint64, proposalHash string) string {
+	return "call_" + shortHash(NewCanonicalEncoder("context-runtime/call-id/v2").
+		String(sessionID).String(conversationID).Uint(conversationRevision).String(proposalHash))
 }
 
 // DerivedDirectiveID is the ID of a directive item written without an
