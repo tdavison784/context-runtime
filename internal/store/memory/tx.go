@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
@@ -664,13 +663,16 @@ func (t *tx) PutConversation(c domain.Conversation, expectedRevision uint64) err
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	cur, _ := t.convs.peek(c.ConversationID) // absent reads as revision 0
+	cur, ok := t.convs.peek(c.ConversationID) // absent reads as revision 0
 	if cur.Revision != expectedRevision {
 		return fmt.Errorf("conversation %s: revision %d, expected %d: %w",
 			c.ConversationID, cur.Revision, expectedRevision, domain.ErrVersionConflict)
 	}
 	if c.Revision != expectedRevision+1 {
 		return invalid("conversation %s: revision must be %d", c.ConversationID, expectedRevision+1)
+	}
+	if ok && (c.TaskID != cur.TaskID || c.AgentID != cur.AgentID) {
+		return fmt.Errorf("conversation %s: task and agent cannot change: %w", c.ConversationID, domain.ErrImmutable)
 	}
 	t.convs.put(c.ConversationID, c)
 	return nil
@@ -688,6 +690,11 @@ func (t *tx) InsertCall(c domain.CallRecord) error {
 	}
 	if t.calls.has(c.CallID) {
 		return fmt.Errorf("call %s: %w", c.CallID, domain.ErrImmutable)
+	}
+	if c.State.Reserving() {
+		if err := t.checkReservation(c); err != nil {
+			return err
+		}
 	}
 	t.calls.put(c.CallID, c)
 	return nil
@@ -710,26 +717,41 @@ func (t *tx) UpdateCall(c domain.CallRecord, expectedRevision uint64) error {
 	if c.Revision != expectedRevision+1 {
 		return invalid("call %s: revision must be %d", c.CallID, expectedRevision+1)
 	}
+	if c.State != cur.State && !domain.ValidCallTransition(cur.State, c.State) {
+		return fmt.Errorf("call %s: %s -> %s: %w", c.CallID, cur.State, c.State, domain.ErrInvalidTransition)
+	}
 	if !sameCallRequest(cur, c) {
 		return fmt.Errorf("call %s: request fields cannot change: %w", c.CallID, domain.ErrImmutable)
 	}
-	if c.State != cur.State && !domain.ValidCallTransition(cur.State, c.State) {
-		return fmt.Errorf("call %s: %s -> %s: %w", c.CallID, cur.State, c.State, domain.ErrInvalidTransition)
+	if !cur.State.Reserving() && c.State.Reserving() {
+		if err := t.checkReservation(c); err != nil {
+			return err
+		}
 	}
 	t.calls.put(c.CallID, c)
 	return nil
 }
 
-// sameCallRequest reports whether the fields frozen at PrepareCall agree
-// (FR-CALL-001): the conversation and operation, the inference principal,
-// the checked versions, and the request bytes and manifest.
+// sameCallRequest reports whether b differs from a only in the fields the
+// call lifecycle advances: state, attempt count, outcome, cancellation,
+// completion, and revision. Everything else is frozen at PrepareCall
+// (FR-CALL-001).
 func sameCallRequest(a, b domain.CallRecord) bool {
-	return a.ConversationID == b.ConversationID && a.Operation == b.Operation &&
-		a.Principal == b.Principal &&
-		a.BaseConversationVersion == b.BaseConversationVersion && a.SemanticSeq == b.SemanticSeq &&
-		a.Epoch == b.Epoch && a.PolicyVersion == b.PolicyVersion && a.DescriptorVersion == b.DescriptorVersion &&
-		a.RequestHash == b.RequestHash && bytes.Equal(a.Request, b.Request) &&
-		a.ManifestHash == b.ManifestHash && a.PreparedSeq == b.PreparedSeq
+	b = b.Clone()
+	b.State, b.Attempts, b.OutcomeHash, b.Outcome = a.State, a.Attempts, a.OutcomeHash, a.Outcome
+	b.CancelReason, b.FinishedSeq, b.Revision = a.CancelReason, a.FinishedSeq, a.Revision
+	return reflect.DeepEqual(a, b)
+}
+
+// checkReservation enforces FR-CALL-005 defensively: at most one call per
+// conversation is PREPARED, SENT, or UNKNOWN.
+func (t *tx) checkReservation(c domain.CallRecord) error {
+	for id, other := range t.calls.all() {
+		if id != c.CallID && other.ConversationID == c.ConversationID && other.State.Reserving() {
+			return fmt.Errorf("conversation %s: %w", c.ConversationID, domain.ErrCallInFlight)
+		}
+	}
+	return nil
 }
 
 func (t *tx) PutCallAttempt(a domain.CallAttempt) error {
