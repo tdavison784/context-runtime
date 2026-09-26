@@ -832,10 +832,11 @@ func TestSupersedeSnapshot_FRDIR007(t *testing.T) {
 		mustInsert(t, tx, w1a, otherAgentItem, w2)
 		mustFile(t, tx, w1a, otherAgentItem)
 
-		rels, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
+		res, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
 		if err != nil {
 			return err
 		}
+		rels := res.Supersedes
 		if len(rels) != 1 || rels[0].ToID != w1a.ID {
 			t.Errorf("SupersedeSnapshot relationships = %+v, want exactly one edge to %s", rels, w1a.ID)
 		}
@@ -887,10 +888,11 @@ func TestSupersedeSnapshot_MultipleOldItems(t *testing.T) {
 		mustInsert(t, tx, w1a, w1b, w2)
 		mustFile(t, tx, w1a, w1b)
 
-		rels, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
+		res, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
 		if err != nil {
 			return err
 		}
+		rels := res.Supersedes
 		if len(rels) != 2 {
 			t.Errorf("SupersedeSnapshot relationships = %d, want 2", len(rels))
 		}
@@ -945,10 +947,11 @@ func TestSupersedeSnapshot_ConversationKindAndIndependentTaskState(t *testing.T)
 		mustInsert(t, tx, oldConv, independent, newConv)
 		mustFile(t, tx, oldConv)
 
-		rels, err := SupersedeSnapshot(tx, actor, []string{newConv.ID}, taskID, "evt-conv")
+		res, err := SupersedeSnapshot(tx, actor, []string{newConv.ID}, taskID, "evt-conv")
 		if err != nil {
 			return err
 		}
+		rels := res.Supersedes
 		if len(rels) != 1 || rels[0].ToID != oldConv.ID {
 			t.Errorf("SupersedeSnapshot relationships = %+v, want exactly one edge to %s", rels, oldConv.ID)
 		}
