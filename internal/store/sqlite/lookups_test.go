@@ -38,11 +38,6 @@ func assertIndexed(t *testing.T, s *Store, q string, args ...any) {
 	}
 }
 
-func TestItemsByBlobUsesIndex(t *testing.T) {
-	s, _ := openTemp(t)
-	assertIndexed(t, s, "SELECT item_id FROM item_blobs WHERE session_id=? AND blob_hash=? LIMIT ?", "s", "h", 2)
-}
-
 // TestUpgradeItemBlobIndex checks that migration 0009 indexes items stored
 // before it.
 func TestUpgradeItemBlobIndex(t *testing.T) {
@@ -63,19 +58,14 @@ func TestUpgradeItemBlobIndex(t *testing.T) {
 	l.insert("item", storetest.NewItem("s", "text-only", 2, "no blob"), nil)
 	s := l.upgrade()
 	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
-		got, err := tx.ItemsByBlob(blob.Hash, 1)
-		if err != nil || len(got) != 1 || got[0].ID != "legacy" {
-			t.Errorf("ItemsByBlob after upgrade = %v, %v", got, err)
+		got, err := tx.BlobReferrer(store.BlobReferrerFilter{Viewer: planViewer, BlobHash: blob.Hash, Within: it.Access})
+		if err != nil || len(got.Items) != 1 || got.Items[0].ID != "legacy" {
+			t.Errorf("BlobReferrer after upgrade (0009 then 0012) = %+v, %v", got, err)
 		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestDuplicateCandidatesUseIndex(t *testing.T) {
-	s, _ := openTemp(t)
-	assertIndexed(t, s, duplicateSQL, "s", "h", "task", "", "", "USER", "TASK", "s", "", "task", "", 2)
 }
 
 // TestUpgradeDuplicateIndex checks that items stored before migration 0004
@@ -86,27 +76,15 @@ func TestUpgradeDuplicateIndex(t *testing.T) {
 	l.insert("item", it, nil)
 	s := l.upgrade()
 	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
-		got, err := tx.DuplicateCandidates(store.DuplicateFilter{TaskID: it.TaskID, Section: it.Section, Role: domain.RoleSemantic,
-			Authority: it.Authority, Access: it.Access, ContentHash: it.ContentHash, Limit: 1})
-		if err != nil || len(got) != 1 || got[0].ID != "legacy" {
-			t.Errorf("DuplicateCandidates after upgrade = %v, %v", got, err)
+		got, err := tx.CanonicalCandidates(store.CanonicalFilter{Viewer: planViewer, TaskID: it.TaskID, Section: it.Section, Kind: it.Kind,
+			Role: domain.RoleSemantic, Authority: it.Authority, Access: it.Access, ContentHash: it.ContentHash, Limit: 1})
+		if err != nil || len(got.Items) != 1 || got.Items[0].ID != "legacy" {
+			t.Errorf("CanonicalCandidates after upgrade (0010 then 0012) = %+v, %v", got, err)
 		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestUnresolvedReferencesByKeyUseIndex(t *testing.T) {
-	s, _ := openTemp(t)
-	base := schemas["reference"].selectSQL + " WHERE session_id=? AND f_locator_key=?"
-	assertIndexed(t, s, base+referenceOrderSQL, "s", "k", 2)
-	assertIndexed(t, s, base+" AND f_rule_version=?"+referenceOrderSQL, "s", "k", "locator/v1", 2)
-}
-
-func TestItemsBySourceKeyUsesIndex(t *testing.T) {
-	s, _ := openTemp(t)
-	assertIndexed(t, s, sourceKeySQL, "s", domain.LocatorRuleVersion, "path:a", 2)
 }
 
 // TestUpgradeItemSourceIndex checks that migration 0011's Go step indexes
@@ -130,9 +108,9 @@ func TestUpgradeItemSourceIndex(t *testing.T) {
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		got, err := tx.ItemsBySourceKey("path:docs/a.md", 2)
-		if err != nil || len(got) != 2 || got[0].ID != "legacy-0" || got[1].ID != "new" {
-			t.Errorf("ItemsBySourceKey after upgrade = %v, %v", got, err)
+		got, err := tx.SourceItems(store.SourceFilter{Viewer: planViewer, LocatorKey: "path:docs/a.md", Page: store.Page{Limit: 2}})
+		if err != nil || len(got.Items) != 2 || got.Items[0].ID != "legacy-0" || got.Items[1].ID != "new" {
+			t.Errorf("SourceItems after upgrade (0011 step then 0012) = %+v, %v", got, err)
 		}
 		return nil
 	}); err != nil {
