@@ -1,6 +1,6 @@
 # 19. Directive parsing and ingestion
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 2 exit; PR #5 merged as b869cb1 after SEC 4, SPEC 5, DUR 5, TEST 2 review rounds reported NO FURTHER WORK NEEDED)
 Date: 2026-09-26
 
 ## Context

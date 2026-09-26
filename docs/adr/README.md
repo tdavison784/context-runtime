@@ -51,7 +51,7 @@ Codex) has scrutinized it, noting which findings changed the decision.
 | 16 | Common mutation authorization, directive/obligation version replacement, independent residency/goal status, immutable source snapshots | Phase 1 | [Accepted](0016-mutation-authorization.md) |
 | 17 | Provider call/attempt state machine, conversation reservation, outcome reconciliation, streaming completion, crash/retry tests | Phase 1 | [Accepted](0017-call-ledger.md) |
 | 18 | Semantic state tool schemas, result formats, reference instruction block | Phase 5 | pending — gates Phase 5 |
-| 19 | Directive parsing and ingestion: grammar, IDs, span/parse-unit isolation, deterministic classification, deduplication/replacement, Working snapshots, obligations, receipts, and lifecycle-command deferral | Phase 2 | [Proposed](0019-directive-parsing-and-ingestion.md) |
+| 19 | Directive parsing and ingestion: grammar, IDs, span/parse-unit isolation, deterministic classification, deduplication/replacement, Working snapshots, obligations, receipts, and lifecycle-command deferral | Phase 2 | [Accepted](0019-directive-parsing-and-ingestion.md) |
 
 ADR 19 was not one of SDD §15's original 18; Phase 2's adversarial decision
 review found the brief's decisions needed a dedicated ADR beyond that list,
