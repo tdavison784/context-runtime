@@ -120,6 +120,12 @@ func (p *probe) reasoning(model string) {
 		return
 	}
 	result := object{"type": "function_call_output", "call_id": call["call_id"], "output": "A = cobalt"}
+	if id, ok := r1["id"].(string); ok {
+		p.call(base+"_stateless_previous", "/responses", object{
+			"model": model, "store": false, "max_output_tokens": 160,
+			"previous_response_id": id, "input": []any{result},
+		})
+	}
 	history := []any{first["input"].([]any)[0]}
 	history = append(history, items...)
 	history = append(history, result)
