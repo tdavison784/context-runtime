@@ -2,12 +2,13 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
 func ingestFixture() (Principal, Event) {
 	p := Principal{SessionID: "s", WorkflowID: "w", TaskID: "t", AgentID: "a", Authority: AuthoritySystem}
-	return p, Event{EventID: "e", Kind: AuthorityHarness, TurnID: "turn", Spans: []Span{{Authority: AuthorityHarness, Access: BoundaryFor(ScopeTask, p), DirectiveCapable: true, Parts: []InputPart{{Type: PartText, Text: "## Goal\r\nexact\xff"}}, Source: &SourceRef{Kind: SourcePath, Locator: "file"}}}}
+	return p, Event{EventID: "e", Kind: EventHarness, Spans: []Span{{Authority: AuthorityHarness, Access: BoundaryFor(ScopeTask, p), DirectiveCapable: true, Parts: []InputPart{{Type: PartText, Text: "## Goal\r\nexact\xff"}}, Source: &SourceRef{Kind: SourcePath, Locator: "file"}}}}
 }
 
 func TestEventPayloadHashSensitivity(t *testing.T) {
@@ -22,10 +23,8 @@ func TestEventPayloadHashSensitivity(t *testing.T) {
 		"principal task":      func(p *Principal, e *Event) { p.TaskID += "x" },
 		"principal agent":     func(p *Principal, e *Event) { p.AgentID += "x" },
 		"principal authority": func(p *Principal, e *Event) { p.Authority = AuthorityHarness },
-		"kind":                func(p *Principal, e *Event) { e.Kind = AuthorityUser },
-		"turn":                func(p *Principal, e *Event) { e.TurnID += "x" },
+		"kind":                func(p *Principal, e *Event) { e.Kind = EventSystem },
 		"turn boundary":       func(p *Principal, e *Event) { e.TurnBoundary = true },
-		"span turn boundary":  func(p *Principal, e *Event) { e.Spans[0].TurnBoundary = true },
 		"span authority":      func(p *Principal, e *Event) { e.Spans[0].Authority = AuthorityUser },
 		"capability":          func(p *Principal, e *Event) { e.Spans[0].DirectiveCapable = false },
 		"scope":               func(p *Principal, e *Event) { e.Spans[0].Access.Scope = ScopeSession },
@@ -41,7 +40,7 @@ func TestEventPayloadHashSensitivity(t *testing.T) {
 		"source kind":         func(p *Principal, e *Event) { e.Spans[0].Source.Kind = SourceURL },
 		"source locator":      func(p *Principal, e *Event) { e.Spans[0].Source.Locator += "x" },
 		"source hash":         func(p *Principal, e *Event) { e.Spans[0].Source.ContentHash = HashBytes(nil) },
-		"source tool":         func(p *Principal, e *Event) { e.Spans[0].Source.ToolCallID = "call" },
+		"source kind tool":    func(p *Principal, e *Event) { e.Spans[0].Source.Kind = SourceTool },
 	}
 	for name, change := range changes {
 		t.Run(name, func(t *testing.T) {
@@ -61,8 +60,8 @@ func TestEventPayloadHashSensitivity(t *testing.T) {
 	if err != nil || got != want {
 		t.Fatal("event lookup key affected payload")
 	}
-	if want != "sha256:88318032fcdef564f83d42bf55b0d3bb35b5b4b8a0d9e3889c6d82b7a24cf871" {
-		t.Fatal("canonical v1 schema changed", want)
+	if want != "sha256:09708249afa4a7819890494e5a913d07316d650c3c4e2a748b5c07d90a2dfeb5" {
+		t.Fatal("canonical v2 schema changed", want)
 	}
 }
 
@@ -89,9 +88,17 @@ func TestEventValidationAuthorityAndLimits(t *testing.T) {
 	if !errors.Is(e.ValidateFor(p, Limits{}), ErrInvalidAuthorityPromotion) {
 		t.Fatal("promoted envelope allowed")
 	}
-	e.Kind = AuthorityUser
+	e.Kind = EventUser
 	if !errors.Is(e.ValidateFor(p, Limits{}), ErrInvalidAuthorityPromotion) {
-		t.Fatal("promoted span allowed")
+		t.Fatal("span above its envelope allowed")
+	}
+	e.Spans[0].Authority, e.Spans[0].DirectiveCapable = AuthorityUser, true
+	if err := e.ValidateFor(p, Limits{}); err != nil {
+		t.Fatal(err)
+	}
+	p.Authority = AuthorityAgent
+	if !errors.Is(e.ValidateFor(p, Limits{}), ErrInvalidAuthorityPromotion) {
+		t.Fatal("promoted envelope allowed")
 	}
 	p, e = ingestFixture()
 	if !errors.Is(e.ValidateFor(p, Limits{MaxSpanBytes: 1}), ErrInvalidRecord) {
@@ -126,5 +133,114 @@ func TestEventHashBlobTransportAndOrder(t *testing.T) {
 	b, _ = e.PayloadHash(p)
 	if a == b {
 		t.Fatal("order omitted")
+	}
+}
+
+func TestEventKindsAndTurns(t *testing.T) {
+	p, e := ingestFixture()
+	for _, k := range []EventKind{"", "harness", "EVENT", "USER "} {
+		e.Kind = k
+		if !errors.Is(e.Validate(), ErrInvalidRecord) {
+			t.Errorf("kind %q accepted", k)
+		}
+	}
+	for _, c := range []struct {
+		kind     EventKind
+		boundary bool
+		opens    bool
+	}{
+		{EventUser, false, true}, {EventHarness, true, true}, {EventHarness, false, false}, {EventSystem, false, false},
+	} {
+		e.Kind, e.TurnBoundary = c.kind, c.boundary
+		if e.OpensTurn() != c.opens {
+			t.Errorf("%s boundary=%v opens=%v", c.kind, c.boundary, !c.opens)
+		}
+	}
+	for _, k := range []EventKind{EventSystem, EventUser, EventAgent, EventTool, EventRetrievedContent} {
+		_, e := ingestFixture()
+		e.Kind, e.TurnBoundary = k, true
+		e.Spans[0].Authority = AuthorityRetrievedContent
+		e.Spans[0].DirectiveCapable = false
+		if !errors.Is(e.Validate(), ErrInvalidRecord) {
+			t.Errorf("%s asserted a turn boundary", k)
+		}
+	}
+	_, e = ingestFixture()
+	e.TurnBoundary = true
+	p.TaskID = ""
+	e.Spans[0].Access = BoundaryFor(ScopeSession, p)
+	if !errors.Is(e.ValidateFor(p, Limits{}), ErrInvalidRecord) {
+		t.Fatal("turn opener without a task accepted")
+	}
+	e.TurnBoundary = false
+	if err := e.ValidateFor(p, Limits{}); err != nil {
+		t.Fatalf("task-less setup event rejected: %v", err)
+	}
+}
+
+func TestEventIDAndToolCallRules(t *testing.T) {
+	_, e := ingestFixture()
+	for _, id := range []string{"a b", "é", "x\n", strings.Repeat("x", MaxEventIDBytes+1)} {
+		e.EventID = id
+		if e.Validate() == nil {
+			t.Errorf("event ID %q accepted", id)
+		}
+	}
+	e.EventID = strings.Repeat("x", MaxEventIDBytes)
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	e.Spans[0].Source.ToolCallID = "call_1"
+	if e.Validate() == nil {
+		t.Fatal("tool call ID on a HARNESS span accepted")
+	}
+	e.Spans[0].Authority, e.Spans[0].DirectiveCapable = AuthorityTool, false
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEventWholeLimits(t *testing.T) {
+	p, e := ingestFixture()
+	e.Spans = append(e.Spans, e.Spans[0], e.Spans[0])
+	n := len(e.Spans[0].Parts[0].Text)
+	for name, l := range map[string]Limits{
+		"spans":      {MaxSpans: 2},
+		"parts":      {MaxParts: 2},
+		"event":      {MaxEventBytes: 3*n - 1},
+		"span bytes": {MaxSpanBytes: n - 1},
+	} {
+		if !errors.Is(e.ValidateFor(p, l), ErrInvalidRecord) {
+			t.Errorf("%s limit not enforced", name)
+		}
+	}
+	if err := e.ValidateFor(p, Limits{MaxSpans: 3, MaxParts: 3, MaxEventBytes: 3 * n, MaxSpanBytes: n}); err != nil {
+		t.Fatal(err)
+	}
+	e.Spans[1].Parts = []InputPart{{Type: PartImage, MediaType: "image/png", BlobHash: HashBytes(nil), BlobSize: 1 << 62}}
+	e.Spans[2].Parts = e.Spans[1].Parts
+	if !errors.Is(e.ValidateFor(p, Limits{MaxBlobBytes: 1 << 30, MaxEventBytes: 1 << 30}), ErrInvalidRecord) {
+		t.Fatal("huge referenced blobs accepted")
+	}
+}
+
+func TestEventCloneAndParseUnits(t *testing.T) {
+	_, e := ingestFixture()
+	e.Spans[0].Parts = append(e.Spans[0].Parts, InputPart{Type: PartImage, MediaType: "image/png", Data: []byte{1}}, InputPart{Type: PartText, Text: "ned\n"})
+	c := e.Clone()
+	e.Spans[0].Parts[1].Data[0] = 9
+	e.Spans[0].Source.Locator = "mutated"
+	e.Spans[0].Parts[0].Text = "mutated"
+	if c.Spans[0].Parts[1].Data[0] != 1 || c.Spans[0].Source.Locator != "file" || c.Spans[0].Parts[0].Text == "mutated" {
+		t.Fatal("Clone shares caller buffers")
+	}
+	units := c.ParseUnits()
+	if len(units) != 2 || units[0].PartIndex != 0 || units[1].PartIndex != 2 || units[1].Text != "ned\n" ||
+		units[0].SnapshotHash != HashBytes([]byte(c.Spans[0].Parts[0].Text)) || !units[0].ParsesDirectives() {
+		t.Fatalf("parse units %+v", units)
+	}
+	c.Spans[0].Authority, c.Spans[0].DirectiveCapable = AuthorityUser, false
+	if c.ParseUnits()[0].ParsesDirectives() {
+		t.Fatal("unmarked USER unit parses")
 	}
 }
