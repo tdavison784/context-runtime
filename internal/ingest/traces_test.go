@@ -31,6 +31,10 @@ func TestT01_UserPinKeepsUserAuthority(t *testing.T) {
 			if ok, _ := graph.IsCurrent(tx, pin.ID); !ok {
 				t.Errorf("U1 is not a current pin")
 			}
+			// SPEC-1.10: the USER goal is current too, at USER authority.
+			if ok, _ := graph.IsCurrent(tx, goal.ID); !ok || goal.Kind != domain.KindGoal || *goal.GoalStatus != domain.GoalOpen {
+				t.Errorf("USER goal is not a current OPEN goal: %+v", goal)
+			}
 			obs, _ := tx.ObligationsBySource(pin.ID, 10)
 			if len(obs) != 1 || obs[0].SourceAuthority != domain.AuthorityUser {
 				t.Errorf("obligation = %+v", obs)
@@ -86,6 +90,18 @@ func TestT02_ReplacementRetiresOldRequirement(t *testing.T) {
 				if err != nil || stored.Parts[0].Text != old.Parts[0].Text || stored.Authority != domain.AuthorityUser {
 					t.Errorf("%s not retained: %+v %v", old.DirectiveID, stored, err)
 				}
+				// SPEC-1.10: retirement changes neither generation nor
+				// provenance: the old version keeps DERIVED_FROM its transcript.
+				if stored.Generation != old.Generation {
+					t.Errorf("%s generation %s -> %s", old.DirectiveID, old.Generation, stored.Generation)
+				}
+				prov, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDerivedFrom, FromID: old.ID})
+				if err != nil || len(prov) != 1 || prov[0].ToID != r1.Items[0].ID {
+					t.Errorf("%s provenance = %+v, %v", old.DirectiveID, prov, err)
+				}
+			}
+			if p1.Generation != domain.GenerationPinned {
+				t.Errorf("P1 generation = %s", p1.Generation)
 			}
 			if g, _ := tx.Item(g2.ID); *g.GoalStatus != domain.GoalOpen {
 				t.Errorf("replacement goal is not OPEN")
