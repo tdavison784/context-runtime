@@ -109,6 +109,9 @@ func TestTurnOwnershipAndTTL(t *testing.T) {
 	}{
 		{3, 3, 2, true}, {3, 4, 2, true}, {3, 5, 2, false}, {3, 2, 2, false},
 		{0, ^uint64(0), MaxTTLTurns, false}, {^uint64(0) - 1, ^uint64(0), 2, true}, {1, 1, 0, false},
+		// A creation turn of 0 means the item predates turn metadata or no
+		// turn had opened; it is never live by default (M8, R18).
+		{0, 0, 2, false}, {0, 1, 2, false}, {0, 0, MaxTTLTurns, false},
 	} {
 		if got := TTLLive(c.created, c.current, c.n); got != c.want {
 			t.Errorf("TTLLive(%d, %d, %d) = %v", c.created, c.current, c.n, got)

@@ -303,12 +303,14 @@ func (it ContextItem) ValidateTurnOwnership() error {
 }
 
 // TTLLive reports whether an item created at turn created with a TTL of n
-// turns is live at turn current of the same owning task (D18): current >=
-// created and current-created < n. The difference form cannot overflow.
-// TURN scope expires at the next turn regardless of a larger TTL; callers
-// check scope separately.
+// turns is live at turn current of the same owning task (D18): created >= 1,
+// current >= created, and current-created < n. The difference form cannot
+// overflow. A creation turn of 0 (an item that predates turn metadata, or
+// one created before any turn opened) is never live: TTL eligibility is not
+// invented for records that lack their origin (M8, R18). TURN scope expires
+// at the next turn regardless of a larger TTL; callers check scope separately.
 func TTLLive(created, current uint64, n int) bool {
-	return n > 0 && current >= created && current-created < uint64(n)
+	return n > 0 && created > 0 && current >= created && current-created < uint64(n)
 }
 
 // ItemRef names an item for plans, manifests, and relationships.
