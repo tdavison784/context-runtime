@@ -2349,6 +2349,77 @@ fixed.
   `item_task_seq` indexes after upgrade, and the three indexes 0015
   replaced are confirmed gone.
 
+### 31. PR #5 review round 4: SEC-3.1 (retry admission hardened), SEC-3.2 (command-detail redaction) — all landed, recorded here per SPEC-4.2
+
+A fourth external review round found that round 3's admission gate and
+round 1's diagnostic/command narrowing (F6, §26) each had a residual gap;
+both are now fixed. Migration 0016 adds the columns SEC-3.2 needs; ADR 3
+records it in the migration list. No SDD amendment is needed for either:
+FR-ING-006's retry identity is unchanged (SEC-3.1 only narrows *which*
+retries are admitted before validation, not what counts as a match), and
+FR-DIR-005 doesn't specify diagnostic readership, so narrowing where its
+unknown-target diagnostic is readable is this ADR's decision to make, the
+same as F6/SEC-1.3/SEC-2.2 already were.
+
+- **SEC-3.1: an over-limit event can no longer smuggle an oversized
+  payload past the limit gate by reusing a known `EventID` with a
+  different payload (refines §29's SEC-2.1, §13, D17/F3).** §29's
+  admission gate let an over-limit event through as a retry once it found
+  *any* receipt stored under the caller's `EventID` — it never checked
+  that the new event actually matches what that receipt was for. A
+  different principal, or the same principal with a larger payload under
+  the same `EventID`, could therefore still reach `Clone`/`PayloadHash`/the
+  write transaction. `admitKnownRetry` (`internal/ingest/sizes.go`) now
+  requires, from cheap reads alone before anything is copied or hashed:
+  the stored receipt's `Principal` must equal the caller's, and the new
+  event's *shape* — `Kind`, `TurnBoundary`, span count, and per-span
+  authority/part-count/every-byte-length (`sameShape`) — must equal the
+  stored envelope's exactly. Anything else is a bare `ErrEventIDConflict`
+  from the read, never a limit error, so a mismatched retry attempt
+  discloses nothing about why it failed; an exact retry still replays
+  (F3), for the same principal only. Test:
+  `TestKnownEventIDCannotSmuggleOversizePayload_SEC31`
+  (`internal/ingest/fixes_r1_test.go`) — the same principal and a
+  different principal both fail `ErrEventIDConflict` when retrying a known
+  `EventID` with an oversized payload, and neither enters a write
+  transaction.
+- **SEC-3.2: a lifecycle-command record's resolution is redacted outside a
+  narrower detail boundary, instead of the whole record narrowing (refines
+  F6/§26, SEC-1.3/SEC-2.2/§29; supersedes both for the *command record*
+  specifically — see the corrections above).** F6/SEC-2.2 narrowed a
+  command record's own `Access` to the intersection of every cause
+  boundary. That means the record's very *existence* — not only its
+  resolution — became invisible to a reader outside that intersection, so
+  a lifecycle command a source actor issued could vanish entirely for
+  another reader of the same transcript, an inconsistency with every other
+  record type (which is always readable at its transcript boundary; only
+  *some* fields narrow further). `domain.LifecycleCommandRecord` now
+  carries a separate `DetailAccess` field: `Access` stays at the
+  transcript boundary always (`rec.Access = c.transcript.Access`,
+  `internal/ingest/derive.go:351`, never narrowed), and `DetailAccess` is
+  computed per outcome via `causeAccess` — `RESOLVED`/`MISMATCH` narrow to
+  the resolved target's boundary, `AMBIGUOUS` to the intersection of every
+  candidate's boundary, and **`NOT_FOUND` narrows to the *source actor's
+  own* boundary** (`actorOwn`, `internal/ingest/derive.go:356-365`) — a new
+  narrowing this round adds, since a genuinely missing target has no
+  target boundary to narrow to. A reader outside `DetailAccess` calls
+  `LifecycleCommandRecord.Redacted(viewer)` (`internal/domain/diagnostic.go`)
+  and gets the record back with `Resolution: WITHHELD`, no resolved item
+  ID or version, and `DetailAccess` reset to `Access` — the same shape
+  whether the real resolution was hidden or the target never existed, so
+  `WITHHELD` never itself discloses which. `TargetWithheld` is a value
+  ingestion never stores; it exists only as `Redacted`'s output.
+  `internal/store/sqlite/ingestion.go` and `internal/store/memory/read.go`
+  both call `Redacted(f.Viewer)` on every record `Access` already permits,
+  in `LifecycleCommands`. Migration `0016_command_detail_access.sql` adds
+  `rec_command`'s five `f_detail_access_*` columns; a record written
+  before 0016 reads them back NULL, which decodes as the zero
+  `AccessBoundary`, which `Redacted` treats as "no narrowing beyond
+  `Access`" (M8: pre-existing records keep exactly the visibility they had
+  before `DetailAccess` existed, never an invented narrower or wider
+  default). Test: `TestCommandRecordDetailRedaction`
+  (`internal/domain/diagnostic_test.go`).
+
 ## Open questions
 
 Five open questions, all resolved by commander ruling:
