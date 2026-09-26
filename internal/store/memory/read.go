@@ -218,11 +218,8 @@ func (r *readTx) ObligationVersions(obligationID string) ([]domain.ObligationVer
 	if err := r.check(); err != nil {
 		return nil, err
 	}
-	n, ok := r.latest.peek(obligationID)
-	if !ok {
-		return nil, notFound("obligation", obligationID)
-	}
-	out := make([]domain.ObligationVersion, 0, n)
+	n, _ := r.latest.peek(obligationID)
+	var out []domain.ObligationVersion
 	for v := uint64(1); v <= n; v++ {
 		o, _ := r.obligations.get(obligationKey{obligationID, v})
 		out = append(out, o)
@@ -250,9 +247,6 @@ func (r *readTx) Obligations(taskID string) ([]domain.ObligationVersion, error) 
 func (r *readTx) ObligationTransitions(obligationID string) ([]domain.ObligationTransition, error) {
 	if err := r.check(); err != nil {
 		return nil, err
-	}
-	if !r.latest.has(obligationID) {
-		return nil, notFound("obligation", obligationID)
 	}
 	var out []domain.ObligationTransition
 	for _, t := range r.transitions.all() {
@@ -360,9 +354,6 @@ func (r *readTx) Calls(f store.CallFilter) ([]domain.CallRecord, error) {
 func (r *readTx) CallAttempts(callID string) ([]domain.CallAttempt, error) {
 	if err := r.check(); err != nil {
 		return nil, err
-	}
-	if !r.calls.has(callID) {
-		return nil, notFound("call", callID)
 	}
 	var out []domain.CallAttempt
 	for k, a := range r.attempts.all() {

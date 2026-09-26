@@ -476,7 +476,7 @@ func (t *tx) InsertCall(c domain.CallRecord) error {
 	// Later states need attempt evidence that only UpdateCall checks, so a
 	// call enters the ledger PREPARED with no attempts.
 	if c.State != domain.CallPrepared || c.Attempts != 0 {
-		return invalid("call %s: new calls start PREPARED with no attempts", c.CallID)
+		return fmt.Errorf("call %s: new calls start PREPARED with no attempts: %w", c.CallID, domain.ErrInvalidTransition)
 	}
 	if err := t.fresh("call "+c.CallID, c.PreparedSeq); err != nil {
 		return err
