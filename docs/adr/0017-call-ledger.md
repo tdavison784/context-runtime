@@ -197,6 +197,21 @@ distinct from the frozen inference principal.
   (ADR 4, INV-09). `store.Tx.AppendLifecycleEvent`'s doc comment reserves
   `TargetCall` events for `internal/invocation` specifically, so no other
   package can forge a ledger audit entry.
+- **A `TargetCall` event's `Seq` can never be reused by a semantic write
+  (round 2, DUR-2.1).** At commit, the store rejects any transaction where
+  a sequence number allocated for a `TargetCall` lifecycle event is also
+  used by an item, relationship, event record, obligation version or
+  transition, grant, or non-`TargetCall` lifecycle event
+  (`ErrInvalidRecord`). This is the other half of the semantic-write rule
+  above: that rule guarantees a semantic write always carries *some*
+  sequenced record; this one guarantees it can't satisfy that requirement
+  by silently attaching itself to a sequence number the ledger already
+  owns for an unrelated purpose, which would let a semantic change hide
+  from `semanticStale`'s count while technically having "a sequenced
+  record." Calls and attempts (`PreparedSeq`, `SentSeq`, `FinishedSeq`) are
+  explicitly exempt: they are the ledger's own bookkeeping and legitimately
+  share a `TargetCall` event's sequence number by design (every ledger
+  transition already allocates and consumes exactly one).
 - No database transaction is held across transport: `Prepare`, `MarkSent`,
   `RecordOutcome` are separate `store.Update` calls.
 - **Service grant deferred; the owner-match floor is now applied on every
@@ -264,8 +279,8 @@ distinct from the frozen inference principal.
   Rejected for Phase 1: no grant-issuance machinery for dispatch actions
   exists yet, and SYSTEM/HARNESS-plus-owner-match is a sound, conservative
   subset (never permits an unrelated dispatcher) to build the rest of the
-  ledger against — provided it is actually applied everywhere, which
-  SPEC-1.2 found `Prepare` currently is not (see above).
+  ledger against, applied consistently on every ledger path (see
+  `actorInScope` above).
 - **Constraining `next.Attempts` to equal `old.Attempts` (or +1 only on
   `PREPARED→SENT`) instead of trusting the evidence-gating rule alone.**
   Rejected as insufficient on its own (DUR-1.1): evidence-gating checks that
@@ -281,6 +296,16 @@ distinct from the frozen inference principal.
   the three instances found so far, and is the only formulation
   `semanticStale` can rely on going forward without re-auditing every
   store method again for the next one.
+- **Barring every record type from sharing a `TargetCall` event's `Seq`,
+  including calls and attempts (round 2, DUR-2.1's first proposal).**
+  Rejected: `CallRecord.PreparedSeq`/`SentSeq`/`FinishedSeq` legitimately
+  equal the `Seq` of the `TargetCall` `LifecycleEvent` recording that same
+  transition — they are two records the ledger writes atomically for the
+  *same* event, not a semantic write hiding behind a ledger sequence
+  number. Barring them too would make every ordinary ledger transition fail
+  its own commit. The rule only needs to forbid *semantic* records from
+  reusing a `TargetCall` sequence number, which is what `semanticStale`
+  actually depends on.
 
 ## Consequences / compatibility impact
 
@@ -330,7 +355,11 @@ distinct from the frozen inference principal.
   and that only `State`/`OutcomeHash`/`Retryable`/`FinishedSeq`/`FinishedAt`
   may change once an attempt is closed; `TestConformance/CallReservation`
   (`testCallReservation`) covers the one-reserving-call rule, including
-  across separate transactions and that other conversations are unaffected.
+  across separate transactions and that other conversations are unaffected;
+  `TestConformance/LedgerSeqIsolation` is the exact DUR-2.1 regression — a
+  semantic write reusing a `TargetCall` event's `Seq` fails
+  `ErrInvalidRecord`, while a call/attempt legitimately sharing that same
+  `Seq` commits normally.
 - `internal/store/sqlite/durability_test.go:TestCallTransitionsRequireAttemptEvidence`
   reconfirms the evidence-gating rule specifically against the SQLite
   typed-column write path (ADR 3).
@@ -476,3 +505,16 @@ scope, not this ADR's. Also found while verifying this round's tests (not
 a numbered finding): `TestConformance/DirectiveBoundaries` briefly failed
 on `internal/store/sqlite` only — fixed in `a8e895f`, passes on both
 stores now.
+
+**Round 2 review** (PR #2; DUR — Claude Opus, `dur-review-round2.md`, DUR-2.1
+LOW, verdict NO FURTHER WORK NEEDED beyond it). Locking every ledger
+transition to allocate a fresh `Seq` (recorded in this ADR since round 1)
+still left one gap: nothing stopped a semantic write from reusing a
+`TargetCall` event's own `Seq`, which would satisfy the semantic-write
+rule's "carries a sequenced record" test without actually being counted by
+`semanticStale`. Fixed by barring semantic records (not calls/attempts,
+which legitimately share it) from a `TargetCall` `Seq`;
+`TestConformance/LedgerSeqIsolation` locks both halves. SPEC — Codex GPT-6,
+`spec-pr-comment-round2.md`, finding SPEC-2.3 (LOW): reconfirmed this ADR's
+SPEC-1.2 account already read correctly as of the round-1 reconciliation
+pass — no further change needed here.
