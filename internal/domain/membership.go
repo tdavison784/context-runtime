@@ -95,6 +95,8 @@ func (m ExchangeMember) Validate() error {
 type ExchangeAcknowledgment struct {
 	SemanticMeta
 	ExchangeID, ManifestID string
+	ConsumingCallID        string
+	CancellationReason     ExchangeCancellationReason
 	Actor                  Principal
 	Cancelled              bool
 }
@@ -103,8 +105,15 @@ func (a ExchangeAcknowledgment) Validate() error {
 	if err := a.SemanticMeta.Validate(); err != nil {
 		return err
 	}
-	if !semanticID(a.ExchangeID) || !semanticID(a.ManifestID) {
+	if !semanticID(a.ExchangeID) {
 		return invalid("acknowledgment: exchange and manifest required")
+	}
+	if a.Cancelled {
+		if a.ManifestID != "" || a.ConsumingCallID != "" || a.CancellationReason != ExchangeAbandoned && a.CancellationReason != ExchangeExplicitCancellation {
+			return invalid("cancellation: cannot fabricate successful admission")
+		}
+	} else if !semanticID(a.ManifestID) || !semanticID(a.ConsumingCallID) || a.CancellationReason != "" {
+		return invalid("acknowledgment: completed consuming inference required")
 	}
 	if err := semanticActor(a.SessionID, a.Actor); err != nil {
 		return err

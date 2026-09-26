@@ -53,7 +53,7 @@ func (r ObservationRun) Validate() error {
 	if err != nil {
 		return err
 	}
-	if key != r.SubjectKey || r.Ordinal == 0 || !semanticID(r.ExecutionID) || !semanticID(r.TaskID) {
+	if key != r.SubjectKey || r.Ordinal != r.Seq || !semanticID(r.ExecutionID) || !semanticID(r.TaskID) {
 		return invalid("observation run: pre-execution identity required")
 	}
 	if err := r.Binding.Validate(); err != nil {

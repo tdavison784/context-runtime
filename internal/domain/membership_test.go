@@ -35,3 +35,14 @@ func TestFrontierDoesNotOutrunMembership(t *testing.T) {
 		t.Fatal("ordinary summary accepted as checkpoint")
 	}
 }
+
+func TestCancellationCannotFabricateAcknowledgedCoverage(t *testing.T) {
+	a := ExchangeAcknowledgment{SemanticMeta: semanticMeta("ack"), ExchangeID: "x", Actor: Principal{SessionID: "s", Authority: AuthorityHarness}, Cancelled: true, CancellationReason: ExchangeAbandoned}
+	if err := a.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	a.ManifestID = "unseen"
+	if a.Validate() == nil {
+		t.Fatal("cancellation fabricated coverage")
+	}
+}

@@ -23,9 +23,8 @@ func (l RetrievalLease) Validate() error {
 	}
 	return l.Source.Validate()
 }
-func (l RetrievalLease) Live(holder Principal, conversationID, currentTurnID string, taskActive bool, completedInferenceIndex uint64) bool {
-	return l.Validate() == nil && taskActive && l.Holder == holder && l.ConversationID == conversationID && l.TurnID == currentTurnID && completedInferenceIndex >= l.IssuedCompletedInferenceIndex && completedInferenceIndex-l.IssuedCompletedInferenceIndex < l.CallAllowance
-}
+
+// Lease liveness is owned by the single pure internal/policy predicate (W3).
 
 type ExpiryState string
 
