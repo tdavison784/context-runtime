@@ -210,9 +210,11 @@ type Tx interface {
 	// PutConversation creates (expectedRevision 0) or replaces a
 	// conversation under compare-and-swap on Revision.
 	PutConversation(c domain.Conversation, expectedRevision uint64) (domain.Conversation, error)
-	// InsertCall stores a new call record (Revision 1). A call in a
-	// reserving state fails with domain.ErrCallInFlight if the conversation
-	// already has another reserving call (FR-CALL-005).
+	// InsertCall stores a new call record (Revision 1). The call must be
+	// PREPARED with no attempts, so no call can enter the ledger past the
+	// evidence gates of UpdateCall (domain.ErrInvalidTransition otherwise).
+	// It fails with domain.ErrCallInFlight if the conversation already has
+	// another reserving call (FR-CALL-005).
 	InsertCall(c domain.CallRecord) error
 	// UpdateCall replaces a call record under compare-and-swap on Revision.
 	// The state change must satisfy domain.ValidCallTransition (or leave the
