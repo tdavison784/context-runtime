@@ -1353,9 +1353,10 @@ the code at this ADR's final-pass head.
   (`internal/domain/limits_test.go` — D17's 8 MiB/4096-item defaults);
   `TestReplaceDirective_ObligationFanOut` (`internal/graph/fanout_test.go`
   — R9's large-fan-out obligation retirement); `TestConcurrentSupersession`
-  (`internal/ingest/supersession_test.go`, SPEC-3.6: previously uncited —
-  `n` concurrent events each replacing one Working pin serialize into one
-  supersession chain on both stores: exactly one current pin, one
+  (`internal/ingest/supersession_test.go`, SPEC-3.6: previously uncited,
+  SPEC-4.5: "one Working pin" corrected — the fixture uses `## Pinned`) —
+  `n` concurrent events each replacing one `## Pinned` directive serialize
+  into one supersession chain on both stores: exactly one current pin, one
   `SUPERSEDES` edge per replacement, every old version retired exactly
   once); `TestRetryIdentity_SessionScopedRich`
   (`internal/ingest/retry_test.go` — TEST-1.2's session-scoped rich-event
@@ -2051,8 +2052,10 @@ isn't covered), that is called out explicitly rather than left silent.
   `TestEventMetadataBounds_SEC14`/`TestEventMetadataCharsets_SEC14`/
   `TestMaxReferenceLinks` (SEC-1.4); `TestSuppressedListContent`(`_Ingest`)
   (SPEC-1.1); `TestLinkDuplicate_ComparesObligationClaim` (SPEC-1.12);
-  `TestD10_MappedDuplicateNeverCurrent`/`TestDiagnosticsCapTruncates`
-  (TEST-1.1/1.3).
+  `TestD10_MappedDuplicateNeverCurrent` (TEST-1.1);
+  `TestLateLimitRejectionIsAtomic`/`TestDiagnosticsCapTruncates`
+  (TEST-1.3, its two halves — SPEC-4.5: previously credited to
+  `TestDiagnosticsCapTruncates` alone).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
@@ -2234,9 +2237,11 @@ fixed.
   `itemCache` of items it has already decoded and verified this
   transaction (`Item` returns a clone from the cache when present,
   populates it otherwise), so a transcript is decoded once per
-  transaction rather than once per derived item — `UpdateItem` refreshes
-  its entry, and a rolled-back store-method savepoint clears the whole
-  cache, so a cached value is never stale relative to what the
+  transaction rather than once per derived item — `UpdateItem` deletes its
+  entry (**SPEC-4.5: corrected from "refreshes" — `write.go:100`, the next
+  read decodes the updated row instead**), and a rolled-back store-method
+  savepoint clears the whole cache, so a cached value is never stale
+  relative to what the
   transaction itself has written. Store-level item bytes loaded, 500 vs.
   4000 derived items from one transcript: x65.5 before, x8.0 after (linear
   in item count, not transcript size too); end-to-end SQLite ingest of one
@@ -2257,12 +2262,20 @@ fixed.
   in place: a removal (now located by its `Seq`, tracked in `gone
   map[K]map[string]seqRef`) is deleted by binary search, and an addition
   is appended when it is newest (the common case, since additions are
-  usually new) or inserted by binary search otherwise — work proportional
-  to the size of the *change*, never the key's existing entry count.
-  `Update` holds the session's write lock for the whole transaction, so an
-  in-place edit to a committed slice never races a concurrent `View`.
-  Committing one more referrer of a blob that already has 20,001: 347µs
-  before, 4.7µs after. Test: `TestOrderedIndexCommitMerges`
+  usually new) or inserted by binary search otherwise. **(SPEC-4.5:
+  corrected)** This is not unconditionally "never proportional to the
+  key's existing entry count" — `slices.Delete`/`slices.Insert`
+  (`index.go:209,224`) still move every entry after the affected position,
+  so a removal, or an addition that is not the newest, costs work
+  proportional to how much of the list sits after it. It is the common
+  case this fixes: an addition is (almost) always newest in practice
+  (append-only ingestion), and this no longer costs a full-list rebuild
+  regardless of position, which is what made *every* commit proportional
+  to the key's size before. `Update` holds the session's write lock for
+  the whole transaction, so an in-place edit to a committed slice never
+  races a concurrent `View`. Committing one more referrer (append case) of
+  a blob that already has 20,001: 347µs before, 4.7µs after. Test:
+  `TestOrderedIndexCommitMerges`
   (`internal/store/memory/bounded_test.go`).
 - **SPEC-3.1 item 4: SQLite lookup cursors now seek inside the index
   search instead of sorting a union (refines §26, F1).** A lookup's owner
@@ -2322,10 +2335,14 @@ fixed.
   the second review found (refines §29).** Four gaps, each now caught by a
   test that fails on the specific mutation the review reproduced: (1)
   `TestKeyedReadsDoNotScan` (memory) is extended past `CurrentVersions`/
-  `ObligationsBySource` to also cover per-item relationship/item reads,
-  and now also fails if `Relationships` is keyed by type alone (SPEC-3.1
-  item 5), not only by a full scan — it counts both the typed index's
-  yields and the by-type index scan. (2)
+  `ObligationsBySource` to also cover per-item `Relationships`/`Items`
+  reads, keyed or full-scan (**SPEC-4.5: corrected — its fixture carries
+  no relationships, so it cannot also guard the type-keying property**);
+  `TestRelationshipsReadTheirTypedKey` (`internal/store/memory/scan_test.go`)
+  is the guard for SPEC-3.1 item 5 specifically: it counts both the typed
+  index's own yields and its underlying scan, so serving a typed read from
+  an endpoint-only or type-only index — either would return the right
+  answer while walking the wrong amount of work — fails it. (2)
   `TestSupersessionCycleCheckIsLocal` now measures the cycle check *from
   outside* the function it tests: every `*transaction` records `rowsRead`
   across every multi-row query the transaction issues (a `countedRows`

@@ -489,9 +489,10 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all fifteen migrations replay on a fresh database (SPEC-3.6:
-    corrected from a stale "fourteen" once 0015 landed; SPEC-2.6 had
-    already corrected that from an earlier, stale "eleven", itself
+    after all seventeen migrations replay on a fresh database (SPEC-4.5:
+    corrected from a stale "fifteen" once 0016 and 0017 landed; SPEC-3.6
+    had already corrected that from a stale "fourteen" once 0015 landed,
+    itself correcting an earlier stale "eleven", itself
     corrected from a
     stale "seven"), still matches every Go
     struct field exactly, locking the no-opaque-copy design above against
