@@ -1,6 +1,6 @@
 # 17. Call ledger state machine
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
 ## Context
@@ -452,12 +452,18 @@ contract (`storetest.Run` extended with new cases; both
 
 ## Open questions
 
+### Resolved at acceptance (2026-09-26)
+
 - Design of the Phase 5 `ActionDispatchCall` service grant: how a
   narrower-scoped dispatcher is authorized to drive a call for a principal
   it doesn't directly own, without weakening the current owner-match floor.
+  **Decision:** the `ActionDispatchCall` service grant is designed in
+  Phase 5 and recorded as an amendment to this ADR before Phase 5 exits.
 - Whether `CallAttempt.ProviderRequestID` is sufficient for FR-CALL-004's
   reconciliation mechanism, or reconciliation needs more provider-specific
   fields decided in ADR 9.
+  **Decision:** reconciliation fields beyond `ProviderRequestID` are
+  decided with ADR 9 (Phase 5).
 
 ## Review
 

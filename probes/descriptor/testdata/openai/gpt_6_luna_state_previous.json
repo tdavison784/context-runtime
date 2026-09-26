@@ -1,0 +1,137 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_state_previous",
+  "request": {
+    "input": [
+      {
+        "content": "Repeat the word.",
+        "content_length": 16,
+        "role": "user"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-luna",
+    "previous_response_id": "[response id]",
+    "reasoning": {
+      "effort": "medium"
+    },
+    "store": true
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790427293,
+    "created_at": 1790427292,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "52af186134492f6db4ec1d05cd55013316395e5b4fbd379131d4b8840fc2aea1"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 160,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1316,
+          "sha256": "12100dab72df4d0786b7f71c6851b2ab9248642162870207a8f140c419018593"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "91bc63f9a3984122f2b06a1417ef7bdb7772608c7225fc8c7ab04cd578f94986"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "cobalt",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "f372572da62cb832f76d823e8c127d66dd36931cb864ad92712ba8bb98b42be5"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": {
+      "length": 55,
+      "sha256": "aa8f022ad65c2607d47c18d2ba7d54fed4c2a57f136d1a11d34b6e20725765d5"
+    },
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": true,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 25,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 34,
+      "output_tokens_details": {
+        "reasoning_tokens": 26
+      },
+      "total_tokens": 59
+    },
+    "user": "[redacted]"
+  }
+}

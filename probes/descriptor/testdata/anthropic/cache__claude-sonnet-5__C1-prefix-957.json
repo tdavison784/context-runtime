@@ -1,0 +1,66 @@
+{
+  "betas": [],
+  "model": "claude-sonnet-5",
+  "probe": "cache/claude-sonnet-5/C1-prefix-957",
+  "question": "C1 system prefix target ~957 tokens",
+  "request": {
+    "max_tokens": 64,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Reply with the single word OK.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "effort": "low"
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "Garden notebook 20260926T130313-957.\nGarden note 0000: row 0 has 0 tulips and 0 daisies in bed A.\nGarden note 0001: row …[len=1940 sha256=0cec323e33fc3fc4]",
+        "type": "text"
+      }
+    ]
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "text": "OK",
+        "type": "text"
+      }
+    ],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "model": "claude-sonnet-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 990,
+      "output_tokens": 4,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}

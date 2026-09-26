@@ -1,0 +1,146 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_k2_restore",
+  "request": {
+    "input": [
+      {
+        "role": "user",
+        "type": "message"
+      },
+      {
+        "encrypted_content": {
+          "length": 1144,
+          "sha256": "526b0c805ce70e46c3dd379b53c81b68f1b4f6d252f1cbbe155b9fbba72b371c"
+        },
+        "type": "compaction"
+      },
+      {
+        "content": "Mandatory restoration: answer with the original marker word.",
+        "content_length": 60,
+        "role": "developer"
+      },
+      {
+        "content": "What is the marker?",
+        "content_length": 19,
+        "role": "user"
+      }
+    ],
+    "max_output_tokens": 80,
+    "model": "gpt-6-luna",
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790427096,
+    "created_at": 1790427095,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "6abd1992c1a4bdd3f0f25f7600efde73dd6b7c9ed8b49f8bf0a5bbdee69e8943"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 80,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1316,
+          "sha256": "15b12d7ee1701954813f5c7f35a00d8f11b07d50f49b77fa2e0d5a309f8d6333"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "6f3b67044950a486d14e355cedefb1a71410030ffb775fe62c4ce052861ef5fe"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "cobalt",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "1a06e26b363ce2b4b2a0d2cab5b510b12cb44d0826c29454dbb97ed9aaac4168"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 82,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 27,
+      "output_tokens_details": {
+        "reasoning_tokens": 19
+      },
+      "total_tokens": 109
+    },
+    "user": "[redacted]"
+  }
+}

@@ -1,0 +1,186 @@
+{
+  "betas": [
+    "thinking-binding-controls-2026-08-01"
+  ],
+  "model": "claude-opus-5-5",
+  "probe": "reasoning/claude-opus-5-5/edit-DROP_LEADING_REASONING-dropblock",
+  "question": "DROP_LEADING_REASONING remove oldest thinking only",
+  "request": {
+    "max_tokens": 4096,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "First work out the key: it is the lowercase English name of the Greek letter whose 1-based position in the Greek alphabet equals the number of primes below 20. Then call the lookup tool with that key. Afterwards compute (value * 17 + 3) mod 23, showing the arithmetic in one line.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Primes below 20: 2, 3, 5, 7, 11, 13, 17, 19. That makes 8, and the 8th Greek letter is theta.",
+            "type": "text"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01Lt6eBP83usdhdJMSzuGJzc",
+            "input": {
+              "key": "theta"
+            },
+            "name": "lookup",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "41",
+                "type": "text"
+              }
+            ],
+            "is_error": false,
+            "tool_use_id": "toolu_01Lt6eBP83usdhdJMSzuGJzc",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "signature": "CAQShAUKEAgSGAI4…[len=868 sha256=1f7e35a47941bd3e]",
+            "thinking": "Computing 41*17+3, getting 700, then finding 700 mod 23 gives remainder 10.\n\n",
+            "type": "thinking"
+          },
+          {
+            "text": "The key is \"theta\" and its value is 41.\n\n41 × 17 + 3 = 697 + 3 = 700; 700 mod 23 = 700 − 690 = **10**",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Now look up key 'beta' and apply the same formula.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01TqHTGNCZG1QnPF3iX2SQLH",
+            "input": {
+              "key": "beta"
+            },
+            "name": "lookup",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "7",
+                "type": "text"
+              }
+            ],
+            "is_error": false,
+            "tool_use_id": "toolu_01TqHTGNCZG1QnPF3iX2SQLH",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-opus-5-5",
+    "output_config": {
+      "effort": "medium"
+    },
+    "system": [
+      {
+        "text": "You are a terse probe assistant. When asked for a key's value, call the lookup tool; never guess values.",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "block_binding": {
+        "prefix_mismatch_behavior": "drop_block"
+      },
+      "display": "summarized",
+      "type": "adaptive"
+    },
+    "tools": [
+      {
+        "description": "Look up the integer value stored under a key.",
+        "input_schema": {
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "lookup"
+      }
+    ]
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "signature": "CAQS/wQKEAgSGAI4…[len=864 sha256=fbf89210e5012498]",
+        "thinking": "Let me check: 7 times 17 is 119, plus 3 is 122, and subtracting 115 gives 7.\n\n",
+        "type": "thinking"
+      },
+      {
+        "text": "The value for \"beta\" is 7.\n\n7 × 17 + 3 = 119 + 3 = 122; 122 mod 23 = 122 − 115 = **7**",
+        "type": "text"
+      }
+    ],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "input_transformations": [],
+    "model": "claude-opus-5-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 773,
+      "output_tokens": 75,
+      "output_tokens_details": {
+        "thinking_tokens": 19
+      },
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}
