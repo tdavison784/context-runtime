@@ -68,7 +68,8 @@ func TestOrderedIndexCommitMerges(t *testing.T) {
 		t.Errorf("key holds %d entries, want 20001", n)
 	}
 	var got []seqRef
-	for r := range newOrderedIndex(base, false).after("k", seqRef{4, "id"}) {
+	ro := newOrderedIndex(base, false)
+	for r := range ro.after("k", seqRef{4, "id"}) {
 		got = append(got, r)
 		if len(got) == 2 {
 			break

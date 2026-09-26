@@ -95,16 +95,17 @@ func (t *tx) retireLookups(id string, duplicate bool) {
 	if !ok {
 		return
 	}
-	t.canonical.remove(canonicalKeyOf(it), id)
+	ref := seqRef{it.Seq, id}
+	t.canonical.remove(canonicalKeyOf(it), ref)
 	if it.Section == domain.SectionWorking {
-		t.working.remove(workingKey{it.TaskID, it.Authority, it.Access}, id)
+		t.working.remove(workingKey{it.TaskID, it.Authority, it.Access}, ref)
 	}
 	if k, ok := sourceKeyOf(it); ok {
-		t.sources.remove(k, id)
+		t.sources.remove(k, ref)
 	}
 	if duplicate {
 		for _, k := range blobKeysOf(it) {
-			t.blobOwners.remove(k, id)
+			t.blobOwners.remove(k, ref)
 		}
 	}
 }
