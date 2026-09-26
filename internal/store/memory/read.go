@@ -40,6 +40,9 @@ type readTx struct {
 	convs        table[string, domain.Conversation]
 	calls        table[string, domain.CallRecord]
 	attempts     table[attemptKey, domain.CallAttempt]
+	receipts     table[string, domain.IngestReceipt]
+	envelopes    table[string, domain.EventEnvelope]
+	references   table[string, domain.UnresolvedReference]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -67,6 +70,9 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		convs:        newTable(st.convs, writable, same[domain.Conversation]),
 		calls:        newTable(st.calls, writable, domain.CallRecord.Clone),
 		attempts:     newTable(st.attempts, writable, same[domain.CallAttempt]),
+		receipts:     newTable(st.receipts, writable, domain.IngestReceipt.Clone),
+		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
+		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
 	}
 }
 
@@ -191,29 +197,56 @@ func (r *readTx) Blob(hash string) (domain.Blob, error) {
 	return b, nil
 }
 
-func (r *readTx) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
+func (r *readTx) CurrentVersion(key domain.CurrentKey) (string, error) {
 	if err := r.check(); err != nil {
 		return "", err
 	}
-	id, ok := r.directives.get(directiveKey{taskID, directiveID, boundary})
-	if !ok {
-		return "", notFound("directive", taskID+"/"+directiveID)
+	if err := key.Validate(); err != nil {
+		return "", err
 	}
-	return id, nil
+	return r.current(key.TaskID, key.ID, key.Access, key.Namespace)
 }
 
-func (r *readTx) CurrentDirectives(taskID, directiveID string) ([]string, error) {
+func (r *readTx) CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error) {
 	if err := r.check(); err != nil {
 		return nil, err
 	}
+	if !ns.Valid() {
+		return nil, invalid("current versions: invalid namespace %q", ns)
+	}
 	var out []string
-	for k, id := range r.directives.all() {
-		if k.taskID == taskID && k.directiveID == directiveID {
-			out = append(out, id)
+	for k, itemID := range r.directives.all() {
+		if k.taskID == taskID && k.directiveID == id && k.namespace == ns {
+			out = append(out, itemID)
 		}
 	}
 	slices.Sort(out)
 	return out, nil
+}
+
+func (r *readTx) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
+	if err := r.check(); err != nil {
+		return "", err
+	}
+	id, err := r.current(taskID, directiveID, boundary, domain.NamespaceDirective)
+	if errors.Is(err, domain.ErrNotFound) {
+		return r.current(taskID, directiveID, boundary, domain.NamespaceAgentKey)
+	}
+	return id, err
+}
+
+func (r *readTx) CurrentDirectives(taskID, directiveID string) ([]string, error) {
+	return currentDirectives(r, taskID, directiveID)
+}
+
+// current looks up one pointer. A boundary in another session names nothing
+// here.
+func (r *readTx) current(taskID, id string, boundary domain.AccessBoundary, ns domain.DirectiveNamespace) (string, error) {
+	itemID, ok := r.directives.get(directiveKey{taskID, id, boundary, ns})
+	if !ok || boundary.SessionID != r.sessionID {
+		return "", notFound("current version", taskID+"/"+id)
+	}
+	return itemID, nil
 }
 
 func (r *readTx) Obligation(obligationID string) (domain.ObligationVersion, error) {
@@ -254,6 +287,29 @@ func (r *readTx) Obligations(taskID string) ([]domain.ObligationVersion, error) 
 	}
 	slices.SortFunc(out, func(a, b domain.ObligationVersion) int {
 		return cmp.Compare(a.ObligationID, b.ObligationID)
+	})
+	return out, nil
+}
+
+func (r *readTx) ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		return nil, invalid("obligations by source: limit must be positive")
+	}
+	out := []domain.ObligationVersion{}
+	for _, o := range r.obligations.all() {
+		if o.SourceItemID != sourceItemID {
+			continue
+		}
+		if len(out) == limit {
+			return nil, store.ErrLimitExceeded
+		}
+		out = append(out, o.Clone())
+	}
+	slices.SortFunc(out, func(a, b domain.ObligationVersion) int {
+		return cmp.Or(cmp.Compare(a.ObligationID, b.ObligationID), cmp.Compare(a.Version, b.Version))
 	})
 	return out, nil
 }
@@ -376,5 +432,127 @@ func (r *readTx) CallAttempts(callID string) ([]domain.CallAttempt, error) {
 		}
 	}
 	slices.SortFunc(out, func(a, b domain.CallAttempt) int { return cmp.Compare(a.Attempt, b.Attempt) })
+	return out, nil
+}
+
+// currentDirectives is the deprecated namespace-agnostic view: the pointers
+// of both namespaces, ordered by item ID.
+func currentDirectives(r store.ReadTx, taskID, directiveID string) ([]string, error) {
+	var out []string
+	for _, ns := range []domain.DirectiveNamespace{domain.NamespaceDirective, domain.NamespaceAgentKey} {
+		ids, err := r.CurrentVersions(taskID, ns, directiveID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ids...)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+func (r *readTx) Receipt(occurrenceID string) (domain.IngestReceipt, error) {
+	if err := r.check(); err != nil {
+		return domain.IngestReceipt{}, err
+	}
+	v, ok := r.receipts.get(occurrenceID)
+	if !ok {
+		return domain.IngestReceipt{}, notFound("receipt", occurrenceID)
+	}
+	return v, nil
+}
+
+func (r *readTx) Envelope(occurrenceID string) (domain.EventEnvelope, error) {
+	if err := r.check(); err != nil {
+		return domain.EventEnvelope{}, err
+	}
+	v, ok := r.envelopes.get(occurrenceID)
+	if !ok {
+		return domain.EventEnvelope{}, notFound("envelope", occurrenceID)
+	}
+	return v, nil
+}
+
+// visibleReceipts returns the receipts an occurrence filter selects, ordered
+// by Seq, after validating the viewer.
+func (r *readTx) visibleReceipts(viewer domain.Principal, occurrenceID string) ([]domain.IngestReceipt, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if err := viewer.Validate(); err != nil {
+		return nil, err
+	}
+	var out []domain.IngestReceipt
+	for occ, rec := range r.receipts.all() {
+		if occurrenceID == "" || occ == occurrenceID {
+			out = append(out, rec)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.IngestReceipt) int { return cmp.Compare(a.Seq, b.Seq) })
+	return out, nil
+}
+
+func (r *readTx) Diagnostics(f store.DiagnosticFilter) ([]domain.DiagnosticRecord, error) {
+	recs, err := r.visibleReceipts(f.Viewer, f.OccurrenceID)
+	if err != nil {
+		return nil, err
+	}
+	out := []domain.DiagnosticRecord{}
+	for _, rec := range recs {
+		for _, d := range rec.Diagnostics {
+			if d.VisibleTo(f.Viewer) {
+				out = append(out, d)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *readTx) LifecycleCommands(f store.CommandFilter) ([]domain.LifecycleCommandRecord, error) {
+	recs, err := r.visibleReceipts(f.Viewer, f.OccurrenceID)
+	if err != nil {
+		return nil, err
+	}
+	out := []domain.LifecycleCommandRecord{}
+	for _, rec := range recs {
+		for _, c := range rec.Lifecycle {
+			if c.Access.Permits(f.Viewer) {
+				out = append(out, c)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *readTx) UnresolvedReference(id string) (domain.UnresolvedReference, error) {
+	if err := r.check(); err != nil {
+		return domain.UnresolvedReference{}, err
+	}
+	v, ok := r.references.get(id)
+	if !ok {
+		return domain.UnresolvedReference{}, notFound("unresolved reference", id)
+	}
+	return v, nil
+}
+
+func (r *readTx) UnresolvedReferences(f store.ReferenceFilter) ([]domain.UnresolvedReference, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if f.Limit <= 0 {
+		return nil, invalid("unresolved references: limit must be positive")
+	}
+	out := []domain.UnresolvedReference{}
+	for _, v := range r.references.all() {
+		if f.LocatorKey != "" && v.LocatorKey != f.LocatorKey || f.RuleVersion != "" && v.RuleVersion != f.RuleVersion {
+			continue
+		}
+		if len(out) == f.Limit {
+			return nil, store.ErrLimitExceeded
+		}
+		out = append(out, v)
+	}
+	slices.SortFunc(out, func(a, b domain.UnresolvedReference) int {
+		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
+	})
 	return out, nil
 }

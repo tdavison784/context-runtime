@@ -32,7 +32,8 @@ var _ store.Tx = (*tx)(nil)
 func (t *tx) commit(st *state) bool {
 	wrote := t.items.dirty() || t.rels.dirty() || t.events.dirty() || t.blobs.dirty() ||
 		t.directives.dirty() || t.obligations.dirty() || t.transitions.dirty() || t.grants.dirty() ||
-		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty()
+		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty() ||
+		t.receipts.dirty() || t.envelopes.dirty() || t.references.dirty()
 	t.items.commit()
 	t.rels.commit()
 	t.supersedes.commit()
@@ -52,6 +53,9 @@ func (t *tx) commit(st *state) bool {
 	t.convs.commit()
 	t.calls.commit()
 	t.attempts.commit()
+	t.receipts.commit()
+	t.envelopes.commit()
+	t.references.commit()
 	st.lastSeq = t.lastSeq
 	return wrote
 }
@@ -216,6 +220,26 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	return nil
 }
 
+func (t *tx) SetCurrentVersion(itemID string) error {
+	if err := t.check(); err != nil {
+		return err
+	}
+	it, ok := t.items.peek(itemID)
+	if !ok {
+		return notFound("item", itemID)
+	}
+	key, ok := it.CurrentKey()
+	if !ok {
+		return invalid("item %s has no directive ID", itemID)
+	}
+	if err := key.Validate(); err != nil {
+		return fmt.Errorf("item %s: %w", itemID, err)
+	}
+	t.directives.put(directiveKey{key.TaskID, key.ID, key.Access, key.Namespace}, itemID)
+	t.markSemantic()
+	return nil
+}
+
 func (t *tx) SetCurrentDirective(taskID, directiveID, itemID string) error {
 	if err := t.check(); err != nil {
 		return err
@@ -230,9 +254,7 @@ func (t *tx) SetCurrentDirective(taskID, directiveID, itemID string) error {
 	if it.DirectiveID != directiveID || it.TaskID != taskID {
 		return invalid("item %s is not directive %s of task %s", itemID, directiveID, taskID)
 	}
-	t.directives.put(directiveKey{taskID, directiveID, it.Access}, itemID)
-	t.markSemantic()
-	return nil
+	return t.SetCurrentVersion(itemID)
 }
 
 func (t *tx) InsertBlob(b domain.Blob) error {
@@ -312,6 +334,36 @@ func (t *tx) UpdateObligationVersion(o domain.ObligationVersion, expectedRevisio
 	t.obligations.put(key, next)
 	t.markSemantic()
 	return next, nil
+}
+
+func (t *tx) RetireObligationVersion(obligationID string, version, expectedRevision uint64, event domain.LifecycleEvent) (domain.ObligationVersion, error) {
+	if err := t.check(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	key := obligationKey{obligationID, version}
+	cur, ok := t.obligations.peek(key)
+	if !ok {
+		return domain.ObligationVersion{}, notFound("obligation", fmt.Sprintf("%s/%d", obligationID, version))
+	}
+	if cur.Revision != expectedRevision {
+		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: revision %d, expected %d: %w",
+			obligationID, version, cur.Revision, expectedRevision, domain.ErrVersionConflict)
+	}
+	if !cur.Current {
+		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d is already retired: %w", obligationID, version, domain.ErrInvalidTransition)
+	}
+	if err := t.checkTargetEvent(event, domain.TargetObligation, obligationID); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	next := cur.Clone()
+	next.Current, next.RetiredSeq, next.Revision = false, event.Seq, expectedRevision+1
+	if err := next.Validate(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	t.obligations.put(key, next)
+	t.lifecycle.put(event.ID, event)
+	t.markSequenced()
+	return next.Clone(), nil
 }
 
 // sameObligation compares versions treating nil and empty evidence alike.
@@ -709,6 +761,12 @@ func (t *tx) checkLedgerSeqs() error {
 	for _, g := range t.grants.over {
 		seqs = append(seqs, g.IssuedSeq)
 	}
+	for _, r := range t.receipts.over {
+		seqs = append(seqs, r.Seq)
+	}
+	for _, r := range t.references.over {
+		seqs = append(seqs, r.Seq)
+	}
 	for _, e := range t.lifecycle.over {
 		if e.TargetKind != domain.TargetCall {
 			seqs = append(seqs, e.Seq)
@@ -719,5 +777,79 @@ func (t *tx) checkLedgerSeqs() error {
 			return invalid("sequence %d is used by both a TargetCall event and a semantic record", seq)
 		}
 	}
+	return nil
+}
+
+func (t *tx) InsertIngestion(env domain.EventEnvelope, r domain.IngestReceipt) error {
+	if err := t.check(); err != nil {
+		return err
+	}
+	if err := store.ValidateIngestion(t.sessionID, env, r); err != nil {
+		return err
+	}
+	if old, ok := t.receipts.peek(r.OccurrenceID); ok {
+		if old.PayloadHash != r.PayloadHash {
+			return fmt.Errorf("occurrence %s: %w", r.OccurrenceID, domain.ErrEventIDConflict)
+		}
+		return fmt.Errorf("receipt %s: %w", r.OccurrenceID, domain.ErrImmutable)
+	}
+	if err := t.fresh("receipt "+r.OccurrenceID, r.Seq); err != nil {
+		return err
+	}
+	for _, snap := range r.Items {
+		stored, ok := t.items.peek(snap.ID)
+		if !ok || !t.Allocated(snap.Seq) || !store.ReceiptItemMatches(stored, snap) {
+			return invalid("receipt %s: item %s is not the item this transaction stored", r.OccurrenceID, snap.ID)
+		}
+	}
+	for _, links := range [][]domain.IngestLink{r.Duplicates, r.Replacements} {
+		for _, l := range links {
+			if !t.items.has(l.TargetID) {
+				return invalid("receipt %s: link target %s is not stored", r.OccurrenceID, l.TargetID)
+			}
+		}
+	}
+	for _, c := range r.Lifecycle {
+		if c.Resolution != domain.TargetResolved {
+			continue
+		}
+		if it, ok := t.items.peek(c.ResolvedItemID); !ok || c.ResolvedVersion > it.Version {
+			return invalid("receipt %s: resolved command target is not stored", r.OccurrenceID)
+		}
+	}
+	for _, span := range env.Event.Spans {
+		for _, p := range span.Parts {
+			if p.BlobHash == "" {
+				continue
+			}
+			if b, ok := t.blobs.peek(p.BlobHash); !ok || uint64(len(b.Data)) != p.BlobSize {
+				return fmt.Errorf("envelope references blob %s, which is not stored: %w", p.BlobHash, domain.ErrIntegrity)
+			}
+		}
+	}
+	t.receipts.put(r.OccurrenceID, r)
+	t.envelopes.put(env.OccurrenceID, env)
+	t.markSequenced()
+	return nil
+}
+
+func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
+	if err := t.own(r.SessionID); err != nil {
+		return err
+	}
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if err := t.fresh("unresolved reference "+r.ID, r.Seq); err != nil {
+		return err
+	}
+	if !t.items.has(r.ItemID) {
+		return invalid("unresolved reference %s: declaring item %s is not stored", r.ID, r.ItemID)
+	}
+	if t.references.has(r.ID) {
+		return fmt.Errorf("unresolved reference %s: %w", r.ID, domain.ErrImmutable)
+	}
+	t.references.put(r.ID, r)
+	t.markSequenced()
 	return nil
 }

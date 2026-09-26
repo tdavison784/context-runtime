@@ -44,3 +44,16 @@ func TestConformance(t *testing.T) {
 		return s
 	})
 }
+
+func TestDurableConformance(t *testing.T) {
+	storetest.RunDurable(t, func(t *testing.T) storetest.Opener {
+		path := filepath.Join(t.TempDir(), "state.db")
+		return func(t *testing.T) store.Store {
+			s, err := Open(context.Background(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return s
+		}
+	})
+}
