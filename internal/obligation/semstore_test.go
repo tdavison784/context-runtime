@@ -510,3 +510,25 @@ func (b *semBackend) PutResourcePathState(s domain.ResourcePathState, expected u
 	}
 	return s, nil
 }
+
+func (b *semBackend) SetObligationMaterialization(ref domain.ObligationRef, disabled bool, expected uint64, ev domain.LifecycleEvent) (domain.ObligationVersion, error) {
+	var out domain.ObligationVersion
+	err := b.write(nil, func() error {
+		o, err := b.ExactObligation(ref)
+		if err != nil {
+			return err
+		}
+		if ev.TargetKind != domain.TargetObligation || ev.TargetID != ref.ObligationID || !b.tx.Allocated(ev.Seq) {
+			return domain.ErrInvalidRecord
+		}
+		o.MaterializationDisabled = disabled
+		cache := b.st.caches[ref]
+		o.CurrentProofID, o.CurrentAssertionID = "", ""
+		if out, err = b.tx.UpdateObligationVersion(o, expected); err != nil {
+			return err
+		}
+		out.CurrentProofID, out.CurrentAssertionID = cache.proof, cache.assertion
+		return b.tx.AppendLifecycleEvent(ev)
+	})
+	return out, err
+}
