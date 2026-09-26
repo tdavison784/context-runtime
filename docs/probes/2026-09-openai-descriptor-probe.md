@@ -72,19 +72,29 @@ Identical for `gpt_6_luna_r3_corrupt.json`. Verdict: **REJECTED**, confirming th
 reasoning blocks are integrity-checked server-side (a `REWRITE` of the reasoning block itself is
 always rejected, never silently dropped).
 
-**R4 — edit an earlier message while replaying later reasoning unchanged: ACCEPTED.**
+**R4 — edit an earlier message while replaying later reasoning unchanged: accepted by the
+provider, but LOSSY at the runtime boundary (SEC-1.2 correction).**
 `gpt_6_astra_r4_edit_earlier.json` rewrites the first user message's `content` (asking for lookup
 code B instead of A) while leaving the tool-turn `reasoning`/`function_call`/`function_call_output`
 items byte-for-byte unchanged, and still succeeds:
 `usage: {input_tokens: 90, output_tokens: 23, reasoning_tokens: 15}`, answer `"cobalt"` (the value
-fixed by the unedited tool result, not a value implied by the edited instruction — the model is not
-observed to notice the edit; it just reads the tool result back). Verdict: **SAFE** — the API's
-reasoning-item integrity check is not bound to the preceding conversation text, only to the
-reasoning item's own encrypted content (contrast with R3, where corrupting that same field is
-rejected). This means a `REWRITE` of content *before* an open reasoning/tool round is accepted by
-this provider as long as the reasoning items themselves are untouched — narrower than FR-CAP-002's
-default assumption that any REWRITE drops trailing reasoning; the descriptor should record this as
-model-specific rather than assume it generalizes.
+fixed by the unedited tool result, not a value implied by the edited instruction). The API's
+reasoning-item integrity check is confirmed to bind only to the reasoning item's own encrypted
+content, not to the preceding conversation text (contrast with R3, where corrupting that same
+field is rejected) — that half of the observation stands. But accepting the request is not the
+same as the edit being safe: the model followed reasoning computed for the *pre-edit* history
+(code A) and produced the pre-edit answer, silently ignoring the rewritten instruction (code B)
+that the runtime meant to take effect. The reasoning item is opaque/encrypted, so the runtime
+cannot itself detect that it now describes stale history. Verdict: **REWRITE = LOSSY, and the
+provider offers no safety net for it** — the adapter must strip any reasoning items dated at or
+after the rewritten content before dispatch itself, matching the Anthropic doc's identical
+treatment of the same observation shape on Sonnet 5 (`BoundToPriorHistory: false` →
+"the adapter must strip it itself; the provider offers no safety net", not SAFE). An opaque
+reasoning item's effective coverage includes every item before it in history; ADR 6's pre-dispatch
+eligibility recheck must treat it as depending on that whole prefix and drop it whenever any item
+in that prefix is rewritten or loses eligibility, the same as it would for a REWRITE anywhere else
+under FR-CAP-002's default. This is the FR-CAP-002 default, not a provider-specific exception —
+the earlier "SAFE, narrower than the framework default" framing is withdrawn.
 
 **R5 — reasoning from turns before the last user message: replay is optional, not required.**
 Both variants append a new final user turn ("What was the lookup word? One word.") after the full
@@ -299,7 +309,7 @@ provenance.
 | `Edits[APPEND_SYSTEM]` | accepted (O); authority/effectiveness UNVERIFIED | OBSERVED that a `developer`-role message inserted mid-history before the next inference is accepted (no error); **NOT DETERMINED** whether it carries any authority — K2's fixture cannot separate that from the model reading the already-echoed plaintext user turn (see K2, SEC-1.1) |
 | `Edits[DROP_LEADING_REASONING]` | LOSSY | OBSERVED (R5-drop: accepted, fresh reasoning generated instead of the original) |
 | `Edits[DROP_ALL_REASONING]` | LOSSY | OBSERVED (R2: accepted, fresh reasoning generated instead of the original) |
-| `Edits[REWRITE]` | **SAFE when the rewrite doesn't touch the reasoning item itself** (narrower than the general REWRITE-drops-reasoning default) | OBSERVED (R4); flagged for ADR 12 as a provider-specific exception worth encoding explicitly rather than falling back to the framework default, since it is more permissive, not less |
+| `Edits[REWRITE]` | **LOSSY** (FR-CAP-002 default; no per-profile override) | OBSERVED (R4): the provider accepts the request but replays reasoning bound to the pre-edit history and produces the pre-edit answer; the adapter must strip reasoning dated at or after the rewritten content itself, since the provider offers no safety net (SEC-1.2 correction, withdraws the earlier SAFE override) |
 | `Edits[ADD_DEFERRED_TOOL]` | — | **NOT DETERMINED** — no probe added a tool mid-conversation after an initial reasoning turn without one |
 | `Edits[MOVE_CACHE_MARKERS]` | — | **NOT DETERMINED / likely N/A** — no manual cache-marker/breakpoint mechanism was found in this API surface to move |
 | `NativeCompaction` | true | OBSERVED (both `/responses/compact` and `context_management` compaction) |
@@ -314,14 +324,17 @@ provenance.
 **Recommendation for the adapter/strategy layer:** use `/responses/compact` (not automatic
 `context_management`) as the FR-MAT-005 checkpoint primitive for `gpt-6-astra`/`gpt-6-luna` until
 the automatic path is verified against a realistic mandatory-context set; treat `REWRITE` of
-content preceding an open reasoning/tool round as SAFE specifically for this profile (do not fall
-back to a REJECTED/LOSSY default that would force unnecessary resets); and continue to bracket
-tighter on the minimum cache prefix length before shipping a hard-coded threshold into
-`CachingRules`.
+content preceding an open reasoning/tool round as **LOSSY** per the FR-CAP-002 default — the
+adapter itself must strip any reasoning item whose coverage includes rewritten history, since this
+provider gives no rejection or invalidation signal when that reasoning is stale (SEC-1.2); do not
+place mandatory/restoration content in a mid-conversation `developer` message until its authority
+is verified (SEC-1.1); and continue to bracket tighter on the minimum cache prefix length before
+shipping a hard-coded threshold into `CachingRules`.
 
-## Commander rulings (2026-09-26)
+## Commander rulings (2026-09-26, amended in PR #4 round 1)
 
-Rulings on the three open questions above, binding for ADR 12 and this descriptor:
+Rulings on the original three open questions, binding for ADR 12 and this descriptor. Ruling 3 is
+amended and ruling 4 added below following the PR #4 round-1 SEC review (SEC-1.1, SEC-1.2).
 
 1. **`ContextWindow`/`MaxOutput`.** No limit-exceeding probe will be run — it would cost money and
    settles nothing about reasoning/cache/compaction binding, the actual purpose of this probe.
@@ -338,11 +351,16 @@ Rulings on the three open questions above, binding for ADR 12 and this descripto
    marker word — is required before any automatic path is enabled, and is scheduled for Phase 5,
    not this phase.
 
-3. **`Edits[REWRITE]` = SAFE-when-reasoning-untouched.** Ruled a **per-profile descriptor
-   override for OpenAI only**, not a change to the FR-CAP-002 framework default. FR-CAP-002's
-   conservative default (a REWRITE drops trailing reasoning) stays as-is for every other/unknown
-   profile; `gpt-6-astra`/`gpt-6-luna`'s descriptor carries the observed exception explicitly
-   (R4 above), and no other provider's descriptor should infer the same behavior from this one.
+3. **`Edits[REWRITE]` (SEC-1.2 — supersedes the original ruling 3 below).** The original ruling
+   3 read "SAFE when the rewrite doesn't touch the reasoning item itself, a per-profile descriptor
+   override for OpenAI only." **That ruling is withdrawn.** SEC-1.1 round-1 review (SPEC/SEC review
+   of PR #4) found the underlying R4 evidence shows the opposite: the provider *accepts* a REWRITE
+   ahead of an open reasoning round, but the model then follows reasoning computed for the
+   pre-edit history and produces the pre-edit answer — acceptance is not safety. `Edits[REWRITE]`
+   is **LOSSY**, the FR-CAP-002 default, with no OpenAI-specific exception. The adapter must strip
+   any reasoning item whose coverage reaches back across rewritten content before dispatch; this
+   is now a general ADR 6 pre-dispatch-recheck rule (an opaque reasoning item's coverage is its
+   entire preceding history), not a per-profile allowance to preserve it.
 
 4. **`MidConversationSystem` (SEC-1.1).** Ruled **false, fail-closed**, mirroring the Anthropic
    probe's ruling 4. K2's fixture accepts a mid-history `developer`-role restoration message, but
