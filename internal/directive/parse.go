@@ -158,7 +158,7 @@ func diagnosticReason(reason string) domain.DiagnosticReason {
 		return domain.ReasonScopeWidening
 	case "duplicate attribute":
 		return domain.ReasonDuplicateAttribute
-	case "derived directive ID":
+	case "derived directive ID", "reserved derived ID":
 		return domain.ReasonDerivedID
 	case "heading exceeds length limit", "item limit reached", "diagnostic limit reached":
 		return domain.ReasonLimit

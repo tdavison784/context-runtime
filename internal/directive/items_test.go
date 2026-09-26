@@ -189,3 +189,33 @@ func TestHeadingAttributesValidatedOnce(t *testing.T) {
 		t.Fatalf("diagnostics=%+v items=%d", r.Diagnostics, len(r.Items))
 	}
 }
+
+func TestDerivedShapedExplicitIDRejected(t *testing.T) {
+	hex := strings.Repeat("0123456789abcdef", 4)
+	for _, input := range []string{"## Goal [goal-" + hex + "]\nx", "## Remember\n- [pinned-" + hex + "] x\n- kept", "## Working\n- [ephemeral-" + hex + "] x\n- kept"} {
+		r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem})
+		for _, it := range r.Items {
+			if it.ExplicitID {
+				t.Fatalf("%q: %+v", input, it)
+			}
+		}
+		found := false
+		for _, d := range r.Diagnostics {
+			found = found || d.Code == domain.ErrMalformedDirective && d.Reason == domain.ReasonDerivedID && d.DirectiveID == ""
+		}
+		if r.Err != nil || !found || !r.Sections[0].Malformed {
+			t.Fatalf("%q: %+v", input, r)
+		}
+	}
+	// Near misses remain ordinary explicit IDs.
+	for _, id := range []string{"Goal-" + hex, "goal-" + strings.ToUpper(hex), "goal-" + hex[:63], "resolve-" + hex, "goal_" + hex} {
+		r := Parse([]byte("## Remember\n- ["+id+"] x"), Options{Authority: domain.AuthoritySystem})
+		if len(r.Items) != 1 || r.Items[0].DirectiveID != id || !r.Items[0].ExplicitID {
+			t.Fatalf("%q: %+v", id, r)
+		}
+	}
+	// Lifecycle targets may name derived IDs; they are references, not declarations.
+	if r := Parse([]byte("## Unpin [pinned-"+hex+"]"), Options{Authority: domain.AuthoritySystem}); len(r.Lifecycle) != 1 {
+		t.Fatal(r)
+	}
+}

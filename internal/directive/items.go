@@ -216,6 +216,11 @@ func (p *coreParser) addItem(item rawItem) {
 	} else if emptyText(item.text) {
 		p.reject(item.sectionIndex, "empty directive text", item.byteRange)
 		return
+	} else if item.explicit && derivedShaped(item.id) {
+		// D20: explicit IDs may never enter the derived namespace, so the
+		// item is dropped rather than re-identified.
+		p.reject(item.sectionIndex, "reserved derived ID", item.byteRange)
+		return
 	}
 	if len(p.items) >= p.limits.maxItems {
 		p.itemLimitHit = true
@@ -228,7 +233,20 @@ func (p *coreParser) addItem(item rawItem) {
 	}
 	p.items = append(p.items, item)
 }
+
+// derivedID is D9's ID for a validated canonical keyword (FR-DIR-002).
 func derivedID(section, text string) string {
-	h := domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: text}})
-	return asciiLower(section) + "-" + strings.TrimPrefix(h, "sha256:")
+	return domain.DerivedDirectiveID(section, domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: text}}))
+}
+
+// derivedShaped recognizes exactly a lowercase content keyword, '-', and 64
+// lowercase hex digits (D20). IDs are otherwise case-sensitive, so
+// "Goal-<hex>" or uppercase hex are ordinary explicit IDs.
+func derivedShaped(id string) bool {
+	for _, k := range []string{"goal", "pinned", "working", "remember", "references", "ephemeral"} {
+		if suffix, ok := strings.CutPrefix(id, k+"-"); ok && domain.ValidHash("sha256:"+suffix) {
+			return true
+		}
+	}
+	return false
 }
