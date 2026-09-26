@@ -1232,8 +1232,11 @@ and no longer depends on live domain code.
 
 ## Tests that lock the behavior
 
-Required, not yet written except where a package/file is named; `p2-tests`
-reconciles exact names in a later round.
+Concrete test names are cited per clause below where they exist (SPEC-1.4:
+most now do); a clause phrased as a requirement rather than naming a test
+is either still landing on another worker's branch (noted inline) or is a
+genuine gap `p2-tests`/this ADR's final reconciliation pass should close,
+not an unwritten placeholder for the whole section.
 
 - **§1 (lifecycle commands):** `internal/ingest` — an unauthorized source
   actor's Resolve/Unpin aborts the whole event (no partial mutation); an
