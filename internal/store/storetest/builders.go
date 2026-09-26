@@ -57,15 +57,22 @@ func NewGoal(sess, id string, seq uint64, text string) domain.ContextItem {
 	return it
 }
 
+// DirectiveBoundary is the access boundary of NewDirective items: the
+// boundary component of their directive identity.
+func DirectiveBoundary(sess string) domain.AccessBoundary {
+	return domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: "task"}
+}
+
 // NewDirective returns a valid USER instruction carrying directive ID dirID
-// in task "task".
+// in task "task", within DirectiveBoundary(sess).
 func NewDirective(sess, id, dirID string, seq uint64, text string) domain.ContextItem {
 	it := NewItem(sess, id, seq, text)
 	it.Kind = domain.KindInstruction
 	it.DirectiveID = dirID
+	it.Section = domain.SectionPinned
 	it.Generation = domain.GenerationPinned
 	it.Scope = domain.ScopeTask
-	it.Access = domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: it.TaskID}
+	it.Access = DirectiveBoundary(sess)
 	return it
 }
 
@@ -129,6 +136,7 @@ func NewTransition(sess, id, obligationID string, version, seq uint64, from, to 
 		ObligationID: obligationID,
 		Version:      version,
 		Seq:          seq,
+		Action:       func() domain.Action { a, _ := domain.TransitionAction(from, to); return a }(),
 		From:         from,
 		To:           to,
 		Actor:        NewPrincipal(sess, domain.AuthorityHarness),

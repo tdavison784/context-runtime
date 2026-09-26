@@ -287,7 +287,8 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 		o, err := tx.Obligation("o2")
 		noErr(t, err)
 		o.Current, o.RetiredSeq = false, tx.NextSeq()
-		return errOf(tx.UpdateObligationVersion(o, o.Revision))
+		noErr(t, errOf(tx.UpdateObligationVersion(o, o.Revision)))
+		return audited(tx)
 	})
 	err = s.Update(ctx, sessA, func(tx store.Tx) error {
 		return errOf(tx.AppendObligationTransition(NewTransition(sessA, "z", "o2", 1, tx.NextSeq(),
@@ -379,21 +380,19 @@ func testGrants(t *testing.T, s store.Store) {
 
 // testTasks checks PutTask under the compare-and-swap rule (the store
 // writes expected+1 itself and returns the stored record) and its audit
-// rule: creation and status changes carry a TargetTask event, other changes
-// carry none.
+// rule: every task change appends a TargetTask event for the task.
 func testTasks(t *testing.T, s store.Store) {
-	taskEvent := func(id string, seq uint64) *domain.LifecycleEvent {
-		e := NewLifecycleEvent(sessA, id, seq, domain.TargetTask, "task")
-		return &e
+	taskEvent := func(id string, seq uint64) domain.LifecycleEvent {
+		return NewLifecycleEvent(sessA, id, seq, domain.TargetTask, "task")
 	}
 	task := NewTask(sessA, "task")
 	task.Version = 0 // ignored: the store writes expected+1
 	var created domain.LifecycleEvent
 	update(t, s, sessA, func(tx store.Tx) error {
 		seq := tx.NextSeq()
-		wantErr(t, errOf(tx.PutTask(task, 0, nil)), domain.ErrInvalidRecord)
-		created = *taskEvent("l1", seq)
-		got, err := tx.PutTask(task, 0, &created)
+		wantErr(t, errOf(tx.PutTask(task, 0, domain.LifecycleEvent{})), domain.ErrInvalidRecord)
+		created = taskEvent("l1", seq)
+		got, err := tx.PutTask(task, 0, created)
 		noErr(t, err)
 		want := task
 		want.Version = 1
@@ -410,58 +409,53 @@ func testTasks(t *testing.T, s store.Store) {
 		x.Status, x.CompletedSeq = domain.TaskCompleted, seq
 		return x
 	}
+	same := func(x domain.TaskState) func(uint64) domain.TaskState {
+		return func(uint64) domain.TaskState { return x }
+	}
+	valid := func(seq uint64) domain.LifecycleEvent { return taskEvent("lx", seq) }
 	cases := []struct {
 		name     string
 		t        func(seq uint64) domain.TaskState
 		expected uint64
-		event    func(seq uint64) *domain.LifecycleEvent
-		want     []error
+		event    func(seq uint64) domain.LifecycleEvent
+		want     error
 	}{
-		{"create existing", func(uint64) domain.TaskState { return task }, 0,
-			func(seq uint64) *domain.LifecycleEvent { return taskEvent("lx", seq) }, []error{domain.ErrVersionConflict}},
-		{"stale version", func(uint64) domain.TaskState { return next }, 2,
-			func(uint64) *domain.LifecycleEvent { return nil }, []error{domain.ErrVersionConflict}},
-		{"missing task", func(uint64) domain.TaskState { return NewTask(sessA, "other") }, 1,
-			func(uint64) *domain.LifecycleEvent { return nil }, []error{domain.ErrVersionConflict}},
-		{"completed without seq", func(uint64) domain.TaskState { return completed(0) }, 1,
-			func(seq uint64) *domain.LifecycleEvent { return taskEvent("lx", seq) }, []error{domain.ErrInvalidRecord}},
-		{"completed at an earlier seq", func(uint64) domain.TaskState { return completed(1) }, 1,
-			func(seq uint64) *domain.LifecycleEvent { return taskEvent("lx", seq) }, []error{domain.ErrInvalidRecord}},
-		{"status change without event", completed, 1,
-			func(uint64) *domain.LifecycleEvent { return nil }, []error{domain.ErrInvalidRecord}},
-		{"event without status change", func(uint64) domain.TaskState { return next }, 1,
-			func(seq uint64) *domain.LifecycleEvent { return taskEvent("lx", seq) }, []error{domain.ErrInvalidRecord}},
-		{"event for another task", completed, 1, func(seq uint64) *domain.LifecycleEvent {
-			e := NewLifecycleEvent(sessA, "lx", seq, domain.TargetTask, "other")
-			return &e
-		}, []error{domain.ErrInvalidRecord}},
-		{"event of another kind", completed, 1, func(seq uint64) *domain.LifecycleEvent {
-			e := NewLifecycleEvent(sessA, "lx", seq, domain.TargetItem, "task")
-			return &e
-		}, []error{domain.ErrInvalidRecord}},
-		{"event at an earlier seq", completed, 1,
-			func(uint64) *domain.LifecycleEvent { return taskEvent("lx", 1) }, []error{domain.ErrInvalidRecord}},
-		{"event ID reused", completed, 1,
-			func(seq uint64) *domain.LifecycleEvent { return taskEvent("l1", seq) }, []error{domain.ErrImmutable}},
+		{"create existing", same(task), 0, valid, domain.ErrVersionConflict},
+		{"stale version", same(next), 2, valid, domain.ErrVersionConflict},
+		{"missing task", same(NewTask(sessA, "other")), 1, valid, domain.ErrVersionConflict},
+		{"completed without seq", same(completed(0)), 1, valid, domain.ErrInvalidRecord},
+		{"completed at an earlier seq", same(completed(1)), 1, valid, domain.ErrInvalidRecord},
+		{"turn change without event", same(next), 1, func(uint64) domain.LifecycleEvent { return domain.LifecycleEvent{} }, domain.ErrInvalidRecord},
+		{"event for another task", completed, 1, func(seq uint64) domain.LifecycleEvent {
+			return NewLifecycleEvent(sessA, "lx", seq, domain.TargetTask, "other")
+		}, domain.ErrInvalidRecord},
+		{"event of another kind", completed, 1, func(seq uint64) domain.LifecycleEvent {
+			return NewLifecycleEvent(sessA, "lx", seq, domain.TargetItem, "task")
+		}, domain.ErrInvalidRecord},
+		{"event at an earlier seq", completed, 1, func(uint64) domain.LifecycleEvent { return taskEvent("lx", 1) }, domain.ErrInvalidRecord},
+		{"event ID reused", completed, 1, func(seq uint64) domain.LifecycleEvent { return taskEvent("l1", seq) }, domain.ErrImmutable},
 	}
 	for _, tc := range cases {
 		err := s.Update(ctx, sessA, func(tx store.Tx) error {
 			seq := tx.NextSeq()
 			return errOf(tx.PutTask(tc.t(seq), tc.expected, tc.event(seq)))
 		})
-		oneOf(t, tc.name, err, tc.want...)
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: error = %v, want %v", tc.name, err, tc.want)
+		}
 	}
 	var done domain.TaskState
-	var completion domain.LifecycleEvent
+	var turn, completion domain.LifecycleEvent
 	update(t, s, sessA, func(tx store.Tx) error {
-		got, err := tx.PutTask(next, 1, nil)
+		turn = taskEvent("l2", tx.NextSeq())
+		got, err := tx.PutTask(next, 1, turn)
 		noErr(t, err)
 		if got.Version != 2 || got.Turn != 2 {
 			t.Errorf("PutTask result = %+v, want Version 2, Turn 2", got)
 		}
 		seq := tx.NextSeq()
-		completion = *taskEvent("l2", seq)
-		done, err = tx.PutTask(completed(seq), 2, &completion)
+		completion = taskEvent("l3", seq)
+		done, err = tx.PutTask(completed(seq), 2, completion)
 		noErr(t, err)
 		return nil
 	})
@@ -474,7 +468,7 @@ func testTasks(t *testing.T, s store.Store) {
 		}
 		evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetTask})
 		noErr(t, err)
-		assertEqual(t, "task audit events", evs, []domain.LifecycleEvent{created, completion})
+		assertEqual(t, "task audit events", evs, []domain.LifecycleEvent{created, turn, completion})
 		_, err = tx.Task("other")
 		wantErr(t, err, domain.ErrNotFound)
 		return nil
