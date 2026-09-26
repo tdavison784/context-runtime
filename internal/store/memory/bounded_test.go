@@ -45,3 +45,36 @@ func TestLookupsDoBoundedWork(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestOrderedIndexCommitMerges checks SPEC-3.1 item 3: committing one new
+// entry into a key that already holds 20001 does work proportional to the
+// change, not a rebuild of the key's list.
+func TestOrderedIndexCommitMerges(t *testing.T) {
+	base := map[string][]seqRef{}
+	x := newOrderedIndex(base, true)
+	for i := range 20001 {
+		x.add("k", seqRef{uint64(i + 1), "id"})
+	}
+	x.commit()
+	x = newOrderedIndex(base, true)
+	x.add("k", seqRef{30000, "new"})
+	x.remove("k", seqRef{5, "id"})
+	x.commitWork = 0
+	x.commit()
+	if x.commitWork > 4 {
+		t.Errorf("commit of one addition and one removal did %d units of work, want a handful", x.commitWork)
+	}
+	if n := len(base["k"]); n != 20001 {
+		t.Errorf("key holds %d entries, want 20001", n)
+	}
+	var got []seqRef
+	for r := range newOrderedIndex(base, false).after("k", seqRef{4, "id"}) {
+		got = append(got, r)
+		if len(got) == 2 {
+			break
+		}
+	}
+	if len(got) != 2 || got[0].seq != 6 || got[1].seq != 7 {
+		t.Errorf("entries after 4 = %v, want 6 and 7 (5 removed)", got)
+	}
+}
