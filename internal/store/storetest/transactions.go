@@ -76,15 +76,15 @@ func populate(tx store.Tx, sess string) error {
 		func() error { return tx.InsertBlob(NewBlob(sess, []byte("blob"))) },
 		func() error { return tx.InsertObligationVersion(NewObligation(sess, "o1", 1, s[4], "i2")) },
 		func() error {
-			return tx.AppendObligationTransition(NewTransition(sess, "t1", "o1", 1, s[5],
-				domain.ObligationUnresolved, domain.ObligationBlocked))
+			return errOf(tx.AppendObligationTransition(NewTransition(sess, "t1", "o1", 1, s[5],
+				domain.ObligationUnresolved, domain.ObligationBlocked)))
 		},
 		func() error { return tx.InsertGrant(NewGrant(sess, "g1", s[6], "i1")) },
-		func() error { return tx.PutTask(NewTask(sess, "task"), 0) },
+		func() error { return errOf(tx.PutTask(NewTask(sess, "task"), 0)) },
 		func() error {
 			return tx.AppendLifecycleEvent(NewLifecycleEvent(sess, "l1", s[7], domain.TargetItem, "i1"))
 		},
-		func() error { return tx.PutConversation(NewConversation(sess, "c1"), 0) },
+		func() error { return errOf(tx.PutConversation(NewConversation(sess, "c1"), 0)) },
 		func() error { return tx.InsertCall(NewCall(sess, "call1", "c1", s[8])) },
 		func() error { return tx.PutCallAttempt(NewAttempt(sess, "call1", 1, s[9])) },
 	}
@@ -206,7 +206,7 @@ func testRollbackOnStoreError(t *testing.T, s store.Store) {
 // otherwise successful transaction leaves no partial state behind.
 func testFailedWriteLeavesNoTrace(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
-		n := seqs(tx, 3)
+		n := seqs(tx, 4)
 		noErr(t, tx.InsertItem(NewItem(sessA, "a", n[0], "a")))
 		noErr(t, tx.InsertItem(NewItem(sessA, "b", n[1], "b")))
 		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "r1", domain.RelSupersedes, "a", "b", n[2])))
@@ -215,13 +215,18 @@ func testFailedWriteLeavesNoTrace(t *testing.T, s store.Store) {
 			domain.ErrSupersessionCycle)
 		// Rejected: goal status on a non-goal.
 		resolved := domain.GoalResolved
-		_, err := tx.UpdateItem("a", 1, domain.ItemChange{GoalStatus: &resolved})
+		_, err := tx.UpdateItem("a", 1, domain.ItemChange{GoalStatus: &resolved}, NewItemEvent(sessA, "l1", n[3], "a"))
 		wantErr(t, err, domain.ErrInvalidTransition)
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		rels, err := tx.Relationships(store.RelationshipFilter{})
 		noErr(t, err)
+		evs, err := tx.LifecycleEvents(store.LifecycleFilter{})
+		noErr(t, err)
+		if len(evs) != 0 {
+			t.Errorf("LifecycleEvents = %+v, want none from the rejected UpdateItem", evs)
+		}
 		if len(rels) != 1 || rels[0].ID != "r1" {
 			t.Errorf("Relationships = %+v, want only r1", rels)
 		}
@@ -421,10 +426,10 @@ func testSessionIsolation(t *testing.T, s store.Store) {
 		// Directive targets must be items in this session.
 		wantErr(t, tx.SetCurrentDirective("task", "dir", "i2"), domain.ErrNotFound)
 		// Obligation transitions and call attempts need records in this session.
-		wantErr(t, tx.AppendObligationTransition(NewTransition(sessB, "t1", "o1", 1, seq,
-			domain.ObligationUnresolved, domain.ObligationBlocked)), domain.ErrNotFound)
+		wantErr(t, errOf(tx.AppendObligationTransition(NewTransition(sessB, "t1", "o1", 1, seq,
+			domain.ObligationUnresolved, domain.ObligationBlocked))), domain.ErrNotFound)
 		wantErr(t, tx.RevokeGrant("g1", seq), domain.ErrNotFound)
-		_, err := tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1})
+		_, err := tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessB, "l1", seq, "i1"))
 		wantErr(t, err, domain.ErrNotFound)
 		return nil
 	})
@@ -459,12 +464,13 @@ func testForeignSessionRecords(t *testing.T, s store.Store) {
 			"InsertRelationship": tx.InsertRelationship(NewRelationship(sessA, "rx", domain.RelDerivedFrom, "i1", "i2", n)),
 			"InsertBlob":         tx.InsertBlob(NewBlob(sessA, []byte("x"))),
 			"InsertObligation":   tx.InsertObligationVersion(NewObligation(sessA, "ox", 1, n, "i1")),
-			"AppendTransition": tx.AppendObligationTransition(NewTransition(sessA, "tx", "o1", 1, n,
-				domain.ObligationUnresolved, domain.ObligationBlocked)),
+			"AppendTransition": errOf(tx.AppendObligationTransition(NewTransition(sessA, "tx", "o1", 1, n,
+				domain.ObligationBlocked, domain.ObligationUnresolved))),
+			"UpdateItem":           errOf(tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "ly", n, "i1"))),
 			"InsertGrant":          tx.InsertGrant(NewGrant(sessA, "gx", n, "i1")),
-			"PutTask":              tx.PutTask(NewTask(sessA, "tx"), 0),
+			"PutTask":              errOf(tx.PutTask(NewTask(sessA, "tx"), 0)),
 			"AppendLifecycleEvent": tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "lx", n, domain.TargetItem, "i1")),
-			"PutConversation":      tx.PutConversation(NewConversation(sessA, "cx"), 0),
+			"PutConversation":      errOf(tx.PutConversation(NewConversation(sessA, "cx"), 0)),
 			"InsertCall":           tx.InsertCall(NewCall(sessA, "callx", "c1", n)),
 			"PutCallAttempt":       tx.PutCallAttempt(NewAttempt(sessA, "call1", 2, n)),
 		}

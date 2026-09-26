@@ -165,7 +165,13 @@ func NewTask(sess, taskID string) domain.TaskState {
 	}
 }
 
-// NewLifecycleEvent returns a valid lifecycle event on an item.
+// NewItemEvent returns a valid lifecycle event for a change to item itemID,
+// as UpdateItem requires.
+func NewItemEvent(sess, id string, seq uint64, itemID string) domain.LifecycleEvent {
+	return NewLifecycleEvent(sess, id, seq, domain.TargetItem, itemID)
+}
+
+// NewLifecycleEvent returns a valid lifecycle event.
 func NewLifecycleEvent(sess, id string, seq uint64, kind domain.TargetKind, target string) domain.LifecycleEvent {
 	return domain.LifecycleEvent{
 		ID:         id,
@@ -193,10 +199,11 @@ func NewConversation(sess, id string) domain.Conversation {
 	}
 }
 
-// NewCall returns a valid PREPARED inference call at Revision 1.
+// NewCall returns a valid PREPARED inference call at Revision 1 with a
+// matching ProposalHash. Tests that change a frozen field call Reseal.
 func NewCall(sess, callID, conversationID string, preparedSeq uint64) domain.CallRecord {
 	req := []byte("request " + callID)
-	return domain.CallRecord{
+	return Reseal(domain.CallRecord{
 		CallID:                  callID,
 		SessionID:               sess,
 		ConversationID:          conversationID,
@@ -213,7 +220,31 @@ func NewCall(sess, callID, conversationID string, preparedSeq uint64) domain.Cal
 		ManifestHash:            domain.HashBytes([]byte("manifest")),
 		PreparedSeq:             preparedSeq,
 		Revision:                1,
+	})
+}
+
+// Reseal recomputes a call's ProposalHash after its frozen fields changed.
+func Reseal(c domain.CallRecord) domain.CallRecord {
+	c.ProposalHash = domain.CallProposalHash(c)
+	return c
+}
+
+// Finish moves c to a terminal state at finishedSeq. A COMPLETED call gets
+// a valid outcome for its latest attempt.
+func Finish(c domain.CallRecord, state domain.CallState, finishedSeq uint64) domain.CallRecord {
+	c = c.Clone()
+	c.State, c.FinishedSeq = state, finishedSeq
+	if state == domain.CallCompleted {
+		resp := []byte("response " + c.CallID)
+		c.Outcome = &domain.CallOutcome{
+			Attempt:      max(c.Attempts, 1),
+			State:        domain.CallCompleted,
+			ResponseHash: domain.HashBytes(resp),
+			Response:     resp,
+		}
+		c.OutcomeHash = c.Outcome.OutcomeHash()
 	}
+	return c
 }
 
 // NewAttempt returns a valid SENT attempt.
