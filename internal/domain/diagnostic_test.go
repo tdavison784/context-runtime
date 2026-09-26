@@ -128,3 +128,49 @@ func TestDiagnosticRecordKeysAndAccess(t *testing.T) {
 		t.Fatal("diagnostic visibility ignores the source boundary")
 	}
 }
+
+func commandRecordFixture() LifecycleCommandRecord {
+	occ := CallerOccurrenceID("s1", "e1")
+	actor := Principal{SessionID: "s1", TaskID: "t1", AgentID: "a1", Authority: AuthorityUser}
+	return LifecycleCommandRecord{
+		ID: LifecycleCommandRecordID("s1", occ, 0), SessionID: "s1", OccurrenceID: occ, EventID: "e1",
+		Actor: actor, Access: BoundaryFor(ScopeTask, actor), ParserVersion: "directive/v1", SchemaVersion: LifecycleCommandSchemaVersion,
+		Status: CommandParsedNotExecuted, Resolution: TargetResolved, ResolvedItemID: "itm_x", ResolvedVersion: 1,
+		LifecycleCommand: LifecycleCommand{Action: LifecycleUnpin, TargetID: "architecture", Authority: AuthorityUser, Range: ByteRange{0, 9}},
+	}
+}
+
+func TestLifecycleCommandRecord(t *testing.T) {
+	r := commandRecordFixture()
+	if err := r.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mut := range map[string]func(*LifecycleCommandRecord){
+		"executed":          func(r *LifecycleCommandRecord) { r.Status = "EXECUTED" },
+		"caller authority":  func(r *LifecycleCommandRecord) { r.Actor.Authority = AuthoritySystem },
+		"actor session":     func(r *LifecycleCommandRecord) { r.Actor.SessionID = "s2" },
+		"boundary":          func(r *LifecycleCommandRecord) { r.Access.TaskID = "t2" },
+		"resolved no item":  func(r *LifecycleCommandRecord) { r.ResolvedItemID = "" },
+		"resolved no ver":   func(r *LifecycleCommandRecord) { r.ResolvedVersion = 0 },
+		"notfound w/ item":  func(r *LifecycleCommandRecord) { r.Resolution = TargetNotFound },
+		"ambiguous w/ item": func(r *LifecycleCommandRecord) { r.Resolution = TargetAmbiguous },
+		"resolution":        func(r *LifecycleCommandRecord) { r.Resolution = "" },
+		"ordinal":           func(r *LifecycleCommandRecord) { r.Ordinal = 1 },
+		"event":             func(r *LifecycleCommandRecord) { r.EventID = "e2" },
+		"schema":            func(r *LifecycleCommandRecord) { r.SchemaVersion = "" },
+		"parser":            func(r *LifecycleCommandRecord) { r.ParserVersion = "" },
+		"agent authority":   func(r *LifecycleCommandRecord) { r.Authority, r.Actor.Authority = AuthorityAgent, AuthorityAgent },
+		"target":            func(r *LifecycleCommandRecord) { r.TargetID = "" },
+	} {
+		c := r
+		mut(&c)
+		if c.Validate() == nil {
+			t.Errorf("%s: invalid command record accepted", name)
+		}
+	}
+	nf := r
+	nf.Resolution, nf.ResolvedItemID, nf.ResolvedVersion = TargetNotFound, "", 0
+	if err := nf.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

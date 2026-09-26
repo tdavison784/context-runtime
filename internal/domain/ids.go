@@ -100,6 +100,16 @@ func ValidOccurrenceID(id string) bool {
 	return ok && rest != ""
 }
 
+// OccurrenceMatchesEvent reports whether occurrenceID is the occurrence of
+// eventID in the session: the derived caller occurrence when eventID is set,
+// and an anonymous occurrence when it is empty.
+func OccurrenceMatchesEvent(sessionID, occurrenceID, eventID string) bool {
+	if eventID != "" {
+		return occurrenceID == CallerOccurrenceID(sessionID, eventID)
+	}
+	return ValidOccurrenceID(occurrenceID) && !strings.HasPrefix(occurrenceID, callerOccurrencePrefix)
+}
+
 // IDDomain separates the deterministic ID spaces of one occurrence's
 // artifacts (M3). Each domain has its own prefix and versioned hash tag, so
 // ordinals in different domains never collide. Item IDs keep DerivedItemID;

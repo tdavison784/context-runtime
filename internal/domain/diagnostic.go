@@ -1,7 +1,5 @@
 package domain
 
-import "strings"
-
 // ByteRange is a half-open [Start, End) range in the original text part's
 // bytes, before BOM handling, newline interpretation, or item normalization.
 type ByteRange struct{ Start, End int }
@@ -172,8 +170,7 @@ func (r DiagnosticRecord) Validate() error {
 	if r.ID != DiagnosticRecordID(r.SessionID, r.OccurrenceID, r.SpanIndex, r.Index) {
 		return invalid("diagnostic record: ID does not match its key")
 	}
-	if r.EventID != "" && r.OccurrenceID != CallerOccurrenceID(r.SessionID, r.EventID) ||
-		r.EventID == "" && strings.HasPrefix(r.OccurrenceID, callerOccurrencePrefix) {
+	if !OccurrenceMatchesEvent(r.SessionID, r.OccurrenceID, r.EventID) {
 		return invalid("diagnostic record: event ID disagrees with occurrence")
 	}
 	if err := r.Access.Validate(); err != nil {
@@ -212,17 +209,16 @@ const (
 
 func (a LifecycleAction) Valid() bool { return a == LifecycleResolve || a == LifecycleUnpin }
 
-// LifecycleCommand retains the caller's target and original byte range.
-// ResolvedItemID is populated only after an authorized read-only lookup; it
-// stays empty on unknown/ambiguous targets. Phase 2 never executes commands.
+// LifecycleCommand is a parsed Resolve/Unpin: the exact target spelling, the
+// span authority, and the original byte range. It carries no resolution;
+// ingestion records that in a LifecycleCommandRecord.
 type LifecycleCommand struct {
-	Action         LifecycleAction
-	TargetID       string
-	ResolvedItemID string
-	Authority      Authority
-	SpanIndex      int
-	PartIndex      int
-	Range          ByteRange
+	Action    LifecycleAction
+	TargetID  string
+	Authority Authority
+	SpanIndex int
+	PartIndex int
+	Range     ByteRange
 }
 
 func (c LifecycleCommand) Validate() error {
@@ -230,4 +226,96 @@ func (c LifecycleCommand) Validate() error {
 		return invalid("lifecycle command: invalid action, target, authority, or index")
 	}
 	return c.Range.Validate()
+}
+
+// CommandStatus is the execution status of a recorded lifecycle command.
+// Phase 2 parses and resolves commands but executes none (D1): a command never
+// reports a successful transition, and changes no goal status or generation.
+type CommandStatus string
+
+const CommandParsedNotExecuted CommandStatus = "PARSED_NOT_EXECUTED"
+
+// TargetResolution is the read-only resolution of a command's target at the
+// command's position in event order. Missing and inaccessible targets are the
+// same NOT_FOUND (FR-DIR-005); AMBIGUOUS names no target.
+type TargetResolution string
+
+const (
+	TargetResolved  TargetResolution = "RESOLVED"
+	TargetNotFound  TargetResolution = "NOT_FOUND"
+	TargetAmbiguous TargetResolution = "AMBIGUOUS"
+)
+
+// LifecycleCommandSchemaVersion versions the persisted command record.
+const LifecycleCommandSchemaVersion = "lifecycle-command/v1"
+
+// LifecycleCommandRecord is the immutable record of one parsed command
+// (D1, R7). Actor is the source actor (SourceActor): the caller's ownership
+// with the span's authority, never the ingestion caller's. An unauthorized
+// command aborts its event, so no record exists for one; unknown,
+// inaccessible, and ambiguous targets are recorded with diagnostics. A
+// resolved item ID is not a capability: the phase that executes commands must
+// revalidate access, source authorization, and target currentness, and
+// historical records are never executed automatically.
+type LifecycleCommandRecord struct {
+	ID              string
+	SessionID       string
+	OccurrenceID    string
+	EventID         string
+	Ordinal         int // position among the event's commands, in event order
+	Actor           Principal
+	Access          AccessBoundary // source span boundary
+	ParserVersion   string
+	SchemaVersion   string
+	Status          CommandStatus
+	Resolution      TargetResolution
+	ResolvedItemID  string
+	ResolvedVersion uint64
+	LifecycleCommand
+}
+
+// LifecycleCommandRecordID derives a record ID from its key.
+func LifecycleCommandRecordID(sessionID, occurrenceID string, ordinal int) string {
+	return DerivedArtifactID(IDDomainCommand, sessionID, occurrenceID, uint64(ordinal))
+}
+
+// Validate checks the record's key, source actor, status, and resolution.
+func (r LifecycleCommandRecord) Validate() error {
+	if err := r.LifecycleCommand.Validate(); err != nil {
+		return err
+	}
+	if r.SessionID == "" || r.Ordinal < 0 || r.ParserVersion == "" || r.SchemaVersion != LifecycleCommandSchemaVersion {
+		return invalid("lifecycle command record: session, ordinal, and versions are required")
+	}
+	if !OccurrenceMatchesEvent(r.SessionID, r.OccurrenceID, r.EventID) || r.ID != LifecycleCommandRecordID(r.SessionID, r.OccurrenceID, r.Ordinal) {
+		return invalid("lifecycle command record: ID, occurrence, and event disagree")
+	}
+	if err := r.Actor.Validate(); err != nil {
+		return err
+	}
+	if r.Actor.SessionID != r.SessionID || r.Actor.Authority != r.Authority {
+		return invalid("lifecycle command record: actor must be the source actor")
+	}
+	if err := r.Access.Validate(); err != nil {
+		return err
+	}
+	if !r.Access.Permits(r.Actor) {
+		return invalid("lifecycle command record: source boundary does not permit the actor")
+	}
+	if r.Status != CommandParsedNotExecuted {
+		return invalid("lifecycle command record: commands are never executed in this phase")
+	}
+	switch r.Resolution {
+	case TargetResolved:
+		if r.ResolvedItemID == "" || r.ResolvedVersion == 0 {
+			return invalid("lifecycle command record: a resolved target needs its item version")
+		}
+	case TargetNotFound, TargetAmbiguous:
+		if r.ResolvedItemID != "" || r.ResolvedVersion != 0 {
+			return invalid("lifecycle command record: an unresolved target names no item")
+		}
+	default:
+		return invalid("lifecycle command record: invalid resolution")
+	}
+	return nil
 }
