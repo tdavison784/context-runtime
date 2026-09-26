@@ -13,6 +13,11 @@ func (e Event) ValidateV3() error {
 	seen := make([]bool, len(e.Spans))
 	aliases := map[string]bool{}
 	for _, o := range e.Operations {
+		for _, ref := range o.References {
+			if !aliases[ref.Alias] {
+				return invalid("operation: forward or unknown alias")
+			}
+		}
 		if o.Alias != "" {
 			if aliases[o.Alias] {
 				return invalid("operation stream: duplicate alias")

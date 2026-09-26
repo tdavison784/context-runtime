@@ -18,3 +18,17 @@ func TestOperationIsClosedAndDeepCloned(t *testing.T) {
 		t.Fatal("ambiguous operation accepted")
 	}
 }
+
+func TestOperationReferenceCannotSkipResolvedValidation(t *testing.T) {
+	o := SemanticOperation{Kind: OperationDeclareObligation, DeclareObligation: &DeclareObligationIntent{}, References: []OperationReference{{Slot: OperationSourceItem, Alias: "source"}}}
+	if err := o.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if o.ValidateResolved() == nil {
+		t.Fatal("unresolved intent reached a service")
+	}
+	e := Event{Kind: EventHarness, Operations: []SemanticOperation{o}}
+	if e.ValidateV3() == nil {
+		t.Fatal("forward alias accepted")
+	}
+}

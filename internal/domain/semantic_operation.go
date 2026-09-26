@@ -34,6 +34,7 @@ func (i SpanIngestIntent) Validate() error {
 // SourceSpanIndex authenticates the operation at an earlier span's authority.
 // Nil uses the envelope actor; it never promotes a lower-authority source.
 type SemanticOperation struct {
+	References        []OperationReference
 	Kind              SemanticOperationKind
 	SourceSpanIndex   *int
 	Alias             string
@@ -62,7 +63,10 @@ func (o SemanticOperation) Validate() error {
 	}
 	v := reflect.ValueOf(o)
 	count := 0
-	for n := 3; n < v.NumField(); n++ {
+	for n := 0; n < v.NumField(); n++ {
+		if v.Type().Field(n).Tag.Get("operation") == "" {
+			continue
+		}
 		f := v.Field(n)
 		if f.IsNil() {
 			continue
@@ -71,9 +75,31 @@ func (o SemanticOperation) Validate() error {
 		if v.Type().Field(n).Tag.Get("operation") != string(o.Kind) {
 			return invalid("operation: discriminant mismatch")
 		}
-		if err := f.Interface().(interface{ Validate() error }).Validate(); err != nil {
+		if len(o.References) == 0 {
+			if err := f.Interface().(interface{ Validate() error }).Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	seen := map[struct {
+		slot  OperationReferenceSlot
+		index int
+	}]bool{}
+	for _, ref := range o.References {
+		if err := ref.Validate(); err != nil {
 			return err
 		}
+		key := struct {
+			slot  OperationReferenceSlot
+			index int
+		}{ref.Slot, ref.Index}
+		if seen[key] {
+			return invalid("operation: duplicate reference slot")
+		}
+		seen[key] = true
+	}
+	if o.Kind == OperationSpan && len(o.References) != 0 {
+		return invalid("span: aliases cannot select input spans")
 	}
 	if count != 1 || o.Kind == OperationSpan && o.SourceSpanIndex != nil {
 		return invalid("operation: exactly one payload required")
