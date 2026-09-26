@@ -494,9 +494,12 @@ further amended following the round-2 SEC review (SEC-2.1).
    which no OpenAI fixture tested. `Edits[REWRITE]` therefore reverts to its fail-closed default
    (`REJECTED`, untested) rather than being asserted `LOSSY`. In practice this makes no difference
    to the adapter's obligation: it must strip any reasoning item whose coverage reaches back across
-   rewritten content before dispatch — that is now a general ADR 6 pre-dispatch-recheck rule (an
-   opaque reasoning item's coverage is its entire preceding history), not a per-profile allowance
-   to preserve it, and `PostEditReplay: STALE` is exactly the fact that makes skipping this
+   rewritten content before dispatch. ADR 6 rule 1 now defines this directly (an opaque reasoning
+   block/item's coverage is its entire preceding rendered history, including system/instructions
+   and tool definitions — added in parallel by the Anthropic-side PR #4 round-2 fix, SEC-2.2), so
+   the adapter's pre-dispatch recheck follows from that ADR 6 rule, not from a per-profile
+   allowance to preserve stale reasoning, and `PostEditReplay: STALE` is exactly the fact that makes
+   skipping this
    unsafe for this provider.
 
 4. **`MidConversationSystem` / `Edits[APPEND_SYSTEM]` (SEC-1.1).** Ruled **false / `REJECTED`,
