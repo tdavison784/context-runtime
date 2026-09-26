@@ -841,20 +841,31 @@ Answers to `p2-ingest`'s implementation questions, appended to
   when the event actually advanced the turn), is the SDD's "turn-opening
   message" and its pending-input items — no separate pending-input
   structure is needed; the receipt already carries it.
-- **Indexed lookups, not session-wide scans (refines §7/§13/§15/§16,
-  D10/D17/D19/M5 — landed, SPEC-1.4).** `p2-store` added indexed lookups
-  so blob reference (`ItemsByBlob`, migration 0009, §15/R5),
-  duplicate-candidate (`DuplicateCandidates`, migration 0010, §7/D10), and
-  reference matching (`UnresolvedReferences`, migration 0008, §16/M5/R2)
-  are bounded, not a scan of every item in a session, matching D17/NFR's
-  bounded-work discipline; a fourth, `ItemsBySourceKey` (migration 0011,
-  R19), was added for the same reason. ADR 3 records the migrations and
-  the `assertIndexed` `EXPLAIN QUERY PLAN` tests locking each to a real
-  index. **These three lookups are properly indexed; the *other* graph and
-  current-version reads `internal/ingest` calls once per ingested item or
-  section — repeated `Relationships`/`Items`/`Grants` calls — reintroduce
-  an unbounded scan one level up, which is a separate, still-open finding
-  (SPEC-1.3/F1, §26).**
+- **Indexed lookups, not session-wide scans — superseded by F1's
+  access-filtered redesign (refines §7/§13/§15/§16, D10/D17/D19/M5 —
+  landed, SPEC-1.4; see §26 for the full F1 record).** `p2-store` first
+  added bounded-but-session-wide indexed lookups for blob reference
+  (migration 0009), duplicate candidates (migration 0010), and reference
+  matching (migration 0008), plus a fourth for source-key matching
+  (migration 0011) — each properly indexed, matching D17/NFR's
+  bounded-work discipline, but each still returning every matching row in
+  the session regardless of whether the calling principal could see it.
+  The first external review's F1/SEC-1.1/SEC-1.2 findings (§26) caught
+  this gap and required an access-filtered redesign, which superseded all
+  four: `store.BlobReferrer`, `CanonicalCandidates`, `CurrentWorking`,
+  `SourceItems`, and `VisibleReferences` (migration 0012, with 0009-0011's
+  tables dropped by 0013) filter inside the query by the caller's
+  `Viewer`, before any limit, and separately report a visible match whose
+  content fails verification without blocking on it (DUR-1.4). ADR 3
+  records the full migration sequence and every locking test. SPEC-1.3
+  also found that *other* graph/ingest reads issued once per ingested item
+  or section — `Relationships`/`Items` filtered by type/task — were not
+  indexed even though the named lookups were; migration 0012's
+  `relationship_to` index and an item-by-task index close this
+  (`TestGraphReadsUseIndex`). `tx.Grants()` remains an unfiltered
+  whole-session read, deliberately deferred to Phase 3 (§13 records the
+  ruling in full: a grant can only be created by an authorized issuer, so
+  the read discloses nothing and only costs time, never correctness).
 - **Locator identity has no repository namespace in V1 (resolves the §16
   open question, M5/R2).** Sharpens this ADR's earlier "References
   base-directory policy — resolved, deferred" open-question answer with
@@ -1398,17 +1409,18 @@ not an unwritten placeholder for the whole section.
   always carries `Code: ErrMalformedDirective`, and one paired with
   `ReasonTargetMismatch` always carries `Code: DiagnosticNotFound`, never
   a different code for either (R19, the pinning decision above).
-  `internal/ingest` (once it lands) — a TOOL or RETRIEVED_CONTENT event
-  for a task with `Turn=0` is rejected before any item is created (R19); a
-  References locator match never considers a repository/namespace
-  component, so two same-named locators in different conceptual
-  repositories within one session are treated as the same target (R19,
-  until multi-repo support exists). Landed (SPEC-1.4): blob-reference
-  lookup (`ItemsByBlob`), duplicate-candidate lookup
-  (`DuplicateCandidates`), reference matching (`UnresolvedReferences`),
-  and source-key lookup (`ItemsBySourceKey`) each run in bounded time via
-  `assertIndexed`-locked indexes, independent of session size, not as a
-  linear scan (R19) — see ADR 3.
+  `internal/ingest` — `TestRetrievedBeforeFirstTurn` (`clauses_test.go`)
+  confirms a TOOL or RETRIEVED_CONTENT event for a task with `Turn=0` is
+  rejected before any item is created (R19); a References locator match
+  never considers a repository/namespace component, so two same-named
+  locators in different conceptual repositories within one session are
+  treated as the same target (R19, until multi-repo support exists).
+  Landed, then superseded by F1's access-filtered redesign (§26): blob
+  reference, duplicate-candidate, working-snapshot, and source-key lookups
+  each run in bounded time via `TestAccessLookupsUseIndex` and
+  `TestGraphReadsUseIndex` (`internal/store/sqlite/access_lookups_test.go`),
+  independent of session size and of the calling principal's visibility —
+  see ADR 3.
 - **§24 (round 6 ruling, R20 — all landed, SPEC-1.4):** `internal/domain
   /ingest_test.go:TestEventIDRejectsReservedPrefixes` — an `EventID` equal
   to or prefixed like `evc_`, `eva_`, any `IDDomain` prefix, or `lce_`
