@@ -359,7 +359,7 @@ distinct from the frozen inference principal.
 `internal/store/storetest` now compile and pass against the round-1 store
 contract (`storetest.Run` extended with new cases; both
 `memory:TestConformance` and `sqlite:TestConformance` green under
-`go test -race`, with one exception noted below).
+`go test -race`).
 
 - `internal/store/storetest/calls.go:testCallAttemptBinding`
   (`TestConformance/CallAttemptBinding`) is the exact DUR-1.1 regression:
@@ -384,26 +384,25 @@ contract (`storetest.Run` extended with new cases; both
   is the exact SPEC-1.2 regression: a `ServiceActor` scoped to a different
   task/agent than the conversation's inference principal fails `Prepare`,
   matching what `MarkSent`/`Cancel`/`RecordOutcome` already enforced.
-- Still missing (genuine gaps, not blocked on anything): an
-  `internal/invocation`-level end-to-end regression for DUR-1.3 (the store
-  contract is proven by `testSemanticWriteRule`, but no test exercises
-  `Prepare`→`UpdateObligationVersion`→`MarkSent` failing `ErrVersionConflict`
-  through the ledger API itself); and a `TestRecoverAll*` suite for
-  `Ledger.RecoverAll` (implemented, exercised only indirectly through
-  existing `Recover` tests via `Store.Sessions`, not through `RecoverAll`
-  itself — no test constructs multiple sessions and calls `RecoverAll`
-  directly).
-- **Known regression, `sqlite-worker`'s to fix:** `TestConformance
-  /DirectiveBoundaries` (new in round 1, covering ADR 4's boundary-keyed
-  directive identity) fails on `internal/store/sqlite` only — querying
-  `CurrentDirective` with a boundary from a *different* session than the
-  transaction's returns `invalid record: record belongs to another
-  session` instead of the `ErrNotFound` the memory store and this test
-  both expect. This is exactly the AUTH-1.3 existence-disclosure pattern
-  applied to the new boundary parameter: a structural-validation error
-  where a bare not-found is required. Reproduced directly in this
-  worktree; `go test ./internal/store/sqlite/...` fails on this subtest
-  as of this ADR update.
+- `internal/invocation/recover_all_test.go:TestObligationChangeStalesPreview`
+  is the exact `internal/invocation`-level end-to-end regression for
+  DUR-1.3 this ADR previously called a missing gap: it prepares a call,
+  changes an obligation's `MaterializationDisabled` (confirming the
+  store's semantic-write rule refuses the change without an audit event),
+  then asserts `MarkSent` fails `ErrVersionConflict` on the now-stale
+  preview, and that a fresh `Prepare` at the old sequence also fails while
+  one at the current sequence succeeds.
+  `TestRecoverAllVisitsEverySession` is the exact `Ledger.RecoverAll` suite:
+  it recovers SENT calls across three sessions (including one with
+  semantic state but no calls) from one `Store.Sessions` listing in a
+  single call, and confirms a mismatched `actorFor` session is reported in
+  the joined error without stopping the other sessions' recovery.
+- `TestConformance/DirectiveBoundaries` (new in round 1, covering ADR 4's
+  boundary-keyed directive identity) briefly failed on
+  `internal/store/sqlite` only — `CurrentDirective` reported a
+  different-session boundary as `ErrInvalidRecord` instead of `ErrNotFound`,
+  the same AUTH-1.3 existence-disclosure pattern applied to the new
+  boundary parameter. Fixed in `a8e895f`; passes on both stores now.
 
 ## Open questions
 
@@ -466,13 +465,14 @@ owner-match check this ADR documents as the Phase 1 floor, unlike every
 other ledger method — I reproduced this directly against the merged
 worktree before `ledger-worker`'s fix landed (a HARNESS actor scoped to
 task A/agent A could `Prepare` task B/agent B's reservation) and initially
-recorded it as an unassigned open gate blocker; `ledger-worker` has since
-fixed it (`actorInScope` applied in `validatePrepare` before any reservation
-write, `TestPrepareRejectsOutOfScopeServiceActor` locks it), so this ADR's
-Decision/Consequences/Open-questions text is updated to describe the fix
-as landed rather than pending. DUR-1.2, 1.4, 1.5, 1.6, 1.7
-(commit-cancellation semantics, error mapping, re-entrancy, concurrent
-`Open`, interrupted migration) are ADR 3's scope, not this ADR's. Also
-found while verifying this round's tests (not a numbered finding):
-`TestConformance/DirectiveBoundaries` fails on `internal/store/sqlite`
-only — see Tests, "Round 1 additions" — flagged for `sqlite-worker`.
+recorded it as unassigned in the round-1 fix table (it had in fact been
+assigned to `ledger-worker` by direct message, not the table); it is fixed
+(`336ae38`; `actorInScope` applied in `validatePrepare` before any
+reservation write, `TestPrepareRejectsOutOfScopeServiceActor` locks it), so
+this ADR's Decision/Consequences/Open-questions text now describes it as
+landed. DUR-1.2, 1.4, 1.5, 1.6, 1.7 (commit-cancellation semantics, error
+mapping, re-entrancy, concurrent `Open`, interrupted migration) are ADR 3's
+scope, not this ADR's. Also found while verifying this round's tests (not
+a numbered finding): `TestConformance/DirectiveBoundaries` briefly failed
+on `internal/store/sqlite` only — fixed in `a8e895f`, passes on both
+stores now.
