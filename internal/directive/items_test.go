@@ -198,6 +198,14 @@ func TestMalformedItemsAndLifecycle(t *testing.T) {
 	if len(p.items) != 1 || p.items[0].id == "heading" || p.diagnostics[0].reason != "heading ID on list section" {
 		t.Fatal(p)
 	}
+	for _, input := range []string{"## Working [heading]\n- text", "## Unpin [a]\n- [b]"} {
+		if r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem}); len(r.Sections) != 1 || r.Sections[0].DirectiveID != "" {
+			t.Fatalf("%q: ignored heading ID exported: %+v", input, r.Sections)
+		}
+	}
+	if r := Parse([]byte("## Goal [g]\nx"), Options{Authority: domain.AuthoritySystem}); r.Sections[0].DirectiveID != "g" {
+		t.Fatal(r.Sections)
+	}
 }
 func TestRepeatedIDsWithinList(t *testing.T) {
 	cases := []struct {
