@@ -165,3 +165,21 @@ func kinds(items []domain.ContextItem) []domain.Kind {
 	}
 	return out
 }
+
+// Transaction wrappers in tests forward the Phase 3 semantic facet of the
+// transaction they wrap, as W1's handoff requires of fault-injection and
+// recording wrappers, so graph and services see the same transaction and
+// poison state.
+
+func (t pageTx) SemanticTransaction() (store.SemanticTx, error) { return store.Semantic(t.Tx) }
+func (t pageTx) SemanticReadBackend() store.SemanticReader {
+	r, _ := store.ReadSemantic(t.Tx)
+	return r
+}
+func (t repeatUnverifiedTx) SemanticTransaction() (store.SemanticTx, error) {
+	return store.Semantic(t.Tx)
+}
+func (t repeatUnverifiedTx) SemanticReadBackend() store.SemanticReader {
+	r, _ := store.ReadSemantic(t.Tx)
+	return r
+}
