@@ -79,6 +79,7 @@ var suite = []testCase{
 	{"CanonicalCandidates", testCanonicalCandidates},
 	{"CurrentWorking", testCurrentWorking},
 	{"SourceItems", testSourceItems},
+	{"SourceItemsMixedOwners", testSourceItemsMixedOwners},
 	{"VisibleReferences", testVisibleReferences},
 	{"ItemInsertRules", testItemInsertRules},
 	{"ItemBlobIntegrity", testItemBlobIntegrity},

@@ -357,11 +357,12 @@ type transaction struct {
 	// rowsRead counts the rows every multi-row query of the transaction
 	// read, so tests can bound a write's reads from outside (SPEC-3.2).
 	rowsRead int
-	// itemCache holds items this transaction has decoded and verified;
-	// UpdateItem refreshes an entry and a rolled-back store method clears
-	// it (SPEC-3.1 item 2). itemBytesLoaded counts the bytes decoded, so
-	// tests can assert a transcript is not reloaded per derived item.
-	itemCache       map[string]domain.ContextItem
+	// itemCache holds items this transaction has decoded and verified,
+	// bounded by entries and bytes (SPEC-4.1); UpdateItem drops an entry
+	// and a rolled-back store method clears it (SPEC-3.1 item 2).
+	// itemBytesLoaded counts the bytes decoded, so tests can assert a
+	// transcript is not reloaded per derived item.
+	itemCache       *itemCache
 	itemBytesLoaded uint64
 }
 
