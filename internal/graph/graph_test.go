@@ -80,6 +80,23 @@ func agentDirective(sess, id, dirID string, seq uint64) domain.ContextItem {
 	return it
 }
 
+// workingItem returns a TASK-scoped task_state item, as a Working section's
+// items are (FR-DIR-007).
+func workingItem(sess, id string, seq uint64, authority domain.Authority) domain.ContextItem {
+	it := taskItem(sess, id, seq, authority)
+	it.Kind = domain.KindTaskState
+	return it
+}
+
+// agentScopedWorkingItem is workingItem narrowed to one agent's own AGENT
+// scope, as a keyed agent write is (FR-TOOL-002).
+func agentScopedWorkingItem(sess, id string, seq uint64, authority domain.Authority, agentID string) domain.ContextItem {
+	it := agentScopedItem(sess, id, seq, agentID)
+	it.Kind = domain.KindTaskState
+	it.Authority = authority
+	return it
+}
+
 func mustInsert(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
 	t.Helper()
 	for _, it := range items {
@@ -176,22 +193,41 @@ func TestSupersede_AuthorizationRules(t *testing.T) {
 		}
 	})
 
-	t.Run("ToolAndRetrievedContentNeitherSupersedesTheOther", func(t *testing.T) {
+	t.Run("AgentSupersedesAgentAllowed", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		const sess = "sess-authz-1b"
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			oldItem := taskItem(sess, "old", tx.NextSeq(), domain.AuthorityAgent)
+			newItem := taskItem(sess, "new", tx.NextSeq(), domain.AuthorityAgent)
+			mustInsert(t, tx, oldItem, newItem)
+			_, err := Supersede(tx, principal(sess, domain.AuthorityAgent), newItem.ID, oldItem.ID, "evt", "")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("AGENT superseding AGENT: unexpected error %v", err)
+		}
+	})
+
+	t.Run("ToolAndRetrievedContentActorsAlwaysRejected", func(t *testing.T) {
+		// Tool output can never suppress state (section 9): a TOOL or
+		// RETRIEVED_CONTENT actor is rejected outright, even when both
+		// items share its own authority (which the old equal-rank check
+		// alone would not have caught).
 		for _, dir := range []struct {
-			name       string
-			newA, oldA domain.Authority
-			actorA     domain.Authority
+			name   string
+			actorA domain.Authority
 		}{
-			{"ToolOverRetrieved", domain.AuthorityTool, domain.AuthorityRetrievedContent, domain.AuthorityTool},
-			{"RetrievedOverTool", domain.AuthorityRetrievedContent, domain.AuthorityTool, domain.AuthorityRetrievedContent},
+			{"ToolActor", domain.AuthorityTool},
+			{"RetrievedContentActor", domain.AuthorityRetrievedContent},
 		} {
 			t.Run(dir.name, func(t *testing.T) {
 				s := memory.New()
 				defer s.Close()
 				sess := "sess-authz-2-" + dir.name
 				err := s.Update(ctx, sess, func(tx store.Tx) error {
-					oldItem := taskItem(sess, "old", tx.NextSeq(), dir.oldA)
-					newItem := taskItem(sess, "new", tx.NextSeq(), dir.newA)
+					oldItem := taskItem(sess, "old", tx.NextSeq(), dir.actorA)
+					newItem := taskItem(sess, "new", tx.NextSeq(), dir.actorA)
 					mustInsert(t, tx, oldItem, newItem)
 					_, err := Supersede(tx, principal(sess, dir.actorA), newItem.ID, oldItem.ID, "evt", "")
 					return err
@@ -332,54 +368,112 @@ func TestReplaceDirective_KeyedAgentWriteChain_T17(t *testing.T) {
 	}
 }
 
-// -- FR-DIR-007-style multi-item snapshot supersession --------------------
+// -- FR-DIR-007 v0.6: Working snapshot supersession ------------------------
 
-func TestSupersede_MultiItemSnapshot_FRDIR007(t *testing.T) {
+// TestSupersedeSnapshot_FRDIR007 ingests a Working section W2 (one new
+// task_state item) into a task that already holds two current Working
+// items: w1a, which shares W2's authority and TASK-scoped access boundary
+// and must be superseded, and an AGENT-scoped item belonging to a different
+// agent, which must be left alone even though it lives in the same task
+// (FR-DIR-007 v0.6: same authority AND same access boundary, not mere task
+// membership).
+func TestSupersedeSnapshot_FRDIR007(t *testing.T) {
 	s := memory.New()
 	defer s.Close()
-	const sess = "sess-dir007"
+	const sess, taskID = "sess-dir007", "task"
 	actor := principal(sess, domain.AuthorityUser)
 
+	var w1a, otherAgentItem, w2 domain.ContextItem
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
-		w1a := taskItem(sess, "w1a", tx.NextSeq(), domain.AuthorityUser)
-		w1b := taskItem(sess, "w1b", tx.NextSeq(), domain.AuthorityUser)
-		w2 := taskItem(sess, "w2", tx.NextSeq(), domain.AuthorityUser)
-		mustInsert(t, tx, w1a, w1b, w2)
+		w1a = workingItem(sess, "w1a", tx.NextSeq(), domain.AuthorityUser)
+		otherAgentItem = agentScopedWorkingItem(sess, "agent-restricted", tx.NextSeq(), domain.AuthorityUser, "agent-b")
+		w2 = workingItem(sess, "w2", tx.NextSeq(), domain.AuthorityUser)
+		mustInsert(t, tx, w1a, otherAgentItem, w2)
 
-		if _, err := Supersede(tx, actor, w2.ID, w1a.ID, "evt-w2", ""); err != nil {
+		rels, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
+		if err != nil {
 			return err
 		}
-		_, err := Supersede(tx, actor, w2.ID, w1b.ID, "evt-w2", "")
-		return err
+		if len(rels) != 1 || rels[0].ToID != w1a.ID {
+			t.Errorf("SupersedeSnapshot relationships = %+v, want exactly one edge to %s", rels, w1a.ID)
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("snapshot supersession: %v", err)
 	}
 
 	err = s.View(ctx, sess, func(tx store.ReadTx) error {
-		for _, id := range []string{"w1a", "w1b"} {
-			if ok, err := IsCurrent(tx, id); err != nil || ok {
-				t.Errorf("IsCurrent(%s) = %v, %v; want false, nil", id, ok, err)
-			}
+		if ok, err := IsCurrent(tx, w1a.ID); err != nil || ok {
+			t.Errorf("IsCurrent(w1a) = %v, %v; want false, nil", ok, err)
 		}
-		if ok, err := IsCurrent(tx, "w2"); err != nil || !ok {
+		if ok, err := IsCurrent(tx, w2.ID); err != nil || !ok {
 			t.Errorf("IsCurrent(w2) = %v, %v; want true, nil", ok, err)
 		}
-		rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: "w2"})
+		// The agent-restricted item has a narrower access boundary than W2
+		// (a different agent), so it must remain current and untouched.
+		if ok, err := IsCurrent(tx, otherAgentItem.ID); err != nil || !ok {
+			t.Errorf("IsCurrent(agent-restricted) = %v, %v; want true, nil (must not be superseded)", ok, err)
+		}
+		rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: w2.ID})
+		if err != nil {
+			return err
+		}
+		if len(rels) != 1 {
+			t.Errorf("SUPERSEDES edges from w2 = %d, want 1", len(rels))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+}
+
+// TestSupersedeSnapshot_MultipleOldItems covers a Working section that
+// replaces two current items sharing its authority and boundary at once
+// (FR-DIR-007), the many-superseded-by-one shape T18's W2 exercises.
+func TestSupersedeSnapshot_MultipleOldItems(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess, taskID = "sess-dir007-multi", "task"
+	actor := principal(sess, domain.AuthorityUser)
+
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		w1a := workingItem(sess, "m-w1a", tx.NextSeq(), domain.AuthorityUser)
+		w1b := workingItem(sess, "m-w1b", tx.NextSeq(), domain.AuthorityUser)
+		w2 := workingItem(sess, "m-w2", tx.NextSeq(), domain.AuthorityUser)
+		mustInsert(t, tx, w1a, w1b, w2)
+
+		rels, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
 		if err != nil {
 			return err
 		}
 		if len(rels) != 2 {
-			t.Errorf("SUPERSEDES edges from w2 = %d, want 2", len(rels))
+			t.Errorf("SupersedeSnapshot relationships = %d, want 2", len(rels))
 		}
-		// The chain containing w1a also contains its sibling w1b, since
-		// both were superseded by the same snapshot item w2.
-		chain, err := SupersessionChain(tx, "w1a")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot supersession: %v", err)
+	}
+
+	err = s.View(ctx, sess, func(tx store.ReadTx) error {
+		for _, id := range []string{"m-w1a", "m-w1b"} {
+			if ok, err := IsCurrent(tx, id); err != nil || ok {
+				t.Errorf("IsCurrent(%s) = %v, %v; want false, nil", id, ok, err)
+			}
+		}
+		if ok, err := IsCurrent(tx, "m-w2"); err != nil || !ok {
+			t.Errorf("IsCurrent(m-w2) = %v, %v; want true, nil", ok, err)
+		}
+		// The chain containing m-w1a also contains its sibling m-w1b, since
+		// both were superseded by the same snapshot item m-w2.
+		chain, err := SupersessionChain(tx, "m-w1a")
 		if err != nil {
 			return err
 		}
-		if len(chain) != 3 || chain[0] != "w2" {
-			t.Errorf("SupersessionChain(w1a) = %v, want newest-first [w2 <w1a,w1b in some order>]", chain)
+		if len(chain) != 3 || chain[0] != "m-w2" {
+			t.Errorf("SupersessionChain(m-w1a) = %v, want newest-first [m-w2 <m-w1a,m-w1b in some order>]", chain)
 		}
 		return nil
 	})
