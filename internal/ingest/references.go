@@ -19,14 +19,18 @@ func referenceKey(text string) (string, bool) {
 	return domain.LocatorKey(domain.SourcePath, text)
 }
 
-// declareReference persists an immutable unresolved reference for a new
-// References item whose text is a locator, and links every already
-// ingested source it names (M5, R2). The record is kept even when a source
+// declareReference links a new References item to the item it names by
+// ID, if any (F4), then persists an immutable unresolved reference for it
+// if its text is a locator and links every already ingested source it names
+// (M5, R2). The record is kept even when a source
 // matched, since every later ingestion of a matching source may add an
 // edge; references are never retired. Existing sources come from the
 // store's bounded source-key index (R19); more than the lookup limit
 // rejects the event (store.ErrLimitExceeded, D17).
 func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
+	if err := r.referenceItemID(c, ref); err != nil {
+		return err
+	}
 	key, ok := referenceKey(ref.Parts[0].Text)
 	if !ok {
 		return nil
@@ -59,6 +63,37 @@ func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
 		Seq:          r.tx.NextSeq(),
 	})
 }
+
+// referenceItemID links a References item whose text names an item ID
+// (FR-DIR-003, F4, SPEC-1.2) through an exact-key lookup: the named item is
+// linked only if the source actor can access it and it is no narrower than
+// the reference. A missing and an inaccessible item are indistinguishable:
+// nothing is linked and nothing is reported either way.
+func (r *run) referenceItemID(c unitCtx, ref domain.ContextItem) error {
+	id := ref.Parts[0].Text
+	if id == "" || len(id) > maxItemIDBytes || id == ref.ID {
+		return nil
+	}
+	for i := range len(id) {
+		if b := id[i]; b <= ' ' || b == 0x7f {
+			return nil
+		}
+	}
+	target, err := r.tx.Item(id)
+	switch {
+	case isNotFound(err) || errors.Is(err, domain.ErrIntegrity):
+		// A row failing verification is reported before any access check,
+		// so treating it as an error would reveal an item the actor may
+		// not see; like a missing one, it is simply not linked.
+		return nil
+	case err != nil:
+		return err
+	}
+	return r.linkReference(c.actor, ref, target)
+}
+
+// maxItemIDBytes bounds the text tried as an item ID.
+const maxItemIDBytes = 256
 
 // linkPendingReferences links every stored reference naming a newly
 // ingested source (the span's transcript) to it, under both the
