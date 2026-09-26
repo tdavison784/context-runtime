@@ -262,7 +262,11 @@ func (r *run) workingSection(c unitCtx, si int) error {
 	if err != nil {
 		return err
 	}
-	for range res.Unverified {
+	for _, id := range res.Unverified {
+		if r.unverified[id] {
+			continue
+		}
+		r.unverified[id] = true
 		r.unitDiags = append(r.unitDiags, scopedDiag{domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: domain.ItemUnverified,
 			Reason: domain.ReasonUnverifiedItem, Range: sec.Range}, c.transcript.Access})
 	}
