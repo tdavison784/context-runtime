@@ -118,3 +118,27 @@ func TestNestedOldLeaseCannotBeRenewedByNewRootLease(t *testing.T) {
 		t.Fatalf("both leases live: %v", err)
 	}
 }
+
+func TestProjectionRejectsCyclicAndOverBudgetCoverage(t *testing.T) {
+	d := dependencyFixture(t)
+	root := d.Coverages["coverage"]
+	child := domain.CoverageRecord{SemanticMeta: domain.SemanticMeta{ID: "child", SessionID: "s", Seq: 5, SchemaVersion: domain.SemanticSchemaV1},
+		Purpose: domain.CoverageLeaseDependency, Access: root.Access, MemberCount: 1}
+	back := domain.CoverageMember{SemanticMeta: domain.SemanticMeta{ID: "back", SessionID: "s", Seq: 5, SchemaVersion: domain.SemanticSchemaV1}, CoverageID: child.ID, NestedCoverageID: root.ID}
+	child.Signature, _ = domain.CoverageSignature(child, []domain.CoverageMember{back})
+	d.Coverages[child.ID], d.Members[child.ID] = child, []domain.CoverageMember{back}
+	forward := domain.CoverageMember{SemanticMeta: domain.SemanticMeta{ID: "forward", SessionID: "s", Seq: root.Seq, SchemaVersion: domain.SemanticSchemaV1}, CoverageID: root.ID, NestedCoverageID: child.ID}
+	members := append(d.Members[root.ID], forward)
+	slices.SortFunc(members, func(a, b domain.CoverageMember) int { x, _ := a.Key(); y, _ := b.Key(); return cmp.Compare(x, y) })
+	root.MemberCount = uint64(len(members))
+	root.Signature, _ = domain.CoverageSignature(root, members)
+	d.Coverages[root.ID], d.Members[root.ID] = root, members
+	d.SnapshotSeq = 5
+	if err := CheckProjectionDependencies(d); !errors.Is(err, domain.ErrIncompleteCoverage) {
+		t.Fatalf("cyclic coverage = %v", err)
+	}
+	d.MaxMembers = 1
+	if err := CheckProjectionDependencies(d); !errors.Is(err, domain.ErrResourceLimit) {
+		t.Fatalf("over-budget coverage = %v", err)
+	}
+}
