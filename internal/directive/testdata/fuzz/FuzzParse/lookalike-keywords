@@ -1,0 +1,5 @@
+go test fuzz v1
+[]byte("## Wor\xe2\x84\xaaing\x0a- evil\x0a## Re\xc5\xbfolve [g]\x0a## P\xc4\xb1nned\x0a- evil")
+uint8(0)
+bool(false)
+uint16(3)
