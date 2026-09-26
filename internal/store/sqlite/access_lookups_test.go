@@ -170,3 +170,62 @@ func TestRetireLookupsUseIndex(t *testing.T) {
 		assertIndexed(t, s, []string{"session_id", "item_id"}, retireLookupSQL(table), "s", "x")
 	}
 }
+
+// assertSeeks fails unless q's plan searches an index with cursor inside
+// its constraint and sorts nothing: a page after a cursor then costs what
+// it returns, not the matches before the cursor (SPEC-3.1 item 4).
+func assertSeeks(t *testing.T, s *Store, cursor string, q string, args ...any) {
+	t.Helper()
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	seeks := false
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(detail, "TEMP B-TREE") {
+			t.Errorf("query sorts (%s): %q", detail, q)
+		}
+		if strings.HasPrefix(detail, "SEARCH ") && strings.Contains(detail, cursor) {
+			seeks = true
+		}
+	}
+	if !seeks {
+		t.Errorf("cursor %s is not part of an index search: %q", cursor, q)
+	}
+}
+
+// TestLookupCursorsSeek runs every paged or batched lookup builder, one
+// query per permitted owner combination, at a mid-list cursor (SPEC-3.1
+// item 4).
+func TestLookupCursorsSeek(t *testing.T) {
+	s, _ := openTemp(t)
+	mid := store.Cursor{Seq: 7, ID: "m"}
+	combos := ownerCombos(planViewer)
+	if len(combos) != 8 {
+		t.Fatalf("owner combinations = %d, want 8", len(combos))
+	}
+	for _, b := range blobReferrerQueries("s", "h", combos) {
+		q, args := b(mid, lookupBatch)
+		assertSeeks(t, s, "(seq,item_id)>(?,?)", q, args...)
+	}
+	for _, b := range sourceItemsQueries("s", "k", combos) {
+		q, args := b(mid, lookupBatch)
+		assertSeeks(t, s, "(seq,item_id)>(?,?)", q, args...)
+	}
+	for _, b := range visibleReferencesQueries("s", "k", combos) {
+		q, args := b(mid, 3)
+		assertSeeks(t, s, "(f_seq,id)>(?,?)", q, args...)
+	}
+	q, args := canonicalQuery("s", store.CanonicalFilter{TaskID: "task", Kind: domain.KindFact, Authority: domain.AuthorityUser,
+		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, ContentHash: "h"})(mid, lookupBatch)
+	assertSeeks(t, s, "(seq,item_id)>(?,?)", q, args...)
+	q, args = workingQuery("s", store.WorkingFilter{TaskID: "task", Authority: domain.AuthorityUser,
+		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}})(mid, lookupBatch)
+	assertSeeks(t, s, "(seq,item_id)>(?,?)", q, args...)
+}
