@@ -89,7 +89,12 @@ func makeSchemas() map[string]*recordSchema {
 			s.collect(f.Type, []int{i}, "f_"+snake(f.Name))
 		}
 		cols := []string{"session_id", "id", "subkey"}
+		seen := map[string]bool{}
 		for _, c := range s.columns {
+			if seen[c.name] {
+				panic("sqlite schema: duplicate column " + s.table + "." + c.name)
+			}
+			seen[c.name] = true
 			cols = append(cols, c.name)
 		}
 		s.selectSQL = "SELECT " + strings.Join(cols, ",") + " FROM " + s.table
@@ -113,7 +118,21 @@ var (
 	semanticMetaType = reflect.TypeOf(domain.SemanticMeta{})
 )
 
+// valueLeafTypes are immutable nested result unions stored whole in one
+// lossless-encoded TEXT column rather than flattened: they are never
+// filtered or ordered on, and flattening their union members produces
+// ambiguous column names (a nested Before.Version beside a BeforeVersion).
+var valueLeafTypes = map[reflect.Type]bool{
+	reflect.TypeFor[domain.MutationResult]():     true,
+	reflect.TypeFor[domain.ToolResult]():         true,
+	reflect.TypeFor[domain.ItemMutationResult](): true,
+}
+
 func (s *recordSchema) collect(typ reflect.Type, path []int, name string) {
+	if valueLeafTypes[typ] {
+		s.columns = append(s.columns, recordColumn{name: name, path: path, typ: typ})
+		return
+	}
 	if typ.Kind() == reflect.Pointer {
 		s.columns = append(s.columns, recordColumn{name: name + "_present", path: path, typ: typ, role: presentColumn})
 		s.collect(typ.Elem(), path, name)
@@ -160,6 +179,9 @@ func (c recordColumn) sqlType() string {
 	}
 	if t == partsType {
 		return "BLOB" // lossless parts (lossless.go)
+	}
+	if valueLeafTypes[t] {
+		return "TEXT" // lossless value (lossless.go)
 	}
 	switch t.Kind() {
 	case reflect.String:
@@ -312,6 +334,11 @@ func encodeField(v reflect.Value) (any, error) {
 			return b, err // parts occupy a BLOB column (migration 0002)
 		}
 		return string(b), nil
+	case reflect.Struct:
+		if valueLeafTypes[v.Type()] {
+			b, err := encodeLossless(v)
+			return string(b), err
+		}
 	}
 	return nil, fmt.Errorf("unsupported field type %s", v.Type())
 }
@@ -437,6 +464,11 @@ func decodeField(f reflect.Value, x any, bytesNil bool) error {
 				f.SetBytes(append([]byte{}, b...))
 			}
 			return nil
+		}
+		return decodeLossless([]byte(asString(x)), f)
+	case reflect.Struct:
+		if !valueLeafTypes[f.Type()] {
+			return fmt.Errorf("unsupported field type %s", f.Type())
 		}
 		return decodeLossless([]byte(asString(x)), f)
 	default:
