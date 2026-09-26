@@ -10,9 +10,10 @@ const MaxDiagnosticsPerSpanCap = 256
 // but never exceed the grammar. Exceeding most limits rejects the whole
 // event before any write; MaxReferenceLinks is the documented exception
 // (ADR 19 §13/SPEC-2.4, a departure from FR-DIR-003's literal text): once
-// spent, further REFERENCES edges for the rest of the event are silently
-// skipped with a ReferenceLinksTruncated diagnostic rather than rejecting
-// the event. Diagnostics past MaxEventDiagnostics/MaxDiagnosticsPerSpan
+// spent, further REFERENCES edges for the rest of the event are skipped,
+// diagnosed with ReferenceLinksTruncated rather than rejecting the event
+// (SPEC-3.6: not "silently" — the diagnostic is the point). Diagnostics
+// past MaxEventDiagnostics/MaxDiagnosticsPerSpan
 // are truncated the same way, with a marker.
 type Limits struct {
 	// Per parse unit.

@@ -177,9 +177,16 @@ preserve valid state.
     `relationship_to` index on `rec_relationship(type, to_id)` and a
     `reference_visible` index on `rec_reference` adding the owner columns.
     Backfilled from 0009-0011's tables, which still held data at 0012's
-    replay point. The store deletes an item's lookup rows in the same
-    write that retires it (`SUPERSEDES`/`DUPLICATE_OF`), so repeated
-    identical content never grows these tables (DUR-1.1).
+    replay point. The store deletes an item's rows from
+    `lookup_canonical`/`lookup_working`/`lookup_source` in the same write
+    that retires it (`SUPERSEDES`/`DUPLICATE_OF`), so repeated identical
+    content never grows these three tables (DUR-1.1). **(SPEC-3.3)
+    `lookup_blob` does not follow the same rule:** its row is dropped only
+    when the retiring item is itself a duplicate, not on an ordinary
+    supersession (the canonical item's content and boundary still
+    authorize the same blob references), and 0012's `lookup_blob` backfill
+    carries forward even a pre-existing duplicate's row, with no
+    `DUPLICATE_OF` exclusion — unlike the other three tables' backfills.
   - `0013_drop_pre_f1_lookups.sql` drops `item_blobs`, `item_sources`, the
     `item_duplicate` index, and the `reference_locator` index once 0012
     has carried their data forward — "nothing reads or writes these"
@@ -200,6 +207,17 @@ preserve valid state.
     dropping the key-only `relationship_from`/`relationship_to`/`item_task`
     indexes they supersede — see "The access-filtered lookup API" below
     for why the key-only indexes were not enough on their own.
+    `TestUpgradeOrderedGraphIndexes` (SPEC-3.2, previously missing) is the
+    migrated-layout parity fixture: a relationship and items stored before
+    0015 read back correctly through the new indexes after upgrade, and
+    the three superseded indexes are confirmed gone.
+  - `0016_lookup_item_indexes.sql` (SPEC-3.1 item 1) adds a `(session_id,
+    item_id)` index to each of `lookup_canonical`/`lookup_working`/
+    `lookup_source`/`lookup_blob`. Every `SUPERSEDES`/`DUPLICATE_OF` edge
+    deletes the retired item's rows from these tables by item ID, but
+    their primary keys start with the lookup key, not the item ID, so that
+    `DELETE` searched the whole session before this index existed. Test:
+    `TestRetireLookupsUseIndex` (`internal/store/sqlite/access_lookups_test.go`).
 
   **The access-filtered lookup API (F1), landed:** `store.BlobReferrer`,
   `CanonicalCandidates`, `CurrentWorking`, and `SourceItems`
@@ -229,18 +247,22 @@ preserve valid state.
 
   SPEC-1.3 separately found that *other* per-item graph/ingest reads —
   `Relationships` filtered by type/from/to, and `Items` filtered by task —
-  were not indexed even though R19's three named lookups were. 0012's own
-  `relationship_to`/item-task indexes did not actually close this (SPEC-2.1:
-  they carried the key but not the `(Seq, ID)` order, so SQLite preferred a
+  were not indexed even though R19's three named lookups were. The
+  key-only indexes behind them did not actually close this (SPEC-2.1: they
+  carried the key but not the `(Seq, ID)` order, so SQLite preferred a
   session-wide order index to avoid a sort — each read still grew with the
   session, and `TestGraphReadsUseIndex`'s plan guard could not yet catch it,
   since it only rejected an unindexed `SCAN`, not a session-prefix `SEARCH`).
+  **(SPEC-3.3, corrected) Only `relationship_to` is from 0012 — `relationship_from`
+  and `item_task` are 0001_init.sql originals**, so this gap predates 0012
+  and was never actually about 0012's own additions.
   **`0015_ordered_graph_indexes.sql` (SPEC-2.1, p2-store) fixes this
   properly:** `relationship_from_seq`/`relationship_to_seq` on
   `rec_relationship(session_id, f_type, f_from_id|f_to_id, f_seq, id)` and
   `item_task_seq` on `rec_item(session_id, f_task_id, f_seq, id)` carry both
-  the key and the order in one index, dropping the 0012 key-only indexes
-  they supersede (`relationship_from`, `relationship_to`, `item_task`); a
+  the key and the order in one index, dropping the three key-only indexes
+  they supersede (`relationship_from`/`item_task` from 0001,
+  `relationship_to` from 0012); a
   strengthened plan guard now requires the exact key columns in the index's
   search constraint, not merely that some index is used
   (`internal/store/sqlite/lookups_test.go`'s `assertIndexed`,
@@ -315,7 +337,7 @@ preserve valid state.
   is content-part-specific** (`verifyItemContent`, below): a lossless
   tag/ID list corrupted the same way decodes cleanly (the wire format
   itself is intact) and is returned as-is with no `ErrIntegrity`, since
-  nothing compares it against a separate hash \u2014 see
+  nothing compares it against a separate hash — see
   `TestUpgradeLosslessStringLists` below.
 ## Alternatives considered
 
@@ -382,10 +404,16 @@ preserve valid state.
 - The lossless leaf-list encoding (D3, R8) is a breaking on-disk format
   change for any pre-Phase-2 database; migrations 0002/0003 upgrade
   existing rows automatically on open, but a row `0001` had already
-  corrupted (invalid UTF-8 replaced with U+FFFD) is detected, not
-  silently repaired: it now reads back `domain.ErrIntegrity` rather than
-  the wrong value it held before. Operators restoring a pre-Phase-2 backup
-  should expect this on any row a Phase 1 binary had already corrupted.
+  corrupted a *content part* (invalid UTF-8 replaced with U+FFFD) is
+  detected, not silently repaired: it now reads back `domain.ErrIntegrity`
+  rather than the wrong value it held before. **(SPEC-3.6) This detection
+  is content-part-specific, not general** — see "The access-filtered
+  lookup API" above: a corrupted tag or ID list decodes cleanly and is
+  returned as-is, with no `ErrIntegrity`, since nothing compares it
+  against a separate hash. Operators restoring a pre-Phase-2 backup
+  should expect the `ErrIntegrity` detection only for a row whose
+  corruption was in a content part, and a silently-preserved-as-is old
+  value for one whose corruption was in a tag or ID list.
 - One writer connection plus `BEGIN IMMEDIATE` means writer throughput is
   bounded by SQLite's single-writer model. `store.Store.Update`
   (`internal/store/store.go`) now documents different sessions as
@@ -446,8 +474,10 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all fourteen migrations replay on a fresh database (SPEC-2.6:
-    corrected from an earlier, stale "eleven", itself corrected from a
+    after all fifteen migrations replay on a fresh database (SPEC-3.6:
+    corrected from a stale "fourteen" once 0015 landed; SPEC-2.6 had
+    already corrected that from an earlier, stale "eleven", itself
+    corrected from a
     stale "seven"), still matches every Go
     struct field exactly, locking the no-opaque-copy design above against
     every migration added since Phase 1, not only 0001.
