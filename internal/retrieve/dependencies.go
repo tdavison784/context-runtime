@@ -37,7 +37,7 @@ func CheckProjectionDependencies(d DependencySnapshot) error {
 	if !p.Access.Permits(d.Principal) {
 		return domain.ErrNotFound
 	}
-	if p.Invocation.Principal != d.Principal {
+	if p.Origin.Holder != d.Principal {
 		return domain.ErrLeaseExpired
 	}
 	visited := map[string]uint8{} // 1 visiting, 2 verified
@@ -92,7 +92,7 @@ func CheckProjectionDependencies(d DependencySnapshot) error {
 				live := policy.LeaseLive(lease, policy.LeaseSnapshot{
 					Seq: d.SnapshotSeq, Source: *m.Source, Task: d.Task, Conversation: d.Conversation,
 				}, d.Principal, d.DispatchTurn)
-				if lease.Holder != d.Principal || lease.ConversationID != p.Invocation.ConversationID || lease.TurnID != p.Invocation.TurnID || !live {
+				if lease.Holder != d.Principal || lease.ConversationID != p.Origin.ConversationID || lease.TurnID != p.Origin.TurnID || !live {
 					return domain.ErrLeaseExpired
 				}
 				if root && *m.Source == p.Source && m.LeaseID == p.LeaseID {

@@ -39,7 +39,8 @@ func dependencyFixture(t *testing.T) DependencySnapshot {
 	projection := domain.ProjectionRecord{
 		SemanticMeta: domain.SemanticMeta{ID: "projection", SessionID: "s", Seq: 4, SchemaVersion: domain.SemanticSchemaV1},
 		ItemID:       "projection-item", Source: ref, LeaseID: "lease", RetrievalResultID: "result", DependencyCoverageID: "coverage",
-		Invocation: invocation, Access: item.Access, DeliveryPolicyVersion: "delivery",
+		Origin: domain.RetrievalOrigin{Holder: p, ConversationID: lease.ConversationID, TurnID: "turn-1", Invocation: &invocation},
+		Access: item.Access, DeliveryPolicyVersion: "delivery",
 	}
 	return DependencySnapshot{
 		Principal: p, Projection: projection, MaxMembers: 4, SnapshotSeq: 4, DispatchTurn: "turn-1",
