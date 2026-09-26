@@ -162,3 +162,99 @@ continuity (FR-ASM-011 REQUIRE).
 Blocks are bound to the producing model family: a switch or fallback is **LOSSY** and
 reported only under the header (OBSERVED). This is a separate check from the prefix binding
 and applies on every account.
+
+## Cache reads (C1-C4)
+
+Fixtures `cache__<model>__*.json`. Prefix = a `system` text block of deterministic
+garden-note filler with `cache_control: {type: "ephemeral"}`, followed by a short user turn
+(the uncached "tail": 16 tokens on Opus 5.5, 14 on Sonnet 5). Each point uses a fresh nonce so
+a *write* decides whether it is cacheable. Usage fields read: `cache_creation_input_tokens`,
+`cache_read_input_tokens`, `cache_creation.ephemeral_5m_input_tokens` /
+`ephemeral_1h_input_tokens`, `input_tokens` (uncached remainder only).
+
+### C1 - minimum cacheable prefix (token-level bisection)
+
+| Model | Largest uncached | Smallest cached | Bracket | Documented |
+|---|---|---|---|---|
+| opus-5-5 | billed 527 = 511 prefix + 16 tail, `cache_creation_input_tokens: 0` | write 517 (billed 533) | 512 - 517 | 512 (listed for Opus 5; Opus 5.5 not listed) |
+| sonnet-5 | billed 1036 = 1022 prefix + 14 tail | write 1029 (billed 1043) | 1023 - 1029 | 1024 |
+
+Below the minimum the request succeeds with no error and zero cache fields; the only signal
+is `cache_creation_input_tokens: 0` (OBSERVED). Both brackets are consistent with the
+documented values: 512 for Opus 5.5 and 1024 for Sonnet 5, counted over the prefix up to the
+breakpoint.
+
+### C2 - identical prefix twice
+
+| Model | First | Repeat |
+|---|---|---|
+| opus-5-5 | `cache_creation_input_tokens: 517`, `cache_read_input_tokens: 0`, `input_tokens: 16` | `cache_creation: 0`, `cache_read: 517`, `input_tokens: 16` |
+| sonnet-5 | write 1029 | read 1029 |
+
+Billed input = `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`
+(OBSERVED; token counting below agrees exactly).
+
+### C3 - append-only continuation vs early edit (top-level automatic `cache_control`)
+
+History: `u0` = about 1,000 (Opus) / 2,000 (Sonnet) tokens of filler; then `a0 "Noted."`,
+`u1` question.
+
+| Step | opus-5-5 (write / read) | sonnet-5 (write / read) |
+|---|---|---|
+| 1. `[u0]` | 1025 / 0 | 2052 / 0 |
+| 2. `[u0, a0, u1]` (append) | 24 / **1025** | 24 / **2052** |
+| 3. same, but `u0` gets one leading character | 1050 / **0** | 2077 / **0** |
+| 4. step 2 + appended `{"role":"system"}` message | 15 / **1049** | 14 / **2076** |
+
+Verdict (OBSERVED): append-only continuation reads the whole earlier prefix; an edit to the
+first message drops the read to 0 and rewrites everything; an appended mid-conversation
+system message keeps the prefix read (APPEND_SYSTEM is cache-SAFE on both models).
+Automatic caching moves the breakpoint to the end and reads the previous entry via the
+lookback.
+
+### C4 - TTLs and pricing
+
+`cache_control: {type: "ephemeral", ttl: "1h"}` reports the write under
+`cache_creation.ephemeral_1h_input_tokens` (opus-5-5: 539 of 539; sonnet-5: 1051 of 1051),
+the default under `ephemeral_5m_input_tokens` (OBSERVED). Expiry was not waited out.
+
+Pricing (DOCUMENTED, https://platform.claude.com/docs/en/about-claude/pricing, read
+2026-09-26), USD per million tokens:
+
+| Model | Input | 5m write (1.25x) | 1h write (2x) | Cache read | Output |
+|---|---|---|---|---|---|
+| opus-5-5 | 4.00 | 5.00 | 8.00 | **0.20 (0.05x)** | 20.00 |
+| sonnet-5 | 2.00 | 2.50 | 4.00 | 0.20 (0.1x) | 10.00 |
+
+Other documented cache facts used below: at most 4 breakpoints; `tools` -> `system` ->
+`messages` render order; a 20-block lookback for automatic breakpoints; longer TTL entries
+must precede shorter ones; caches are per workspace; a read refreshes the TTL; lifetime is
+measured from request start.
+
+### Incidental: refusals and cache writes
+
+An earlier filler ("Ledger line N: account N moved N units to bucket X") made Opus 5.5 return
+HTTP 200 `stop_reason: "refusal"`, `stop_details.category: "cyber"`, `output_tokens: 0`, and
+once, in the committed run, a 295-token garden-note prompt did too. The refused response
+**reported a 560-token cache write, but an identical repeat read 0 and wrote again**
+(`incidental__opus-5-5__refusal-cache-write.json`, `...-no-read.json`). A refusal is
+therefore a cache miss for forecasting purposes, whatever `cache_creation_input_tokens` says
+(OBSERVED, n=2). Sonnet 5 never refused.
+
+## Token counting (FR-PROV-004)
+
+`POST /v1/messages/count_tokens` exists for both models, accepts the same body shape
+(system, tools, thinking, `output_config`, betas) and returned **exactly** the billed input
+total for every comparison made, including thinking replay and cached requests:
+
+| Request | opus-5-5 count / billed | sonnet-5 count / billed |
+|---|---|---|
+| first tool turn | 498 / 498 | 564 / 564 |
+| `H1` replay with thinking | 678 / 678 | 712 / 712 |
+| `H2 + u4` with 2 (1) thinking blocks, header set | 793 / 793 | 795 / 795 |
+| cached prefix request (read + uncached) | 533 / 533 | 1043 / 1043 |
+
+Verdict: an exact counter backed by the endpoint is available (OBSERVED, error bound 0 on
+n=4 per model). It is a network call, so FR-PROV-004 keeps it off the ingestion path. The
+docs also say it runs the preserved-thinking check and ignores the `compaction` parameter
+(DOCUMENTED, not exercised).
