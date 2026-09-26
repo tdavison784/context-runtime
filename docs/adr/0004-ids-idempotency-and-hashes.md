@@ -46,18 +46,23 @@ requires stable input identities for deterministic replay.
   differing request fails `ErrEventIDConflict`.
 - Call IDs (v2): `DerivedCallID(session, conversation, conversationRevision,
   proposalHash)` (`internal/domain/ids.go`) hashes the conversation's
-  **revision at reservation time** and `CallProposalHash(c)` — every field
-  PrepareCall froze: session, conversation, operation, both principals, base
-  version, semantic seq, epoch, policy/descriptor versions, request hash,
-  manifest hash (`internal/domain/call.go`, `CallRecord.ProposalHash`,
-  checked by `CallRecord.Validate`). Repeating `PrepareCall` is recognized
-  by comparing the new proposal against the conversation's **currently
-  held** in-flight record (`internal/invocation/prepare.go`: `held.State ==
-  CallPrepared && sameRequest(held, call)`), not by the derived ID alone —
-  the ID is a storage key, the held record's full proposal is the
-  idempotency check. A later operation at the same conversation version,
-  after an earlier one's reservation was released, gets a distinct ID
-  because the conversation's revision has advanced.
+  `Revision` **as read immediately before the reservation is taken** (not
+  after — the whole point is to distinguish a later operation from an
+  earlier one whose reservation already released) and `CallProposalHash(c)`
+  — every field PrepareCall froze: session, conversation, operation, both
+  principals, base version, semantic seq, epoch, policy/descriptor
+  versions, request hash, manifest hash. `CallRecord.ProposalHash` **must be
+  persisted on the record itself** and equal `CallProposalHash(c)`
+  (`internal/domain/call.go`, checked by `CallRecord.Validate`) — the hash
+  is not just an ID input, it is stored data a later read can re-verify
+  without recomputing PrepareCall's original inputs. Repeating `PrepareCall`
+  is recognized by comparing the new proposal against the conversation's
+  currently held in-flight record's `ProposalHash`, not by the derived ID
+  alone — the ID is a storage key; the held record's full proposal is the
+  idempotency check. ADR 17 fixes the required order of checks in `Prepare`
+  (base version, then semantic staleness, then this comparison) and records
+  that `internal/invocation/prepare.go` does not yet implement either the ID
+  scheme or that order.
 - Outcome identity is per attempt. `CallOutcome.Attempt` (≥1) names the
   attempt it closes; `OutcomeHash()` covers `Attempt` plus state, response
   hash, failure reason, retryable flag, and usage (nil-vs-present
@@ -106,11 +111,13 @@ silently supersede one another under FR-DIR-002's ID-reuse rule.
 - **Deriving the call ID from the base conversation version and request
   hash alone (v1).** Rejected per Codex finding 4: that scheme lets an
   unrelated later operation at the same conversation version alias an
-  earlier PREPARED or terminal call's ID once its reservation is released,
-  and it never re-validates the semantic seq, access snapshot, manifest, or
-  operation kind before returning an "identical" record. Binding to the
-  conversation's revision at reservation time, plus checking the full
-  frozen proposal against the currently held record, closes both gaps.
+  earlier PREPARED or terminal call's ID once its reservation is released.
+  Binding to the conversation's pre-reservation revision, plus persisting
+  and checking the full frozen `ProposalHash` against the currently held
+  record, closes the aliasing gap — but not the separate ordering gap ADR
+  17 records (Codex finding N1): even with the v2 ID scheme, checking the
+  held record before revalidating base version/semantic sequence would
+  still let a same-ID match skip revalidation. Both fixes are required.
 - **A single `OutcomeHash` per call instead of per attempt.** Rejected per
   Codex finding 3: a retryable failure on attempt 1 followed by a different
   outcome on attempt 2 would either look like a hash conflict against
@@ -147,10 +154,12 @@ silently supersede one another under FR-DIR-002's ID-reuse rule.
   differs when only `Attempt` differs.
 - `internal/invocation` (`t10_test.go`, `property_test.go`, already
   committed): re-`Prepare`ing an identical proposal against an unreleased
-  reservation returns the same record; a changed semantic seq, access
-  snapshot, or operation kind is never treated as identical even at the same
-  conversation version; a retryable failure on one attempt followed by a
-  distinct outcome on the next attempt is not a conflict.
+  reservation returns the same record; a retryable failure on one attempt
+  followed by a distinct outcome on the next attempt is not a conflict. The
+  case that a changed semantic seq or base version is never treated as
+  identical even when the `ProposalHash` matches — i.e. the check-order
+  regression Codex's second pass found (ADR 17, finding N1) — is not yet
+  covered; see ADR 17's Tests section for the required addition.
 - `internal/store/storetest`: `InsertEvent` idempotency (trace T10 step 1);
   a blob store test asserting `(sessionA, hash)` and `(sessionB, hash)` are
   independent existence checks.
@@ -164,11 +173,20 @@ silently supersede one another under FR-DIR-002's ID-reuse rule.
 
 ## Review
 
-Scrutinized by Codex gpt-6-sol xhigh (`codex-decision-review-out.md`,
-findings 3, 4, 5, 12, 14). Changed: `DerivedCallID` now binds to the
-conversation's revision and the full `CallProposalHash` instead of base
-version + request hash (finding 4); `CallOutcome`/`OutcomeHash` moved to
-per-attempt identity with response-bytes-to-hash validation (findings 3, 5);
-the injectivity claim is now scoped per schema instead of global (finding
-14); the amendment section reports FR-DIR-002/006 as applied in SDD v0.6
-rather than proposed (finding 12).
+First pass (Codex gpt-6-sol xhigh, `codex-decision-review-out.md`, findings
+3, 4, 5, 12, 14): `DerivedCallID` bound to the conversation's revision and
+the full `CallProposalHash` instead of base version + request hash;
+`CallOutcome`/`OutcomeHash` moved to per-attempt identity with
+response-bytes-to-hash validation; the injectivity claim scoped per schema;
+the amendment section updated to report FR-DIR-002/006 as applied.
+
+Second pass (Codex gpt-6-sol xhigh, `codex-contract-v2-review.md`, finding
+N1, verifying PARTIAL on finding 4): the v1→v2 ID redesign was correct as a
+domain-layer decision, but two things were still missing — `CallRecord
+.ProposalHash` wasn't specified as a field the record itself persists (not
+just an ID input), and the committed `internal/invocation` package hadn't
+adopted either the new ID signature or a safe check order. Changed: the
+Decision now states `ProposalHash` must be persisted and re-verifiable on
+the record; the required `Prepare` check order is now ADR 17's decision,
+cross-referenced here; the Tests section no longer overclaims coverage
+`internal/invocation`'s committed tests don't yet have.
