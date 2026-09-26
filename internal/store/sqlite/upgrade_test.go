@@ -428,3 +428,56 @@ func TestUpgradeOrderedGraphIndexes(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeCommandDetailAndLookupItemIndexes checks migrations 0016 and
+// 0017 from databases migrated through 14, 15, and 16 (SPEC-4.3): 0016's
+// detail-access columns and 0017's lookup item indexes exist, and a
+// command record written without detail access (NULL columns) reads back
+// with a zero DetailAccess, validates, and keeps its resolution visible at
+// its own boundary (M8).
+func TestUpgradeCommandDetailAndLookupItemIndexes(t *testing.T) {
+	detailCols := []string{"f_detail_access_scope", "f_detail_access_session_id", "f_detail_access_workflow_id", "f_detail_access_task_id", "f_detail_access_agent_id"}
+	for _, from := range []int{14, 15, 16} {
+		t.Run(fmt.Sprintf("from_%d", from), func(t *testing.T) {
+			l := openLegacy(t, from)
+			_, r := storetest.NewIngestion("s", "e1", domain.CallerOccurrenceID("s", "e1"), 5)
+			cmd := r.Lifecycle[0]
+			nulls := map[string]any{}
+			for _, c := range detailCols {
+				nulls[c] = nil // what a pre-0016 row holds after ADD COLUMN
+			}
+			l.insert("command", cmd, nulls)
+			s := l.upgrade()
+			for _, c := range detailCols {
+				var n int
+				if err := s.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('rec_command') WHERE name=?", c).Scan(&n); err != nil || n != 1 {
+					t.Errorf("column %s after upgrade: %d, %v", c, n, err)
+				}
+			}
+			for _, name := range []string{"lookup_canonical_item", "lookup_working_item", "lookup_source_item", "lookup_blob_item"} {
+				var n int
+				if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", name).Scan(&n); err != nil || n != 1 {
+					t.Errorf("index %s after upgrade: %d, %v", name, n, err)
+				}
+			}
+			if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+				var got domain.LifecycleCommandRecord
+				if err := tx.(*transaction).get("command", cmd.ID, 0, &got); err != nil {
+					return err
+				}
+				if got.DetailAccess != (domain.AccessBoundary{}) {
+					t.Errorf("legacy DetailAccess = %+v, want zero", got.DetailAccess)
+				}
+				if err := got.Validate(); err != nil {
+					t.Errorf("legacy command record invalid: %v", err)
+				}
+				if red := got.Redacted(got.Actor); red.Resolution != cmd.Resolution {
+					t.Errorf("legacy resolution read as %s, want %s", red.Resolution, cmd.Resolution)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

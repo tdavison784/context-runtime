@@ -64,8 +64,26 @@ func TestSupersessionCycleCheckIsLocal(t *testing.T) {
 		if err != nil || !cycle || visited > 3 {
 			t.Errorf("v1 -> v3: cycle=%v visited=%d err=%v; want a cycle after at most 3 visits", cycle, visited, err)
 		}
+		// The inserts below do walk (their source has an incoming edge);
+		// bound what every query read, so a walk that loads the whole
+		// SUPERSEDES graph while reporting only walked nodes fails too
+		// (SPEC-4.3).
+		inner.rowsRead = 0
 		if err := tx.InsertRelationship(storetest.NewRelationship("s", "v1-v3", domain.RelSupersedes, "v1", "v3", tx.NextSeq())); !errors.Is(err, domain.ErrSupersessionCycle) {
 			t.Errorf("closing the cycle: %v, want ErrSupersessionCycle", err)
+		}
+		if inner.rowsRead > 6 {
+			t.Errorf("the cycle-closing insert read %d rows, want its own chain only", inner.rowsRead)
+		}
+		if err := tx.InsertItem(storetest.NewItem("s", "v0", tx.NextSeq(), "v0")); err != nil {
+			return err
+		}
+		inner.rowsRead = 0
+		if err := tx.InsertRelationship(storetest.NewRelationship("s", "v1-v0", domain.RelSupersedes, "v1", "v0", tx.NextSeq())); err != nil {
+			t.Errorf("a walking insert with no cycle: %v", err)
+		}
+		if inner.rowsRead > 6 {
+			t.Errorf("a walking insert read %d rows, want its own chain only", inner.rowsRead)
 		}
 		return nil
 	}); err != nil {

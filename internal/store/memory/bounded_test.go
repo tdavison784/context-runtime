@@ -60,7 +60,14 @@ func TestOrderedIndexCommitMerges(t *testing.T) {
 	x.add("k", seqRef{30000, "new"})
 	x.remove("k", seqRef{5, "id"})
 	x.commitWork = 0
+	backing := &base["k"][0]
 	x.commit()
+	// commit edits the key's list in place: removals first, so the one
+	// addition fits the existing capacity. A copy of the touched list
+	// (slices.Clone) would move it to a new array (SPEC-4.3).
+	if &base["k"][0] != backing {
+		t.Error("commit copied the touched key's list")
+	}
 	if x.commitWork > 4 {
 		t.Errorf("commit of one addition and one removal did %d units of work, want a handful", x.commitWork)
 	}

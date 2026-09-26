@@ -85,6 +85,19 @@ func TestRelationshipsReadTheirTypedKey(t *testing.T) {
 		if err := tx.InsertItem(storetest.NewItem("s", "c", tx.NextSeq(), "c")); err != nil {
 			return err
 		}
+		// Unrelated SUPERSEDES edges, so a type-only index would yield
+		// entries the (type, endpoint) key excludes (SPEC-4.3).
+		for i := range 200 {
+			x, y := fmt.Sprintf("x%d", i), fmt.Sprintf("y%d", i)
+			for _, id := range []string{x, y} {
+				if err := tx.InsertItem(storetest.NewItem("s", id, tx.NextSeq(), id)); err != nil {
+					return err
+				}
+			}
+			if err := tx.InsertRelationship(storetest.NewRelationship("s", "s"+x, domain.RelSupersedes, x, y, tx.NextSeq())); err != nil {
+				return err
+			}
+		}
 		for i := range 1000 {
 			id := fmt.Sprintf("d%d", i)
 			if err := tx.InsertItem(storetest.NewItem("s", id, tx.NextSeq(), "c")); err != nil {
