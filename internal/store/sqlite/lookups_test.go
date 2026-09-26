@@ -117,3 +117,19 @@ func TestUpgradeItemSourceIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestLegacyLookupsDropped checks that the tables and indexes of the
+// deleted pre-F1 lookups are gone after every migration, so no write keeps
+// maintaining them.
+func TestLegacyLookupsDropped(t *testing.T) {
+	s, _ := openTemp(t)
+	for _, name := range []string{"item_blobs", "item_sources", "item_duplicate", "reference_locator"} {
+		var n int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name=?", name).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s still exists after migrations", name)
+		}
+	}
+}
