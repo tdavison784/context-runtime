@@ -541,7 +541,7 @@ Mutations serialize per session because WORKFLOW, SESSION, and AGENT items can b
 Each phase lists the ADRs (section 15) that must be accepted before it exits.
 
 1. Contracts, domain, and stores: accept authority/access/residency and call-ledger decisions before schema implementation; add memory and SQLite stores, immutable blobs, idempotency, transactions, and recovery records. ADRs 1, 3, 4, 6, 13, 16, 17. Gate: state-transition, restart, graph, and concurrency tests for the foundational event traces. A throwaway live probe of the Claude and OpenAI descriptor assumptions (reasoning binding, cache reads, compaction protocol) runs during this phase so ADR 12 rests on observed behavior before the vertical slice.
-2. Directives and ingestion: grammar, IDs, span boundaries, immutable snapshots, deterministic classification, and replacement. Gate: canonical directive examples, parser fuzzing, retry identity, and injection resistance.
+2. Directives and ingestion: grammar, IDs, span boundaries, immutable snapshots, deterministic classification, and replacement. ADR 19. Gate: canonical directive examples, parser fuzzing, retry identity, and injection resistance.
 3. Semantic state engine: current versions, goal status, Working snapshots, keyed agent writes, checkpoints and coverage, observation identity, evidence applicability, obligation transitions, and basic archival/leased retrieval. ADR 8. Gate: replacement, resolution/rehydration, evidence invalidation, and mutation-authority traces.
 4. Context planner: access/eligibility, mandatory partition, provider-independent sizes/scores, plans, and semantic decisions. ADRs 5, 7. Gate: identical plans across provider counters and planner import check.
 5. First vertical slice: fake adapter and one real provider with fixed Rebuild/AppendOnlyCached modes, role-preserving rendering, verified counters/descriptors, tool exchanges including the semantic state tools and reference instruction block, call ledger, checkpoint compaction where supported, and restart recovery. The fake adapter enforces its descriptor (edit safety, tool pairing, cache-prefix accounting, compaction protocol) and is configurable to model rewrite-safe and reasoning-bound profiles. ADRs 2, 9, 10 (initial fixture/profile), 11, 12, 18. Gate: actual requests satisfy authority, scope, tool pairing, budget, reasoning, compaction, and crash traces before building an optimizer.
@@ -660,6 +660,7 @@ Section 11 maps each ADR to the phase it gates.
 16. Common mutation authorization, directive/obligation version replacement, independent residency/goal status, and immutable source snapshots.
 17. Provider call/attempt state machine, conversation reservation, outcome reconciliation, streaming completion, and crash/retry tests.
 18. Semantic state tool schemas, result formats, and the reference instruction block.
+19. Directive parsing and ingestion (grammar deviations, parse units, ingestion pipeline, receipts, dedup/replacement/snapshots, lifecycle parse/authorize).
 
 Each ADR records the decision, alternatives, compatibility impact, and tests that lock the behavior.
 

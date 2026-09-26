@@ -1842,5 +1842,10 @@ convention (§13/§28); and SPEC-1.11's fix, R21's fix, and R20's fix had
 all landed since this ADR's previous revision described them as pending.
 This ADR is ready for the commander to move from Proposed to Accepted at
 Phase 2 exit, pending only the open questions recorded above (§ Open
-questions) and the SDD §11/§15 amendment SPEC-1.13 flagged as still
-outstanding.
+questions). **(2026-09-27) The SDD §11/§15 amendment SPEC-1.13 flagged is
+applied:** by commander ruling, SDD §11 item 2 now names "ADR 19." and
+§15 lists it as item 19 ("Directive parsing and ingestion (grammar
+deviations, parse units, ingestion pipeline, receipts, dedup/replacement/
+snapshots, lifecycle parse/authorize)"), so Phase 2 can exit with this
+ADR accepted; docs/adr/README.md is updated to match, and this is no
+longer an open item.
