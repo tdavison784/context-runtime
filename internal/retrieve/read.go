@@ -33,7 +33,13 @@ func (s *Service) Get(ctx context.Context, p domain.Principal, itemID string) (d
 			return domain.ErrNotFound
 		}
 		currentness := domain.ItemUnkeyed
-		if _, keyed := it.CurrentKey(); keyed {
+		dups, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: it.ID})
+		if err != nil {
+			return err
+		}
+		if len(dups) != 0 {
+			currentness = domain.ItemDuplicate
+		} else if _, keyed := it.CurrentKey(); keyed {
 			currentness = domain.ItemHistorical
 			current, err := graph.IsCurrent(tx, it.ID)
 			if err != nil {
@@ -41,14 +47,6 @@ func (s *Service) Get(ctx context.Context, p domain.Principal, itemID string) (d
 			}
 			if current {
 				currentness = domain.ItemCurrent
-			} else {
-				dups, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: it.ID})
-				if err != nil {
-					return err
-				}
-				if len(dups) != 0 {
-					currentness = domain.ItemDuplicate
-				}
 			}
 		}
 		out = domain.GetResult{Item: it, SnapshotSeq: tx.LastSeq(), Observed: domain.ObservedItemState{
@@ -59,7 +57,7 @@ func (s *Service) Get(ctx context.Context, p domain.Principal, itemID string) (d
 			Generation:  it.Generation,
 			Residency:   it.Residency,
 			Authority:   it.Authority,
-			Expiry:      itemExpiry(tx, it),
+			Expiry:      itemExpiry(tx, it, p),
 		}}
 		return nil
 	})
@@ -71,7 +69,13 @@ func (s *Service) Get(ctx context.Context, p domain.Principal, itemID string) (d
 
 // itemExpiry is descriptive metadata for Get, never an admission decision.
 // Unknown origin state stays unknown so a read cannot invent eligibility.
-func itemExpiry(tx store.ReadTx, it domain.ContextItem) domain.ExpiryState {
+func itemExpiry(tx store.ReadTx, it domain.ContextItem, p domain.Principal) domain.ExpiryState {
+	if it.TTLTurns != nil && p.TaskID != it.TaskID {
+		return domain.ExpiryExpired
+	}
+	if it.Scope == domain.ScopeWorkflow || it.Scope == domain.ScopeAgent {
+		return domain.ExpiryUnknown // W3's owner snapshot supplies admission.
+	}
 	if it.Scope != domain.ScopeTurn && it.Scope != domain.ScopeTask && it.TTLTurns == nil {
 		return domain.ExpiryLive
 	}
