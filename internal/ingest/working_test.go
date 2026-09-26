@@ -79,15 +79,15 @@ func TestWorking_DuplicateAndMalformed(t *testing.T) {
 	})
 }
 
-// TestLifecycle_ParsedNotExecuted_D1: Resolve/Unpin are recorded, resolved
-// read-only at their position in event order, and never executed; targets
-// that are unknown, ambiguous, or of the wrong kind are diagnostics; a
-// retry returns the identical records.
-func TestLifecycle_ParsedNotExecuted_D1(t *testing.T) {
-	eachStore(t, func(t *testing.T, f *fixture) {
-		// D1 is the frozen Phase 2 contract, still what every v1 record
-		// means; new Phase 3 events execute (TestCommandsV2_*).
-		f.in.legacyV2 = true
+// TestLifecycle_ExecutesInOrder_P335 is D1's scenario under Phase 3: the
+// commands of a new event execute at their position in event order as the
+// span's source actor (Resolve on the goal just declared), a target of the
+// wrong kind is MISMATCH and an unknown one NOT_FOUND, each with its
+// diagnostic; a retry returns the identical receipt. The frozen D1
+// guarantee for recorded v1 commands (PARSED_NOT_EXECUTED forever) is
+// TestPhase2FixtureReplay's.
+func TestLifecycle_ExecutesInOrder_P335(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
 		e := userEvent("u1", "## Goal [ship]\nShip it.\n## Resolve [ship]\n## Unpin [ship]\n## Resolve [nope]\n", true)
 		r := f.mustIngest(user, e)
@@ -95,9 +95,12 @@ func TestLifecycle_ParsedNotExecuted_D1(t *testing.T) {
 			t.Fatalf("commands = %+v", r.Lifecycle)
 		}
 		goal, _ := byDirective(r, "ship")
-		want := []domain.TargetResolution{domain.TargetResolved, domain.TargetMismatch, domain.TargetNotFound}
+		want := []struct {
+			res    domain.TargetResolution
+			status domain.CommandStatus
+		}{{domain.TargetResolved, domain.CommandExecuted}, {domain.TargetMismatch, domain.CommandNotExecuted}, {domain.TargetNotFound, domain.CommandNotExecuted}}
 		for i, c := range r.Lifecycle {
-			if c.Resolution != want[i] || c.Status != domain.CommandParsedNotExecuted || c.Actor.Authority != domain.AuthorityUser {
+			if c.Resolution != want[i].res || c.Status != want[i].status || c.Actor.Authority != domain.AuthorityUser {
 				t.Errorf("command %d = %+v", i, c)
 			}
 		}
@@ -109,12 +112,12 @@ func TestLifecycle_ParsedNotExecuted_D1(t *testing.T) {
 		}
 		f.view(func(tx store.ReadTx) error {
 			g, err := tx.Item(goal.ID)
-			if err != nil || *g.GoalStatus != domain.GoalOpen || g.Version != 1 {
-				t.Errorf("goal executed: %+v %v", g, err)
+			if err != nil || *g.GoalStatus != domain.GoalResolved || g.Version != 2 {
+				t.Errorf("goal not resolved in order: %+v %v", g, err)
 			}
 			return nil
 		})
-		if again := f.mustIngest(user, e); !reflect.DeepEqual(again, r) {
+		if again := f.mustIngest(user, e); !reflect.DeepEqual(normReceipt(again), normReceipt(r)) {
 			t.Errorf("retry differs")
 		}
 	})
