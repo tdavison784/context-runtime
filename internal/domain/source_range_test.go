@@ -48,3 +48,30 @@ func TestItemSourceRanges(t *testing.T) {
 		t.Fatal("invalid source range accepted")
 	}
 }
+
+func TestTranscriptRoleCannotPoseAsRequirement(t *testing.T) {
+	tr := validItem()
+	tr.Role = RoleTranscript
+	tr.Section, tr.DirectiveID, tr.GoalStatus = SectionNone, "", nil
+	tr.Kind, tr.Generation, tr.Retention = KindConversation, GenerationWorking, RetentionNormal
+	tr.Authority = AuthoritySystem
+	if err := tr.Validate(); err != nil {
+		t.Fatalf("valid SYSTEM transcript rejected: %v", err)
+	}
+	for name, mut := range map[string]func(*ContextItem){
+		"role":       func(it *ContextItem) { it.Role = "transcript" },
+		"section":    func(it *ContextItem) { it.Section, it.DirectiveID = SectionPinned, "p" },
+		"directive":  func(it *ContextItem) { it.DirectiveID = "p" },
+		"instr kind": func(it *ContextItem) { it.Kind = KindInstruction },
+		"constraint": func(it *ContextItem) { it.Kind = KindConstraint },
+		"pinned":     func(it *ContextItem) { it.Generation = GenerationPinned },
+		"protected":  func(it *ContextItem) { it.Retention = RetentionProtected },
+		"ranges":     func(it *ContextItem) { it.SourceRanges = []SourceRange{{TranscriptID: "x"}} },
+	} {
+		it := tr.Clone()
+		mut(&it)
+		if it.Validate() == nil {
+			t.Errorf("%s: transcript posing as requirement accepted", name)
+		}
+	}
+}

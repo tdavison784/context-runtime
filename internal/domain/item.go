@@ -52,6 +52,23 @@ func (p ContentPart) Validate() error {
 	return nil
 }
 
+// ItemRole separates a span's verbatim transcript snapshot from semantic
+// items (D8). A TRANSCRIPT item is the immutable audit and pending-input
+// envelope of one span: it is never a directive, never a requirement kind,
+// and never becomes a current requirement merely because its authority is
+// SYSTEM or HARNESS; accepted directives and uncovered trusted instruction
+// text become separate semantic items DERIVED_FROM it. The zero value is a
+// semantic item, which keeps records that predate roles semantic.
+type ItemRole string
+
+const (
+	RoleSemantic   ItemRole = ""
+	RoleTranscript ItemRole = "TRANSCRIPT"
+)
+
+// Valid reports whether r is a known role.
+func (r ItemRole) Valid() bool { return r == RoleSemantic || r == RoleTranscript }
+
 // SourceKind says what a source locator names.
 type SourceKind string
 
@@ -83,7 +100,9 @@ type ContextItem struct {
 	DirectiveID string
 	// Section is the directive section that created the item, if any.
 	Section DirectiveSection
-	Seq     uint64
+	// Role is TRANSCRIPT for a span's verbatim snapshot (D8).
+	Role ItemRole
+	Seq  uint64
 
 	SessionID  string
 	WorkflowID string
@@ -189,6 +208,9 @@ func (it ContextItem) Validate() error {
 	if !it.Retention.Valid() {
 		return invalid("item %s: invalid retention %q", it.ID, it.Retention)
 	}
+	if err := it.validateRole(); err != nil {
+		return err
+	}
 	if err := it.Access.Validate(); err != nil {
 		return fmt.Errorf("item %s: %w", it.ID, err)
 	}
@@ -240,6 +262,23 @@ func (it ContextItem) Validate() error {
 	}
 	if it.Version == 0 {
 		return invalid("item %s: version must start at 1", it.ID)
+	}
+	return nil
+}
+
+// validateRole fails closed on a transcript that could pose as a
+// requirement: no directive identity, no directive-category kind, no pinned
+// generation or protected retention, and no source ranges (it is the source).
+func (it ContextItem) validateRole() error {
+	if !it.Role.Valid() {
+		return invalid("item %s: invalid role %q", it.ID, it.Role)
+	}
+	if it.Role != RoleTranscript {
+		return nil
+	}
+	if it.Section != SectionNone || it.DirectiveID != "" || len(it.SourceRanges) != 0 ||
+		it.Kind.Category() == CategoryDirective || it.Generation == GenerationPinned || it.Retention == RetentionProtected {
+		return invalid("item %s: a transcript cannot carry directive identity or requirement status", it.ID)
 	}
 	return nil
 }
