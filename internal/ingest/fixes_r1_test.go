@@ -251,3 +251,25 @@ func TestOverLimitNewEventsStayOutOfWriteTx_SEC21(t *testing.T) {
 		}
 	})
 }
+
+// TestSizeGateMatchesValidateFor_SEC21: the length-only admission gate
+// accepts exactly what ValidateFor's limit accounting accepts at the edge,
+// so it never rejects a valid event and never admits an over-limit one.
+func TestSizeGateMatchesValidateFor_SEC21(t *testing.T) {
+	user := principal(domain.AuthorityUser)
+	l := domain.Limits{MaxSpanBytes: 64, MaxEventBytes: 96, MaxBlobBytes: 32}.Effective()
+	mk := func(text, blob int) domain.Event {
+		parts := []domain.InputPart{{Type: domain.PartText, MediaType: "text/plain", Text: strings.Repeat("t", text)}}
+		if blob > 0 {
+			parts = append(parts, domain.InputPart{Type: domain.PartImage, MediaType: "image/png", Data: make([]byte, blob)})
+		}
+		return domain.Event{EventID: "edge", Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(), Parts: parts}}}
+	}
+	for _, c := range []struct{ text, blob int }{{64, 32}, {65, 0}, {64, 33}, {60, 32}, {64, 31}} {
+		e := mk(c.text, c.blob)
+		gate, exact := checkSizes(e, configuredSizes(l)) == nil, e.ValidateFor(user, l) == nil
+		if gate != exact {
+			t.Errorf("text %d blob %d: gate accepts %v, ValidateFor accepts %v", c.text, c.blob, gate, exact)
+		}
+	}
+}
