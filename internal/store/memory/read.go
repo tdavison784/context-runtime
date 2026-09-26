@@ -43,6 +43,7 @@ type readTx struct {
 	receipts     table[string, domain.IngestReceipt]
 	envelopes    table[string, domain.EventEnvelope]
 	references   table[string, domain.UnresolvedReference]
+	itemsByBlob  index[string]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -73,6 +74,7 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		receipts:     newTable(st.receipts, writable, domain.IngestReceipt.Clone),
 		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
 		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
+		itemsByBlob:  newIndex(st.itemsByBlob, writable),
 	}
 }
 
@@ -552,6 +554,27 @@ func (r *readTx) UnresolvedReferences(f store.ReferenceFilter) ([]domain.Unresol
 		out = append(out, v)
 	}
 	slices.SortFunc(out, func(a, b domain.UnresolvedReference) int {
+		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
+	})
+	return out, nil
+}
+
+func (r *readTx) ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || !domain.ValidHash(blobHash) {
+		return nil, invalid("items by blob: positive limit and valid hash required")
+	}
+	out := []domain.ContextItem{}
+	for id := range r.itemsByBlob.lookup(blobHash) {
+		if len(out) == limit {
+			return nil, store.ErrLimitExceeded
+		}
+		it, _ := r.items.get(id)
+		out = append(out, it)
+	}
+	slices.SortFunc(out, func(a, b domain.ContextItem) int {
 		return cmp.Or(cmp.Compare(a.Seq, b.Seq), cmp.Compare(a.ID, b.ID))
 	})
 	return out, nil

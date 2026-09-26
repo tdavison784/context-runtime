@@ -72,6 +72,7 @@ var suite = []testCase{
 	{"ItemLosslessText", testItemLosslessText},
 	{"ByteExactStringLists", testByteExactStringLists},
 	{"ItemProvenance", testItemProvenance},
+	{"ItemsByBlob", testItemsByBlob},
 	{"ItemInsertRules", testItemInsertRules},
 	{"ItemBlobIntegrity", testItemBlobIntegrity},
 	{"ItemsFilterOrder", testItemsFilterOrder},

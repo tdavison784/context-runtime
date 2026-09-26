@@ -85,6 +85,7 @@ type state struct {
 	receipts     map[string]domain.IngestReceipt // by occurrence ID
 	envelopes    map[string]domain.EventEnvelope // by occurrence ID
 	references   map[string]domain.UnresolvedReference
+	itemsByBlob  map[string][]string // blob hash -> referencing item IDs
 }
 
 func newState() *state {
@@ -111,6 +112,7 @@ func newState() *state {
 		receipts:     map[string]domain.IngestReceipt{},
 		envelopes:    map[string]domain.EventEnvelope{},
 		references:   map[string]domain.UnresolvedReference{},
+		itemsByBlob:  map[string][]string{},
 	}
 }
 

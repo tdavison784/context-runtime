@@ -62,7 +62,21 @@ func (t *transaction) InsertItem(v domain.ContextItem) error {
 			return domain.ErrIntegrity
 		}
 	}
-	return t.put("item", v.ID, 0, v, false)
+	return t.atomic(func() error {
+		if err := t.put("item", v.ID, 0, v, false); err != nil {
+			return err
+		}
+		// item_blobs indexes each referenced blob once per item (R19).
+		for _, part := range v.Parts {
+			if part.BlobHash == "" {
+				continue
+			}
+			if _, err := t.conn.ExecContext(t.ctx, "INSERT OR IGNORE INTO item_blobs(session_id,blob_hash,item_id) VALUES(?,?,?)", t.session, part.BlobHash, v.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error) {
 	old, err := t.Item(id)

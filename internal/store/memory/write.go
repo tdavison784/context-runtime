@@ -39,6 +39,7 @@ func (t *tx) commit(st *state) bool {
 	t.supersedes.commit()
 	t.supersededBy.commit()
 	t.relsFrom.commit()
+	t.itemsByBlob.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
 	t.events.commit()
@@ -149,6 +150,13 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 		}
 	}
 	t.items.put(it.ID, it)
+	indexed := map[string]bool{}
+	for _, p := range it.Parts {
+		if p.BlobHash != "" && !indexed[p.BlobHash] {
+			indexed[p.BlobHash] = true
+			t.itemsByBlob.add(p.BlobHash, it.ID)
+		}
+	}
 	t.markSequenced()
 	return nil
 }

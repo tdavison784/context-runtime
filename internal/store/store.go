@@ -194,6 +194,13 @@ type ReadTx interface {
 
 	Item(id string) (domain.ContextItem, error)
 	Items(f ItemFilter) ([]domain.ContextItem, error)
+	// ItemsByBlob returns every item in the session with a part referencing
+	// the blob hash, each once, ordered by Seq then ID (R19, R5). It is
+	// bounded like ObligationsBySource: limit must be positive and a
+	// malformed hash is domain.ErrInvalidRecord; more matches than limit
+	// fail with ErrLimitExceeded. Callers filter by access: possession of a
+	// hash authorizes nothing.
+	ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, error)
 	Relationships(f RelationshipFilter) ([]domain.Relationship, error)
 	Event(eventID string) (domain.EventRecord, error)
 	// Blob returns the blob with the given hash after verifying its bytes;
