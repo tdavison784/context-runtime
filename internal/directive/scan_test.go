@@ -50,12 +50,12 @@ func TestScannerSourceAndMarkdownGates(t *testing.T) {
 func TestScannerOffsetsAndExtents(t *testing.T) {
 	input := "\xef\xbb\xbf## Goal [g]\r\nfirst\r### Notes\nsecond\n#### Working\rstate\n# Other\noutside"
 	p := scanner(input, true)
-	if len(p.sections) != 2 {
-		t.Fatalf("%+v", p.sections)
+	if len(p.sections) != 1 || len(p.diagnostics) != 1 || p.diagnostics[0].reason != "nested heading" {
+		t.Fatalf("%+v %+v", p.sections, p.diagnostics)
 	}
-	a, b := p.sections[0], p.sections[1]
-	if a.heading.start != 3 || a.heading.end != 14 || a.end != strings.Index(input, "#### Working") || len(a.body) != 3 || b.end != strings.Index(input, "# Other") {
-		t.Fatalf("%+v %+v", a, b)
+	a := p.sections[0]
+	if a.heading.start != 3 || a.heading.end != 14 || a.end != strings.Index(input, "# Other") || len(a.body) != 5 {
+		t.Fatalf("%+v", a)
 	}
 	if a.heading.id != "g" {
 		t.Fatal(a.heading)

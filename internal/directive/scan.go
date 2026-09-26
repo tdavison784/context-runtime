@@ -155,11 +155,19 @@ func (p *coreParser) scan(capable bool) {
 			p.diagnostic("DirectiveNotParsed", reason, section, "", byteRange{candidateStart, end})
 		}
 		if capable && blocked == "" && level > 0 {
-			if section != "" || active >= 0 && level <= p.sections[active].heading.level {
-				if active >= 0 {
-					p.sections[active].end = line.start
-					active = -1
+			// D6/FR-DIR-006: only a same-or-higher heading ends a section. A
+			// deeper heading, keyword or not, is body text of the open section
+			// (including a malformed one) and never opens a nested directive.
+			if active >= 0 && level > p.sections[active].heading.level {
+				if section != "" {
+					p.diagnostic("DirectiveNotParsed", "nested heading", section, "", byteRange{start, end})
 				}
+				p.sections[active].body = append(p.sections[active].body, line)
+				continue
+			}
+			if active >= 0 {
+				p.sections[active].end = line.start
+				active = -1
 			}
 			if section != "" {
 				h := rawHeading{section: section, level: level, byteRange: byteRange{start, end}, valid: true}
