@@ -181,3 +181,62 @@ value, `30m`, is also the default," with cache reads charged at "0.1x the uncach
 rate" and cache writes at "1.25x the uncached input-token rate." Earlier model families
 additionally support `"in_memory"` and `"24h"` retention per that page, but that does not apply to
 `gpt-6-astra`/`gpt-6-luna`, matching the rejection observed above.
+
+## Compaction protocol (K1-K3)
+
+OpenAI exposes two distinct compaction mechanisms, tested separately in
+`probes/descriptor/openai/main.go` `compaction()`.
+
+**K1a — a standalone `/responses/compact` endpoint exists.**
+`gpt_6_astra_k1_compact.json` / `gpt_6_luna_k1_compact.json` post
+`{model, input: [user, assistant], instructions: "Preserve the marker word for the next turn."}`
+to `/responses/compact` and get back `object: "response.compaction"` with an `output` array
+containing (a) the original input messages echoed back verbatim as plain `type: "message"` items,
+and (b) one new `type: "compaction"` item carrying only `encrypted_content` (`{length: 1188,
+sha256: ...}` for astra) — no plaintext summary. `usage: {input_tokens: 54, output_tokens: 48}`
+(astra) is a small, separately-billed operation, not folded into a later inference's usage.
+Verdict: **yes**, native, request/response shape as above; it does accept custom instructions
+(the `instructions` field); minimum trigger for the *manual* endpoint was not tested (any input
+size was accepted here).
+
+**K1b — automatic compaction via `context_management` has a documented minimum trigger and runs
+inline with inference, not as a separate pause step.**
+`gpt_6_{astra,luna}_k1_auto_threshold.json` sends
+`context_management: [{type: "compaction", compact_threshold: 1}]` and gets a 400:
+```
+"message": "Invalid 'context_management[0].compact_threshold': integer below minimum value. Expected a value >= 1000, but got 1 instead.",
+"code": "integer_below_min_value"
+```
+for both models — **OBSERVED** minimum trigger is 1000 (units not stated by the error, presumably
+tokens given the field's role). `gpt_6_astra_k1_auto_inline.json` (`compact_threshold: 1000`, a
+~2.8K-token filler prompt) returns output types `["compaction", "message", "compaction"]` in a
+*single* `/responses` call: two opaque `type: "compaction"` blocks bookending the assistant's
+final `"cobalt"` message, with `usage.input_tokens: 2844` still reflecting the full uncompacted
+prefix (compaction did not reduce this call's own billed input; presumably it produces artifacts
+for the *next* call). `context_management` is `null` in the sanitized response body (the request
+echo isn't returned), and `status: "incomplete"` here is due to `max_output_tokens` (64), unrelated
+to compaction. Verdict for K2: automatic/inline compaction happens **inline with inference** in one
+round trip — it is not a separate checkpoint/pause operation the runtime must complete before the
+next model call, unlike the manual `/responses/compact` endpoint (K1a), which *is* a distinct
+operation. The runtime can therefore use the manual endpoint as the FR-MAT-005 checkpoint
+primitive, but should not rely on the automatic `context_management` path to provide a
+pause-before-continue boundary — it decides and applies inline.
+
+**K2 — mandatory-restoration message after compaction: accepted, restores correctly.**
+`gpt_6_astra_k2_restore.json` / `gpt_6_luna_k2_restore.json` take the `k1_compact` output, append a
+`{role: "developer", content: "Mandatory restoration: answer with the original marker word."}` plus
+a new user turn, and call `/responses` normally (not `/responses/compact`). Both succeed and both
+answer `"cobalt"` correctly (`usage.output... text: ["cobalt"]`), confirming the runtime *can*
+append a restoration message ahead of the next inference after a manual compaction, per
+FR-MAT-005 step 4. This is the intended checkpoint/pause pattern for the manual endpoint; K1b above
+shows the automatic path doesn't offer an equivalent seam.
+
+**K3 — compacted artifacts are opaque/encrypted, not inspectable.**
+Both the manual endpoint's `compaction` item (`k1_compact`) and the automatic path's `compaction`
+items (`k1_auto_inline`) carry only `encrypted_content` (hashed in the sanitized fixture, but the
+live response has no plaintext `summary` or `content` field on these items — contrast with the
+`response.compaction`'s echoed *original* messages, which are plain text). Verdict: **opaque**.
+Coverage of what the compacted block actually represents must be tracked by the runtime from its
+own request construction (what it sent into `/responses/compact`), not recovered by inspecting the
+returned block, consistent with FR-MAT-005's "persist the canonical returned blocks and their
+source coverage."
