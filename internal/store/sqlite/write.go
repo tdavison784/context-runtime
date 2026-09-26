@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -32,7 +31,7 @@ func (t *transaction) InsertEvent(e domain.EventRecord) (domain.EventRecord, boo
 	if err = t.checkSeq(e.Seq); err != nil {
 		return domain.EventRecord{}, false, err
 	}
-	err = t.put("event", e.EventID, 0, recordMeta{seq: e.Seq}, e, false)
+	err = t.put("event", e.EventID, 0, e, false)
 	return e.Clone(), false, err
 }
 func (t *transaction) InsertItem(v domain.ContextItem) error {
@@ -63,7 +62,7 @@ func (t *transaction) InsertItem(v domain.ContextItem) error {
 			return domain.ErrIntegrity
 		}
 	}
-	return t.put("item", v.ID, 0, recordMeta{seq: v.Seq, version: v.Version, task: v.TaskID, agent: v.AgentID, directive: v.DirectiveID, event: v.EventID, state: string(v.Residency)}, v, false)
+	return t.put("item", v.ID, 0, v, false)
 }
 func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error) {
 	old, err := t.Item(id)
@@ -93,7 +92,7 @@ func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemC
 		return domain.ContextItem{}, err
 	}
 	err = t.atomic(func() error {
-		if err := t.put("item", id, 0, recordMeta{seq: v.Seq, version: v.Version, task: v.TaskID, agent: v.AgentID, directive: v.DirectiveID, event: v.EventID, state: string(v.Residency)}, v, true); err != nil {
+		if err := t.put("item", id, 0, v, true); err != nil {
 			return err
 		}
 		return t.AppendLifecycleEvent(event)
@@ -132,12 +131,7 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 			return domain.ErrSupersessionCycle
 		}
 	}
-	meta := recordMeta{seq: v.Seq, from: v.FromID, to: v.ToID, event: v.EventID, state: string(v.Type)}
-	if v.Coverage != nil {
-		b, _ := json.Marshal(v.Coverage.ItemIDs)
-		meta.coverageItemIDs = string(b)
-	}
-	if err := t.put("relationship", v.ID, 0, meta, v, false); err != nil {
+	if err := t.put("relationship", v.ID, 0, v, false); err != nil {
 		return err
 	}
 	if v.Type == domain.RelSupersedes {
@@ -152,7 +146,7 @@ func (t *transaction) loadSupersession() error {
 	if t.supersessionLoaded {
 		return nil
 	}
-	rows, err := t.conn.QueryContext(t.ctx, "SELECT from_id,to_id FROM records WHERE session_id=? AND kind='relationship' AND state=?", t.session, string(domain.RelSupersedes))
+	rows, err := t.conn.QueryContext(t.ctx, "SELECT f_from_id,f_to_id FROM rec_relationship WHERE session_id=? AND f_type=?", t.session, string(domain.RelSupersedes))
 	if err != nil {
 		return err
 	}
@@ -238,7 +232,7 @@ func (t *transaction) InsertObligationVersion(v domain.ObligationVersion) error 
 	} else if v.Version != old.Version+1 {
 		return domain.ErrVersionConflict
 	}
-	return t.put("obligation", v.ObligationID, int(v.Version), recordMeta{seq: v.CreatedSeq, version: v.Version, revision: v.Revision, task: v.TaskID, state: string(v.Status)}, v, false)
+	return t.put("obligation", v.ObligationID, int(v.Version), v, false)
 }
 func (t *transaction) UpdateObligationVersion(v domain.ObligationVersion, expected uint64) (domain.ObligationVersion, error) {
 	var old domain.ObligationVersion
@@ -272,7 +266,7 @@ func (t *transaction) UpdateObligationVersion(v domain.ObligationVersion, expect
 			return domain.ObligationVersion{}, err
 		}
 	}
-	err = t.put("obligation", v.ObligationID, int(v.Version), recordMeta{seq: v.CreatedSeq, version: v.Version, revision: v.Revision, task: v.TaskID, state: string(v.Status)}, v, true)
+	err = t.put("obligation", v.ObligationID, int(v.Version), v, true)
 	return v.Clone(), err
 }
 func (t *transaction) AppendObligationTransition(v domain.ObligationTransition, expectedRevision uint64) (domain.ObligationVersion, error) {
@@ -312,10 +306,10 @@ func (t *transaction) AppendObligationTransition(v domain.ObligationTransition, 
 		return domain.ObligationVersion{}, err
 	}
 	err := t.atomic(func() error {
-		if err := t.put("obligation_transition", v.ID, 0, recordMeta{seq: v.Seq, version: v.Version, state: string(v.To)}, v, false); err != nil {
+		if err := t.put("obligation_transition", v.ID, 0, v, false); err != nil {
 			return err
 		}
-		return t.put("obligation", current.ObligationID, int(current.Version), recordMeta{seq: current.CreatedSeq, version: current.Version, revision: current.Revision, task: current.TaskID, state: string(current.Status)}, current, true)
+		return t.put("obligation", current.ObligationID, int(current.Version), current, true)
 	})
 	return current.Clone(), err
 }
@@ -332,7 +326,7 @@ func (t *transaction) InsertGrant(v domain.MutationGrant) error {
 	if v.RevokedSeq != 0 {
 		return fmt.Errorf("%w: new grant cannot be revoked", domain.ErrInvalidRecord)
 	}
-	return t.put("grant", v.ID, 0, recordMeta{seq: v.IssuedSeq}, v, false)
+	return t.put("grant", v.ID, 0, v, false)
 }
 func (t *transaction) RevokeGrant(id string, event domain.LifecycleEvent) (domain.MutationGrant, error) {
 	v, err := t.Grant(id)
@@ -359,7 +353,7 @@ func (t *transaction) RevokeGrant(id string, event domain.LifecycleEvent) (domai
 		return domain.MutationGrant{}, err
 	}
 	err = t.atomic(func() error {
-		if err := t.put("grant", id, 0, recordMeta{seq: v.IssuedSeq}, v, true); err != nil {
+		if err := t.put("grant", id, 0, v, true); err != nil {
 			return err
 		}
 		return t.AppendLifecycleEvent(event)
@@ -407,7 +401,7 @@ func (t *transaction) PutTask(v domain.TaskState, expected uint64, event *domain
 			}
 		}
 		err = t.atomic(func() error {
-			if err := t.put("task", v.TaskID, 0, recordMeta{version: v.Version, task: v.TaskID, state: string(v.Status)}, v, false); err != nil {
+			if err := t.put("task", v.TaskID, 0, v, false); err != nil {
 				return err
 			}
 			return t.AppendLifecycleEvent(*event)
@@ -421,13 +415,13 @@ func (t *transaction) PutTask(v domain.TaskState, expected uint64, event *domain
 	}
 	if event != nil {
 		err = t.atomic(func() error {
-			if err := t.put("task", v.TaskID, 0, recordMeta{version: v.Version, task: v.TaskID, state: string(v.Status)}, v, true); err != nil {
+			if err := t.put("task", v.TaskID, 0, v, true); err != nil {
 				return err
 			}
 			return t.AppendLifecycleEvent(*event)
 		})
 	} else {
-		err = t.put("task", v.TaskID, 0, recordMeta{version: v.Version, task: v.TaskID, state: string(v.Status)}, v, true)
+		err = t.put("task", v.TaskID, 0, v, true)
 	}
 	return v, err
 }
@@ -441,7 +435,7 @@ func (t *transaction) AppendLifecycleEvent(v domain.LifecycleEvent) error {
 	if err := t.checkSeq(v.Seq); err != nil {
 		return err
 	}
-	return t.put("lifecycle", v.ID, 0, recordMeta{seq: v.Seq, event: v.EventID, state: string(v.TargetKind)}, v, false)
+	return t.put("lifecycle", v.ID, 0, v, false)
 }
 func (t *transaction) PutConversation(v domain.Conversation, expected uint64) (domain.Conversation, error) {
 	v.Revision = expected + 1
@@ -456,7 +450,7 @@ func (t *transaction) PutConversation(v domain.Conversation, expected uint64) (d
 		if expected != 0 {
 			return domain.Conversation{}, domain.ErrVersionConflict
 		}
-		err = t.put("conversation", v.ConversationID, 0, recordMeta{version: v.Version, revision: v.Revision, task: v.TaskID, agent: v.AgentID}, v, false)
+		err = t.put("conversation", v.ConversationID, 0, v, false)
 		return v, err
 	}
 	if err != nil {
@@ -468,7 +462,7 @@ func (t *transaction) PutConversation(v domain.Conversation, expected uint64) (d
 	if old.TaskID != v.TaskID || old.AgentID != v.AgentID {
 		return domain.Conversation{}, domain.ErrImmutable
 	}
-	err = t.put("conversation", v.ConversationID, 0, recordMeta{version: v.Version, revision: v.Revision, task: v.TaskID, agent: v.AgentID}, v, true)
+	err = t.put("conversation", v.ConversationID, 0, v, true)
 	return v, err
 }
 func (t *transaction) InsertCall(v domain.CallRecord) error {
@@ -508,7 +502,7 @@ func (t *transaction) InsertCall(v domain.CallRecord) error {
 			}
 		}
 	}
-	return t.put("call", v.CallID, 0, recordMeta{seq: v.PreparedSeq, revision: v.Revision, from: v.ConversationID, state: string(v.State), proposalHash: v.ProposalHash, outcomeHash: v.OutcomeHash}, v, false)
+	return t.put("call", v.CallID, 0, v, false)
 }
 func domainCallFilter(id string) store.CallFilter { return store.CallFilter{ConversationID: id} }
 func (t *transaction) UpdateCall(v domain.CallRecord, expected uint64) (domain.CallRecord, error) {
@@ -565,7 +559,7 @@ func (t *transaction) UpdateCall(v domain.CallRecord, expected uint64) (domain.C
 			}
 		}
 	}
-	err = t.put("call", v.CallID, 0, recordMeta{seq: v.PreparedSeq, revision: v.Revision, from: v.ConversationID, state: string(v.State), proposalHash: v.ProposalHash, outcomeHash: v.OutcomeHash}, v, true)
+	err = t.put("call", v.CallID, 0, v, true)
 	return v.Clone(), err
 }
 
@@ -640,7 +634,7 @@ func (t *transaction) PutCallAttempt(v domain.CallAttempt) error {
 				return err
 			}
 		}
-		return t.put("attempt", v.CallID, v.Attempt, recordMeta{seq: v.SentSeq, state: string(v.State), outcomeHash: v.OutcomeHash, retryable: v.Retryable}, v, false)
+		return t.put("attempt", v.CallID, v.Attempt, v, false)
 	}
 	if err != nil {
 		return err
@@ -674,5 +668,5 @@ func (t *transaction) PutCallAttempt(v domain.CallAttempt) error {
 			return err
 		}
 	}
-	return t.put("attempt", v.CallID, v.Attempt, recordMeta{seq: v.SentSeq, state: string(v.State), outcomeHash: v.OutcomeHash, retryable: v.Retryable}, v, true)
+	return t.put("attempt", v.CallID, v.Attempt, v, true)
 }

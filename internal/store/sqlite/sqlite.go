@@ -7,12 +7,12 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -281,13 +281,6 @@ func (t *transaction) checkSeq(seq uint64) error {
 	return nil
 }
 
-type recordMeta struct {
-	seq, version, revision                         uint64
-	task, agent, directive, event, from, to, state string
-	proposalHash, outcomeHash, coverageItemIDs     string
-	retryable                                      bool
-}
-
 // atomic keeps a multi-record method indivisible if its caller handles an
 // error and continues the outer Update.
 func (t *transaction) atomic(fn func() error) error {
@@ -303,14 +296,20 @@ func (t *transaction) atomic(fn func() error) error {
 	return err
 }
 
-func (t *transaction) put(kind, id string, sub int, meta recordMeta, value any, replace bool) error {
-	b, err := json.Marshal(value)
+func (t *transaction) put(kind, id string, sub int, value any, replace bool) error {
+	s, err := schemaFor(kind)
 	if err != nil {
 		return err
 	}
+	values, err := s.recordValues(value)
+	if err != nil {
+		return err
+	}
+	if values[0] != t.session || values[1] != id || fmt.Sprint(values[2]) != strconv.Itoa(sub) {
+		return fmt.Errorf("%w: %s key disagrees with record", domain.ErrInvalidRecord, kind)
+	}
 	if replace {
-		r, err := t.conn.ExecContext(t.ctx, `UPDATE records SET seq=?,version=?,revision=?,task_id=?,agent_id=?,directive_id=?,event_id=?,from_id=?,to_id=?,state=?,proposal_hash=?,outcome_hash=?,retryable=?,coverage_item_ids=?,data=? WHERE session_id=? AND kind=? AND id=? AND subkey=?`,
-			meta.seq, meta.version, meta.revision, meta.task, meta.agent, meta.directive, meta.event, meta.from, meta.to, meta.state, meta.proposalHash, meta.outcomeHash, meta.retryable, meta.coverageItemIDs, b, t.session, kind, id, sub)
+		r, err := t.conn.ExecContext(t.ctx, s.updateSQL, append(values[3:], t.session, id, sub)...)
 		if err != nil {
 			return err
 		}
@@ -320,48 +319,44 @@ func (t *transaction) put(kind, id string, sub int, meta recordMeta, value any, 
 		}
 		return nil
 	}
-	_, err = t.conn.ExecContext(t.ctx, `INSERT INTO records(session_id,kind,id,subkey,seq,version,revision,task_id,agent_id,directive_id,event_id,from_id,to_id,state,proposal_hash,outcome_hash,retryable,coverage_item_ids,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		t.session, kind, id, sub, meta.seq, meta.version, meta.revision, meta.task, meta.agent, meta.directive, meta.event, meta.from, meta.to, meta.state, meta.proposalHash, meta.outcomeHash, meta.retryable, meta.coverageItemIDs, b)
+	_, err = t.conn.ExecContext(t.ctx, s.insertSQL, values...)
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "PRIMARY KEY constraint failed")) {
 		return fmt.Errorf("%w: %s %s", domain.ErrImmutable, kind, id)
 	}
 	return err
 }
 func (t *transaction) get(kind, id string, sub int, out any) error {
-	var b []byte
-	err := t.conn.QueryRowContext(t.ctx, "SELECT data FROM records WHERE session_id=? AND kind=? AND id=? AND subkey=?", t.session, kind, id, sub).Scan(&b)
+	s, err := schemaFor(kind)
+	if err != nil {
+		return err
+	}
+	v, err := s.scan(t.conn.QueryRowContext(t.ctx, s.selectSQL+" WHERE session_id=? AND id=? AND subkey=?", t.session, id, sub))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.ErrNotFound
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %s %s: %v", domain.ErrIntegrity, kind, id, err)
 	}
-	if err = json.Unmarshal(b, out); err != nil {
-		return fmt.Errorf("%w: corrupt %s %s: %v", domain.ErrIntegrity, kind, id, err)
-	}
+	reflect.ValueOf(out).Elem().Set(v)
 	return nil
 }
-func (t *transaction) list(kind string) ([][]byte, error) {
-	rows, err := t.conn.QueryContext(t.ctx, "SELECT data FROM records WHERE session_id=? AND kind=?", t.session, kind)
+func listRecords[T any](t *transaction, kind string) ([]T, error) {
+	s, err := schemaFor(kind)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := t.conn.QueryContext(t.ctx, s.selectSQL+" WHERE session_id=?", t.session)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out [][]byte
+	var out []T
 	for rows.Next() {
-		var b []byte
-		if err = rows.Scan(&b); err != nil {
+		v, err := s.scan(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, b)
+		out = append(out, v.Interface().(T))
 	}
 	return out, rows.Err()
-}
-func decode[T any](b []byte) (T, error) {
-	var v T
-	err := json.Unmarshal(b, &v)
-	if err != nil {
-		err = fmt.Errorf("%w: corrupt record: %v", domain.ErrIntegrity, err)
-	}
-	return v, err
 }

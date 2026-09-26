@@ -11,12 +11,3 @@ update-only methods (`UpdateItem`, `UpdateObligationVersion`, and
 Recommendation: limit the version-0 wording to the create-or-replace methods
 (`PutTask` and `PutConversation`), and state explicitly that update-only
 methods return `ErrNotFound` for a missing target.
-
-## Record layout
-
-The pre-release migration stores indexed query fields as SQLite columns and
-the complete record as a JSON-encoded BLOB. This keeps nested records and
-restart behavior exact, but ADR 3 calls for JSON only in leaf value lists.
-Before the schema is deployed, split the remaining scalar and nested fields
-into typed columns and use JSON only for lists, retaining the migration
-checksum check during that change.

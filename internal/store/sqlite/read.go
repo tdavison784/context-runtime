@@ -15,16 +15,12 @@ func (t *transaction) Item(id string) (domain.ContextItem, error) {
 	return v, err
 }
 func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
-	bs, err := t.list("item")
+	items, err := listRecords[domain.ContextItem](t, "item")
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.ContextItem, 0)
-	for _, b := range bs {
-		v, e := decode[domain.ContextItem](b)
-		if e != nil {
-			return nil, e
-		}
+	for _, v := range items {
 		if f.TaskID != "" && f.TaskID != v.TaskID || f.AgentID != "" && f.AgentID != v.AgentID || f.Residency != "" && f.Residency != v.Residency || f.DirectiveID != "" && f.DirectiveID != v.DirectiveID || f.EventID != "" && f.EventID != v.EventID || v.Seq < f.MinSeq || f.MaxSeq != 0 && v.Seq > f.MaxSeq {
 			continue
 		}
@@ -50,39 +46,26 @@ func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 	return out, nil
 }
 func (t *transaction) Relationships(f store.RelationshipFilter) ([]domain.Relationship, error) {
-	query := "SELECT data FROM records WHERE session_id=? AND kind='relationship'"
-	args := []any{t.session}
-	if f.Type != "" {
-		query += " AND state=?"
-		args = append(args, string(f.Type))
-	}
-	if f.FromID != "" {
-		query += " AND from_id=?"
-		args = append(args, f.FromID)
-	}
-	if f.ToID != "" {
-		query += " AND to_id=?"
-		args = append(args, f.ToID)
-	}
-	query += " ORDER BY seq,id"
-	rows, err := t.conn.QueryContext(t.ctx, query, args...)
+	// Filtering is performed after decoding so all list methods share the
+	// same per-record typed-column decoder.
+	records, err := listRecords[domain.Relationship](t, "relationship")
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := make([]domain.Relationship, 0)
-	for rows.Next() {
-		var b []byte
-		if err := rows.Scan(&b); err != nil {
-			return nil, err
-		}
-		v, e := decode[domain.Relationship](b)
-		if e != nil {
-			return nil, e
+	for _, v := range records {
+		if f.Type != "" && f.Type != v.Type || f.FromID != "" && f.FromID != v.FromID || f.ToID != "" && f.ToID != v.ToID {
+			continue
 		}
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Seq != out[j].Seq {
+			return out[i].Seq < out[j].Seq
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 func (t *transaction) Event(id string) (domain.EventRecord, error) {
 	var v domain.EventRecord
@@ -130,16 +113,12 @@ func (t *transaction) Obligation(id string) (domain.ObligationVersion, error) {
 	return vs[len(vs)-1], nil
 }
 func (t *transaction) ObligationVersions(id string) ([]domain.ObligationVersion, error) {
-	bs, err := t.list("obligation")
+	records, err := listRecords[domain.ObligationVersion](t, "obligation")
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.ObligationVersion, 0)
-	for _, b := range bs {
-		v, e := decode[domain.ObligationVersion](b)
-		if e != nil {
-			return nil, e
-		}
+	for _, v := range records {
 		if v.ObligationID == id {
 			out = append(out, v)
 		}
@@ -148,16 +127,12 @@ func (t *transaction) ObligationVersions(id string) ([]domain.ObligationVersion,
 	return out, nil
 }
 func (t *transaction) Obligations(taskID string) ([]domain.ObligationVersion, error) {
-	bs, err := t.list("obligation")
+	records, err := listRecords[domain.ObligationVersion](t, "obligation")
 	if err != nil {
 		return nil, err
 	}
 	latest := map[string]domain.ObligationVersion{}
-	for _, b := range bs {
-		v, e := decode[domain.ObligationVersion](b)
-		if e != nil {
-			return nil, e
-		}
+	for _, v := range records {
 		if taskID != "" && v.TaskID != taskID {
 			continue
 		}
@@ -173,16 +148,12 @@ func (t *transaction) Obligations(taskID string) ([]domain.ObligationVersion, er
 	return out, nil
 }
 func (t *transaction) ObligationTransitions(id string) ([]domain.ObligationTransition, error) {
-	bs, err := t.list("obligation_transition")
+	records, err := listRecords[domain.ObligationTransition](t, "obligation_transition")
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.ObligationTransition, 0)
-	for _, b := range bs {
-		v, e := decode[domain.ObligationTransition](b)
-		if e != nil {
-			return nil, e
-		}
+	for _, v := range records {
 		if v.ObligationID == id {
 			out = append(out, v)
 		}
@@ -201,18 +172,11 @@ func (t *transaction) Grant(id string) (domain.MutationGrant, error) {
 	return v, err
 }
 func (t *transaction) Grants() ([]domain.MutationGrant, error) {
-	bs, err := t.list("grant")
+	records, err := listRecords[domain.MutationGrant](t, "grant")
 	if err != nil {
 		return nil, err
 	}
-	out := make([]domain.MutationGrant, 0, len(bs))
-	for _, b := range bs {
-		v, e := decode[domain.MutationGrant](b)
-		if e != nil {
-			return nil, e
-		}
-		out = append(out, v)
-	}
+	out := records
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
@@ -222,16 +186,12 @@ func (t *transaction) Task(id string) (domain.TaskState, error) {
 	return v, err
 }
 func (t *transaction) LifecycleEvents(f store.LifecycleFilter) ([]domain.LifecycleEvent, error) {
-	bs, err := t.list("lifecycle")
+	records, err := listRecords[domain.LifecycleEvent](t, "lifecycle")
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.LifecycleEvent, 0)
-	for _, b := range bs {
-		v, e := decode[domain.LifecycleEvent](b)
-		if e != nil {
-			return nil, e
-		}
+	for _, v := range records {
 		if f.TargetKind != "" && f.TargetKind != v.TargetKind || f.TargetID != "" && f.TargetID != v.TargetID || v.Seq < f.MinSeq {
 			continue
 		}
@@ -256,16 +216,12 @@ func (t *transaction) Call(id string) (domain.CallRecord, error) {
 	return v, err
 }
 func (t *transaction) Calls(f store.CallFilter) ([]domain.CallRecord, error) {
-	bs, err := t.list("call")
+	records, err := listRecords[domain.CallRecord](t, "call")
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.CallRecord, 0)
-	for _, b := range bs {
-		v, e := decode[domain.CallRecord](b)
-		if e != nil {
-			return nil, e
-		}
+	for _, v := range records {
 		if f.ConversationID != "" && f.ConversationID != v.ConversationID {
 			continue
 		}
@@ -291,16 +247,12 @@ func (t *transaction) Calls(f store.CallFilter) ([]domain.CallRecord, error) {
 	return out, nil
 }
 func (t *transaction) CallAttempts(id string) ([]domain.CallAttempt, error) {
-	bs, err := t.list("attempt")
+	records, err := listRecords[domain.CallAttempt](t, "attempt")
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.CallAttempt, 0)
-	for _, b := range bs {
-		v, e := decode[domain.CallAttempt](b)
-		if e != nil {
-			return nil, e
-		}
+	for _, v := range records {
 		if v.CallID == id {
 			out = append(out, v)
 		}

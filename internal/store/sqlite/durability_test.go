@@ -191,6 +191,16 @@ func TestMigrationChecksumMismatch(t *testing.T) {
 	}
 }
 
+func TestEmbeddedSchemaMatchesTypes(t *testing.T) {
+	b, err := migrations.ReadFile("migrations/0001_init.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != schemaDDL() {
+		t.Fatal("embedded migration differs from typed record schema")
+	}
+}
+
 func TestEmptyAndCorruptBlob(t *testing.T) {
 	s, _ := openTemp(t)
 	ctx := context.Background()
@@ -217,6 +227,41 @@ func TestEmptyAndCorruptBlob(t *testing.T) {
 		_, err := tx.Blob(empty.Hash)
 		if !errors.Is(err, domain.ErrIntegrity) {
 			t.Fatalf("Blob error = %v, want ErrIntegrity", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEmptyNonNilRequestRoundTrip(t *testing.T) {
+	s, path := openTemp(t)
+	actor := domain.Principal{SessionID: "s", Authority: domain.AuthorityHarness}
+	request := []byte{}
+	call := domain.CallRecord{CallID: "empty", SessionID: "s", ConversationID: "conversation", Operation: domain.OperationInference,
+		State: domain.CallPrepared, Principal: actor, ServiceActor: actor, Request: request, RequestHash: domain.HashBytes(request), Revision: 1}
+	call.ProposalHash = domain.CallProposalHash(call)
+	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		call.PreparedSeq = tx.NextSeq()
+		return tx.InsertCall(call)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if err := reopened.View(context.Background(), "s", func(tx store.ReadTx) error {
+		got, err := tx.Call(call.CallID)
+		if err != nil {
+			return err
+		}
+		if got.Request == nil {
+			t.Fatal("empty non-nil request became nil")
 		}
 		return nil
 	}); err != nil {
