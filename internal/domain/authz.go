@@ -84,7 +84,7 @@ func (g MutationGrant) Validate() error {
 		}
 		seen := map[string]bool{}
 		for _, target := range g.Targets {
-			if target.Validate() != nil || target.SessionID != g.SessionID || seen[target.AuthorizationKey] {
+			if target.Validate() != nil || target.SessionID != g.SessionID || !g.Action.ValidForTarget(target.Kind) || g.Matcher != nil && target.Kind != GrantTargetObligation || seen[target.AuthorizationKey] {
 				return invalid("grant: invalid or duplicate typed target")
 			}
 			seen[target.AuthorizationKey] = true
@@ -317,6 +317,9 @@ func sameTargetSet(g MutationGrant, targets []MutationTarget) error {
 	}
 	seen := map[string]bool{}
 	for _, t := range targets {
+		if t.Ref != (GrantTarget{}) && t.Ref.Validate() != nil {
+			return ErrInvalidRecord
+		}
 		if !named[t.AuthorizationID()] || seen[t.AuthorizationID()] {
 			return invalid("grant %s: targets do not match target IDs", g.ID)
 		}

@@ -28,3 +28,17 @@ func TestCreationDeclarationCloneAndOrigin(t *testing.T) {
 		t.Fatal("legacy unknown matched")
 	}
 }
+
+func TestDeclarationIgnoresTurnWithoutTemporalEligibility(t *testing.T) {
+	s := CreationSemantics{Key: CurrentKey{SessionID: "s", Namespace: NamespaceDirective, ID: "r", Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}, Authority: AuthorityUser, Section: SectionRemember, Kind: KindFact, ContentHash: HashBytes(nil), Generation: GenerationDurable, Retention: RetentionHigh, Residency: ResidencyResident}
+	a, err := s.Signature("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.CreatedTurn = 9
+	s.OriginTurnID = "new"
+	b, _ := s.Signature("p")
+	if a != b {
+		t.Fatal("non-temporal restatement changed identity")
+	}
+}

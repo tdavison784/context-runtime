@@ -119,3 +119,19 @@ func grantNamesTarget(g MutationGrant, t MutationTarget) bool {
 	}
 	return false
 }
+
+func (a Action) ValidForTarget(kind GrantTargetKind) bool {
+	if kind == GrantTargetObligation {
+		switch a {
+		case ActionAssertObligation, ActionBlockObligation, ActionUnblockObligation, ActionWaiveObligation, ActionReplaceDirective, ActionSetObligationMaterialization:
+			return true
+		}
+	}
+	if kind == GrantTargetItem {
+		switch a {
+		case ActionResolve, ActionUnpin, ActionReplaceDirective, ActionChangeScope, ActionPromote, ActionDemote, ActionArchive, ActionUnarchive, ActionDeclareObligation:
+			return true
+		}
+	}
+	return false
+}

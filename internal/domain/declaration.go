@@ -73,7 +73,12 @@ func (s CreationSemantics) Signature(policy string) (string, error) {
 	if s.GoalStatus != nil {
 		e.String(string(*s.GoalStatus))
 	}
-	e.String(s.OriginTaskID).String(s.OriginTurnID).Uint(s.CreatedTurn).Uint(boolUint(s.TTLTurns != nil))
+	originRelevant := s.Key.Access.Scope == ScopeTurn || s.TTLTurns != nil
+	e.Uint(boolUint(originRelevant))
+	if originRelevant {
+		e.String(s.OriginTaskID).String(s.OriginTurnID).Uint(s.CreatedTurn)
+	}
+	e.Uint(boolUint(s.TTLTurns != nil))
 	if s.TTLTurns != nil {
 		e.Int(int64(*s.TTLTurns))
 	}

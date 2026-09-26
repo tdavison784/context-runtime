@@ -69,6 +69,9 @@ func encodePrincipal(e *CanonicalEncoder, p Principal) {
 // Phase3Policy records finite effective limits and the exact code registries
 // used by an operation. There is no zero/unlimited interpretation (P3-39/42).
 type Phase3Policy struct {
+	MaxPageSize, MaxReceiptBytes, MaxGCDecisions                                     int
+	CheckpointGeneration                                                             Generation
+	CheckpointRetention                                                              RetentionClass
 	Version, Claim, Matcher, ObservationState, Eligibility, Locator, Coverage, Dedup string
 	MaxOperations, MaxMetadataBytes, MaxTargets, MaxEvidence, MaxCoverageMembers     int
 	MaxTransactionWork, MaxToolResultBytes, MaxCheckpointSemanticBytes               int
@@ -81,10 +84,13 @@ func (p Phase3Policy) Validate() error {
 			return invalid("semantic policy: missing registry version")
 		}
 	}
-	for _, n := range []int{p.MaxOperations, p.MaxMetadataBytes, p.MaxTargets, p.MaxEvidence, p.MaxCoverageMembers, p.MaxTransactionWork, p.MaxToolResultBytes, p.MaxCheckpointSemanticBytes} {
+	for _, n := range []int{p.MaxPageSize, p.MaxReceiptBytes, p.MaxGCDecisions, p.MaxOperations, p.MaxMetadataBytes, p.MaxTargets, p.MaxEvidence, p.MaxCoverageMembers, p.MaxTransactionWork, p.MaxToolResultBytes, p.MaxCheckpointSemanticBytes} {
 		if n <= 0 {
 			return invalid("semantic policy: limits must be finite and positive")
 		}
+	}
+	if !p.CheckpointGeneration.Valid() || !p.CheckpointRetention.Valid() || p.CheckpointGeneration == GenerationPinned {
+		return invalid("semantic policy: explicit non-pinned checkpoint defaults required")
 	}
 	if p.DefaultLeaseCalls == 0 || p.MaxLeaseCalls < p.DefaultLeaseCalls {
 		return invalid("semantic policy: invalid lease allowance")

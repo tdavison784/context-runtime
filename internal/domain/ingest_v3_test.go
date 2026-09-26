@@ -6,7 +6,7 @@ import (
 )
 
 func semanticPolicy() Phase3Policy {
-	return Phase3Policy{Version: Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs-state/1", Eligibility: "eligibility/1", Locator: "resource-locator/1", Coverage: "coverage/1", Dedup: "declaration/1", MaxOperations: 64, MaxMetadataBytes: 65536, MaxTargets: 64, MaxEvidence: 64, MaxCoverageMembers: 1024, MaxTransactionWork: 4096, MaxToolResultBytes: 65536, MaxCheckpointSemanticBytes: DefaultMaxCheckpointSemanticBytes, DefaultLeaseCalls: 2, MaxLeaseCalls: 8}
+	return Phase3Policy{MaxPageSize: 128, MaxReceiptBytes: 1048576, MaxGCDecisions: 4096, CheckpointGeneration: GenerationDurable, CheckpointRetention: RetentionHigh, Version: Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs-state/1", Eligibility: "eligibility/1", Locator: "resource-locator/1", Coverage: "coverage/1", Dedup: "declaration/1", MaxOperations: 64, MaxMetadataBytes: 65536, MaxTargets: 64, MaxEvidence: 64, MaxCoverageMembers: 1024, MaxTransactionWork: 4096, MaxToolResultBytes: 65536, MaxCheckpointSemanticBytes: DefaultMaxCheckpointSemanticBytes, DefaultLeaseCalls: 2, MaxLeaseCalls: 8}
 }
 func TestV3HashOrdersOperationsAndConflictsWithV2Identity(t *testing.T) {
 	p := Principal{SessionID: "s", Authority: AuthorityHarness}
