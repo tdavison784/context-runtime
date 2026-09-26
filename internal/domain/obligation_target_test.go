@@ -20,3 +20,13 @@ func TestObligationTargetModesAndClone(t *testing.T) {
 		t.Fatal("unbound fixed hash accepted")
 	}
 }
+
+func TestLegacyObligationCannotAcquireExecutableTarget(t *testing.T) {
+	o := ObligationVersion{TargetSpec: &TargetSpec{File: &FileTarget{Locator: ResourceLocator{ResourceID: "r", BaseDir: ".", Path: "a"}, Mode: FileCurrentContent}}}
+	if o.validateBinding() == nil {
+		t.Fatal("legacy claim acquired new executable target")
+	}
+	if ValidSubjectKey("sub_" + "not-a-hash") {
+		t.Fatal("invalid subject digest accepted")
+	}
+}

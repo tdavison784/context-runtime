@@ -50,6 +50,7 @@ func TestExplicitNamespaceOverridesLegacyShape(t *testing.T) {
 	seen := map[string]bool{}
 	for _, ns := range []DirectiveNamespace{NamespaceDirective, NamespaceAgentKey, NamespaceObservation} {
 		k.Namespace = ns
+		k.ID = "sub_" + HashBytes(nil)[7:]
 		h, err := k.CanonicalHash()
 		if err != nil || seen[h] {
 			t.Fatal("namespace key collision", err)

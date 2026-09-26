@@ -51,15 +51,23 @@ type MatcherRef struct {
 // a new one that starts UNRESOLVED. Status history lives in
 // ObligationTransition records; Status caches the latest.
 type ObligationVersion struct {
-	DeclarationID, CurrentProofID, CurrentAssertionID string
-	ObligationID                                      string
-	Version                                           uint64
-	SessionID                                         string
-	TaskID                                            string
-	SourceItemID                                      string
-	SourceAuthority                                   Authority
-	Access                                            AccessBoundary
-	Description                                       string
+	TargetSpec                                             *TargetSpec
+	TargetSubjectKey, ClaimPatternVersion, DeclarationSlot string
+	DeclarationKind                                        DeclarationKind
+	DeclarationProvenance                                  DeclarationProvenance
+	WorkspaceBindingRef                                    *WorkspaceBindingRef
+	BindingState                                           ObligationBindingState
+	BindingReason                                          ObligationReasonCode
+	Legacy                                                 bool
+	DeclarationID, CurrentProofID, CurrentAssertionID      string
+	ObligationID                                           string
+	Version                                                uint64
+	SessionID                                              string
+	TaskID                                                 string
+	SourceItemID                                           string
+	SourceAuthority                                        Authority
+	Access                                                 AccessBoundary
+	Description                                            string
 	// Claim is the declared claim name from a Pinned obligation=<claim>
 	// attribute (D13). It is only a name: it is not a registry lookup, a
 	// matcher binding, or a grant. Matcher stays nil until a registered
@@ -80,6 +88,14 @@ type ObligationVersion struct {
 
 // Clone returns a deep copy.
 func (o ObligationVersion) Clone() ObligationVersion {
+	if o.TargetSpec != nil {
+		v := o.TargetSpec.Clone()
+		o.TargetSpec = &v
+	}
+	if o.WorkspaceBindingRef != nil {
+		v := *o.WorkspaceBindingRef
+		o.WorkspaceBindingRef = &v
+	}
 	o.EvidenceIDs = slices.Clone(o.EvidenceIDs)
 	if o.Matcher != nil {
 		m := *o.Matcher
@@ -90,6 +106,9 @@ func (o ObligationVersion) Clone() ObligationVersion {
 
 // Validate checks structural rules.
 func (o ObligationVersion) Validate() error {
+	if err := o.validateBinding(); err != nil {
+		return err
+	}
 	if o.Status != ObligationSatisfied && (o.CurrentProofID != "" || o.CurrentAssertionID != "") {
 		return invalid("obligation: nonsatisfied version carries current proof")
 	}

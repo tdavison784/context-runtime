@@ -32,6 +32,9 @@ type CurrentKey struct {
 
 // Validate checks the key's structure.
 func (k CurrentKey) Validate() error {
+	if k.Namespace == NamespaceObservation && !ValidSubjectKey(k.ID) {
+		return invalid("observation current key: subject digest required")
+	}
 	if k.SessionID == "" || !k.Namespace.Valid() || !ValidDirectiveID(k.ID) {
 		return invalid("current key: session, namespace, and a valid ID are required")
 	}
