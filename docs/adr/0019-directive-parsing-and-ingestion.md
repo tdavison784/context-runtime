@@ -852,3 +852,51 @@ reconciles exact names in a later round.
   restructuring the planned edge set to guarantee at most one retirement
   of a given old target per event; `p2-graph` decides the mechanism, this
   ADR only requires the collision not occur.
+
+## SDD amendment (applied in v0.9)
+
+Five clarifications, applied in SDD v0.9 (R4):
+
+- **FR-ING-004 (parse-unit isolation, §5/M1):** added: "Each span, and each
+  separate text part within a span, is an isolated parse unit:
+  fenced/quoted/comment suppression state never carries across a span or
+  part boundary, adjacent spans or parts are never concatenated into one
+  directive token, and an image or document part interrupts text
+  parsing."
+- **FR-ING-005 (Working-snapshot duplicate identity, §7/D11):** added: "A
+  Working snapshot's duplicate identity is the complete snapshot
+  membership and its members' effective metadata; equal member text in an
+  otherwise changed snapshot does not by itself make that member a
+  duplicate."
+- **FR-DIR-002 (derived-ID-shaped explicit ID rejection, §6/D20):** added:
+  "An explicit [id] that has the derived-ID shape (a lowercased keyword, a
+  hyphen, and 64 lowercase hex digits) is rejected with an
+  ErrMalformedDirective diagnostic and the item is dropped, never assigned
+  a derived ID, so explicit and derived IDs can never collide."
+- **FR-DIR-005 (unsupported-lifecycle vocabulary, §1/§4/M4):** added: "The
+  unsupported-lifecycle vocabulary recognized for this diagnostic is
+  Archive, Unarchive, Promote, Demote, Block, Unblock, Waive, CompleteTask,
+  and Reopen; other headings are not lifecycle commands at all and remain
+  ordinary content or DirectiveNotParsed diagnostics under FR-DIR-006."
+- **FR-DIR-006 (ttl representation bound, §8/D12/R1):** added, in the
+  attribute-allowlist paragraph: "ttl accepts ASCII decimal digits (leading
+  zeros allowed) with a value from 1 to 2147483647 inclusive, parsed with
+  checked arithmetic; a syntactically valid but larger value fails event
+  validation with a representation-limit error rather than being ignored
+  or treated as unlimited."
+
+These are the exact insertions applied to SDD.md; see that file's v0.9 diff
+for placement.
+
+## Review
+
+This ADR records the commander's disposition of an adversarial decision
+review (Codex gpt-6-astra xhigh) of the Phase 2 brief against the merged
+Phase 1 codebase and SDD v0.8: D2/D4/D9 agreed as written; D1, D3, D5-D8,
+D10-D19 amended; M1-M8 added as missing decisions; all accepted, with
+commander rulings R1-R8 (`phase2-amendments.md`) overriding eight of them
+as recorded above. No Phase 2 code exists yet against which to re-verify
+these decisions; that verification is this ADR's own gate (the tests in
+the section above) once `p2-contract`, `p2-parser`, `p2-store`, `p2-graph`,
+and `p2-ingest` land their work, and it is expected to move this ADR from
+Proposed to Accepted at Phase 2 exit, not before.
