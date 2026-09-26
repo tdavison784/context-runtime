@@ -50,28 +50,39 @@ func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 	return out, nil
 }
 func (t *transaction) Relationships(f store.RelationshipFilter) ([]domain.Relationship, error) {
-	bs, err := t.list("relationship")
+	query := "SELECT data FROM records WHERE session_id=? AND kind='relationship'"
+	args := []any{t.session}
+	if f.Type != "" {
+		query += " AND state=?"
+		args = append(args, string(f.Type))
+	}
+	if f.FromID != "" {
+		query += " AND from_id=?"
+		args = append(args, f.FromID)
+	}
+	if f.ToID != "" {
+		query += " AND to_id=?"
+		args = append(args, f.ToID)
+	}
+	query += " ORDER BY seq,id"
+	rows, err := t.conn.QueryContext(t.ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	out := make([]domain.Relationship, 0)
-	for _, b := range bs {
+	for rows.Next() {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, err
+		}
 		v, e := decode[domain.Relationship](b)
 		if e != nil {
 			return nil, e
 		}
-		if f.Type != "" && f.Type != v.Type || f.FromID != "" && f.FromID != v.FromID || f.ToID != "" && f.ToID != v.ToID {
-			continue
-		}
 		out = append(out, v)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Seq != out[j].Seq {
-			return out[i].Seq < out[j].Seq
-		}
-		return out[i].ID < out[j].ID
-	})
-	return out, nil
+	return out, rows.Err()
 }
 func (t *transaction) Event(id string) (domain.EventRecord, error) {
 	var v domain.EventRecord

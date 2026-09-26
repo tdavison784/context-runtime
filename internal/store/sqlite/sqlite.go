@@ -272,6 +272,21 @@ type recordMeta struct {
 	task, agent, directive, event, from, to, state string
 }
 
+// atomic keeps a multi-record method indivisible if its caller handles an
+// error and continues the outer Update.
+func (t *transaction) atomic(fn func() error) error {
+	if _, err := t.conn.ExecContext(t.ctx, "SAVEPOINT store_method"); err != nil {
+		return err
+	}
+	if err := fn(); err != nil {
+		_, _ = t.conn.ExecContext(t.ctx, "ROLLBACK TO SAVEPOINT store_method")
+		_, _ = t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
+		return err
+	}
+	_, err := t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
+	return err
+}
+
 func (t *transaction) put(kind, id string, sub int, meta recordMeta, value any, replace bool) error {
 	b, err := json.Marshal(value)
 	if err != nil {

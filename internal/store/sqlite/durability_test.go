@@ -1,0 +1,286 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
+)
+
+func TestRestartPreservesRecords(t *testing.T) {
+	s, path := openTemp(t)
+	ctx := context.Background()
+	principal := domain.Principal{SessionID: "s", TaskID: "task", AgentID: "agent", Authority: domain.AuthorityUser}
+	harness := principal
+	harness.Authority = domain.AuthorityHarness
+	parts := []domain.ContentPart{{Type: domain.PartText, Text: "remember", MediaType: "text/plain"}}
+	item := domain.ContextItem{
+		ID: "i1", SessionID: "s", TaskID: "task", AgentID: "agent", DirectiveID: "d1",
+		Kind: domain.KindFact, Generation: domain.GenerationWorking, Authority: domain.AuthorityUser,
+		Scope: domain.ScopeSession, Access: domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: "s"},
+		Residency: domain.ResidencyResident, Retention: domain.RetentionNormal,
+		Parts: parts, ContentHash: domain.ContentHash(parts), SemanticBytes: domain.SemanticBytes(parts),
+		CreatedAt: time.Date(2026, 9, 25, 12, 0, 0, 123, time.UTC), Tags: []string{"tag"}, Version: 1,
+	}
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		blob := domain.Blob{SessionID: "s", Hash: domain.HashBytes([]byte("blob")), MediaType: "text/plain", Data: []byte("blob")}
+		if err := tx.InsertBlob(blob); err != nil {
+			return err
+		}
+		item.Seq = tx.NextSeq()
+		if err := tx.InsertItem(item); err != nil {
+			return err
+		}
+		second := item.Clone()
+		second.ID = "i2"
+		second.DirectiveID = ""
+		second.Seq = tx.NextSeq()
+		if err := tx.InsertItem(second); err != nil {
+			return err
+		}
+		if err := tx.SetCurrentDirective("task", "d1", "i1"); err != nil {
+			return err
+		}
+		rel := domain.Relationship{ID: "r1", SessionID: "s", Type: domain.RelDerivedFrom, FromID: "i2", ToID: "i1", Seq: tx.NextSeq(), Authority: domain.AuthorityUser}
+		if err := tx.InsertRelationship(rel); err != nil {
+			return err
+		}
+		event := domain.EventRecord{SessionID: "s", EventID: "e1", Principal: principal, PayloadHash: domain.HashBytes([]byte("event")), Seq: tx.NextSeq(), ItemIDs: []string{"i1"}, CommittedAt: item.CreatedAt}
+		if _, _, err := tx.InsertEvent(event); err != nil {
+			return err
+		}
+		ob := domain.ObligationVersion{ObligationID: "o1", Version: 1, SessionID: "s", TaskID: "task", SourceItemID: "i1", SourceAuthority: domain.AuthorityUser, Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, Status: domain.ObligationUnresolved, Current: true, CreatedSeq: tx.NextSeq(), Revision: 1}
+		if err := tx.InsertObligationVersion(ob); err != nil {
+			return err
+		}
+		tr := domain.ObligationTransition{ID: "tr1", SessionID: "s", ObligationID: "o1", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Actor: harness, EvidenceIDs: []string{"i2"}}
+		if _, err := tx.AppendObligationTransition(tr); err != nil {
+			return err
+		}
+		grant := domain.MutationGrant{ID: "g1", SessionID: "s", Action: domain.ActionResolve, TargetIDs: []string{"i1"}, Issuer: harness, Grantee: &principal, IssuedSeq: tx.NextSeq()}
+		if err := tx.InsertGrant(grant); err != nil {
+			return err
+		}
+		if _, err := tx.PutTask(domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive, Version: 999}, 0); err != nil {
+			return err
+		}
+		life := domain.LifecycleEvent{ID: "l1", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetItem, TargetID: "i1", Action: "test", Actor: harness}
+		if err := tx.AppendLifecycleEvent(life); err != nil {
+			return err
+		}
+		if _, err := tx.PutConversation(domain.Conversation{SessionID: "s", ConversationID: "c1", TaskID: "task", AgentID: "agent", Version: 1}, 0); err != nil {
+			return err
+		}
+		request := []byte("request")
+		call := domain.CallRecord{CallID: "c1-call", SessionID: "s", ConversationID: "c1", Operation: domain.OperationInference, State: domain.CallPrepared, Principal: principal, ServiceActor: harness, Request: request, RequestHash: domain.HashBytes(request), PreparedSeq: tx.NextSeq(), Revision: 1}
+		call.ProposalHash = domain.CallProposalHash(call)
+		if err := tx.InsertCall(call); err != nil {
+			return err
+		}
+		attempt := domain.CallAttempt{CallID: call.CallID, SessionID: "s", Attempt: 1, State: domain.AttemptSent, SentSeq: tx.NextSeq()}
+		return tx.PutCallAttempt(attempt)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func(s *Store) []byte {
+		t.Helper()
+		var out []byte
+		err := s.View(ctx, "s", func(tx store.ReadTx) error {
+			m := map[string]any{"last": tx.LastSeq()}
+			var err error
+			if m["items"], err = tx.Items(store.ItemFilter{}); err != nil {
+				return err
+			}
+			if m["relationships"], err = tx.Relationships(store.RelationshipFilter{}); err != nil {
+				return err
+			}
+			if m["event"], err = tx.Event("e1"); err != nil {
+				return err
+			}
+			if m["blob"], err = tx.Blob(domain.HashBytes([]byte("blob"))); err != nil {
+				return err
+			}
+			if m["directive"], err = tx.CurrentDirective("task", "d1"); err != nil {
+				return err
+			}
+			if m["obligation"], err = tx.Obligation("o1"); err != nil {
+				return err
+			}
+			if m["transitions"], err = tx.ObligationTransitions("o1"); err != nil {
+				return err
+			}
+			if m["grant"], err = tx.Grant("g1"); err != nil {
+				return err
+			}
+			if m["task"], err = tx.Task("task"); err != nil {
+				return err
+			}
+			if m["lifecycle"], err = tx.LifecycleEvents(store.LifecycleFilter{}); err != nil {
+				return err
+			}
+			if m["conversation"], err = tx.Conversation("c1"); err != nil {
+				return err
+			}
+			if m["call"], err = tx.Call("c1-call"); err != nil {
+				return err
+			}
+			if m["attempts"], err = tx.CallAttempts("c1-call"); err != nil {
+				return err
+			}
+			out, err = json.Marshal(m)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	before := snapshot(s)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	after := snapshot(reopened)
+	if string(before) != string(after) {
+		t.Fatalf("state changed after reopen:\nbefore %s\nafter %s", before, after)
+	}
+}
+
+func openTemp(t *testing.T) (*Store, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "state.db")
+	s, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s, path
+}
+
+func TestMigrationChecksumMismatch(t *testing.T) {
+	s, path := openTemp(t)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec("UPDATE schema_migrations SET checksum='tampered' WHERE version=1"); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Open(context.Background(), path); err == nil {
+		t.Fatal("Open accepted a changed migration checksum")
+	}
+}
+
+func TestEmptyAndCorruptBlob(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	empty := domain.Blob{SessionID: "s", Hash: domain.HashBytes(nil), Data: nil}
+	if err := s.Update(ctx, "s", func(tx store.Tx) error { return tx.InsertBlob(empty) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+		b, err := tx.Blob(empty.Hash)
+		if err != nil {
+			return err
+		}
+		if len(b.Data) != 0 {
+			t.Fatalf("empty blob length = %d", len(b.Data))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("UPDATE blobs SET data=? WHERE session_id=? AND hash=?", []byte("corrupt"), "s", empty.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+		_, err := tx.Blob(empty.Hash)
+		if !errors.Is(err, domain.ErrIntegrity) {
+			t.Fatalf("Blob error = %v, want ErrIntegrity", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRollbackReusesSequence(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	marker := errors.New("rollback")
+	err := s.Update(ctx, "s", func(tx store.Tx) error {
+		if n := tx.NextSeq(); n != 1 {
+			t.Fatalf("first seq = %d", n)
+		}
+		return marker
+	})
+	if !errors.Is(err, marker) {
+		t.Fatalf("Update error = %v", err)
+	}
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		if n := tx.NextSeq(); n != 1 {
+			t.Fatalf("reused seq = %d", n)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConcurrentSequenceDensity(t *testing.T) {
+	s, _ := openTemp(t)
+	const count = 24
+	var wg sync.WaitGroup
+	results := make(chan error, count)
+	for range count {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- s.Update(context.Background(), "s", func(tx store.Tx) error { tx.NextSeq(); return nil })
+		}()
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		if tx.LastSeq() != count {
+			t.Fatalf("LastSeq = %d, want %d", tx.LastSeq(), count)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFileCreatedPrivate(t *testing.T) {
+	_, path := openTemp(t)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("file mode = %o, want 600", got)
+	}
+}

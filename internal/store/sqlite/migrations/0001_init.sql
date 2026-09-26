@@ -24,6 +24,10 @@ CREATE TABLE records (
 CREATE INDEX records_order ON records(session_id, kind, seq, id);
 CREATE INDEX records_task ON records(session_id, kind, task_id);
 CREATE INDEX records_from ON records(session_id, kind, from_id);
+-- V2 reserves one provider operation per conversation. This partial index
+-- backs the store's ErrCallInFlight check even if a future writer bypasses it.
+CREATE UNIQUE INDEX one_reserving_call ON records(session_id, from_id)
+    WHERE kind = 'call' AND state IN ('PREPARED', 'SENT', 'UNKNOWN');
 CREATE TABLE blobs (
     session_id TEXT NOT NULL,
     hash TEXT NOT NULL,
