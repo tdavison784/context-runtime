@@ -337,19 +337,23 @@ func (s *Store) Sessions(ctx context.Context) ([]string, error) {
 }
 
 type transaction struct {
-	conn               *sql.Conn
-	ctx                context.Context
-	session            string
-	last               uint64
-	allocated          map[uint64]bool
-	writable           bool
-	supersession       map[string][]string
-	supersessionLoaded bool
-	semanticWrite      bool
-	semanticSeqRecord  bool
-	wrote              bool
-	ledgerSeqs         map[uint64]bool
-	semanticSeqs       map[uint64]bool
+	conn              *sql.Conn
+	ctx               context.Context
+	session           string
+	last              uint64
+	allocated         map[uint64]bool
+	writable          bool
+	semanticWrite     bool
+	semanticSeqRecord bool
+	wrote             bool
+	ledgerSeqs        map[uint64]bool
+	semanticSeqs      map[uint64]bool
+	// lookupRows and lookupLoads count index rows read and items loaded by
+	// access-filtered lookups, so tests can assert bounded work (DUR-2.1).
+	lookupRows, lookupLoads int
+	// lastQuery is the SQL the latest record read ran, so tests can assert
+	// that hot reads use their plan-guarded builders (SPEC-2.1).
+	lastQuery string
 }
 
 var _ store.TxBase = (*transaction)(nil)
@@ -503,6 +507,7 @@ func listRecords[T any](t *transaction, kind string) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
+	t.lastQuery = s.selectSQL + " WHERE session_id=?"
 	rows, err := t.conn.QueryContext(t.ctx, s.selectSQL+" WHERE session_id=?", t.session)
 	if err != nil {
 		return nil, err

@@ -10,9 +10,13 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
 
-// assertIndexed fails when SQLite would answer q with a full table scan
-// (R19: ingest lookups are never session-wide scans).
-func assertIndexed(t *testing.T, s *Store, q string, args ...any) {
+// assertIndexed fails unless SQLite answers q by searching an index whose
+// constraint covers every key column (SPEC-2.1): a plan that only narrows
+// by session_id, or that scans, grows with session size and fails. The
+// constraint is the parenthesized part of a SEARCH step, e.g.
+// "SEARCH rec_relationship USING INDEX relationship_to_seq (session_id=?
+// AND f_type=? AND f_to_id=?)".
+func assertIndexed(t *testing.T, s *Store, keys []string, q string, args ...any) {
 	t.Helper()
 	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+q, args...)
 	if err != nil {
@@ -28,13 +32,26 @@ func assertIndexed(t *testing.T, s *Store, q string, args ...any) {
 		}
 		plan = append(plan, detail)
 	}
+	covered := false
 	for _, step := range plan {
 		if strings.HasPrefix(step, "SCAN ") && !strings.Contains(step, "USING") {
 			t.Errorf("query scans a table: %q\nplan: %v", q, plan)
 		}
+		open, close := strings.Index(step, "("), strings.LastIndex(step, ")")
+		if !strings.HasPrefix(step, "SEARCH ") || open < 0 || close < open {
+			continue
+		}
+		constraint := step[open+1 : close]
+		all := true
+		for _, k := range keys {
+			if !strings.Contains(constraint, k+"=?") {
+				all = false
+			}
+		}
+		covered = covered || all
 	}
-	if len(plan) == 0 || !strings.Contains(strings.Join(plan, " "), "USING") {
-		t.Errorf("query uses no index: %q\nplan: %v", q, plan)
+	if !covered {
+		t.Errorf("no index search constrains all of %v: %q\nplan: %v", keys, q, plan)
 	}
 }
 

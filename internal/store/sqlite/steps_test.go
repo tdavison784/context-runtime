@@ -4,19 +4,24 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
-// committedSteps pins every Go migration step (F5: DUR-1.8, SPEC-1.9): its
-// identity, which is part of the migration's stored checksum, and the
-// SHA-256 of the file holding its frozen code. A committed step is never
-// edited; a changed transform is a new migration.
-var committedSteps = map[int]struct{ id, file, sum string }{
-	11: {"0011/item-sources/reference-locator-v1", "steps_0011.go", "e99a25b0aa67a7d3d2388fb739fe0d941430f38a09a61e89726008d23ab1c409"},
+// committedSteps pins every Go migration step (F5: DUR-1.8, SPEC-1.9,
+// SPEC-2.5): its identity, which is part of the migration's stored
+// checksum, the function the registry runs, and the SHA-256 of the file
+// holding that function's frozen code. A committed step is never edited; a
+// changed transform is a new migration.
+var committedSteps = map[int]struct{ id, fn, file, sum string }{
+	11: {"0011/item-sources/reference-locator-v1", "backfillItemSourcesV1", "steps_0011.go", "e99a25b0aa67a7d3d2388fb739fe0d941430f38a09a61e89726008d23ab1c409"},
 }
+
+const pkgPath = "github.com/tdavison784/context-runtime/internal/store/sqlite"
 
 func TestCommittedStepsUnchanged(t *testing.T) {
 	if len(migrationSteps) != len(committedSteps) {
@@ -26,6 +31,11 @@ func TestCommittedStepsUnchanged(t *testing.T) {
 		step, ok := migrationSteps[n]
 		if !ok || step.id != want.id {
 			t.Errorf("step %d id = %q, want %q", n, step.id, want.id)
+		}
+		// The registry runs exactly the frozen function (SPEC-2.5), not a
+		// wrapper that could reach live code.
+		if got := runtime.FuncForPC(reflect.ValueOf(step.run).Pointer()).Name(); got != pkgPath+"."+want.fn {
+			t.Errorf("step %d runs %s, want %s.%s", n, got, pkgPath, want.fn)
 		}
 		b, err := os.ReadFile(want.file)
 		if err != nil {
