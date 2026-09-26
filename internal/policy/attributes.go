@@ -1,12 +1,20 @@
 package policy
 
 import (
+	"fmt"
+	"slices"
+
 	"github.com/tdavison784/context-runtime/internal/domain"
-	"strconv"
 )
 
+// ErrTTLRepresentation rejects an event whose ttl is a positive value above
+// domain.MaxTTLTurns (R1). It is a validation error, not an ignorable
+// malformed attribute: ignoring it would silently make a finite-lived item
+// unlimited.
+var ErrTTLRepresentation = fmt.Errorf("%w: ttl exceeds %d turns", domain.ErrInvalidRecord, domain.MaxTTLTurns)
+
 // AttributeValue is one validated override; exactly one field is populated.
-// Callers apply it only when ValidateAttribute returns ReasonNone.
+// Callers apply it only when ValidateAttribute returns ReasonNone and no error.
 type AttributeValue struct {
 	Kind       domain.Kind
 	Scope      domain.Scope
@@ -23,7 +31,7 @@ func AttributeAllowed(section domain.DirectiveSection, name string) bool {
 	case "scope":
 		return true
 	case "kind":
-		return section == domain.SectionPinned || section == domain.SectionWorking || section == domain.SectionRemember || section == domain.SectionEphemeral
+		return len(sectionKinds[section]) > 0
 	case "ttl":
 		return section == domain.SectionWorking || section == domain.SectionRemember || section == domain.SectionReferences || section == domain.SectionEphemeral
 	case "obligation":
@@ -32,8 +40,11 @@ func AttributeAllowed(section domain.DirectiveSection, name string) bool {
 	return false
 }
 
-// ScopeAllowed implements D12. Access constraints are checked separately by
-// ingestion: permission for a scope never grants permission to broaden a span.
+// ScopeAllowed implements FR-DIR-006's widening rule: only SYSTEM and HARNESS
+// spans may request WORKFLOW or SESSION. Authorities that never parse
+// directives are allowed nothing. Permission for a scope never grants access:
+// ingestion intersects the requested scope's boundary with the authenticated
+// span boundary, and an AGENT scope keeps any task/workflow constraint (D12).
 func ScopeAllowed(authority domain.Authority, scope domain.Scope) bool {
 	if !authority.CanHoldLifecycleAuthority() || !scope.Valid() {
 		return false
@@ -41,12 +52,45 @@ func ScopeAllowed(authority domain.Authority, scope domain.Scope) bool {
 	return scope != domain.ScopeWorkflow && scope != domain.ScopeSession || authority == domain.AuthoritySystem || authority == domain.AuthorityHarness
 }
 
-// ValidateAttribute validates one lexical attribute. On failure it returns an
-// empty value and a content-free reason for an ErrMalformedDirective diagnostic;
-// the caller ignores the override and keeps defaults/other valid attributes.
-// Names, kinds, and claims are exact; only scope values are ASCII case-insensitive.
-func ValidateAttribute(section domain.DirectiveSection, authority domain.Authority, name, value string) (AttributeValue, domain.DiagnosticReason) {
-	bad := func(r domain.DiagnosticReason) (AttributeValue, domain.DiagnosticReason) { return AttributeValue{}, r }
+// ParseTTL parses a ttl value (R1): ASCII decimal digits only, leading zeros
+// allowed, checked arithmetic. ok is false for an empty, non-digit, or zero
+// value (a malformed attribute). A positive value above domain.MaxTTLTurns
+// returns ErrTTLRepresentation, unless the value also contains a non-digit,
+// which makes it merely malformed.
+func ParseTTL(value string) (n int, ok bool, err error) {
+	overflow := false
+	for i := range len(value) {
+		c := value[i]
+		if c < '0' || c > '9' {
+			return 0, false, nil
+		}
+		d := int(c - '0')
+		if overflow || n > (domain.MaxTTLTurns-d)/10 {
+			overflow = true
+			continue
+		}
+		n = n*10 + d
+	}
+	switch {
+	case overflow:
+		return 0, false, ErrTTLRepresentation
+	case n < 1:
+		return 0, false, nil
+	}
+	return n, true, nil
+}
+
+// ValidateAttribute validates one lexical attribute (FR-DIR-006, R1). Names
+// and values are exact: scope is one of TURN, TASK, WORKFLOW, SESSION, AGENT
+// in upper case, kind is a lowercase FR-DIR-003 kind allowed for the section,
+// and obligation is a claim name in the value grammar. On a recoverable
+// failure it returns an empty value and a content-free reason for an
+// ErrMalformedDirective diagnostic; the caller ignores the override and keeps
+// the inherited or default value. A non-nil error rejects the whole event.
+func ValidateAttribute(section domain.DirectiveSection, authority domain.Authority, name, value string) (AttributeValue, domain.DiagnosticReason, error) {
+	bad := func(r domain.DiagnosticReason) (AttributeValue, domain.DiagnosticReason, error) {
+		return AttributeValue{}, r, nil
+	}
 	switch name {
 	case "kind", "scope", "ttl", "obligation":
 	default:
@@ -55,33 +99,18 @@ func ValidateAttribute(section domain.DirectiveSection, authority domain.Authori
 	if !AttributeAllowed(section, name) {
 		return bad(domain.ReasonDisallowedAttribute)
 	}
-	if !asciiValue(value) {
+	if !domain.ValidAttributeValue(value) {
 		return bad(domain.ReasonInvalidAttribute)
 	}
-	v := AttributeValue{}
+	var v AttributeValue
 	switch name {
 	case "kind":
-		allowed := map[domain.DirectiveSection][]domain.Kind{
-			domain.SectionPinned:    {domain.KindConstraint, domain.KindInstruction},
-			domain.SectionWorking:   {domain.KindTaskState, domain.KindConversation},
-			domain.SectionRemember:  {domain.KindFact, domain.KindDecision, domain.KindSummary},
-			domain.SectionEphemeral: {domain.KindEvidence, domain.KindToolResult},
+		if !slices.Contains(sectionKinds[section], domain.Kind(value)) {
+			return bad(domain.ReasonInvalidAttribute)
 		}
-		for _, kind := range allowed[section] {
-			if string(kind) == value {
-				v.Kind = kind
-				return v, domain.ReasonNone
-			}
-		}
-		return bad(domain.ReasonInvalidAttribute)
+		v.Kind = domain.Kind(value)
 	case "scope":
-		b := []byte(value)
-		for i, c := range b {
-			if c >= 'a' && c <= 'z' {
-				b[i] = c - ('a' - 'A')
-			}
-		}
-		v.Scope = domain.Scope(b)
+		v.Scope = domain.Scope(value)
 		if !v.Scope.Valid() {
 			return bad(domain.ReasonInvalidAttribute)
 		}
@@ -89,34 +118,16 @@ func ValidateAttribute(section domain.DirectiveSection, authority domain.Authori
 			return bad(domain.ReasonScopeWidening)
 		}
 	case "ttl":
-		if len(value) > 5 || value[0] == '0' {
-			return bad(domain.ReasonInvalidAttribute)
+		n, ok, err := ParseTTL(value)
+		if err != nil {
+			return AttributeValue{}, domain.ReasonNone, err
 		}
-		for i := range len(value) {
-			if value[i] < '0' || value[i] > '9' {
-				return bad(domain.ReasonInvalidAttribute)
-			}
-		}
-		n, err := strconv.Atoi(value)
-		if err != nil || n < 1 || n > 10000 {
+		if !ok {
 			return bad(domain.ReasonInvalidAttribute)
 		}
 		v.TTLTurns = &n
 	case "obligation":
 		v.Obligation = value
 	}
-	return v, domain.ReasonNone
-}
-
-func asciiValue(value string) bool {
-	if value == "" {
-		return false
-	}
-	for i := range len(value) {
-		c := value[i]
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
-			return false
-		}
-	}
-	return true
+	return v, domain.ReasonNone, nil
 }
