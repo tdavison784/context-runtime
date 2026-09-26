@@ -94,11 +94,11 @@ func (g Ingester) now() time.Time {
 // problems, boundary conflicts (R13), and unresolved or mismatched
 // lifecycle targets (R7, R14) are diagnostics in the receipt.
 func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event) (domain.IngestReceipt, error) {
-	r, err := g.ingest(ctx, s, p, e)
+	r, err := g.ingest(ctx, s, p, e, nil)
 	return r, sanitize(err)
 }
 
-func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event) (domain.IngestReceipt, error) {
+func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event, b *domain.OutcomeBinding) (domain.IngestReceipt, error) {
 	// Admission (SEC-2.1), from lengths alone and outside any write
 	// transaction: the hard ceiling first, then the configured limits. An
 	// over-limit event is admitted only as the retry of a known EventID
@@ -140,7 +140,7 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	}
 	var out domain.IngestReceipt
 	err := s.Update(ctx, p.SessionID, func(tx store.Tx) error {
-		r, err := g.apply(tx, p, e, anonymous)
+		r, err := g.apply(tx, p, e, anonymous, b)
 		if err != nil {
 			return err
 		}
@@ -164,11 +164,17 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 // Every error Ingest and Apply return is a bare public sentinel (or a join
 // of them): never text naming an item or other record (R20.1).
 func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
-	r, err := g.apply(tx, p, e, anonymousOccurrence)
+	r, err := g.apply(tx, p, e, anonymousOccurrence, nil)
 	return r, sanitize(err)
 }
 
-func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
+func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string, b *domain.OutcomeBinding) (domain.IngestReceipt, error) {
+	if b != nil {
+		if err := checkOutcome(*b, e); err != nil {
+			return domain.IngestReceipt{}, err
+		}
+		p = b.Principal
+	}
 	limits := g.Limits.Effective()
 	// Admission from lengths alone (SEC-2.1), as in Ingest: over the
 	// configured limits, only the retry of a known EventID may proceed, and
@@ -224,7 +230,7 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 		return domain.IngestReceipt{}, err
 	}
 
-	r := &run{g: g, tx: tx, p: p, e: e, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
+	r := &run{g: g, tx: tx, p: p, e: e, binding: b, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
 	rc, err := r.apply()
 	if err != nil {
 		// Everything above only read; from here the core has written. Any

@@ -13,6 +13,7 @@ import (
 // receipt in creation order; the transaction makes it all-or-nothing.
 type run struct {
 	g          Ingester
+	binding    *domain.OutcomeBinding // a provider outcome's originating context
 	tx         store.Tx
 	p          domain.Principal
 	e          domain.Event
@@ -132,6 +133,9 @@ func (r *run) operation(oi int, op domain.SemanticOperation) error {
 // event (D18). Ownership is immutable: a task of another workflow is
 // rejected, and a COMPLETED task is never reactivated by ingestion.
 func (r *run) advanceTask() error {
+	if r.binding != nil {
+		return r.outcomeTask()
+	}
 	if r.p.TaskID == "" {
 		return nil
 	}
@@ -191,7 +195,12 @@ func (r *run) fill(it domain.ContextItem) domain.ContextItem {
 	it.WorkflowID = r.p.WorkflowID
 	it.TaskID = r.p.TaskID
 	it.AgentID = r.p.AgentID
-	if r.hasTask && r.task.Turn > 0 {
+	switch {
+	case r.binding != nil:
+		// A provider outcome belongs to the turn its call was issued in,
+		// never the task's newest turn (P3-34).
+		it.CreatedTurn, it.TurnID = r.binding.Turn, r.binding.TurnID
+	case r.hasTask && r.task.Turn > 0:
 		it.CreatedTurn = r.task.Turn
 		it.TurnID = r.task.TurnID
 	}
