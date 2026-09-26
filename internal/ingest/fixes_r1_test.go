@@ -273,3 +273,41 @@ func TestSizeGateMatchesValidateFor_SEC21(t *testing.T) {
 		}
 	}
 }
+
+// TestKnownEventIDCannotSmuggleOversizePayload_SEC31: the cheap read that
+// admits an over-limit retry also proves it can match: the stored receipt
+// must be this principal's and the event's per-span and per-part counts
+// and byte lengths must equal the stored envelope's. Otherwise it is a bare
+// ErrEventIDConflict from the read, and the oversized payload is never
+// copied, hashed, or taken into a write transaction, for the same
+// principal or another; an exact retry still replays (F3).
+func TestKnownEventIDCannotSmuggleOversizePayload_SEC31(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("known", "small original", false))
+		img := domain.Event{EventID: "img", Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(),
+			Parts: []domain.InputPart{{Type: domain.PartImage, MediaType: "image/png", Data: make([]byte, 2048)}}}}}
+		f.mustIngest(user, img)
+
+		updates := 0
+		f.s = countingStore{f.s, &updates}
+		f.in.Limits = domain.Limits{MaxSpanBytes: 1024, MaxEventBytes: 1024, MaxBlobBytes: 1024}
+		huge := domain.InputPart{Type: domain.PartImage, MediaType: "image/png", Data: make([]byte, 64<<10)}
+		other := domain.Principal{SessionID: sess, WorkflowID: "wf2", TaskID: "T2", AgentID: "Z", Authority: domain.AuthorityUser}
+		for name, c := range map[string]struct {
+			p domain.Principal
+			a domain.AccessBoundary
+		}{"same principal": {user, taskAccess()}, "other principal": {other, domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: "T2"}}} {
+			e := domain.Event{EventID: "known", Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: c.a, Parts: []domain.InputPart{huge}}}}
+			if _, err := f.ingest(c.p, e); err != domain.ErrEventIDConflict {
+				t.Errorf("%s: err = %v, want bare ErrEventIDConflict", name, err)
+			}
+		}
+		if updates != 0 {
+			t.Errorf("mismatched over-limit retries entered %d write transactions, want 0", updates)
+		}
+		if _, err := f.ingest(user, img); err != nil {
+			t.Errorf("exact over-limit retry: %v (F3)", err)
+		}
+	})
+}
