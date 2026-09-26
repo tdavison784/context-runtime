@@ -126,3 +126,44 @@ func TestR13_CheckBoundaryConflict(t *testing.T) {
 		})
 	})
 }
+
+// TestCurrentVersionFor: the version a write would replace or duplicate is
+// the current one at the item's exact key; a stale pointer or an
+// inaccessible version is none.
+func TestCurrentVersionFor(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess = "sess-cvf"
+		user := principal(sess, domain.AuthorityUser)
+		update(t, s, sess, func(tx store.Tx) error {
+			d := storetest.NewDirective(sess, "d1", "d", tx.NextSeq(), "v1")
+			mustInsert(t, tx, d)
+			mustFile(t, tx, d)
+			return nil
+		})
+		probe := storetest.NewDirective(sess, "probe", "d", 99, "v2")
+		view(t, s, sess, func(tx store.ReadTx) error {
+			got, err := CurrentVersionFor(tx, user, probe)
+			if err != nil || got.ID != "d1" {
+				t.Errorf("CurrentVersionFor = %q, %v; want d1", got.ID, err)
+			}
+			other := principalWithAgent(sess, domain.AuthorityUser, "x")
+			other.TaskID = "other-task"
+			if _, err := CurrentVersionFor(tx, other, probe); err != domain.ErrNotFound {
+				t.Errorf("inaccessible: err = %v, want bare ErrNotFound", err)
+			}
+			return nil
+		})
+		update(t, s, sess, func(tx store.Tx) error {
+			r := storetest.NewDirective(sess, "retirer", "r", tx.NextSeq(), "r")
+			mustInsert(t, tx, r)
+			_, err := Supersede(tx, user, "retirer", "d1", "evt", "")
+			return err
+		})
+		view(t, s, sess, func(tx store.ReadTx) error {
+			if _, err := CurrentVersionFor(tx, user, probe); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("stale pointer: err = %v, want ErrNotFound", err)
+			}
+			return nil
+		})
+	})
+}

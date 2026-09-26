@@ -398,6 +398,24 @@ func currentVersionAt(tx store.ReadTx, taskID string, ns domain.DirectiveNamespa
 	return id, nil
 }
 
+// CurrentVersionFor returns the current version at the item's own current-version
+// key (its task, namespace, directive ID, and access boundary), as actor
+// sees it: the version a write of it would replace or duplicate. It fails
+// with domain.ErrNotFound when there is none, when the map entry is a stale
+// pointer, or when actor cannot access the version, and with
+// ErrNamespaceConflict when the slot holds the other namespace's version.
+func CurrentVersionFor(tx store.ReadTx, actor domain.Principal, it domain.ContextItem) (domain.ContextItem, error) {
+	ns, ok := it.DirectiveNamespace()
+	if !ok {
+		return domain.ContextItem{}, domain.ErrNotFound
+	}
+	id, err := currentVersionAt(tx, it.TaskID, ns, it.DirectiveID, it.Access)
+	if err != nil {
+		return domain.ContextItem{}, err
+	}
+	return loadAccessible(tx, actor, id)
+}
+
 // CurrentVersions returns every current version (IsCurrent, D10) of ID
 // directiveID in namespace ns (M6, R6) of taskID that actor can access,
 // ordered by (Seq, ID). FR-DIR-002 keys a directive by (task, directive ID, access
