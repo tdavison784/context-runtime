@@ -13,6 +13,12 @@ type byteRange struct{ start, end int }
 type sourceLine struct {
 	byteRange
 	next int
+	// suppressed names the D5 state the line starts in: it lies inside or
+	// delimits a fence, is an explicit quote line, starts inside a comment,
+	// or opens one at column 0. Such a line never starts an item or target
+	// (SPEC-1.1). A comment opened later on the line does not suppress the
+	// bullet that precedes it.
+	suppressed string
 }
 type rawAttribute struct {
 	name, value string
@@ -144,7 +150,7 @@ func (p *coreParser) scan(capable bool) {
 				pos++
 			}
 		}
-		line := sourceLine{byteRange{start, end}, pos}
+		line := sourceLine{byteRange: byteRange{start, end}, next: pos}
 		if start == 0 && bytes.HasPrefix(p.data, []byte{0xef, 0xbb, 0xbf}) {
 			start = 3
 		}
@@ -155,6 +161,7 @@ func (p *coreParser) scan(capable bool) {
 			indent++
 		}
 		quote := indent < 4 && indent < len(b) && b[indent] == '>'
+		startComment := comment
 		blocked := ""
 		if fence != 0 {
 			blocked = "fenced code"
@@ -198,6 +205,14 @@ func (p *coreParser) scan(capable bool) {
 					blocked = "HTML comment"
 				}
 			}
+		}
+		switch {
+		case blocked == "fenced code":
+			line.suppressed = "fenced code"
+		case quote:
+			line.suppressed = "block quote"
+		case startComment || bytes.HasPrefix(b, []byte("<!--")):
+			line.suppressed = "HTML comment"
 		}
 		candidate := b
 		candidateStart := start
