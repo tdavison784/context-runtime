@@ -10,6 +10,7 @@ import (
 func scanner(data string, capable bool) *coreParser {
 	p := &coreParser{authority: domain.AuthoritySystem, data: []byte(data), limits: scanLimits{8 << 20, 4096, 256, 4096}}
 	p.scan(capable)
+	p.finish()
 	return p
 }
 func TestScannerSourceAndMarkdownGates(t *testing.T) {

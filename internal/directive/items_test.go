@@ -9,7 +9,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
-func parsedCore(data string) *coreParser { p := scanner(data, true); p.extract(); return p }
+func parsedCore(data string) *coreParser { p := scanner(data, true); p.extract(); p.finish(); return p }
 func TestItemExtraction(t *testing.T) {
 	cases := []struct {
 		name, input string
@@ -236,6 +236,7 @@ func TestDerivedIDsAndItemLimit(t *testing.T) {
 	p = scanner("## Working\n- one\n- two\n- three", true)
 	p.limits.maxItems = 2
 	p.extract()
+	p.finish()
 	if len(p.items) != 2 || p.diagnostics[len(p.diagnostics)-1].reason != "item limit reached" {
 		t.Fatal(p)
 	}

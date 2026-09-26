@@ -73,6 +73,7 @@ func TestT18PastedDocumentAndWorkingSections(t *testing.T) {
 	pasted := "## Goal\nDesign document text\n## Pinned\nDocument constraints"
 	p := scanner(pasted, false)
 	p.extract()
+	p.finish()
 	if len(p.items) != 0 || len(p.diagnostics) != 2 {
 		t.Fatal(p)
 	}

@@ -3,6 +3,8 @@ package directive
 
 import (
 	"bytes"
+	"container/heap"
+	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
@@ -32,7 +34,27 @@ type rawSection struct {
 type parseDiagnostic struct {
 	code, reason, section, id string
 	byteRange
+	seq int
 }
+
+// diagnosticHeap is a max-heap by (start, seq): its root is the diagnostic
+// that sorts last, so the cap keeps the earliest ones in source order.
+type diagnosticHeap []parseDiagnostic
+
+func (h diagnosticHeap) Len() int           { return len(h) }
+func (h diagnosticHeap) Less(i, j int) bool { return before(h[j], h[i]) }
+func (h diagnosticHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *diagnosticHeap) Push(x any)        { *h = append(*h, x.(parseDiagnostic)) }
+func (h *diagnosticHeap) Pop() any {
+	old := *h
+	x := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return x
+}
+func before(a, b parseDiagnostic) bool {
+	return a.start < b.start || a.start == b.start && a.seq < b.seq
+}
+
 type scanLimits struct{ maxBytes, maxItems, maxDiagnostics, maxHeading int }
 type rawItem struct {
 	section, id, text   string
@@ -50,17 +72,39 @@ type coreParser struct {
 	ttlOverflow  bool
 	data         []byte
 	limits       scanLimits
-	diagnostics  []parseDiagnostic
+	diagnostics  []parseDiagnostic // source-ordered output of finish
+	pending      diagnosticHeap
+	emitted      int
+	truncated    bool
 	sections     []rawSection
 	items        []rawItem
 	work         int // deterministic work accounting used by adversarial tests
 }
 
 func (p *coreParser) diagnostic(code, reason, section, id string, r byteRange) {
-	if len(p.diagnostics) < p.limits.maxDiagnostics {
-		p.diagnostics = append(p.diagnostics, parseDiagnostic{code, reason, section, id, r})
-	} else if len(p.diagnostics) == p.limits.maxDiagnostics {
-		p.diagnostics = append(p.diagnostics, parseDiagnostic{code: "DiagnosticsTruncated", reason: "diagnostic limit reached", byteRange: r})
+	// D17: memory stays bounded by the cap while the retained set is the
+	// first maxDiagnostics in source order, independent of which pass found
+	// them. Nothing here feeds back into parse decisions.
+	d := parseDiagnostic{code, reason, section, id, r, p.emitted}
+	p.emitted++
+	if len(p.pending) < p.limits.maxDiagnostics {
+		heap.Push(&p.pending, d)
+		return
+	}
+	p.truncated = true
+	if len(p.pending) > 0 && before(d, p.pending[0]) {
+		p.pending[0] = d
+		heap.Fix(&p.pending, 0)
+	}
+}
+
+// finish publishes the retained diagnostics in source order, followed by one
+// DiagnosticsTruncated marker at the unit end when any were dropped.
+func (p *coreParser) finish() {
+	p.diagnostics = append([]parseDiagnostic(nil), p.pending...)
+	sort.Slice(p.diagnostics, func(i, j int) bool { return before(p.diagnostics[i], p.diagnostics[j]) })
+	if p.truncated {
+		p.diagnostics = append(p.diagnostics, parseDiagnostic{code: "DiagnosticsTruncated", reason: "diagnostic limit reached", byteRange: byteRange{len(p.data), len(p.data)}})
 	}
 }
 

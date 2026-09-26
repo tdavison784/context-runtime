@@ -82,3 +82,20 @@ func TestParseLimits(t *testing.T) {
 		}
 	}
 }
+func TestDiagnosticCapKeepsSourceOrder(t *testing.T) {
+	// Extraction diagnostics precede later scanner diagnostics in the source,
+	// so they must survive a cap even though they are generated afterwards.
+	input := []byte("## Working\n- [bad/id] x\n- [bad/id] y\n" + strings.Repeat("> ## Goal\n", 5))
+	small := Parse(input, Options{Authority: domain.AuthoritySystem, Limits: domain.Limits{MaxDiagnosticsPerSpan: 2}})
+	if len(small.Diagnostics) != 3 || small.Diagnostics[0].Reason != domain.ReasonInvalidID || small.Diagnostics[1].Reason != domain.ReasonInvalidID || small.Diagnostics[2].Code != domain.DiagnosticsTruncated {
+		t.Fatalf("%+v", small.Diagnostics)
+	}
+	// D17: the cap never changes parse decisions.
+	full := Parse(input, Options{Authority: domain.AuthoritySystem})
+	if !reflect.DeepEqual(small.Items, full.Items) || !reflect.DeepEqual(small.Sections, full.Sections) || !reflect.DeepEqual(small.Lifecycle, full.Lifecycle) {
+		t.Fatal("diagnostic cap changed parse decisions")
+	}
+	if !reflect.DeepEqual(small.Diagnostics[:2], full.Diagnostics[:2]) {
+		t.Fatal("cap is not a prefix of the full source-ordered diagnostics")
+	}
+}

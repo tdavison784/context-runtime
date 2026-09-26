@@ -68,9 +68,7 @@ func Parse(input []byte, opts Options) Result {
 		result.Items = append(result.Items, typed(Item{Section: domain.DirectiveSection(strings.ToUpper(item.section)), SectionIndex: item.sectionIndex, DirectiveID: item.id, ExplicitID: item.explicit, Authority: opts.Authority, Text: item.text, ContentHash: domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: item.text}}), Attributes: exportAttributes(item.attrs), Range: exportRange(item.byteRange), TextRanges: exportRanges(item.slices)}))
 		result.Sections[item.sectionIndex].ItemIndexes = append(result.Sections[item.sectionIndex].ItemIndexes, index)
 	}
-	// Diagnostics are capped at 257, so this bounded sort preserves O(n)
-	// parsing while merging scanner and extraction diagnostics in source order.
-	sort.SliceStable(p.diagnostics, func(i, j int) bool { return p.diagnostics[i].start < p.diagnostics[j].start })
+	p.finish()
 	truncated := false
 	for _, d := range p.diagnostics {
 		if d.code == "DiagnosticsTruncated" {
