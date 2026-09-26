@@ -185,3 +185,31 @@ func TestAmbiguousLifecycleTarget(t *testing.T) {
 		}
 	})
 }
+
+// TestReplayNeverRecomputes (ADR 19 D14 replay clause, SPEC-1.10): a retry
+// under changed execution inputs that would produce a different, accepted
+// result (here a diagnostics cap that truncates) returns the original
+// receipt, including its recorded execution Versions: replay reads the
+// stored receipt and never re-parses or re-classifies. Parser and policy
+// versions are compile-time constants, so this is the property that makes a
+// version upgrade safe; exercising a real upgrade needs a version seam.
+func TestReplayNeverRecomputes(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		first := f.mustIngest(user, richEvent("rich"))
+		seq := f.lastSeq()
+		changed := Ingester{Limits: domain.Limits{MaxDiagnosticsPerSpan: 1, MaxEventDiagnostics: 1}, IDs: &domain.SequentialIDs{}, Now: f.in.Now}
+		if reflect.DeepEqual(changed.Versions(), first.Versions) {
+			t.Fatal("precondition: the changed ingester must record different execution versions")
+		}
+		again, err := changed.Ingest(ctx, f.s, user, richEvent("rich"))
+		if err != nil || !reflect.DeepEqual(again, first) || f.lastSeq() != seq {
+			t.Fatalf("replay recomputed: err %v, diagnostics %d vs %d", err, len(again.Diagnostics), len(first.Diagnostics))
+		}
+		// The same request as a new event does get the new configuration.
+		fresh, err := changed.Ingest(ctx, f.s, user, richEvent("rich-new"))
+		if err != nil || len(fresh.Diagnostics) >= len(first.Diagnostics) || reflect.DeepEqual(fresh.Versions, first.Versions) {
+			t.Fatalf("new event: err %v, %d diagnostics", err, len(fresh.Diagnostics))
+		}
+	})
+}
