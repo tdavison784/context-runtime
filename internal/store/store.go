@@ -271,10 +271,12 @@ type Tx interface {
 
 	// AppendLifecycleEvent appends an audit event. TargetCall events are
 	// reserved for the call ledger (internal/invocation), and a TargetCall
-	// event's Seq is never shared with any other record: at commit, a
-	// sequence number used by a TargetCall event and by any other
-	// sequenced record fails with domain.ErrInvalidRecord, so a semantic
-	// write cannot hide behind a ledger sequence number (FR-CALL-001).
+	// event's Seq is never shared with a semantic record: at commit, a
+	// sequence number used by a TargetCall event and by an item,
+	// relationship, event record, obligation version or transition, grant,
+	// or non-TargetCall lifecycle event fails with domain.ErrInvalidRecord,
+	// so a semantic write cannot hide behind a ledger sequence number
+	// (FR-CALL-001). Ledger records (calls, attempts) may share it.
 	AppendLifecycleEvent(e domain.LifecycleEvent) error
 
 	// PutConversation creates (expectedRevision 0) or replaces a

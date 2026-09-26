@@ -150,6 +150,9 @@ func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) 
 	if t.semantic && !t.sequenced {
 		return invalid("transaction changes semantic state without a sequenced record")
 	}
+	if err := t.checkLedgerSeqs(); err != nil {
+		return err
+	}
 	if t.commit(sess.st) {
 		sess.committed = true
 	}
