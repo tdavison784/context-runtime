@@ -196,3 +196,19 @@ func TestIngestionReasonsAndMismatch(t *testing.T) {
 		t.Fatal("mismatch without its accessible target accepted")
 	}
 }
+
+// TestIngestionReasonCodePairing is SPEC-1.6 (ADR 19 R19): each ingestion
+// reason has exactly one code — boundary_conflict with ErrMalformedDirective,
+// target_mismatch with ErrNotFound — and never a different one.
+func TestIngestionReasonCodePairing(t *testing.T) {
+	pair := map[DiagnosticReason]DiagnosticCode{ReasonBoundaryConflict: ErrMalformedDirective, ReasonTargetMismatch: DiagnosticNotFound}
+	codes := []DiagnosticCode{ErrUnsupportedDirective, ErrMalformedDirective, ErrAmbiguousDirective, DirectiveNotParsed, DiagnosticsTruncated, DirectiveIDDerived, DiagnosticNotFound}
+	for reason, want := range pair {
+		for _, code := range codes {
+			d := Diagnostic{Code: code, Reason: reason, ParserVersion: "directive/v1"}
+			if err := d.Validate(); (err == nil) != (code == want) {
+				t.Errorf("%s with %s: err = %v", reason, code, err)
+			}
+		}
+	}
+}

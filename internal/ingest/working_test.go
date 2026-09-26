@@ -100,7 +100,7 @@ func TestLifecycle_ParsedNotExecuted_D1(t *testing.T) {
 		if r.Lifecycle[0].ResolvedItemID != goal.ID {
 			t.Errorf("Resolve target = %q, want %q", r.Lifecycle[0].ResolvedItemID, goal.ID)
 		}
-		if !hasDiag(r, domain.ErrUnsupportedDirective, domain.ReasonTargetMismatch) || !hasDiag(r, domain.DiagnosticNotFound, domain.ReasonUnknownTarget) {
+		if !hasDiag(r, domain.DiagnosticNotFound, domain.ReasonTargetMismatch) || !hasDiag(r, domain.DiagnosticNotFound, domain.ReasonUnknownTarget) {
 			t.Errorf("diagnostics = %+v", r.Diagnostics)
 		}
 		f.view(func(tx store.ReadTx) error {
