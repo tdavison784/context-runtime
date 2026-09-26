@@ -449,11 +449,9 @@ func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			// No Section: Validate now requires SYSTEM/HARNESS/USER authority
-			// for a directive section (AUTH-2.2), which would mask the actor
-			// rule this test targets. A directive ID alone doesn't need one.
-			it := taskItem(sess, "d1", tx.NextSeq(), domain.AuthorityTool)
-			it.DirectiveID = dirID
+			// A well-formed USER directive: the TOOL actor itself is refused,
+			// whatever the item's authority (AUTH-2.2).
+			it := newDirective(sess, "d1", dirID, tx.NextSeq(), "text")
 			mustInsert(t, tx, it)
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityTool), taskID, dirID, it.ID, "evt")
 			return err
@@ -463,16 +461,16 @@ func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
 		}
 	})
 
-	t.Run("AgentRejectedForNonKeyedItem", func(t *testing.T) {
+	t.Run("AgentRejectedForDirectiveNamespace", func(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			// AGENT authority but not a keyed "agent.<key>" directive ID; no
-			// Section, for the same reason as ToolActorRejected above.
-			it := taskItem(sess, "d2", tx.NextSeq(), domain.AuthorityAgent)
-			it.DirectiveID = dirID
+			// An AGENT may file only its own exactly owned AGENT_KEY slot;
+			// the namespace, not an "agent." display prefix, is the
+			// boundary (P3-3/25), so a parsed DIRECTIVE is out of reach.
+			it := newDirective(sess, "d2", dirID, tx.NextSeq(), "text")
 			mustInsert(t, tx, it)
-			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityAgent), taskID, dirID, it.ID, "evt")
+			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityAgent, "agent"), taskID, dirID, it.ID, "evt")
 			return err
 		})
 		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
