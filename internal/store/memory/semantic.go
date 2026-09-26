@@ -65,7 +65,10 @@ type semState struct {
 	mutReceipts  map[string]domain.MutationReceipt // by receipt ID
 	mutByKey     map[receiptKey]string
 	toolReceipts map[string]domain.ToolExecutionReceipt
-	reserving    map[string][]seqRef // task -> reserving calls by (PreparedSeq, CallID)
+	reserving    map[string][]seqRef                   // task -> reserving calls by (PreparedSeq, CallID)
+	decls        map[string]domain.CreationDeclaration // by item ID
+	declIDs      map[string]string                     // declaration ID -> item ID
+	snapshots    map[string]domain.SnapshotDeclaration
 }
 
 func newSemState() *semState {
@@ -95,6 +98,9 @@ func newSemState() *semState {
 		mutByKey:     map[receiptKey]string{},
 		toolReceipts: map[string]domain.ToolExecutionReceipt{},
 		reserving:    map[string][]seqRef{},
+		decls:        map[string]domain.CreationDeclaration{},
+		declIDs:      map[string]string{},
+		snapshots:    map[string]domain.SnapshotDeclaration{},
 	}
 }
 
@@ -133,6 +139,9 @@ type semView struct {
 	mutByKey     table[receiptKey, string]
 	toolReceipts table[string, domain.ToolExecutionReceipt]
 	reserving    orderedIndex[string]
+	decls        table[string, domain.CreationDeclaration]
+	declIDs      table[string, string]
+	snapshots    table[string, domain.SnapshotDeclaration]
 }
 
 func newSemView(st *semState, w bool) semView {
@@ -162,6 +171,9 @@ func newSemView(st *semState, w bool) semView {
 		mutByKey:     newTable(st.mutByKey, w, same[string]),
 		toolReceipts: newTable(st.toolReceipts, w, domain.ToolExecutionReceipt.Clone),
 		reserving:    newOrderedIndex(st.reserving, w),
+		decls:        newTable(st.decls, w, domain.CreationDeclaration.Clone),
+		declIDs:      newTable(st.declIDs, w, same[string]),
+		snapshots:    newTable(st.snapshots, w, domain.SnapshotDeclaration.Clone),
 	}
 }
 
@@ -170,7 +182,7 @@ func newSemView(st *semState, w bool) semView {
 func (v *semView) dirty() bool {
 	return v.owners.dirty() || v.coverages.dirty() || v.exchanges.dirty() || v.members.dirty() ||
 		v.acks.dirty() || v.admissions.dirty() || v.membership.dirty() || v.checkpoints.dirty() ||
-		v.mutReceipts.dirty() || v.toolReceipts.dirty()
+		v.mutReceipts.dirty() || v.toolReceipts.dirty() || v.decls.dirty() || v.snapshots.dirty()
 }
 
 func (v *semView) commit() {
@@ -199,6 +211,9 @@ func (v *semView) commit() {
 	v.mutByKey.commit()
 	v.toolReceipts.commit()
 	v.reserving.commit()
+	v.decls.commit()
+	v.declIDs.commit()
+	v.snapshots.commit()
 }
 
 // semRead implements store.SemanticReader over a transaction's view.
