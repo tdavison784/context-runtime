@@ -116,6 +116,11 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	if err := r.linkDerived(c, it); err != nil {
 		return err
 	}
+	// The duplicate or supersession edge counts against the event's
+	// relationship bound too (DUR-1.6).
+	if canonical.ID != "" && r.rels >= r.limits.MaxRelationships {
+		return errLimit("MaxRelationships")
+	}
 	if dup {
 		if _, err := graph.LinkDuplicate(r.tx, c.actor, it.ID, canonical.ID, r.graphEventID(), dedupRule); err != nil {
 			return err
@@ -141,8 +146,8 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	return nil
 }
 
-// duplicateOf reports whether it would be an exact semantic duplicate of
-// its key's current version (D10, R11): same meaning under
+// duplicateOf returns its key's current version, if any, and whether it
+// would be an exact semantic duplicate of it (D10, R11): same meaning under
 // graph.SameDirectiveSemantics and the same obligation declaration. A
 // lower-authority or otherwise different write is never a duplicate.
 func (r *run) duplicateOf(actor domain.Principal, it domain.ContextItem, claim string) (domain.ContextItem, bool, error) {
@@ -154,7 +159,7 @@ func (r *run) duplicateOf(actor domain.Principal, it domain.ContextItem, claim s
 		return domain.ContextItem{}, false, err
 	}
 	if !graph.SameDirectiveSemantics(it, cur) {
-		return domain.ContextItem{}, false, nil
+		return cur, false, nil
 	}
 	claims, err := r.currentClaims(cur.ID)
 	if err != nil {
