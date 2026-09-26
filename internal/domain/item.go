@@ -112,6 +112,9 @@ type ContextItem struct {
 
 	Tags   []string
 	Source *SourceRef
+	// SourceRanges locate the transcript bytes a derived item was formed
+	// from (D8); empty for transcripts and items not derived from a span.
+	SourceRanges []SourceRange
 
 	// Version starts at 1 and increments with every lifecycle change; stores
 	// use it for compare-and-swap.
@@ -127,6 +130,7 @@ func (it ContextItem) Clone() ContextItem {
 	out := it
 	out.Parts = slices.Clone(it.Parts)
 	out.Tags = slices.Clone(it.Tags)
+	out.SourceRanges = cloneSourceRanges(it.SourceRanges)
 	if it.GoalStatus != nil {
 		gs := *it.GoalStatus
 		out.GoalStatus = &gs
@@ -218,6 +222,14 @@ func (it ContextItem) Validate() error {
 	for i, p := range it.Parts {
 		if err := p.Validate(); err != nil {
 			return fmt.Errorf("item %s part %d: %w", it.ID, i, err)
+		}
+	}
+	for _, r := range it.SourceRanges {
+		if err := r.Validate(); err != nil {
+			return fmt.Errorf("item %s: %w", it.ID, err)
+		}
+		if r.TranscriptID == it.ID {
+			return invalid("item %s: an item cannot be its own source range", it.ID)
 		}
 	}
 	if want := ContentHash(it.Parts); it.ContentHash != want {
