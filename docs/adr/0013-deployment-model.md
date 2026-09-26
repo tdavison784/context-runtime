@@ -76,10 +76,11 @@ requires the SQLite file be owned by one process (0600 permissions).
   database file for writing concurrently — at minimum, that SQLite's own
   locking prevents corruption; ideally that the second opener gets a clear
   error rather than a `busy_timeout` stall indistinguishable from a hang.
-- Required: `internal/store/storetest` (already the shared conformance
-  suite) continues to be the primary lock on `Store` interface behavior
-  regardless of deployment; no test currently targets multi-process access
-  since it's out of scope for V1.
+- `internal/store/storetest.Run` (the shared conformance suite, run by both
+  `internal/store/memory:TestConformance` and `internal/store
+  /sqlite:TestConformance`) is the primary lock on `Store` interface
+  behavior regardless of deployment; no test targets multi-process access,
+  since it remains out of scope for V1.
 - No test locks "no wire protocol exists" directly; this is enforced by the
   absence of a server/RPC package in `internal/` (structural, not test-driven).
 
