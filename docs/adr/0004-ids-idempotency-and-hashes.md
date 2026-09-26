@@ -107,6 +107,36 @@ requires stable input identities for deterministic replay.
   or other kinds, so `Kind` cannot be used to find "every current Working
   item" — `Section` can. (ADR 16 covers the supersession-selection
   consequence.)
+- **`Section` is trusted-authority-only (round 2, AUTH-2.2, SDD v0.8's
+  FR-ING-004).** `ContextItem.Validate` now additionally requires that a
+  non-empty `Section` only ever appears on a SYSTEM, HARNESS, or USER item
+  (`Authority.CanHoldLifecycleAuthority()`); AGENT, TOOL, and
+  RETRIEVED_CONTENT items can never carry one. Directive sections are
+  parsed only from trusted or explicitly-marked spans (FR-ING-004); without
+  this check, a low-authority item claiming `Section = SectionWorking`
+  could pose as directive-section provenance it never earned, feeding
+  ADR 16's Section-based Working-snapshot selector a forged input.
+- **Visible-boundary ID reuse is rejected, not silently keyed independently
+  (round 2, AUTH-2.1/SPEC-2.2, SDD v0.8).** `CurrentDirective`'s per-boundary
+  keying (above) is necessary but not sufficient: it also means a principal
+  who *can* see an existing version of a directive ID in one boundary could
+  reuse that same ID to create an independent current version in a
+  *different* boundary the same principal can also access — silently
+  forking one nominal directive ID into two simultaneously-current,
+  simultaneously-visible versions with no supersession edge between them,
+  which contradicts FR-DIR-002's "one current version" per identity and
+  invites exactly the ambiguity SPEC-2.2 raised for Resolve/Unpin. The new
+  `store.ReadTx.CurrentDirectives(taskID, directiveID) ([]string, error)`
+  lists every current version's item ID across *all* boundaries in a task
+  (ordered by item ID, empty when none) so a caller can filter by the
+  actor's own access before deciding: if the actor can access any of the
+  listed current versions in a *different* boundary than the one it's
+  about to write into, the write is a boundary change smuggled through ID
+  reuse and must be rejected (`ErrInvalidAuthorityPromotion`) — versions
+  the actor cannot see remain invisible and never block or appear in this
+  decision, preserving the round-1 non-disclosure property.
+  `CurrentDirectives` is also the primitive `ResolveLifecycleTarget` (ADR 16)
+  builds on to detect an ambiguous Resolve/Unpin target.
 
 ## SDD amendment (applied in v0.6)
 
@@ -142,6 +172,30 @@ disclosure, and it conflicts with `AccessBoundary` being a first-class,
 intentional narrowing mechanism (ADR 6) rather than an error condition.
 Boundary-keyed identity (this ADR's "Option 1") fixes the disclosure without
 restricting what a directive's boundary may be.
+
+## SDD amendment (applied in v0.8)
+
+Round-2 finding SPEC-2.2 (one principal seeing two simultaneously-current,
+same-ID directive versions with no defined Resolve/Unpin target) and the
+visible-boundary ID-reuse gap it exposed in FR-DIR-002 are resolved
+(commit `eaf3b98`): FR-DIR-002 now reads "...but a write that reuses an ID
+while the writer can access a current version of it in a different
+boundary is rejected, because boundary changes cannot be made through ID
+reuse." FR-DIR-005 is amended so a Resolve/Unpin target is "an item ID, or
+a directive ID that resolves to exactly one current version the principal
+can access; a directive ID with several accessible current versions ...
+produces an `ErrAmbiguousDirective` diagnostic and mutates nothing." §8
+adds `ErrAmbiguousDirective` as a diagnostic code alongside
+`ErrUnsupportedDirective`/`ErrMalformedDirective`.
+
+**Alternative rejected:** requiring an explicit boundary qualifier in every
+Resolve/Unpin syntax instead of an ambiguity diagnostic (SPEC-2.2's other
+suggested option). Rejected for V1: it would change the directive grammar
+(FR-DIR-006) for every caller, including the overwhelmingly common
+single-version case, to guard against a rare multi-boundary collision;
+detecting and refusing the ambiguous case, falling back to requiring the
+item ID only when it actually occurs, is less disruptive and matches how
+`CurrentDirectives` already surfaces the collision.
 
 ## Alternatives considered
 
@@ -183,6 +237,16 @@ restricting what a directive's boundary may be.
   for this ADR's scope.
 - `SequentialIDs` remains production code reused by tests for INV-09/
   FR-OBS-004 replay determinism.
+- `CurrentDirectives` and the `Section`-authority check are new required
+  call sites: any Phase 2+ directive-ingestion or lifecycle-command code
+  that writes a directive item or resolves a Resolve/Unpin target must go
+  through them, or the visible-boundary reuse rejection and ambiguity
+  detection this ADR decides can be silently bypassed by a caller that
+  writes/reads directives directly against the store.
+- `Section`'s authority restriction means any future kind of trusted-only
+  metadata that needs the same "only SYSTEM/HARNESS/USER" treatment should
+  reuse `CanHoldLifecycleAuthority()` rather than inventing a parallel
+  check, keeping the trust boundary in one place.
 
 ## Tests that lock the behavior
 
@@ -235,6 +299,21 @@ restricting what a directive's boundary may be.
   `TestContextItemValidate_SectionNoneWithoutDirectiveIDPasses`,
   `TestContextItemValidate_EachSectionWithDirectiveIDPasses` lock
   `Section`'s validation rules exactly.
+- Required (round 2, `domain-tests-worker` assigned): a
+  `ContextItem.Validate` case asserting a non-empty `Section` on an
+  AGENT/TOOL/RETRIEVED_CONTENT item fails (AUTH-2.2); the existing
+  `Section`-with-`DirectiveID` passing cases above need a
+  SYSTEM/HARNESS/USER authority to keep passing once this check lands.
+- Required (round 2, `memstore-worker`/`sqlite-worker` assigned): a
+  `storetest` case for `CurrentDirectives` — returns every current
+  version's item ID across boundaries in a task, ordered by item ID, empty
+  (not an error) when none exist; and a case for the visible-boundary
+  reuse rejection this ADR decides (an actor that can access a current
+  version of a directive ID in one boundary is rejected when it tries to
+  write a new current version of the same ID in a different, also-
+  accessible boundary). `internal/store/memory` implements
+  `CurrentDirectives` as of this update; `internal/store/sqlite` does not
+  yet.
 
 ## Open questions
 
@@ -287,3 +366,15 @@ Verified against the merged `memstore-worker`/`sqlite-worker`/
 the `Section`-validation tests exist and pass on both stores. The
 SQLite-only `DirectiveBoundaries` failure this ADR flagged is fixed
 (`a8e895f`).
+
+**Round 2 review** (PR #2; AUTH — Claude Opus, `auth-review-round2.md`;
+SPEC — Codex GPT-6, `spec-pr-comment-round2.md`). AUTH-2.2: `Section` could
+be forged onto an AGENT/TOOL/RETRIEVED_CONTENT item; fixed by requiring
+`CanHoldLifecycleAuthority()` whenever `Section` is non-empty. SPEC-2.2: a
+principal could see two simultaneously-current versions of one directive
+ID in different boundaries, with no defined Resolve/Unpin target; fixed by
+`CurrentDirectives` plus the SDD v0.8 amendment (visible-boundary reuse
+rejected, `ErrAmbiguousDirective` for a genuinely ambiguous target).
+Recorded here since both are directive-identity decisions; ADR 16 covers
+the authorization call sites (`ResolveLifecycleTarget`,
+`ReplaceDirective`'s AUTH-2.1 check) that consume `CurrentDirectives`.
