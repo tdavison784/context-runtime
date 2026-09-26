@@ -7,6 +7,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/directive"
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/graph"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -145,6 +146,11 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		// slot-0 obligation through W4: explicit obligation= wins, else the
 		// claim pattern decides whether one exists, with an immutable
 		// binding or a fixed UNBOUND reason. A duplicate returned above.
+		// A pin with neither declares nothing (BindPinned would decline),
+		// so the service and its workspace lookup are skipped.
+		if _, claimed := obligation.MatchClaim(it.Parts[0].Text); item.Obligation == "" && !claimed {
+			return nil
+		}
 		svc, err := r.obligations()
 		if err != nil {
 			return err
