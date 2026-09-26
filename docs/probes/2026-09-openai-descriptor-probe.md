@@ -437,20 +437,25 @@ Capabilities{
 }
 ```
 
-**Recommendation for the adapter/strategy layer:** use `/responses/compact` (`CompactionProtocol:
-CHECKPOINT`) as the FR-MAT-005 checkpoint primitive for `gpt-6-astra`/`gpt-6-luna`; never rely on
-the automatic `context_management` path until it is verified against a realistic mandatory-context
-set (RULING 2); treat every `REWRITE` as requiring the adapter to strip reasoning whose coverage
-reaches rewritten history itself, since `Reasoning.PostEditReplay: STALE` means this provider gives
-no rejection or invalidation signal when that reasoning goes stale (SEC-1.2); never place
-mandatory/restoration content in a mid-conversation `developer` message — `Edits[APPEND_SYSTEM]` is
-a policy `REJECTED` until `MidConversationSystem` is proven true (SEC-1.1/RULING 4); and continue
-to bracket tighter on `Caching.MinimumLength` before shipping a hard-coded threshold.
+**Recommendation for the adapter/strategy layer:** `CompactionProtocol: CHECKPOINT`
+(`/responses/compact`) is the only OpenAI compaction protocol that *may* be sanctioned for
+`gpt-6-astra`/`gpt-6-luna` — but with `MandatoryPreservation.RestorationPlacement: []` (no
+placement proven), OpenAI native compaction **cannot yet satisfy FR-MAT-005**, and the strategy
+must use runtime-side (non-native) compaction for these models until RULING 4's Phase 5 proof
+lands (SEC-2.1); never rely on the automatic `context_management` path until it is verified against
+a realistic mandatory-context set (RULING 2); treat every `REWRITE` as requiring the adapter to
+strip reasoning whose coverage reaches rewritten history itself, since
+`Reasoning.PostEditReplay: STALE` means this provider gives no rejection or invalidation signal
+when that reasoning goes stale (SEC-1.2); never place mandatory/restoration content in a
+mid-conversation `developer` message — `Edits[APPEND_SYSTEM]` is a policy `REJECTED` until
+`MidConversationSystem` is proven true (SEC-1.1/RULING 4); and continue to bracket tighter on
+`Caching.MinimumLength` before shipping a hard-coded threshold.
 
-## Commander rulings (2026-09-26, amended in PR #4 round 1)
+## Commander rulings (2026-09-26, amended in PR #4 rounds 1 and 2)
 
 Rulings on the original three open questions, binding for ADR 12 and this descriptor. Ruling 3 is
-amended and ruling 4 added below following the PR #4 round-1 SEC review (SEC-1.1, SEC-1.2).
+amended and ruling 4 added following the PR #4 round-1 SEC review (SEC-1.1, SEC-1.2); ruling 2 is
+further amended following the round-2 SEC review (SEC-2.1).
 
 1. **`ContextWindow`/`MaxOutput`.** No limit-exceeding probe will be run — it would cost money and
    settles nothing about reasoning/cache/compaction binding, the actual purpose of this probe.
@@ -460,13 +465,20 @@ amended and ruling 4 added below following the PR #4 round-1 SEC review (SEC-1.1
    until that docs citation is added at the ADR 12 draft; no further live probing is planned for
    them.
 
-2. **`CompactionProtocol` / automatic `context_management` compaction.** Ruled **not trusted** as
-   an FR-MAT-005/FR-MAT-006 checkpoint. The descriptor for `gpt-6-astra`/`gpt-6-luna` uses the
-   explicit `/responses/compact` checkpoint/pause protocol (K1a/K2 above) as the only sanctioned
-   compaction primitive; the automatic path stays unverified and unused by the strategy layer. A
-   harder probe — several pins, goals, and an open tool round compacted together, not a single
-   marker word — is required before any automatic path is enabled, and is scheduled for Phase 5,
-   not this phase.
+2. **`CompactionProtocol` / automatic `context_management` compaction (amended, SEC-2.1).** The
+   automatic `context_management` path is ruled **not trusted** as an FR-MAT-005/FR-MAT-006
+   checkpoint, unchanged from the original ruling. What is amended: `CHECKPOINT`
+   (`/responses/compact`, K1a) is the only compaction protocol that *may* be sanctioned for
+   `gpt-6-astra`/`gpt-6-luna` — it is **not**, by itself, sufficient evidence that OpenAI native
+   compaction satisfies FR-MAT-005. That requires a proven `MandatoryPreservation.RestorationPlacement`,
+   and the descriptor currently has none (`[]`, RULING 4): K2 is accepted-but-UNVERIFIED evidence,
+   not proof of restoration, and is dropped from this ruling's supporting evidence accordingly (see
+   RULING 4). Until RULING 4's Phase 5 test proves a placement — covering both `user` and
+   `developer` placement, since only `developer` was tried here — the strategy layer must use
+   runtime-side (non-native) compaction for these models; OpenAI native compaction is not an
+   available FR-MAT-005 mechanism yet, checkpoint-shaped or not. A harder probe — several pins,
+   goals, and an open tool round compacted together, not a single marker word — is required before
+   the automatic path specifically can be enabled, and is scheduled for Phase 5, not this phase.
 
 3. **`Edits[REWRITE]` / `Reasoning.PostEditReplay` (SEC-1.2 — supersedes the original ruling 3
    below, and is restated once more after the SPEC-1.1 vocabulary conversion).** The original
@@ -482,9 +494,12 @@ amended and ruling 4 added below following the PR #4 round-1 SEC review (SEC-1.1
    which no OpenAI fixture tested. `Edits[REWRITE]` therefore reverts to its fail-closed default
    (`REJECTED`, untested) rather than being asserted `LOSSY`. In practice this makes no difference
    to the adapter's obligation: it must strip any reasoning item whose coverage reaches back across
-   rewritten content before dispatch — that is now a general ADR 6 pre-dispatch-recheck rule (an
-   opaque reasoning item's coverage is its entire preceding history), not a per-profile allowance
-   to preserve it, and `PostEditReplay: STALE` is exactly the fact that makes skipping this
+   rewritten content before dispatch. ADR 6 rule 1 now defines this directly (an opaque reasoning
+   block/item's coverage is its entire preceding rendered history, including system/instructions
+   and tool definitions — added in parallel by the Anthropic-side PR #4 round-2 fix, SEC-2.2), so
+   the adapter's pre-dispatch recheck follows from that ADR 6 rule, not from a per-profile
+   allowance to preserve stale reasoning, and `PostEditReplay: STALE` is exactly the fact that makes
+   skipping this
    unsafe for this provider.
 
 4. **`MidConversationSystem` / `Edits[APPEND_SYSTEM]` (SEC-1.1).** Ruled **false / `REJECTED`,
@@ -498,4 +513,6 @@ amended and ruling 4 added below following the PR #4 round-1 SEC review (SEC-1.1
    error for it (acceptance is not the same as the safety/authority classification the strategy
    layer needs). That test must restore a rule *absent* from the compacted input (so obedience can
    only be explained by the restoration message) and include a no-restoration control run,
-   matching the Anthropic K2 design.
+   matching the Anthropic K2 design. Per SEC-2.1, this Phase 5 test is also what would establish
+   `MandatoryPreservation.RestorationPlacement` for RULING 2/FR-MAT-005, so it must cover both
+   `user` and `developer` placement — only `developer` was tried in this round's K2 fixture.
