@@ -292,7 +292,8 @@ Anthropic offers three native context features. Docs: `build-with-claude/compact
 
 - 200, `stop_reason: "compaction"`, `content` = exactly one block
   `{"type": "compaction", "content": "<readable summary>", "signature": "<opaque>"}`
-  (opus-5-5: 647-char summary, 1,736-char signature; sonnet-5: 533 / 636). No thinking, text
+  (opus-5-5: 643-character summary, 1,736-character signature; sonnet-5: 531 / 636, counted
+  from the fixtures; the run log's `content=` figures are UTF-8 bytes). No thinking, text
   or tool_use blocks.
 - Usage: top-level `input_tokens: 0`, `output_tokens: 0`; the cost is only in
   `usage.iterations: [{"type": "compaction", "input_tokens": 828, "output_tokens": 294, ...}]`.
@@ -311,7 +312,7 @@ Anthropic offers three native context features. Docs: `build-with-claude/compact
   be at least 50000`. **Minimum trigger = 50,000 input tokens** (OBSERVED; docs default 150,000).
 - A 51,924-token request with `trigger: 50000`, `pause_after_compaction: true` and custom
   instructions -> 200, `stop_reason: "compaction"`, one block `{"type": "compaction",
-  "content": "<942-char summary>"}` with **no signature and no `encrypted_content`**;
+  "content": "<933-character summary>"}` with **no signature and no `encrypted_content`**;
   `iterations: [{"type": "compaction", "input_tokens": 51924, "output_tokens": 602}]`, top-level
   zeros. Cost $0.22.
 
