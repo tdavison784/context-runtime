@@ -255,7 +255,7 @@ once, in the committed run, a 295-token garden-note prompt did too. The refused 
 **reported a 560-token cache write, but an identical repeat read 0 and wrote again**
 (`incidental__opus-5-5__refusal-cache-write.json`, `...-no-read.json`). A refusal is
 therefore a cache miss for forecasting purposes, whatever `cache_creation_input_tokens` says
-(OBSERVED, n=2). Sonnet 5 never refused.
+(OBSERVED, one write/repeat pair). Sonnet 5 never refused.
 
 ## Token counting (FR-PROV-004)
 
@@ -388,7 +388,7 @@ Capabilities{
         TTLs:             {"5m", "1h"},            // O usage split ephemeral_5m/1h; expiry D
         Automatic:        true,                    // O top-level cache_control + lookback read
         AppendSystemSafe: true,                    // O (C3 step 4 read 1049)
-        RefusalPersists:  false,                   // O n=2: refused write not readable
+        RefusalPersists:  false,                   // O one pair: refused write not readable
     },
     Pricing: Pricing{In: 4.00, Write5m: 5.00, Write1h: 8.00, Read: 0.20, Out: 20.00}, // D, USD/MTok
     Reasoning: ReasoningRules{
@@ -472,9 +472,10 @@ Same as Opus 5.5 except:
 1. **Enforced-account behavior** was not observable: this organization predates 2026-08-31.
    The `binding=error` profile emulates it. Confirm on a new organization before claiming the
    default (field unset) is REJECTED.
-2. **Non-leading reasoning removal** and **RW3** (replay reasoning after an edit point, with
-   the reasoning after that point) were not exercised: neither model produced thinking on the
-   turn after the second user message. The docs say both invalidate later blocks.
+2. **Non-leading reasoning removal** and the **RW3 control** (edit a message, then replay
+   reasoning produced after it) were not exercised: neither model emitted thinking on the
+   tool call after the second user message. The docs say both invalidate later blocks, and R4
+   already shows the same failure for reasoning after an edited first message.
 3. **Threshold compaction without pause**, and threshold compaction on Sonnet 5, were not run
    ($0.22 each). ADR 12 disables the unpaused form anyway.
 4. **Sonnet 5 mid-conversation system messages**: accepted with a 200 and cache-safe, but the
@@ -483,7 +484,8 @@ Same as Opus 5.5 except:
 5. **`clear_tool_uses_20250919` did not apply** on a 2-tool-use history (trigger 100, keep 1).
    Cause unknown; not needed for the compaction verdicts.
 6. **Cache TTL expiry** (5m/1h) was not waited out. Lifetime rules are DOCUMENTED only.
-7. **Classifier refusals** (`cyber`) on benign filler, 2 of about 40 Opus 5.5 cache requests.
+7. **Classifier refusals** (`cyber`) on benign filler: every ledger-text request in one development
+   run (4 of 4), and 1 of 15 garden-note cache requests in the committed run (Opus 5.5 only).
    Refused requests report a cache write that is not readable. ADR 15 forecasts may need a
    refusal allowance, and the adapter may want the documented server-side `fallbacks` (not
    probed, because fallbacks change the model and so drop reasoning).
