@@ -33,6 +33,7 @@ type rawItem struct {
 	section, id, text   string
 	explicit, lifecycle bool
 	attrs               []rawAttribute
+	slices              []byteRange
 	byteRange
 	headingRange byteRange
 	sectionIndex int

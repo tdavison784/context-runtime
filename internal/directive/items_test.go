@@ -13,8 +13,13 @@ func TestItemExtraction(t *testing.T) {
 		name, input string
 		texts, ids  []string
 	}{
-		{"single", "## Goal [g]\n\n first  \r\nsecond\t\r\n\n", []string{" first\nsecond"}, []string{"g"}},
-		{"bullets", "## Working\n- [a] first  \n    next \n      nested\n\n* [b] second\n1. [c] third", []string{"first\nnext\n  nested", "second", "third"}, []string{"a", "b", "c"}},
+		{"single", "## Goal [g]\n\n first  \r\nsecond\t\r\n\n", []string{" first  \r\nsecond\t"}, []string{"g"}},
+		{"bullets", "## Working\n- [a] first  \n    next \n      nested\n\n* [b] second\n1. [c] third", []string{"first  \nnext \n  nested", "second", "third"}, []string{"a", "b", "c"}},
+		{"line endings kept", "## Working\n- a\r\n  b\r  c\n\n  d\n", []string{"a\r\nb\rc\n\nd"}, []string{""}},
+		{"tab continuation", "## Working\n- a\n\tb\n\t\tc", []string{"a\nb\n\tc"}, []string{""}},
+		{"blank inside keeps excess", "## Working\n- a\n     \n  b", []string{"a\n   \nb"}, []string{""}},
+		{"payload spacing kept", "## Working\n- [a]  two\t", []string{" two\t"}, []string{"a"}},
+		{"EOF without EOL", "## Goal\nlast", []string{"last"}, []string{""}},
 		{"deeper heading", "## Goal [g]\nfirst\n### Notes\nlast\n## Other\nignored", []string{"first\n### Notes\nlast"}, []string{"g"}},
 		{"deeper keyword is body", "## Goal [g]\nfirst\n#### Pinned [p]\nsecond", []string{"first\n#### Pinned [p]\nsecond"}, []string{"g"}},
 		{"peer keyword closes", "## Goal [g]\nfirst\n## Pinned [p]\nsecond", []string{"first", "second"}, []string{"g", "p"}},
@@ -32,7 +37,7 @@ func TestItemExtraction(t *testing.T) {
 				t.Fatalf("items=%+v diagnostics=%+v", p.items, p.diagnostics)
 			}
 			for i, item := range p.items {
-				if item.text != tt.texts[i] || item.id != tt.ids[i] {
+				if item.text != tt.texts[i] || tt.ids[i] != "" && item.id != tt.ids[i] || p.join(item.slices) != item.text {
 					t.Fatalf("item %d: %+v", i, item)
 				}
 				if item.start < 0 || item.end > len(tt.input) || item.start > item.end {

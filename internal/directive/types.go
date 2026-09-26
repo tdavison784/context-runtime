@@ -65,7 +65,9 @@ type Section struct {
 }
 
 // Item is a syntactically valid content directive, before defaults/classifying.
-// Text follows D7 normalization; Range still addresses the original bytes.
+// Text is exactly the concatenation of input[r.Start:r.End] over TextRanges
+// (D7): recognized bullet/ID/attribute syntax and continuation indentation
+// are the only bytes removed. Range covers the whole item in the original bytes.
 // SectionIndex addresses Result.Sections. Attributes contains effective lexical
 // attributes after heading inheritance and item override, in stable source
 // order; policy may ignore invalid/disallowed values with diagnostics.
@@ -81,6 +83,7 @@ type Item struct {
 	ContentHash  string
 	Attributes   []Attribute
 	Range        ByteRange
+	TextRanges   []ByteRange
 }
 
 // Result retains source ordering in all slices. Recoverable malformed syntax

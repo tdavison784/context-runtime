@@ -40,9 +40,14 @@ func (p *coreParser) extract(validate attributeValidator) {
 				i = j
 			}
 		} else {
-			text := p.bodyText(lines, false)
+			// A single body keeps every byte between its first and last
+			// non-blank lines, including original line endings (D7).
+			var slices []byteRange
+			if len(lines) > 0 {
+				slices = []byteRange{{lines[0].start, lines[len(lines)-1].end}}
+			}
 			r := byteRange{h.start, s.end}
-			p.addItem(rawItem{section: h.section, id: h.id, explicit: h.id != "", text: text, attrs: h.attrs, byteRange: r, headingRange: h.byteRange, sectionIndex: si})
+			p.addItem(rawItem{section: h.section, id: h.id, explicit: h.id != "", text: p.join(slices), slices: slices, attrs: h.attrs, byteRange: r, headingRange: h.byteRange, sectionIndex: si})
 		}
 	}
 }
@@ -131,52 +136,61 @@ func (p *coreParser) listItem(si int, lines []sourceLine, validate attributeVali
 		b = b[1:]
 	}
 	item.attrs = attrs
-	item.text = string(bytes.TrimRight(b, " \t"))
-	continuation := p.bodyText(lines[1:], true)
-	if continuation != "" {
-		item.text += "\n" + continuation
-	}
+	item.slices = p.itemSlices(byteRange{first.end - len(b), first.end}, first, lines[1:])
+	item.text = p.join(item.slices)
 	p.addItem(item)
 }
-func (p *coreParser) bodyText(lines []sourceLine, dedent bool) string {
-	for len(lines) > 0 && blank(p.lineBytes(lines[len(lines)-1])) {
-		lines = lines[:len(lines)-1]
-	}
-	if len(lines) == 0 {
-		return ""
+
+// itemSlices returns the ordered original-byte slices forming a list item's
+// text (D7): the first-line payload, then each continuation line with the
+// continuation indentation removed, joined by the original line-break bytes.
+// Continuation indentation is the fewest leading SP/HTAB bytes over non-blank
+// continuation lines; shorter (blank) lines lose only their SP/HTAB bytes.
+// Trailing blank lines are list structure, not payload; nothing else is trimmed.
+func (p *coreParser) itemSlices(payload byteRange, first sourceLine, rest []sourceLine) []byteRange {
+	for len(rest) > 0 && blank(p.lineBytes(rest[len(rest)-1])) {
+		rest = rest[:len(rest)-1]
 	}
 	common := -1
-	if dedent {
-		for _, l := range lines {
-			b := p.lineBytes(l)
-			if blank(b) {
-				continue
-			}
-			n := 0
-			for n < len(b) && (b[n] == ' ' || b[n] == '\t') {
-				n++
-			}
-			if common < 0 || n < common {
-				common = n
-			}
+	for _, l := range rest {
+		if b := p.lineBytes(l); !blank(b) && (common < 0 || leadingBlanks(b) < common) {
+			common = leadingBlanks(b)
 		}
 	}
+	slices := appendSlice(nil, payload)
+	previous := first
+	for _, l := range rest {
+		slices = appendSlice(slices, byteRange{previous.end, previous.next})
+		strip := min(max(common, 0), leadingBlanks(p.lineBytes(l)))
+		slices = appendSlice(slices, byteRange{l.start + strip, l.end})
+		previous = l
+	}
+	return slices
+}
+func leadingBlanks(b []byte) int {
+	n := 0
+	for n < len(b) && (b[n] == ' ' || b[n] == '\t') {
+		n++
+	}
+	return n
+}
+
+// appendSlice drops empty slices and merges contiguous ones.
+func appendSlice(s []byteRange, r byteRange) []byteRange {
+	if r.start == r.end {
+		return s
+	}
+	if n := len(s); n > 0 && s[n-1].end == r.start {
+		s[n-1].end = r.end
+		return s
+	}
+	return append(s, r)
+}
+func (p *coreParser) join(slices []byteRange) string {
 	var out strings.Builder
-	for i, l := range lines {
-		b := p.lineBytes(l)
-		if common > 0 {
-			if len(b) < common {
-				b = nil
-			} else {
-				b = b[common:]
-			}
-		}
-		b = bytes.TrimRight(b, " \t")
-		if i > 0 {
-			out.WriteByte('\n')
-		}
-		out.Write(b)
-		p.work += len(b) + 1
+	for _, r := range slices {
+		out.Write(p.data[r.start:r.end])
+		p.work += r.end - r.start
 	}
 	return out.String()
 }

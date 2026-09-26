@@ -57,7 +57,7 @@ func Parse(input []byte, opts Options) Result {
 			continue
 		}
 		index := len(result.Items)
-		result.Items = append(result.Items, Item{Section: domain.DirectiveSection(strings.ToUpper(item.section)), SectionIndex: item.sectionIndex, DirectiveID: item.id, ExplicitID: item.explicit, Authority: opts.Authority, Text: item.text, ContentHash: domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: item.text}}), Attributes: exportAttributes(item.attrs), Range: exportRange(item.byteRange)})
+		result.Items = append(result.Items, Item{Section: domain.DirectiveSection(strings.ToUpper(item.section)), SectionIndex: item.sectionIndex, DirectiveID: item.id, ExplicitID: item.explicit, Authority: opts.Authority, Text: item.text, ContentHash: domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: item.text}}), Attributes: exportAttributes(item.attrs), Range: exportRange(item.byteRange), TextRanges: exportRanges(item.slices)})
 		result.Sections[item.sectionIndex].ItemIndexes = append(result.Sections[item.sectionIndex].ItemIndexes, index)
 	}
 	// Diagnostics are capped at 257, so this bounded sort preserves O(n)
@@ -80,6 +80,13 @@ func parseFailure(reason string) Result {
 	return Result{Err: fmt.Errorf("%w: directive parser: %s", domain.ErrInvalidRecord, reason)}
 }
 func exportRange(r byteRange) ByteRange { return ByteRange{Start: r.start, End: r.end} }
+func exportRanges(rs []byteRange) []ByteRange {
+	out := make([]ByteRange, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, exportRange(r))
+	}
+	return out
+}
 func exportAttributes(attrs []rawAttribute) []Attribute {
 	var out []Attribute
 	for _, a := range attrs {
