@@ -83,7 +83,19 @@ func TestLinkDuplicate_RejectsNonDuplicates(t *testing.T) {
 		{name: "Retention", mutate: func(_, d *domain.ContextItem) { d.Retention = domain.RetentionHigh }},
 		{name: "Generation", mutate: func(_, d *domain.ContextItem) { d.Generation = domain.GenerationPinned }},
 		{name: "TTL", mutate: func(_, d *domain.ContextItem) { n := 3; d.TTLTurns = &n }},
-		{name: "OtherTurn", mutate: func(_, d *domain.ContextItem) { d.TurnID = "turn-2" }},
+		// R11: a TURN-bound item from another turn, or a TTL item with a
+		// different expiry origin, is not a semantic duplicate.
+		{name: "OtherTurnTurnScoped", mutate: func(c, d *domain.ContextItem) {
+			for _, it := range []*domain.ContextItem{c, d} {
+				it.Scope, it.Access.Scope, it.CreatedTurn = domain.ScopeTurn, domain.ScopeTurn, 1
+			}
+			d.TurnID, d.CreatedTurn = "turn-2", 2
+		}},
+		{name: "TTLOrigin", mutate: func(c, d *domain.ContextItem) {
+			n := 3
+			c.TTLTurns, d.TTLTurns = &n, &n
+			c.CreatedTurn, d.CreatedTurn = 1, 2
+		}},
 		{name: "Section", mutate: func(_, d *domain.ContextItem) { d.Section = domain.SectionPinned }},
 		{name: "ResolvedCanonicalAbsorbsNoOpenGoal", resolveCanonical: true},
 	}
@@ -262,4 +274,29 @@ func setText(it *domain.ContextItem, text string) {
 	it.Parts = []domain.ContentPart{{Type: domain.PartText, MediaType: "text/plain", Text: text}}
 	it.ContentHash = domain.ContentHash(it.Parts)
 	it.SemanticBytes = domain.SemanticBytes(it.Parts)
+}
+
+// TestLinkDuplicate_RestatedAcrossTurns (R11): a TASK-scoped directive with
+// no TTL restated verbatim in a later turn is a duplicate: its turn origin
+// governs no eligibility, so restating it must not mint a fresh version
+// (which would retire and reset its obligation).
+func TestLinkDuplicate_RestatedAcrossTurns(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess = "sess-dup-restate"
+		actor := principal(sess, domain.AuthorityUser)
+		update(t, s, sess, func(tx store.Tx) error {
+			g := goalLike(sess, "g1", "ship", tx.NextSeq(), "Ship it")
+			g.CreatedTurn = 1
+			mustInsert(t, tx, g)
+			_, err := ReplaceDirective(tx, actor, "task", "ship", g.ID, "evt-1")
+			return err
+		})
+		update(t, s, sess, func(tx store.Tx) error {
+			g := goalLike(sess, "g2", "ship", tx.NextSeq(), "Ship it")
+			g.TurnID, g.CreatedTurn = "turn-5", 5
+			mustInsert(t, tx, g)
+			_, err := LinkDuplicate(tx, actor, g.ID, "g1", "evt-5", "")
+			return err
+		})
+	})
 }
