@@ -52,6 +52,13 @@ var (
 	// so it is never retired a second time, by the same event or another
 	// (D11). Callers retire only current items.
 	ErrAlreadySuperseded = errors.New("graph: item is already superseded")
+	// ErrBoundaryConflict reports a write that reuses a directive ID while
+	// the writer can see a current version of it at a different access
+	// boundary (FR-DIR-002): boundary changes cannot be made through ID
+	// reuse. It is an item-level rejection (R13), deliberately distinct from
+	// domain.ErrInvalidAuthorityPromotion, so ingestion rejects only the
+	// offending item with a boundary_conflict diagnostic.
+	ErrBoundaryConflict = errors.New("graph: directive ID is current at another visible boundary")
 	// ErrNamespaceConflict reports a write whose current-version slot is
 	// held by a current version of the other namespace (M6, R6): a parsed
 	// directive and a keyed agent write never replace each other.
@@ -112,8 +119,8 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 	return nil
 }
 
-// rejectVisibleBoundaryConflict fails with domain.ErrInvalidAuthorityPromotion
-// if actor can access any current version of (taskID, directiveID) at a
+// rejectVisibleBoundaryConflict fails with ErrBoundaryConflict (R13) if
+// actor can access any current version of (taskID, directiveID) at a
 // boundary other than the one ReplaceDirective already confirmed has none
 // (AUTH-2.1): reusing a directive ID at a boundary the actor can see is a
 // scope change, which FR-DIR-002 requires to go through an explicit
@@ -129,9 +136,33 @@ func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, task
 		return err
 	}
 	if len(versions) > 0 {
-		return domain.ErrInvalidAuthorityPromotion
+		return ErrBoundaryConflict
 	}
 	return nil
+}
+
+// CheckBoundaryConflict reports, without writing, whether filing it as a
+// new version would change a directive's boundary through ID reuse
+// (FR-DIR-002): it has no current version at its own boundary, yet actor
+// can see a current version of the same ID (explicit or derived, same
+// namespace) at another boundary. That fails with ErrBoundaryConflict,
+// which rejects only this item (R13). A current version at its own
+// boundary is a replacement, not a conflict; hidden boundaries, stale
+// pointers, and duplicates never conflict. An item without a directive ID
+// never conflicts.
+func CheckBoundaryConflict(tx store.ReadTx, actor domain.Principal, it domain.ContextItem) error {
+	ns, ok := it.DirectiveNamespace()
+	if !ok {
+		return nil
+	}
+	_, err := currentVersionAt(tx, it.TaskID, ns, it.DirectiveID, it.Access)
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, domain.ErrNotFound):
+		return err
+	}
+	return rejectVisibleBoundaryConflict(tx, actor, it.TaskID, ns, it.DirectiveID)
 }
 
 // Supersede records that newID supersedes oldID (FR-REL-003, FR-REL-004,

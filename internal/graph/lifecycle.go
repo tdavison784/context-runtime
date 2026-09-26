@@ -51,7 +51,8 @@ type LifecycleAuthorization struct {
 //     several accessible current versions fail with ErrAmbiguousDirective.
 //     Callers report these as diagnostics; they do not abort the event.
 //   - The target must be of the action's kind and state
-//     (ErrLifecycleTargetMismatch).
+//     (ErrLifecycleTargetMismatch), which is also a diagnostic, not an
+//     abort (R14).
 //   - The action is authorized with domain.AuthorizeMutation for the
 //     source actor, against the session's grants, at the next sequence
 //     number. Failure is domain.ErrInvalidAuthorityPromotion, which aborts
