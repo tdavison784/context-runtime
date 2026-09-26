@@ -45,6 +45,7 @@ type readTx struct {
 	references   table[string, domain.UnresolvedReference]
 	itemsByBlob  index[string]
 	duplicates   index[duplicateKey]
+	refsByKey    index[string]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -77,6 +78,7 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
 		itemsByBlob:  newIndex(st.itemsByBlob, writable),
 		duplicates:   newIndex(st.duplicates, writable),
+		refsByKey:    newIndex(st.refsByKey, writable),
 	}
 }
 
@@ -545,9 +547,27 @@ func (r *readTx) UnresolvedReferences(f store.ReferenceFilter) ([]domain.Unresol
 	if f.Limit <= 0 {
 		return nil, invalid("unresolved references: limit must be positive")
 	}
+	// A locator key lookup reads the key's index entry, never every
+	// reference (R19).
+	candidates := func(yield func(domain.UnresolvedReference) bool) {
+		if f.LocatorKey != "" {
+			for id := range r.refsByKey.lookup(f.LocatorKey) {
+				v, _ := r.references.peek(id)
+				if !yield(v) {
+					return
+				}
+			}
+			return
+		}
+		for _, v := range r.references.all() {
+			if !yield(v) {
+				return
+			}
+		}
+	}
 	out := []domain.UnresolvedReference{}
-	for _, v := range r.references.all() {
-		if f.LocatorKey != "" && v.LocatorKey != f.LocatorKey || f.RuleVersion != "" && v.RuleVersion != f.RuleVersion {
+	for v := range candidates {
+		if f.RuleVersion != "" && v.RuleVersion != f.RuleVersion {
 			continue
 		}
 		if len(out) == f.Limit {

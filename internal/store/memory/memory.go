@@ -87,6 +87,7 @@ type state struct {
 	references   map[string]domain.UnresolvedReference
 	itemsByBlob  map[string][]string // blob hash -> referencing item IDs
 	duplicates   map[duplicateKey][]string
+	refsByKey    map[string][]string // locator key -> unresolved reference IDs
 }
 
 // duplicateKey is the duplicate-candidate identity of an item (R19, D10).
@@ -129,6 +130,7 @@ func newState() *state {
 		references:   map[string]domain.UnresolvedReference{},
 		itemsByBlob:  map[string][]string{},
 		duplicates:   map[duplicateKey][]string{},
+		refsByKey:    map[string][]string{},
 	}
 }
 

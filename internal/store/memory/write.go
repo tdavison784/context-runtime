@@ -41,6 +41,7 @@ func (t *tx) commit(st *state) bool {
 	t.relsFrom.commit()
 	t.itemsByBlob.commit()
 	t.duplicates.commit()
+	t.refsByKey.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
 	t.events.commit()
@@ -860,6 +861,7 @@ func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
 		return fmt.Errorf("unresolved reference %s: %w", r.ID, domain.ErrImmutable)
 	}
 	t.references.put(r.ID, r)
+	t.refsByKey.add(r.LocatorKey, r.ID)
 	t.markSequenced()
 	return nil
 }

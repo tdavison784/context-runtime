@@ -96,3 +96,10 @@ func TestUpgradeDuplicateIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUnresolvedReferencesByKeyUseIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	base := schemas["reference"].selectSQL + " WHERE session_id=? AND f_locator_key=?"
+	assertIndexed(t, s, base+referenceOrderSQL, "s", "k", 2)
+	assertIndexed(t, s, base+" AND f_rule_version=?"+referenceOrderSQL, "s", "k", "locator/v1", 2)
+}
