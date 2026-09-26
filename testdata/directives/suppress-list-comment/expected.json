@@ -1,0 +1,47 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        45
+      ],
+      "heading_range": [
+        0,
+        10
+      ],
+      "body_range": [
+        10,
+        45
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        19,
+        44
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "html_comment",
+      "section": "PINNED",
+      "range": [
+        19,
+        38
+      ]
+    }
+  ]
+}

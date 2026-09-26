@@ -1,0 +1,10 @@
+{
+  "description": "An ATX heading indented 1-3 spaces closes a same-or-higher section, also inside a list item (no container model; closing early only removes directive text).",
+  "requirements": [
+    "FR-DIR-006",
+    "D6",
+    "SPEC-1.11"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

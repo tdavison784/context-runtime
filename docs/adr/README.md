@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 ADRs record decisions that gate a delivery phase (SDD §11) before that
-phase's exit gate is checked. SDD §15 lists all 18 required ADRs; this index
+phase's exit gate is checked. SDD §15 lists all 19 required ADRs; this index
 tracks which are written and which phase still needs them.
 
 ## Format
@@ -29,7 +29,7 @@ vX.Y)** and keeps the record of what changed and why.
 Each ADR also carries a **Review** section once an independent review (e.g.
 Codex) has scrutinized it, noting which findings changed the decision.
 
-## Status of all 18 ADRs (SDD §15)
+## Status of all 19 ADRs (SDD §15)
 
 | # | Title | Gates phase (§11) | Status |
 |---|-------|--------------------|--------|
@@ -51,15 +51,25 @@ Codex) has scrutinized it, noting which findings changed the decision.
 | 16 | Common mutation authorization, directive/obligation version replacement, independent residency/goal status, immutable source snapshots | Phase 1 | [Accepted](0016-mutation-authorization.md) |
 | 17 | Provider call/attempt state machine, conversation reservation, outcome reconciliation, streaming completion, crash/retry tests | Phase 1 | [Accepted](0017-call-ledger.md) |
 | 18 | Semantic state tool schemas, result formats, reference instruction block | Phase 5 | pending — gates Phase 5 |
+| 19 | Directive parsing and ingestion: grammar, IDs, span/parse-unit isolation, deterministic classification, deduplication/replacement, Working snapshots, obligations, receipts, and lifecycle-command deferral | Phase 2 | [Proposed](0019-directive-parsing-and-ingestion.md) |
 
-**Additional ADRs:** ADR 19 (directive parsing and ingestion, Phase 2) is
-being written, beyond the 18 required by SDD §15.
+ADR 19 was not one of SDD §15's original 18; Phase 2's adversarial decision
+review found the brief's decisions needed a dedicated ADR beyond that list,
+and the commander added it by ruling (`phase2-amendments.md` R4). SDD §11
+item 2 and §15 now list it (commander ruling, SPEC-1.13's open item
+resolved): ADR 19 gates Phase 2 exit the same way ADRs 1-18 gate their
+phases.
 
 Phase 1 (Contracts, domain, and stores) requires ADRs 1, 3, 4, 6, 13, 16, 17,
 all written here. Phase 1's exit gate (state-transition, restart, graph, and
 concurrency tests for the foundational event traces) is tracked in
 `internal/domain/*_test.go` and `internal/store/storetest`, not in this
 directory.
+
+Phase 2 (Directives and ingestion) requires ADR 19, written here. Phase 2's
+exit gate (canonical directive examples, parser fuzzing, retry identity,
+and injection resistance) is tracked in `internal/directive`,
+`internal/ingest`, and `testdata/directives`, not in this directory.
 
 ## SDD conflicts found and applied (v0.6)
 
@@ -73,6 +83,31 @@ directory.
   supersession conflicted with the equal-boundary supersession rule. Both
   applied: FR-TOOL-003 states `context_resolve` never resolves in V1;
   FR-DIR-007 requires same authority *and* access boundary.
+
+## SDD conflicts found and applied (v0.9)
+
+- [0019](0019-directive-parsing-and-ingestion.md#sdd-amendment-applied-in-v09):
+  Phase 2's decision review found five gaps the brief did not resolve:
+  FR-ING-004 did not say a span/part is an isolated parse unit (M1);
+  FR-ING-005 did not define a Working snapshot's duplicate identity (D11);
+  FR-DIR-002 did not reject an explicit ID shaped like a derived one (D20);
+  FR-DIR-005 named no closed vocabulary for "other lifecycle words" (M4);
+  FR-DIR-006's `ttl` had no representation bound (D12, narrowed by R1 to
+  1..2147483647). All five are applied as the exact sentences ADR 19
+  records. Two later, separate v0.9 edits followed, each recorded in its
+  own dated entry in ADR 19's amendment section (SPEC-3.4: previously
+  conflated under one description here, which read as covering both and
+  so as wrongly claiming neither changed FR text):
+  - (SPEC-1.13, then recorded as an SDD amendment by SPEC-2.4) §11 item 2
+    and §15 gained ADR 19's listing entry once Phase 2 code landed and the
+    commander added ADR 19 by ruling — no FR/INV text changed, only the
+    two ADR index lists.
+  - (SPEC-2.7, then recorded as an SDD amendment by SPEC-3.4) FR-DIR-002's
+    derived-ID-shape wording narrowed from "a lowercased keyword" to "a
+    lowercased content-section keyword" (plus a new sentence naming the
+    six content sections and excluding Resolve/Unpin) — this one **did**
+    change FR text, scoping D20's rejection rule to the keywords that
+    actually derive IDs.
 
 Independent review: Codex gpt-6-sol xhigh reviewed all seven Phase 1 ADRs
 against the committed code and the SDD in two passes — the initial review

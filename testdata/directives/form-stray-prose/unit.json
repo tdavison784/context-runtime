@@ -1,0 +1,10 @@
+{
+  "description": "Unindented prose in a list is malformed content through the next bullet, never an implicit item; the section is Malformed (M4, D11).",
+  "requirements": [
+    "FR-DIR-006",
+    "M4",
+    "D11"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

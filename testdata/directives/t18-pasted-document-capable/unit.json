@@ -1,0 +1,10 @@
+{
+  "description": "T18 repeat: the same bytes marked directive-capable create USER-authority items and nothing higher.",
+  "requirements": [
+    "T18",
+    "FR-ING-004",
+    "FR-DIR-006"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

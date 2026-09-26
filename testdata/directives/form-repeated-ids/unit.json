@@ -1,0 +1,9 @@
+{
+  "description": "An ID repeated within one list applies no member under it; repetition across sections is source order (M4).",
+  "requirements": [
+    "FR-DIR-006",
+    "M4"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

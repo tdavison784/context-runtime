@@ -1,0 +1,12 @@
+{
+  "description": "A column-0 quote line inside a list body drops every item of the section (R17).",
+  "requirements": [
+    "FR-DIR-006",
+    "D5",
+    "R17",
+    "SPEC-1.1"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

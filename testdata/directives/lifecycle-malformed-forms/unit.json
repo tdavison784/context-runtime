@@ -1,0 +1,10 @@
+{
+  "description": "Mixed forms, missing targets, trailing text and attributes create no command for the malformed unit; valid siblings survive (D7).",
+  "requirements": [
+    "FR-DIR-006",
+    "D7",
+    "FR-DIR-005"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

@@ -1,0 +1,11 @@
+{
+  "description": "Invalid UTF-8 is ordinary payload bytes, kept losslessly; non-ASCII letters never form keywords (D3, D4).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "D3",
+    "D4"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

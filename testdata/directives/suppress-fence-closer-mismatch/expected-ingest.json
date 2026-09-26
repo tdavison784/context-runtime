@@ -1,0 +1,94 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_10f60a3de254d12a7d43990f27c3abdd",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "```\n~~~\n    ```\n\t```\n## Pinned\n- hidden\n"
+        }
+      ],
+      "content_hash": "sha256:e98bddf7a1039335a70f52f4c4dfdb587b21d53631d4f1d971f8426c09e035f8"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_3cef3a6dd0d74f142282ce33cdc1ae0f",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "```\n~~~\n    ```\n\t```\n## Pinned\n- hidden\n"
+        }
+      ],
+      "content_hash": "sha256:4dcbb2df1725850dabea94fe59a2e57166ccc21fd70cf0654d409bfd903713b8",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            40
+          ],
+          "slices": [
+            [
+              0,
+              40
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "PINNED",
+      "range": [
+        21,
+        30
+      ],
+      "access_scope": "SESSION"
+    }
+  ]
+}

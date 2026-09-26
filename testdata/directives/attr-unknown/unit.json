@@ -1,0 +1,10 @@
+{
+  "description": "Unknown attributes are diagnosed and ignored; the diagnostic never echoes the token.",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

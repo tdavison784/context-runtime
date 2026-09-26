@@ -1,0 +1,97 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_0576816d26f3080543fae1384e364288",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Goal ##\ntext\n## Remember [r]   \t\nkept\n"
+        }
+      ],
+      "content_hash": "sha256:894d7867edd7ec501f427df80185a55de778bf52c32d6ddf1e508256080c10f9"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_0ce6c7d3e6cea243eafeeb053f6edd59",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "r",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "kept"
+        }
+      ],
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            16,
+            41
+          ],
+          "slices": [
+            [
+              36,
+              40
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "GOAL",
+      "range": [
+        0,
+        10
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

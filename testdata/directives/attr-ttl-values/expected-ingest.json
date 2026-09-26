@@ -1,0 +1,607 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_947c8eb9e82f82e8552e4d2f3c506313",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Remember\n- {ttl=1} a\n- {ttl=0002} b\n- {ttl=2147483647} c\n- {ttl=0} d\n- {ttl=000} e\n- {ttl=-1} f\n- {ttl=1e3} g\n- {ttl=99999999999x} h\n"
+        }
+      ],
+      "content_hash": "sha256:8d70561bbb957c09cb1641248962b57a265853bcaa7a06b4c80e8e8363f8e137"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_57074df7e5ac032207c20bb346ed3a47",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "ttl_turns": 1,
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "a"
+        }
+      ],
+      "content_hash": "sha256:7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            12,
+            24
+          ],
+          "slices": [
+            [
+              22,
+              23
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_de99b9494ddb72d801ac17d485f1adb1",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "ttl_turns": 2,
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "b"
+        }
+      ],
+      "content_hash": "sha256:08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            24,
+            39
+          ],
+          "slices": [
+            [
+              37,
+              38
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#3",
+      "id": "itm_ead470a48513c43e68944b38d08d13bb",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-62a1204606a4bf4bf16b94b68d480f7ae622a1db3e4ac0efc36cb3c65a7bbde8",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "ttl_turns": 2147483647,
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "c"
+        }
+      ],
+      "content_hash": "sha256:62a1204606a4bf4bf16b94b68d480f7ae622a1db3e4ac0efc36cb3c65a7bbde8",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            39,
+            60
+          ],
+          "slices": [
+            [
+              58,
+              59
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#4",
+      "id": "itm_d652e2a4a411f8d1cae1ebca9c92e8ca",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-09406f5f78b635239cafed5d72ca3016b91fdf241ac584b1ed3e89f349b3426d",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "d"
+        }
+      ],
+      "content_hash": "sha256:09406f5f78b635239cafed5d72ca3016b91fdf241ac584b1ed3e89f349b3426d",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            60,
+            72
+          ],
+          "slices": [
+            [
+              70,
+              71
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#5",
+      "id": "itm_318deae075025b6712327e9c8ecde633",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-2f58ba0afd44529bbac7267e2a1bd0fa875298abb0e50713498d1e11ce275cbf",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "e"
+        }
+      ],
+      "content_hash": "sha256:2f58ba0afd44529bbac7267e2a1bd0fa875298abb0e50713498d1e11ce275cbf",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            72,
+            86
+          ],
+          "slices": [
+            [
+              84,
+              85
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#6",
+      "id": "itm_901ae05121cf573ed9aa16602199d715",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-7fa895dcde29e72eb8ac8c3c9cdf6f0d0983fa10319d08f82fe1dd8e77421f6c",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "f"
+        }
+      ],
+      "content_hash": "sha256:7fa895dcde29e72eb8ac8c3c9cdf6f0d0983fa10319d08f82fe1dd8e77421f6c",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            86,
+            99
+          ],
+          "slices": [
+            [
+              97,
+              98
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#7",
+      "id": "itm_555063f9a1c54ecf57b93dd3ef7362d3",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-2ed620cdddced9538abe548761be0a2af5c5b941ad9e2ae387cd3bc1e4721c16",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "g"
+        }
+      ],
+      "content_hash": "sha256:2ed620cdddced9538abe548761be0a2af5c5b941ad9e2ae387cd3bc1e4721c16",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            99,
+            113
+          ],
+          "slices": [
+            [
+              111,
+              112
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#8",
+      "id": "itm_a057481d1fb4ae897e429a11461edca2",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-ecea6296fc32479be737b56bbe638d5b946ed82b8012d9cd3801c13f481cd917",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "h"
+        }
+      ],
+      "content_hash": "sha256:ecea6296fc32479be737b56bbe638d5b946ed82b8012d9cd3801c13f481cd917",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            113,
+            136
+          ],
+          "slices": [
+            [
+              134,
+              135
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#3",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#4",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#5",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#6",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#7",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#8",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "range": [
+        12,
+        24
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-08df5f176984709e5a00db263847bbdff95e95d574a0471ea3fcb7dd8bc015fe",
+      "range": [
+        24,
+        39
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-62a1204606a4bf4bf16b94b68d480f7ae622a1db3e4ac0efc36cb3c65a7bbde8",
+      "range": [
+        39,
+        60
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-09406f5f78b635239cafed5d72ca3016b91fdf241ac584b1ed3e89f349b3426d",
+      "range": [
+        60,
+        72
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 4,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_attribute",
+      "section": "REMEMBER",
+      "range": [
+        63,
+        68
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 5,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-2f58ba0afd44529bbac7267e2a1bd0fa875298abb0e50713498d1e11ce275cbf",
+      "range": [
+        72,
+        86
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 6,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_attribute",
+      "section": "REMEMBER",
+      "range": [
+        75,
+        82
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 7,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-7fa895dcde29e72eb8ac8c3c9cdf6f0d0983fa10319d08f82fe1dd8e77421f6c",
+      "range": [
+        86,
+        99
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 8,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_attribute",
+      "section": "REMEMBER",
+      "range": [
+        89,
+        95
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 9,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-2ed620cdddced9538abe548761be0a2af5c5b941ad9e2ae387cd3bc1e4721c16",
+      "range": [
+        99,
+        113
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 10,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_attribute",
+      "section": "REMEMBER",
+      "range": [
+        102,
+        109
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 11,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-ecea6296fc32479be737b56bbe638d5b946ed82b8012d9cd3801c13f481cd917",
+      "range": [
+        113,
+        136
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 12,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_attribute",
+      "section": "REMEMBER",
+      "range": [
+        116,
+        132
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

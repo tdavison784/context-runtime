@@ -1,0 +1,351 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_4748437b4765f32b5029492cdbb9c307",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Remember\n- {scope=TURN} turn\n- {scope=TASK} task\n- {scope=AGENT} agent\n- {scope=WORKFLOW} workflow\n- {scope=SESSION} session\n"
+        }
+      ],
+      "content_hash": "sha256:434c05590c352977501147414f54566a21898eed416ed867d14d697befc6053e"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_8f6c461c8b480b2d64cf3ff31e052356",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-c1345b7decc19c96d4d0399552d96b8f4016704e903e3af1f54208265fc2f8ff",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "TURN",
+      "access": {
+        "scope": "TURN",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "turn"
+        }
+      ],
+      "content_hash": "sha256:c1345b7decc19c96d4d0399552d96b8f4016704e903e3af1f54208265fc2f8ff",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            12,
+            32
+          ],
+          "slices": [
+            [
+              27,
+              31
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_371427c4d2b3aa6c942b9462c2eb1fe5",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-b95f634956029660f9818727c5fd7312f1a08c3593633197a8a2946e9b791f63",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "task"
+        }
+      ],
+      "content_hash": "sha256:b95f634956029660f9818727c5fd7312f1a08c3593633197a8a2946e9b791f63",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            32,
+            52
+          ],
+          "slices": [
+            [
+              47,
+              51
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#3",
+      "id": "itm_d130b2b9e5b8394aa41cbe9846c05f5f",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-e10978ed85bfbee0a5b5f72dfd066f134007a9a3b7b15d66251edd5567baa3b5",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "AGENT",
+      "access": {
+        "scope": "AGENT",
+        "task_id": "T",
+        "agent_id": "A"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "agent"
+        }
+      ],
+      "content_hash": "sha256:e10978ed85bfbee0a5b5f72dfd066f134007a9a3b7b15d66251edd5567baa3b5",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            52,
+            74
+          ],
+          "slices": [
+            [
+              68,
+              73
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#4",
+      "id": "itm_808e1a989ec68c14a919bc00518d008e",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-057b5f0ee03a3b064a4fc828821349d6c9139e0d17d46990d7a4b3d53e539cc4",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "WORKFLOW",
+      "access": {
+        "scope": "WORKFLOW",
+        "workflow_id": "wf",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "workflow"
+        }
+      ],
+      "content_hash": "sha256:057b5f0ee03a3b064a4fc828821349d6c9139e0d17d46990d7a4b3d53e539cc4",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            74,
+            102
+          ],
+          "slices": [
+            [
+              93,
+              101
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#5",
+      "id": "itm_e41aa2d444d03cebd08f530665ee76a1",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-3ef9358f1213645109069b58bdf4b21ef23770bd0af7827c08e4dffdbc1c2bee",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "session"
+        }
+      ],
+      "content_hash": "sha256:3ef9358f1213645109069b58bdf4b21ef23770bd0af7827c08e4dffdbc1c2bee",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            102,
+            128
+          ],
+          "slices": [
+            [
+              120,
+              127
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#3",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#4",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#5",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-c1345b7decc19c96d4d0399552d96b8f4016704e903e3af1f54208265fc2f8ff",
+      "range": [
+        12,
+        32
+      ],
+      "access_scope": "TURN"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-b95f634956029660f9818727c5fd7312f1a08c3593633197a8a2946e9b791f63",
+      "range": [
+        32,
+        52
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-e10978ed85bfbee0a5b5f72dfd066f134007a9a3b7b15d66251edd5567baa3b5",
+      "range": [
+        52,
+        74
+      ],
+      "access_scope": "AGENT"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-057b5f0ee03a3b064a4fc828821349d6c9139e0d17d46990d7a4b3d53e539cc4",
+      "range": [
+        74,
+        102
+      ],
+      "access_scope": "WORKFLOW"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 4,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-3ef9358f1213645109069b58bdf4b21ef23770bd0af7827c08e4dffdbc1c2bee",
+      "range": [
+        102,
+        128
+      ],
+      "access_scope": "SESSION"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "description": "kind= values are limited per section by FR-DIR-003; others are invalid and ignored.",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1",
+    "FR-DIR-003"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

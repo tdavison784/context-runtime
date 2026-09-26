@@ -1,0 +1,170 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_a76942b6d6b81eead19d8fb703991a0c",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "\u003c!--\n## Pinned\n- hidden\n--\u003e\n\u003c!-- note --\u003e ## Goal\n## Working \u003c!-- x --\u003e\n- hidden\n\u003c!-- --\u003e\n## Remember\n- kept\n"
+        }
+      ],
+      "content_hash": "sha256:71e970b59f307e8302d3d5e12bc97b52cb20db5693b1c72ff700586cfde82870"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_f639fe5487e47cbbfc77c2122f67bbc4",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "kept"
+        }
+      ],
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            102,
+            109
+          ],
+          "slices": [
+            [
+              104,
+              108
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_db83f7c32629be4028da223612e1c2be",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "\u003c!--\n## Pinned\n- hidden\n--\u003e\n\u003c!-- note --\u003e ## Goal\n## Working \u003c!-- x --\u003e\n- hidden\n\u003c!-- --\u003e\n"
+        }
+      ],
+      "content_hash": "sha256:e34415dea01041fa09e92833e49413a73a2fc8790d5a4f84f4ef085418a881fa",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            90
+          ],
+          "slices": [
+            [
+              0,
+              90
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "html_comment",
+      "section": "PINNED",
+      "range": [
+        5,
+        14
+      ],
+      "access_scope": "SESSION"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "html_comment",
+      "section": "WORKING",
+      "range": [
+        50,
+        71
+      ],
+      "access_scope": "SESSION"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        102,
+        109
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

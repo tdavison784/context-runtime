@@ -1,0 +1,148 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_5c1e5126c796f5bc3da02876cba6a213",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Goal [upgrade]\n\n  Upgrade Foo  \r\nkeep compat\t\r\n\n## Remember\nnext\n"
+        }
+      ],
+      "content_hash": "sha256:33bcaf077758261944f45991d6b2e3cde615be1b420c3f336d7c6439c789b8f0"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_f4864a3d7f5ad72aea4241f25d26b0fe",
+      "kind": "goal",
+      "section": "GOAL",
+      "directive_id": "upgrade",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "goal_status": "OPEN",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "  Upgrade Foo  \r\nkeep compat\t"
+        }
+      ],
+      "content_hash": "sha256:8a05b72c2499445e866c34bf09e87c8567f469a115f076fdab320bd0c201e145",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            51
+          ],
+          "slices": [
+            [
+              19,
+              48
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_bdc682a4fb571f1591fe436c97fc1023",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-31ae2c8c621469622d5a951183f1d264a0e3b71298b4589ff2e43e9ed0afc012",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "next"
+        }
+      ],
+      "content_hash": "sha256:31ae2c8c621469622d5a951183f1d264a0e3b71298b4589ff2e43e9ed0afc012",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            51,
+            68
+          ],
+          "slices": [
+            [
+              63,
+              67
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-31ae2c8c621469622d5a951183f1d264a0e3b71298b4589ff2e43e9ed0afc012",
+      "range": [
+        51,
+        68
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

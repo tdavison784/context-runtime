@@ -1,0 +1,9 @@
+{
+  "description": "With no open directive section a keyword heading at any level opens one (D6).",
+  "requirements": [
+    "FR-DIR-006",
+    "D6"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

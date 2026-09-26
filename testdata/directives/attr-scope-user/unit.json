@@ -1,0 +1,11 @@
+{
+  "description": "A USER unit may not widen scope beyond TASK: WORKFLOW/SESSION are diagnosed (scope_widening) and ignored.",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1",
+    "FR-ING-003"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

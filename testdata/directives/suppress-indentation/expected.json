@@ -1,0 +1,38 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [],
+  "items": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "indented",
+      "section": "PINNED",
+      "range": [
+        1,
+        10
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "indented",
+      "section": "GOAL",
+      "range": [
+        21,
+        28
+      ]
+    },
+    {
+      "index": 2,
+      "code": "DirectiveNotParsed",
+      "reason": "indented",
+      "section": "WORKING",
+      "range": [
+        40,
+        50
+      ]
+    }
+  ]
+}

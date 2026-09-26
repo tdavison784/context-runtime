@@ -1,0 +1,112 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "WORKING",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        19
+      ],
+      "heading_range": [
+        0,
+        11
+      ],
+      "body_range": [
+        11,
+        19
+      ],
+      "items": [
+        0
+      ]
+    },
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        19,
+        32
+      ],
+      "heading_range": [
+        19,
+        31
+      ],
+      "body_range": [
+        31,
+        32
+      ],
+      "items": [
+        1
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "working-a482556c0ce29da934b58b94fc4d4d2fbcc579b1451c9239d0c911fa4dbeabcb",
+      "authority": "USER",
+      "text": "a\rb",
+      "content_hash": "sha256:a482556c0ce29da934b58b94fc4d4d2fbcc579b1451c9239d0c911fa4dbeabcb",
+      "range": [
+        11,
+        19
+      ],
+      "text_ranges": [
+        [
+          13,
+          15
+        ],
+        [
+          17,
+          18
+        ]
+      ]
+    },
+    {
+      "section": "REMEMBER",
+      "section_index": 1,
+      "directive_id": "remember-62a1204606a4bf4bf16b94b68d480f7ae622a1db3e4ac0efc36cb3c65a7bbde8",
+      "authority": "USER",
+      "text": "c",
+      "content_hash": "sha256:62a1204606a4bf4bf16b94b68d480f7ae622a1db3e4ac0efc36cb3c65a7bbde8",
+      "range": [
+        19,
+        32
+      ],
+      "text_ranges": [
+        [
+          31,
+          32
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-a482556c0ce29da934b58b94fc4d4d2fbcc579b1451c9239d0c911fa4dbeabcb",
+      "range": [
+        11,
+        19
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-62a1204606a4bf4bf16b94b68d480f7ae622a1db3e4ac0efc36cb3c65a7bbde8",
+      "range": [
+        19,
+        32
+      ]
+    }
+  ]
+}

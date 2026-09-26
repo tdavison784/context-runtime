@@ -1,0 +1,9 @@
+{
+  "description": "Single-body item takes the heading ID; leading/trailing blank lines removed, trailing whitespace, indentation and CRLF kept (D7).",
+  "requirements": [
+    "FR-DIR-006",
+    "D7"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

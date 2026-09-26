@@ -1,0 +1,108 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        13,
+        32
+      ],
+      "heading_range": [
+        13,
+        25
+      ],
+      "body_range": [
+        25,
+        32
+      ],
+      "items": [
+        0
+      ]
+    },
+    {
+      "keyword": "EPHEMERAL",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        54,
+        74
+      ],
+      "heading_range": [
+        54,
+        67
+      ],
+      "body_range": [
+        67,
+        74
+      ],
+      "items": [
+        1
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "authority": "SYSTEM",
+      "text": "kept",
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        25,
+        32
+      ],
+      "text_ranges": [
+        [
+          27,
+          31
+        ]
+      ]
+    },
+    {
+      "section": "EPHEMERAL",
+      "section_index": 1,
+      "directive_id": "ephemeral-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "authority": "SYSTEM",
+      "text": "kept",
+      "content_hash": "sha256:4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        67,
+        74
+      ],
+      "text_ranges": [
+        [
+          69,
+          73
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        25,
+        32
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "EPHEMERAL",
+      "directive_id": "ephemeral-4bd6b6f3206c447b89e1a0e81c88414c5ebd57607b3fad0c4cce5c93c408b660",
+      "range": [
+        67,
+        74
+      ]
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_2b34d8c9b1180178653639f416528dfb",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Working\n- TestLegacyClient fixed; now on docs.\n"
+        }
+      ],
+      "content_hash": "sha256:1befeed4c45a011cd26b589613ef5a1ace0fbedbc843dbc738ed6cdf6f89f9b7"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_d526e2b751e8fbb8b506a2a46bb4a772",
+      "kind": "task_state",
+      "section": "WORKING",
+      "directive_id": "working-7e9a7914dcba5ea9e93c4a500b757df08aa1ffe8fde0476d271b45ddbdb81426",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "TestLegacyClient fixed; now on docs."
+        }
+      ],
+      "content_hash": "sha256:7e9a7914dcba5ea9e93c4a500b757df08aa1ffe8fde0476d271b45ddbdb81426",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            11,
+            50
+          ],
+          "slices": [
+            [
+              13,
+              49
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-7e9a7914dcba5ea9e93c4a500b757df08aa1ffe8fde0476d271b45ddbdb81426",
+      "range": [
+        11,
+        50
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

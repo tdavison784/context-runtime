@@ -1,0 +1,11 @@
+{
+  "description": "An AGENT unit never parses directives even if marked capable (ingestion also rejects the flag, D15).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "D15"
+  ],
+  "authority": "AGENT",
+  "directive_capable": true,
+  "no_directives": true
+}

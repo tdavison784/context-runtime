@@ -1,0 +1,47 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "UNPIN",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        32
+      ],
+      "heading_range": [
+        0,
+        9
+      ],
+      "body_range": [
+        9,
+        32
+      ],
+      "malformed": true
+    }
+  ],
+  "items": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        15,
+        31
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "fenced_code",
+      "section": "UNPIN",
+      "range": [
+        15,
+        18
+      ]
+    }
+  ]
+}

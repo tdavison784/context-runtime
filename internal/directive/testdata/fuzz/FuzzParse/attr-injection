@@ -1,0 +1,5 @@
+go test fuzz v1
+[]byte("## Pinned scope=SESSION kind=instruction kind=constraint\x0a- {scope=SESSION}scope=AGENT} x\x0a- {kind=instruction} {scope=SESSION} y\x0a- {ttl=99999999999} z\x0a## Ephemeral ttl=0002\x0a- {ttl=0} e")
+uint8(2)
+bool(true)
+uint16(30)

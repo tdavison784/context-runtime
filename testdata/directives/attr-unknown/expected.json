@@ -1,0 +1,90 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "REMEMBER",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        55
+      ],
+      "heading_range": [
+        0,
+        33
+      ],
+      "body_range": [
+        33,
+        55
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "REMEMBER",
+      "section_index": 0,
+      "directive_id": "remember-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "authority": "USER",
+      "text": "a",
+      "content_hash": "sha256:7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "ttl_turns": 2,
+      "attributes": [
+        {
+          "name": "ttl",
+          "value": "2",
+          "range": [
+            46,
+            51
+          ]
+        }
+      ],
+      "range": [
+        33,
+        55
+      ],
+      "text_ranges": [
+        [
+          53,
+          54
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "unknown_attribute",
+      "section": "REMEMBER",
+      "range": [
+        12,
+        32
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "range": [
+        33,
+        55
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "unknown_attribute",
+      "section": "REMEMBER",
+      "range": [
+        36,
+        45
+      ]
+    }
+  ]
+}

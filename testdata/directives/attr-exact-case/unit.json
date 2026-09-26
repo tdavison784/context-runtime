@@ -1,0 +1,10 @@
+{
+  "description": "Attribute names and values are exact case; only keywords fold (FR-DIR-006, R1).",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

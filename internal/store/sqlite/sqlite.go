@@ -1,20 +1,20 @@
 // Package sqlite provides the durable, session-partitioned store.
 //
-// The embedded forward-only migration creates one rec_* table per record
-// type. Session and record identity form each table's key; other scalar and
-// nested fields occupy typed columns. Presence columns preserve nil pointers
-// and byte slices, while JSON is limited to leaf lists. The migration checksum
-// guards this layout against silent drift when a database is reopened. The
-// sessions table tracks the sequence cursor and whether any record committed;
+// Embedded forward-only migrations create one rec_* table per record type;
+// committed migrations are never edited, so every schema change is a new
+// numbered file. Session and record identity form each table's key; other
+// scalar and nested fields occupy typed columns. Presence columns preserve
+// nil pointers and byte slices, while JSON is limited to leaf lists (content
+// parts store every string byte for byte). The migration checksum guards this
+// layout against silent drift when a database is reopened. The sessions
+// table tracks the sequence cursor and whether any record committed;
 // directives use the item's full access boundary as part of their key.
 package sqlite
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"embed"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -136,8 +136,7 @@ func (s *Store) applyMigrations(ctx context.Context, source fs.FS) error {
 		if err != nil {
 			return err
 		}
-		sum := sha256.Sum256(sqlBytes)
-		checksum := hex.EncodeToString(sum[:])
+		checksum := migrationChecksum(sqlBytes, number)
 		conn, err := s.db.Conn(ctx)
 		if err != nil {
 			return err
@@ -162,6 +161,11 @@ func (s *Store) applyMigrations(ctx context.Context, source fs.FS) error {
 				}
 			case errors.Is(err, sql.ErrNoRows):
 				if _, err = conn.ExecContext(ctx, string(sqlBytes)); err == nil {
+					if step, ok := migrationSteps[number]; ok {
+						err = step.run(ctx, conn)
+					}
+				}
+				if err == nil {
 					_, err = conn.ExecContext(ctx, "INSERT INTO schema_migrations(version,name,checksum) VALUES(?,?,?)", number, base, checksum)
 				}
 				if err != nil {
@@ -255,7 +259,12 @@ func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) er
 		return err
 	}
 	tx := &transaction{conn: c, ctx: ctx, session: session, last: last, allocated: make(map[uint64]bool), writable: true}
-	if err = fn(tx); err != nil {
+	g := store.NewGuard(tx)
+	err = fn(g)
+	if p := g.Poisoned(); p != nil {
+		return p // the deferred ROLLBACK discards everything (DUR-1.3)
+	}
+	if err != nil {
 		return err
 	}
 	if err = ctx.Err(); err != nil {
@@ -328,22 +337,36 @@ func (s *Store) Sessions(ctx context.Context) ([]string, error) {
 }
 
 type transaction struct {
-	conn               *sql.Conn
-	ctx                context.Context
-	session            string
-	last               uint64
-	allocated          map[uint64]bool
-	writable           bool
-	supersession       map[string][]string
-	supersessionLoaded bool
-	semanticWrite      bool
-	semanticSeqRecord  bool
-	wrote              bool
-	ledgerSeqs         map[uint64]bool
-	semanticSeqs       map[uint64]bool
+	conn              *sql.Conn
+	ctx               context.Context
+	session           string
+	last              uint64
+	allocated         map[uint64]bool
+	writable          bool
+	semanticWrite     bool
+	semanticSeqRecord bool
+	wrote             bool
+	ledgerSeqs        map[uint64]bool
+	semanticSeqs      map[uint64]bool
+	// lookupRows and lookupLoads count index rows read and items loaded by
+	// access-filtered lookups, so tests can assert bounded work (DUR-2.1).
+	lookupRows, lookupLoads int
+	// lastQuery is the SQL the latest record read ran, so tests can assert
+	// that hot reads use their plan-guarded builders (SPEC-2.1).
+	lastQuery string
+	// rowsRead counts the rows every multi-row query of the transaction
+	// read, so tests can bound a write's reads from outside (SPEC-3.2).
+	rowsRead int
+	// itemCache holds items this transaction has decoded and verified,
+	// bounded by entries and bytes (SPEC-4.1); UpdateItem drops an entry
+	// and a rolled-back store method clears it (SPEC-3.1 item 2).
+	// itemBytesLoaded counts the bytes decoded, so tests can assert a
+	// transcript is not reloaded per derived item.
+	itemCache       *itemCache
+	itemBytesLoaded uint64
 }
 
-var _ store.Tx = (*transaction)(nil)
+var _ store.TxBase = (*transaction)(nil)
 
 func (t *transaction) SessionID() string { return t.session }
 func (t *transaction) LastSeq() uint64   { return t.last }
@@ -374,6 +397,7 @@ func (t *transaction) atomic(fn func() error) error {
 		return err
 	}
 	if err := fn(); err != nil {
+		t.itemCache = nil // a rolled-back write may have refreshed an entry
 		_, _ = t.conn.ExecContext(t.ctx, "ROLLBACK TO SAVEPOINT store_method")
 		_, _ = t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
 		t.semanticWrite, t.semanticSeqRecord, t.wrote = wasWrite, wasSeq, wasWrote
@@ -382,6 +406,7 @@ func (t *transaction) atomic(fn func() error) error {
 	}
 	_, err := t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
 	if err != nil {
+		t.itemCache = nil
 		t.semanticWrite, t.semanticSeqRecord, t.wrote = wasWrite, wasSeq, wasWrote
 		t.ledgerSeqs, t.semanticSeqs = wasLedger, wasSemanticSeqs
 	}
@@ -459,6 +484,10 @@ func (t *transaction) noteSequence(value any) {
 		semantic(v.Seq)
 	case domain.MutationGrant:
 		semantic(v.IssuedSeq)
+	case receiptRow:
+		semantic(v.Seq)
+	case domain.UnresolvedReference:
+		semantic(v.Seq)
 	case domain.LifecycleEvent:
 		if v.TargetKind == domain.TargetCall {
 			if t.ledgerSeqs == nil {
@@ -490,7 +519,7 @@ func listRecords[T any](t *transaction, kind string) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := t.conn.QueryContext(t.ctx, s.selectSQL+" WHERE session_id=?", t.session)
+	rows, err := t.query(s.selectSQL+" WHERE session_id=?", t.session)
 	if err != nil {
 		return nil, err
 	}
@@ -504,4 +533,31 @@ func listRecords[T any](t *transaction, kind string) ([]T, error) {
 		out = append(out, v.Interface().(T))
 	}
 	return out, rows.Err()
+}
+
+// countedRows counts the rows a transaction query reads (SPEC-3.2).
+type countedRows struct {
+	*sql.Rows
+	n *int
+}
+
+func (r *countedRows) Next() bool {
+	if r.Rows.Next() {
+		*r.n++
+		return true
+	}
+	return false
+}
+
+// query runs every multi-row SELECT of a transaction: it records the SQL
+// (lastQuery) and counts the rows read (rowsRead), so tests can assert
+// that hot reads use their builders and that writes read a bounded
+// number of rows.
+func (t *transaction) query(q string, args ...any) (*countedRows, error) {
+	t.lastQuery = q
+	rows, err := t.conn.QueryContext(t.ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	return &countedRows{Rows: rows, n: &t.rowsRead}, nil
 }

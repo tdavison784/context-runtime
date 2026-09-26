@@ -1,0 +1,20 @@
+{
+  "description": "M1: a comment opened in one unit cannot hide or reveal text in another; the retrieved unit stays unparsed.",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "M1"
+  ],
+  "authority": "USER",
+  "directive_capable": true,
+  "no_directives": true,
+  "more_units": [
+    {
+      "input": "unit2.md",
+      "authority": "RETRIEVED_CONTENT",
+      "directive_capable": false,
+      "span_index": 1,
+      "part_index": 0
+    }
+  ]
+}

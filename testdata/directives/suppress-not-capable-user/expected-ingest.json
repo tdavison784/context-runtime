@@ -1,0 +1,60 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_b9a2f9a1a71a9e069a24dd3ef0ae1946",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Goal\nhidden\n```\n## Pinned\n```\n"
+        }
+      ],
+      "content_hash": "sha256:877e1aae9be929cf0e0083920bc5c4ce39434c495561368762a1b3b6c60c9f68"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "source_not_capable",
+      "section": "GOAL",
+      "range": [
+        0,
+        7
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "source_not_capable",
+      "section": "PINNED",
+      "range": [
+        19,
+        28
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

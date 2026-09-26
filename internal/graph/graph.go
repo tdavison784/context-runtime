@@ -47,6 +47,18 @@ var (
 	// writes the derived item, never post-hoc by a later, possibly
 	// lower-authority, actor.
 	ErrDerivedLinkNotAtCreation = errors.New("graph: derived item's provenance can only be linked in the transaction that created it")
+	// ErrAlreadySuperseded reports a Supersede whose old item is already
+	// superseded: retired state is no longer current truth (FR-REL-003),
+	// so it is never retired a second time, by the same event or another
+	// (D11). Callers retire only current items.
+	ErrAlreadySuperseded = errors.New("graph: item is already superseded")
+	// ErrBoundaryConflict reports a write that reuses a directive ID while
+	// the writer can see a current version of it at a different access
+	// boundary (FR-DIR-002): boundary changes cannot be made through ID
+	// reuse. It is an item-level rejection (R13), deliberately distinct from
+	// domain.ErrInvalidAuthorityPromotion, so ingestion rejects only the
+	// offending item with a boundary_conflict diagnostic.
+	ErrBoundaryConflict = errors.New("graph: directive ID is current at another visible boundary")
 	// ErrAmbiguousDirective reports a lifecycle target (SDD section 8, v0.8)
 	// that names more than one directive version the actor can currently
 	// see: FR-DIR-002 keys a directive by (task, directive ID, access
@@ -89,7 +101,9 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 	switch actor.Authority {
 	case domain.AuthoritySystem, domain.AuthorityHarness, domain.AuthorityUser:
 	case domain.AuthorityAgent:
-		if newItem.Authority != domain.AuthorityAgent || !strings.HasPrefix(newItem.DirectiveID, domain.AgentKeyID("")) {
+		ns, _ := newItem.DirectiveNamespace()
+		if newItem.Authority != domain.AuthorityAgent || ns != domain.NamespaceAgentKey ||
+			!strings.HasPrefix(newItem.DirectiveID, domain.AgentKeyID("")) {
 			return domain.ErrInvalidAuthorityPromotion
 		}
 	default:
@@ -101,42 +115,62 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 	return nil
 }
 
-// rejectVisibleBoundaryConflict fails with domain.ErrInvalidAuthorityPromotion
-// if actor can access any current version of (taskID, directiveID) at a
+// rejectVisibleBoundaryConflict fails with ErrBoundaryConflict (R13) if
+// actor can access any current version of (taskID, directiveID) at a
 // boundary other than the one ReplaceDirective already confirmed has none
 // (AUTH-2.1): reusing a directive ID at a boundary the actor can see is a
 // scope change, which FR-DIR-002 requires to go through an explicit
 // authorized replacement, not a silent fork into two current versions.
 // Boundaries actor cannot access are never consulted for this check, so it
 // discloses nothing beyond what the actor could already see. A version
-// tx.CurrentDirectives still names but that has since been superseded is
+// the current-version map still names but that has since been superseded is
 // not a conflict (AUTH-3.2): the pointer is stale, not a second live
 // version, and must never block a legitimate write.
-func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, taskID, directiveID string) error {
-	ids, err := tx.CurrentDirectives(taskID, directiveID)
+func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, taskID string, ns domain.DirectiveNamespace, directiveID string) error {
+	versions, err := CurrentVersions(tx, actor, taskID, ns, directiveID)
 	if err != nil {
 		return err
 	}
-	for _, id := range ids {
-		it, err := tx.Item(id)
-		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				continue
-			}
-			return err
-		}
-		if !it.Access.Permits(actor) {
-			continue
-		}
-		cur, err := IsCurrent(tx, id)
-		if err != nil {
-			return err
-		}
-		if cur {
-			return domain.ErrInvalidAuthorityPromotion
-		}
+	if len(versions) > 0 {
+		return ErrBoundaryConflict
 	}
 	return nil
+}
+
+// CheckBoundaryConflict reports, without writing, whether filing it as a
+// new version would change a directive's boundary through ID reuse
+// (FR-DIR-002): it has no current version at its own boundary, yet actor
+// can see a current version of the same ID (explicit or derived, same
+// namespace) at another boundary. That fails with ErrBoundaryConflict,
+// which rejects only this item (R13). A current version at its own
+// boundary is a replacement, not a conflict; hidden boundaries, stale
+// pointers, and duplicates never conflict. An item without a directive ID
+// never conflicts.
+//
+// With ErrBoundaryConflict it returns the access boundaries of the
+// conflicting versions, so a record of the conflict can be made readable
+// only where those versions are (SEC-2.2).
+func CheckBoundaryConflict(tx store.ReadTx, actor domain.Principal, it domain.ContextItem) ([]domain.AccessBoundary, error) {
+	ns, ok := it.DirectiveNamespace()
+	if !ok {
+		return nil, nil
+	}
+	_, err := currentVersionAt(tx, it.TaskID, ns, it.DirectiveID, it.Access)
+	switch {
+	case err == nil:
+		return nil, nil
+	case !errors.Is(err, domain.ErrNotFound):
+		return nil, err
+	}
+	versions, err := CurrentVersions(tx, actor, it.TaskID, ns, it.DirectiveID)
+	if err != nil || len(versions) == 0 {
+		return nil, err
+	}
+	causes := make([]domain.AccessBoundary, len(versions))
+	for i, v := range versions {
+		causes[i] = v.Access
+	}
+	return causes, ErrBoundaryConflict
 }
 
 // Supersede records that newID supersedes oldID (FR-REL-003, FR-REL-004,
@@ -146,7 +180,15 @@ func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, task
 // SUPERSEDES relationship (the store rejects a cycle with
 // domain.ErrSupersessionCycle), and appends a LifecycleEvent recording the
 // change. It never creates a SUPERSEDES edge when newID is itself recorded
-// as a DUPLICATE_OF some other item (FR-ING-005).
+// as a DUPLICATE_OF some other item (FR-ING-005), and never retires an
+// oldID that is already superseded (ErrAlreadySuperseded, D11). The audit
+// record's ID names the successor, so it is unique per retirement.
+//
+// In the same transaction it retires every current obligation version
+// bound to oldID (FR-OBL-006, D13), whatever replaces it (a pin without
+// obligation=, another section, a snapshot member), each authorized as an
+// indirect effect before anything is written and audited separately; an
+// unauthorized retirement fails the whole supersession.
 //
 // ruleVersion names the deterministic rule that produced the edge (FR-REL-
 // 007); pass "" for an edge created directly from an authorized event, such
@@ -170,6 +212,17 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 	if len(dup) > 0 {
 		return domain.Relationship{}, ErrDuplicateSupersession
 	}
+	retired, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: oldID})
+	if err != nil {
+		return domain.Relationship{}, err
+	}
+	if len(retired) > 0 {
+		return domain.Relationship{}, ErrAlreadySuperseded
+	}
+	obligations, err := planObligationRetirement(tx, actor, oldID)
+	if err != nil {
+		return domain.Relationship{}, err
+	}
 
 	rel := domain.Relationship{
 		ID:          relationshipID(actor.SessionID, domain.RelSupersedes, newID, oldID, eventID),
@@ -187,7 +240,7 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 	}
 
 	ev := domain.LifecycleEvent{
-		ID:         lifecycleEventID(actor.SessionID, oldID, "superseded", eventID),
+		ID:         lifecycleEventID(actor.SessionID, oldID, "superseded", eventID, newID),
 		SessionID:  actor.SessionID,
 		Seq:        tx.NextSeq(),
 		TargetKind: domain.TargetItem,
@@ -199,6 +252,9 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 		EventID:    eventID,
 	}
 	if err := tx.AppendLifecycleEvent(ev); err != nil {
+		return domain.Relationship{}, err
+	}
+	if err := retireObligations(tx, actor, obligations, oldID, newID, eventID); err != nil {
 		return domain.Relationship{}, err
 	}
 	return rel, nil
@@ -227,7 +283,8 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 		return "", ErrDirectiveMismatch
 	}
 
-	previousID, err := tx.CurrentDirective(taskID, directiveID, newItem.Access)
+	ns, _ := newItem.DirectiveNamespace()
+	previousID, err := currentVersionAt(tx, taskID, ns, directiveID, newItem.Access)
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		// FR-DIR-002 v0.8: a boundary the actor cannot see is an
@@ -235,7 +292,7 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 		// CAN see is a scope change, which still requires an explicit
 		// authorized replacement policy (AUTH-2.1) rather than silently
 		// forking a second current version.
-		if err := rejectVisibleBoundaryConflict(tx, actor, taskID, directiveID); err != nil {
+		if err := rejectVisibleBoundaryConflict(tx, actor, taskID, ns, directiveID); err != nil {
 			return "", err
 		}
 		if err := authorizeFirstVersionDirective(actor, newItem); err != nil {
@@ -250,96 +307,163 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 		}
 	}
 
-	if err := tx.SetCurrentDirective(taskID, directiveID, newItemID); err != nil {
+	if err := tx.SetCurrentVersion(newItemID); err != nil {
 		return "", err
 	}
 	return previousID, nil
 }
 
-// SupersedeSnapshot ingests a Working section (FR-DIR-007 v0.6/v0.7,
-// SPEC-1.1): every item in newIDs must itself be Section==WORKING, checked
-// before any candidate is scanned or edge written (SPEC-2.1: a snapshot can
-// only be replaced by another snapshot, never by an arbitrary item such as a
-// PINNED directive; domain.ContextItem.Validate independently requires a
-// directive-section item to carry SYSTEM, HARNESS, or USER authority,
-// AUTH-2.2). For each new item, it then finds every other current item in
-// taskID whose DirectiveSection is WORKING (of any kind FR-DIR-003 permits
-// there, such as a conversation summary, not only task_state) and that
-// shares that new item's authority and access boundary exactly, and
-// Supersedes it. Only the Working section is ever a candidate: an item that
-// happens to share authority and boundary but was not written as part of a
-// Working section (Section != WORKING) is independent state and is left
-// alone. Boundary equality, not mere task membership, further narrows
-// candidates, so an item scoped more narrowly than the snapshot (for
-// example an AGENT-scoped Working item belonging to a different agent) is
-// also left untouched even though it lives in the same task. Items in
-// newIDs are never candidates to supersede each other. It returns every
-// SUPERSEDES relationship created, or nothing if none matched.
-func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, taskID, eventID string) ([]domain.Relationship, error) {
-	if len(newIDs) == 0 {
-		return nil, nil
+// IsCurrent reports whether itemID is current (FR-DOM-005: currentness is
+// derived from SUPERSEDES relationships and the current directive-version
+// map). An item that another item SUPERSEDES is never current. A directive
+// item (one carrying a DirectiveID) is additionally current only while the
+// current-version map entry for (its task, its directive ID, its access
+// boundary) names it and it is not classified DUPLICATE_OF another item
+// (D10): a duplicate never becomes current (FR-ING-005), an item inserted
+// but never filed is not a version at all, and a map entry that still names
+// a since-superseded item is a stale pointer, not a current version. A
+// missing item fails with the store's not-found error.
+//
+// Only a non-directive item may be current merely by not being superseded;
+// its DUPLICATE_OF classification is detection only and never retires the
+// occurrence (D10).
+func IsCurrent(tx store.ReadTx, itemID string) (bool, error) {
+	it, err := tx.Item(itemID)
+	if err != nil {
+		return false, err
 	}
+	return isCurrentItem(tx, it)
+}
 
-	newItems := make([]domain.ContextItem, 0, len(newIDs))
-	newSet := make(map[string]bool, len(newIDs))
-	for _, id := range newIDs {
-		it, err := loadAccessible(tx, actor, id)
-		if err != nil {
-			return nil, err
-		}
-		if it.TaskID != taskID {
-			return nil, ErrSnapshotTaskMismatch
-		}
-		if it.Section != domain.SectionWorking {
-			return nil, ErrSnapshotNotWorking
-		}
-		newItems = append(newItems, it)
-		newSet[id] = true
+// isCurrentItem is IsCurrent for an already-loaded item.
+func isCurrentItem(tx store.ReadTx, it domain.ContextItem) (bool, error) {
+	superseded, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: it.ID})
+	if err != nil {
+		return false, err
 	}
+	if len(superseded) > 0 {
+		return false, nil
+	}
+	if it.DirectiveID == "" {
+		return true, nil
+	}
+	key, _ := it.CurrentKey()
+	mapped, err := tx.CurrentVersion(key)
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		return false, nil
+	case err != nil:
+		return false, err
+	case mapped != it.ID:
+		return false, nil
+	}
+	return isDuplicateFree(tx, it.ID)
+}
 
-	candidates, err := tx.Items(store.ItemFilter{TaskID: taskID})
+// isDuplicateFree reports whether itemID carries no outgoing DUPLICATE_OF
+// edge.
+func isDuplicateFree(tx store.ReadTx, itemID string) (bool, error) {
+	dup, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: itemID})
+	if err != nil {
+		return false, err
+	}
+	return len(dup) == 0, nil
+}
+
+// currentVersionAt returns the current version of directive (taskID,
+// directiveID, boundary), or domain.ErrNotFound when there is none. A map
+// entry naming an item that is no longer current under IsCurrent (a stale
+// pointer left behind when the item was retired outside the map) is treated
+// exactly like a missing entry, so a stale pointer is never superseded a
+// second time or reported as a previous version (D10). The key is typed by
+// namespace (M6, R6), so a parsed directive and keyed agent state of the
+// same ID never see each other.
+func currentVersionAt(tx store.ReadTx, taskID string, ns domain.DirectiveNamespace, directiveID string, boundary domain.AccessBoundary) (string, error) {
+	id, err := tx.CurrentVersion(domain.CurrentKey{SessionID: tx.SessionID(), TaskID: taskID, Access: boundary, Namespace: ns, ID: directiveID})
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", domain.ErrNotFound
+		}
+		return "", err
+	}
+	it, err := tx.Item(id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", domain.ErrNotFound
+		}
+		return "", err
+	}
+	cur, err := isCurrentItem(tx, it)
+	if err != nil {
+		return "", err
+	}
+	if !cur {
+		return "", domain.ErrNotFound
+	}
+	return id, nil
+}
+
+// CurrentVersionFor returns the current version at the item's own current-version
+// key (its task, namespace, directive ID, and access boundary), as actor
+// sees it: the version a write of it would replace or duplicate. It fails
+// with domain.ErrNotFound when there is none, when the map entry is a stale
+// pointer, or when actor cannot access the version.
+func CurrentVersionFor(tx store.ReadTx, actor domain.Principal, it domain.ContextItem) (domain.ContextItem, error) {
+	ns, ok := it.DirectiveNamespace()
+	if !ok {
+		return domain.ContextItem{}, domain.ErrNotFound
+	}
+	id, err := currentVersionAt(tx, it.TaskID, ns, it.DirectiveID, it.Access)
+	if err != nil {
+		return domain.ContextItem{}, err
+	}
+	return loadAccessible(tx, actor, id)
+}
+
+// CurrentVersions returns every current version (IsCurrent, D10) of ID
+// directiveID in namespace ns (M6, R6) of taskID that actor can access,
+// ordered by (Seq, ID). FR-DIR-002 keys a directive by (task, directive ID, access
+// boundary), so one ID may have several current versions; this is the one
+// deterministic place a caller chooses among them (for example a
+// deduplication canonical candidate), and every access and currentness
+// filter is applied before anything is ordered or counted, so a version
+// actor cannot see, a stale map pointer, and a duplicate are never
+// returned and never influence the result.
+func CurrentVersions(tx store.ReadTx, actor domain.Principal, taskID string, ns domain.DirectiveNamespace, directiveID string) ([]domain.ContextItem, error) {
+	ids, err := tx.CurrentVersions(taskID, ns, directiveID)
 	if err != nil {
 		return nil, err
 	}
-
-	var rels []domain.Relationship
-	for _, cand := range candidates {
-		if newSet[cand.ID] || cand.Section != domain.SectionWorking {
+	var out []domain.ContextItem
+	for _, id := range ids {
+		it, err := tx.Item(id)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		if got, _ := it.DirectiveNamespace(); got != ns || !it.Access.Permits(actor) {
 			continue
 		}
-		cur, err := IsCurrent(tx, cand.ID)
+		cur, err := isCurrentItem(tx, it)
 		if err != nil {
 			return nil, err
 		}
-		if !cur {
-			continue
-		}
-		for _, ni := range newItems {
-			if ni.Authority != cand.Authority || ni.Access != cand.Access {
-				continue
-			}
-			rel, err := Supersede(tx, actor, ni.ID, cand.ID, eventID, "")
-			if err != nil {
-				return nil, err
-			}
-			rels = append(rels, rel)
-			break // one superseder per candidate is enough
+		if cur {
+			out = append(out, it)
 		}
 	}
-	return rels, nil
-}
-
-// IsCurrent reports whether itemID is not the target of any SUPERSEDES edge,
-// i.e. no other item has superseded it (FR-DOM-005).
-func IsCurrent(tx store.ReadTx, itemID string) (bool, error) {
-	if _, err := tx.Item(itemID); err != nil {
-		return false, err
-	}
-	rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: itemID})
-	if err != nil {
-		return false, err
-	}
-	return len(rels) == 0, nil
+	slices.SortFunc(out, func(a, b domain.ContextItem) int {
+		switch {
+		case a.Seq < b.Seq:
+			return -1
+		case a.Seq > b.Seq:
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out, nil
 }
 
 // ResolveLifecycleTarget resolves a lifecycle command's bare id (SDD v0.8,
@@ -354,8 +478,12 @@ func IsCurrent(tx store.ReadTx, itemID string) (bool, error) {
 // the result (an existence oracle) and block an otherwise-authorized
 // Resolve/Unpin.
 //
-//  1. As a literal item ID: id is a candidate if it names an item that is
-//     accessible to actor and current.
+// Only the DIRECTIVE namespace is ever considered (M6, R6): a keyed agent
+// write (FR-TOOL-002) or a plain item is never a lifecycle target, even when
+// its ID or key spells a legal directive ID such as "agent.status".
+//
+//  1. As a literal item ID: id is a candidate if it names a DIRECTIVE-
+//     namespace item that is accessible to actor and current.
 //  2. As a directive ID: id's current versions are read across every
 //     access boundary in taskID (FR-DIR-002 v0.7/v0.8: a directive's
 //     identity includes its boundary, so one bare ID can have several
@@ -369,65 +497,57 @@ func IsCurrent(tx store.ReadTx, itemID string) (bool, error) {
 // actor cannot access are never consulted, so the result discloses nothing
 // beyond what actor could already see.
 func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id string) (string, error) {
-	var candidates []string
-	seen := map[string]bool{}
-
-	if it, err := tx.Item(id); err == nil {
-		if it.Access.Permits(actor) {
-			cur, err := IsCurrent(tx, id)
-			if err != nil {
-				return "", err
-			}
-			if cur {
-				candidates = append(candidates, id)
-				seen[id] = true
-			}
-		}
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return "", err
-	}
-
-	versions, err := tx.CurrentDirectives(taskID, id)
+	candidates, err := lifecycleCandidates(tx, actor, taskID, id)
 	if err != nil {
 		return "", err
 	}
-	for _, versionID := range versions {
-		if seen[versionID] {
-			continue
-		}
-		it, err := tx.Item(versionID)
-		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				continue
-			}
-			return "", err
-		}
-		if !it.Access.Permits(actor) {
-			continue
-		}
-		// tx.CurrentDirectives points at the current-directive record, but
-		// that record can go stale the moment the item it names is
-		// superseded outside the directive map (e.g. by a Working
-		// snapshot, AUTH-3.2): a lifecycle command must never resolve to a
-		// version that is no longer current.
-		cur, err := IsCurrent(tx, versionID)
-		if err != nil {
-			return "", err
-		}
-		if cur {
-			candidates = append(candidates, versionID)
-			seen[versionID] = true
-		}
-	}
-
 	switch len(candidates) {
 	case 0:
 		return "", domain.ErrNotFound
 	case 1:
-		return candidates[0], nil
+		return candidates[0].ID, nil
 	default:
 		return "", ErrAmbiguousDirective
 	}
+}
+
+// lifecycleCandidates gathers ResolveLifecycleTarget's accessible, current
+// DIRECTIVE-namespace candidates for id, literal item first, then directive
+// versions in (Seq, ID) order.
+func lifecycleCandidates(tx store.ReadTx, actor domain.Principal, taskID, id string) ([]domain.ContextItem, error) {
+	var candidates []domain.ContextItem
+	seen := map[string]bool{}
+
+	if it, err := tx.Item(id); err == nil {
+		if ns, _ := it.DirectiveNamespace(); ns == domain.NamespaceDirective && it.Access.Permits(actor) {
+			cur, err := isCurrentItem(tx, it)
+			if err != nil {
+				return nil, err
+			}
+			if cur {
+				candidates = append(candidates, it)
+				seen[id] = true
+			}
+		}
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+
+	// CurrentVersions drops stale map pointers (a version superseded
+	// outside the directive map, e.g. by a Working snapshot, AUTH-3.2) and
+	// duplicates: a lifecycle command must never resolve to a version that
+	// is no longer current (D10).
+	versions, err := CurrentVersions(tx, actor, taskID, domain.NamespaceDirective, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range versions {
+		if !seen[v.ID] {
+			candidates = append(candidates, v)
+			seen[v.ID] = true
+		}
+	}
+	return candidates, nil
 }
 
 // SupersessionChain returns every item in the supersession chain containing

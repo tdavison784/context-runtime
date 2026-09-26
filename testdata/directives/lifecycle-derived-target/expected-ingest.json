@@ -1,0 +1,60 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_cbd80af0cd4a4aaf68f90fddc3e92e50",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Unpin [pinned-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef]\n"
+        }
+      ],
+      "content_hash": "sha256:bd8e7f32082ccd5eb2c2bacb85e089c0b451c815f955d6f7e27470621bc45b7c"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [
+    {
+      "action": "UNPIN",
+      "target_id": "pinned-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "authority": "USER",
+      "actor_authority": "USER",
+      "status": "PARSED_NOT_EXECUTED",
+      "resolution": "NOT_FOUND",
+      "range": [
+        0,
+        83
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrNotFound",
+      "reason": "unknown_target",
+      "section": "UNPIN",
+      "range": [
+        0,
+        83
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

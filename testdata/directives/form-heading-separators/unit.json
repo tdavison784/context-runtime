@@ -1,0 +1,8 @@
+{
+  "description": "Only single SP separates heading metadata (FR-DIR-006).",
+  "requirements": [
+    "FR-DIR-006"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

@@ -25,8 +25,8 @@ type readTx struct {
 	rels         table[string, domain.Relationship]
 	supersedes   index[string] // SUPERSEDES successors: FromID -> ToIDs
 	supersededBy index[string] // SUPERSEDES predecessors: ToID -> FromIDs
-	relsFrom     index[string]
-	relsTo       index[string]
+	relsFrom     index[relKey]
+	relsTo       index[relKey]
 	relsByType   index[domain.RelationshipType]
 	events       table[string, domain.EventRecord]
 	blobs        table[string, domain.Blob]
@@ -40,6 +40,17 @@ type readTx struct {
 	convs        table[string, domain.Conversation]
 	calls        table[string, domain.CallRecord]
 	attempts     table[attemptKey, domain.CallAttempt]
+	receipts     table[string, domain.IngestReceipt]
+	envelopes    table[string, domain.EventEnvelope]
+	references   table[string, domain.UnresolvedReference]
+	blobOwners   orderedIndex[blobKey]
+	canonical    orderedIndex[canonicalKey]
+	working      orderedIndex[workingKey]
+	sources      orderedIndex[sourceKey]
+	currentIDs   liveIndex[currentIDKey, domain.AccessBoundary]
+	oblsBySource liveIndex[string, obligationKey]
+	refOwners    orderedIndex[sourceKey]
+	itemsByTask  index[string]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -67,6 +78,17 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		convs:        newTable(st.convs, writable, same[domain.Conversation]),
 		calls:        newTable(st.calls, writable, domain.CallRecord.Clone),
 		attempts:     newTable(st.attempts, writable, same[domain.CallAttempt]),
+		receipts:     newTable(st.receipts, writable, domain.IngestReceipt.Clone),
+		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
+		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
+		blobOwners:   newOrderedIndex(st.blobOwners, writable),
+		canonical:    newOrderedIndex(st.canonical, writable),
+		working:      newOrderedIndex(st.working, writable),
+		sources:      newOrderedIndex(st.sources, writable),
+		currentIDs:   newLiveIndex(st.currentIDs, writable),
+		oblsBySource: newLiveIndex(st.oblsBySource, writable),
+		refOwners:    newOrderedIndex(st.refOwners, writable),
+		itemsByTask:  newIndex(st.itemsByTask, writable),
 	}
 }
 
@@ -107,9 +129,19 @@ func (r *readTx) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 		return nil, err
 	}
 	var out []domain.ContextItem
-	for _, it := range r.items.all() {
+	add := func(it domain.ContextItem) {
 		if matchItem(f, it) {
 			out = append(out, it.Clone())
+		}
+	}
+	if f.TaskID != "" { // a task filter reads the task's index entry (SPEC-1.3)
+		for id := range r.itemsByTask.lookup(f.TaskID) {
+			it, _ := r.items.peek(id)
+			add(it)
+		}
+	} else {
+		for _, it := range r.items.all() {
+			add(it)
 		}
 	}
 	slices.SortFunc(out, func(a, b domain.ContextItem) int {
@@ -135,11 +167,26 @@ func (r *readTx) Relationships(f store.RelationshipFilter) ([]domain.Relationshi
 	}
 	// Scan the narrowest index the filter allows.
 	var ids iter.Seq[string]
+	endpoint := func(x *index[relKey], id string) iter.Seq[string] {
+		types := relationshipTypes
+		if f.Type != "" {
+			types = []domain.RelationshipType{f.Type}
+		}
+		return func(yield func(string) bool) {
+			for _, typ := range types {
+				for rid := range x.lookup(relKey{typ, id}) {
+					if !yield(rid) {
+						return
+					}
+				}
+			}
+		}
+	}
 	switch {
 	case f.FromID != "":
-		ids = r.relsFrom.lookup(f.FromID)
+		ids = endpoint(&r.relsFrom, f.FromID)
 	case f.ToID != "":
-		ids = r.relsTo.lookup(f.ToID)
+		ids = endpoint(&r.relsTo, f.ToID)
 	case f.Type != "":
 		ids = r.relsByType.lookup(f.Type)
 	default:
@@ -191,29 +238,43 @@ func (r *readTx) Blob(hash string) (domain.Blob, error) {
 	return b, nil
 }
 
-func (r *readTx) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
+func (r *readTx) CurrentVersion(key domain.CurrentKey) (string, error) {
 	if err := r.check(); err != nil {
 		return "", err
 	}
-	id, ok := r.directives.get(directiveKey{taskID, directiveID, boundary})
-	if !ok {
-		return "", notFound("directive", taskID+"/"+directiveID)
+	if err := key.Validate(); err != nil {
+		return "", err
 	}
-	return id, nil
+	return r.current(key.TaskID, key.ID, key.Access, key.Namespace)
 }
 
-func (r *readTx) CurrentDirectives(taskID, directiveID string) ([]string, error) {
+func (r *readTx) CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error) {
 	if err := r.check(); err != nil {
 		return nil, err
 	}
+	if !ns.Valid() {
+		return nil, invalid("current versions: invalid namespace %q", ns)
+	}
+	// Only the boundaries this (task, namespace, ID) has pointers in
+	// (SPEC-2.1), never every pointer in the session.
 	var out []string
-	for k, id := range r.directives.all() {
-		if k.taskID == taskID && k.directiveID == directiveID {
-			out = append(out, id)
+	for b := range r.currentIDs.lookup(currentIDKey{taskID, ns, id}) {
+		if itemID, ok := r.directives.get(directiveKey{taskID, id, b, ns}); ok {
+			out = append(out, itemID)
 		}
 	}
 	slices.Sort(out)
 	return out, nil
+}
+
+// current looks up one pointer. A boundary in another session names nothing
+// here.
+func (r *readTx) current(taskID, id string, boundary domain.AccessBoundary, ns domain.DirectiveNamespace) (string, error) {
+	itemID, ok := r.directives.get(directiveKey{taskID, id, boundary, ns})
+	if !ok || boundary.SessionID != r.sessionID {
+		return "", notFound("current version", taskID+"/"+id)
+	}
+	return itemID, nil
 }
 
 func (r *readTx) Obligation(obligationID string) (domain.ObligationVersion, error) {
@@ -254,6 +315,27 @@ func (r *readTx) Obligations(taskID string) ([]domain.ObligationVersion, error) 
 	}
 	slices.SortFunc(out, func(a, b domain.ObligationVersion) int {
 		return cmp.Compare(a.ObligationID, b.ObligationID)
+	})
+	return out, nil
+}
+
+func (r *readTx) ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		return nil, invalid("obligations by source: limit must be positive")
+	}
+	out := []domain.ObligationVersion{}
+	for k := range r.oblsBySource.lookup(sourceItemID) { // the source's own versions (SPEC-2.1)
+		if len(out) == limit {
+			return nil, store.ErrLimitExceeded
+		}
+		o, _ := r.obligations.get(k)
+		out = append(out, o)
+	}
+	slices.SortFunc(out, func(a, b domain.ObligationVersion) int {
+		return cmp.Or(cmp.Compare(a.ObligationID, b.ObligationID), cmp.Compare(a.Version, b.Version))
 	})
 	return out, nil
 }
@@ -377,4 +459,90 @@ func (r *readTx) CallAttempts(callID string) ([]domain.CallAttempt, error) {
 	}
 	slices.SortFunc(out, func(a, b domain.CallAttempt) int { return cmp.Compare(a.Attempt, b.Attempt) })
 	return out, nil
+}
+
+func (r *readTx) Receipt(occurrenceID string) (domain.IngestReceipt, error) {
+	if err := r.check(); err != nil {
+		return domain.IngestReceipt{}, err
+	}
+	v, ok := r.receipts.get(occurrenceID)
+	if !ok {
+		return domain.IngestReceipt{}, notFound("receipt", occurrenceID)
+	}
+	return v, nil
+}
+
+func (r *readTx) Envelope(occurrenceID string) (domain.EventEnvelope, error) {
+	if err := r.check(); err != nil {
+		return domain.EventEnvelope{}, err
+	}
+	v, ok := r.envelopes.get(occurrenceID)
+	if !ok {
+		return domain.EventEnvelope{}, notFound("envelope", occurrenceID)
+	}
+	return v, nil
+}
+
+// visibleReceipts returns the receipts an occurrence filter selects, ordered
+// by Seq, after validating the viewer.
+func (r *readTx) visibleReceipts(viewer domain.Principal, occurrenceID string) ([]domain.IngestReceipt, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if err := viewer.Validate(); err != nil {
+		return nil, err
+	}
+	var out []domain.IngestReceipt
+	for occ, rec := range r.receipts.all() {
+		if occurrenceID == "" || occ == occurrenceID {
+			out = append(out, rec)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.IngestReceipt) int { return cmp.Compare(a.Seq, b.Seq) })
+	return out, nil
+}
+
+func (r *readTx) Diagnostics(f store.DiagnosticFilter) ([]domain.DiagnosticRecord, error) {
+	recs, err := r.visibleReceipts(f.Viewer, f.OccurrenceID)
+	if err != nil {
+		return nil, err
+	}
+	out := []domain.DiagnosticRecord{}
+	for _, rec := range recs {
+		for _, d := range rec.Diagnostics {
+			if d.VisibleTo(f.Viewer) {
+				out = append(out, d)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *readTx) LifecycleCommands(f store.CommandFilter) ([]domain.LifecycleCommandRecord, error) {
+	recs, err := r.visibleReceipts(f.Viewer, f.OccurrenceID)
+	if err != nil {
+		return nil, err
+	}
+	out := []domain.LifecycleCommandRecord{}
+	for _, rec := range recs {
+		for _, c := range rec.Lifecycle {
+			if c.Access.Permits(f.Viewer) {
+				// The record is visible at its transcript boundary; its
+				// resolution only where DetailAccess permits (SEC-3.2).
+				out = append(out, c.Redacted(f.Viewer))
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *readTx) UnresolvedReference(id string) (domain.UnresolvedReference, error) {
+	if err := r.check(); err != nil {
+		return domain.UnresolvedReference{}, err
+	}
+	v, ok := r.references.get(id)
+	if !ok {
+		return domain.UnresolvedReference{}, notFound("unresolved reference", id)
+	}
+	return v, nil
 }

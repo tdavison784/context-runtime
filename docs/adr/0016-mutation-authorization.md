@@ -3,6 +3,52 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
+## Amended in Phase 2 (ADR 19, 2026-09-26; corrected 2026-09-26 per SPEC-1.8)
+
+The store methods this ADR's `ResolveLifecycleTarget` and
+`rejectVisibleBoundaryConflict` decisions call — `CurrentDirective`/
+`CurrentDirectives` — were replaced in Phase 2 by the typed, namespaced
+`store.CurrentVersion`/`store.CurrentVersions` (see ADR 4's amendment note;
+M6/R6, ADR 19 §17), and both `internal/graph` functions now carry a
+`domain.DirectiveNamespace`: `rejectVisibleBoundaryConflict` takes one
+explicitly, and `ResolveLifecycleTarget`'s candidate gathering resolves
+only the `DIRECTIVE` namespace, per R6, so a keyed agent write can never be
+mistaken for a lifecycle target.
+
+**This ADR's authorization semantics are not "unchanged by the rename"
+(SPEC-1.8: that claim was wrong); the mechanism this ADR describes below
+changed in Phase 2, most visibly here:**
+
+- **`rejectVisibleBoundaryConflict` now returns `graph.ErrBoundaryConflict`
+  (R13, ADR 19 §7), never `domain.ErrInvalidAuthorityPromotion`** — a
+  deliberate Phase 2 change (ADR 4's amendment note has the full citation),
+  so a boundary conflict on a same-ID write is an item-level rejection
+  ingestion can diagnose (`boundary_conflict`) without aborting the whole
+  event, unlike every other authority-promotion failure this ADR's
+  `AuthorizeSupersession`/`AuthorizeMutation` decisions still correctly
+  reject with `ErrInvalidAuthorityPromotion`. Only the visible-boundary
+  ID-reuse path changed; the rest of this ADR's authority-promotion
+  decisions are unaffected.
+- **`IsCurrent` (which `AuthorizeSupersession`'s callers and
+  `SupersedeSnapshot` both rely on to find "current" candidates) now also
+  requires the current-version map to name the item and the item to carry
+  no `DUPLICATE_OF` edge** (D10, ADR 19 §7) — not merely the absence of an
+  incoming `SUPERSEDES` edge, which is what this ADR's text below
+  describes.
+- **`Supersede` gained `ErrAlreadySuperseded`** and now retires bound
+  obligation versions in the same operation (D13, ADR 19 §9), which this
+  ADR's obligation-transition decisions below predate.
+- **`SupersedeSnapshot` moved to `internal/graph/snapshot.go`** and returns
+  a `SnapshotResult` (`Supersedes`/`Duplicates`), not the return shape this
+  ADR's `TestSupersedeSnapshot_*` citations below describe.
+
+Only the store call site's name, its added namespace argument, and the
+four points above differ from the authorization/ambiguity/stale-pointer
+text below; the rest of this ADR's decisions (grant issuance/revocation,
+the AGENT-same-key supersession exception, obligation-transition
+authorization, `LinkDerived`'s actor-authority gate) are unaffected by
+Phase 2.
+
 ## Context
 
 FR-AUTH-001 requires every mutation to check access to its targets and
@@ -603,8 +649,10 @@ and tests are all merged and passing (`go test -race ./... ` green):
   AUTH-2.2 (ADR 4 owns the decision; cited here too since ADR 16's
   `SupersedeSnapshot` selector depends on `Section` being trustworthy).
 - `internal/store/memory`/`internal/store/sqlite` implement
-  `CurrentDirectives`; `TestConformance/CurrentDirectivesOrder` (memory and
-  SQLite) and `internal/store/sqlite/current_directives_test.go
+  `CurrentVersions` (SPEC-1.8: registered as
+  `TestConformance/CurrentVersions(DIRECTIVE)Order`, renamed from
+  `CurrentDirectivesOrder`; memory and SQLite) and
+  `internal/store/sqlite/current_directives_test.go
   :TestCurrentDirectivesAcrossBoundaries` lock it (ADR 4 owns the
   decision). `TestConformance/MatcherTransition` reconfirms AUTH-2.3 at the
   store level: `AppendObligationTransition` rejects a matcher transition

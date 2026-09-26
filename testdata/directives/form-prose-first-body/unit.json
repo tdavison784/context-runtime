@@ -1,0 +1,9 @@
+{
+  "description": "A body whose first non-blank line is prose is one single-body item, bullets included (M4).",
+  "requirements": [
+    "FR-DIR-006",
+    "M4"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

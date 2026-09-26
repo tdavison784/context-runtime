@@ -1,0 +1,247 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        207
+      ],
+      "heading_range": [
+        0,
+        54
+      ],
+      "body_range": [
+        54,
+        207
+      ],
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "instruction",
+          "range": [
+            10,
+            26
+          ]
+        },
+        {
+          "name": "scope",
+          "value": "TURN",
+          "range": [
+            43,
+            53
+          ]
+        }
+      ],
+      "items": [
+        0,
+        1,
+        2,
+        3
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "a",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "override",
+      "content_hash": "sha256:29b9bc0eb8cc619d6bf24547efef1a0d24a564ed1d4e89255b1664393177acba",
+      "kind": "constraint",
+      "scope": "TURN",
+      "attributes": [
+        {
+          "name": "scope",
+          "value": "TURN",
+          "range": [
+            43,
+            53
+          ]
+        },
+        {
+          "name": "kind",
+          "value": "constraint",
+          "range": [
+            61,
+            76
+          ]
+        }
+      ],
+      "range": [
+        54,
+        87
+      ],
+      "text_ranges": [
+        [
+          78,
+          86
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "b",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "invalid keeps inherited",
+      "content_hash": "sha256:42cc924b9f7f3360831ce5148d9f245232c2043b70fb2b364477277901aff3ea",
+      "kind": "instruction",
+      "scope": "TURN",
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "instruction",
+          "range": [
+            10,
+            26
+          ]
+        },
+        {
+          "name": "scope",
+          "value": "TURN",
+          "range": [
+            43,
+            53
+          ]
+        }
+      ],
+      "range": [
+        87,
+        143
+      ],
+      "text_ranges": [
+        [
+          119,
+          142
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "c",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "first valid wins",
+      "content_hash": "sha256:dceaf629c78aa790b1309d5267a3798d700a9741d3b9cc6002a860af1fb07ef5",
+      "kind": "instruction",
+      "scope": "TASK",
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "instruction",
+          "range": [
+            10,
+            26
+          ]
+        },
+        {
+          "name": "scope",
+          "value": "TASK",
+          "range": [
+            150,
+            160
+          ]
+        }
+      ],
+      "range": [
+        143,
+        191
+      ],
+      "text_ranges": [
+        [
+          174,
+          190
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 0,
+      "directive_id": "d",
+      "explicit_id": true,
+      "authority": "USER",
+      "text": "inherited",
+      "content_hash": "sha256:1425a9ddd70a5c23e4726f1436ad8ef8d9711b13c857d904aca5e20c2dbdd040",
+      "kind": "instruction",
+      "scope": "TURN",
+      "attributes": [
+        {
+          "name": "kind",
+          "value": "instruction",
+          "range": [
+            10,
+            26
+          ]
+        },
+        {
+          "name": "scope",
+          "value": "TURN",
+          "range": [
+            43,
+            53
+          ]
+        }
+      ],
+      "range": [
+        191,
+        207
+      ],
+      "text_ranges": [
+        [
+          197,
+          206
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_attribute",
+      "section": "PINNED",
+      "range": [
+        27,
+        42
+      ]
+    },
+    {
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_attribute",
+      "section": "PINNED",
+      "range": [
+        94,
+        103
+      ]
+    },
+    {
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "scope_widening",
+      "section": "PINNED",
+      "range": [
+        104,
+        117
+      ]
+    },
+    {
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "duplicate_attribute",
+      "section": "PINNED",
+      "range": [
+        161,
+        172
+      ]
+    }
+  ]
+}

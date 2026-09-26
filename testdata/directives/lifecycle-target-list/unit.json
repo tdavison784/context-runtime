@@ -1,0 +1,9 @@
+{
+  "description": "Resolve/Unpin take target-only list items (FR-DIR-005).",
+  "requirements": [
+    "FR-DIR-006",
+    "FR-DIR-005"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

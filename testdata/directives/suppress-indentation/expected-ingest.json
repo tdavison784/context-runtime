@@ -1,0 +1,120 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_91a6fad6dac2a3f75d066b846cd6aad0",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": " ## Pinned\n- hidden\n\t## Goal\nhidden\n    ## Working\n- hidden\n"
+        }
+      ],
+      "content_hash": "sha256:71ca6cb495b99077db913ae53dd28ef4955e7c2b3440a26c9f9b88ba92b70cbe"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_60c195c2884c765baf27fd29c24c73b1",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": " ## Pinned\n- hidden\n\t## Goal\nhidden\n    ## Working\n- hidden\n"
+        }
+      ],
+      "content_hash": "sha256:4673edd7b36cc2a7bcd7046ca6bb7ebf9225890f2c6d3e6904de8b6c61300931",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            60
+          ],
+          "slices": [
+            [
+              0,
+              60
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "indented",
+      "section": "PINNED",
+      "range": [
+        1,
+        10
+      ],
+      "access_scope": "SESSION"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "indented",
+      "section": "GOAL",
+      "range": [
+        21,
+        28
+      ],
+      "access_scope": "SESSION"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "DirectiveNotParsed",
+      "reason": "indented",
+      "section": "WORKING",
+      "range": [
+        40,
+        50
+      ],
+      "access_scope": "SESSION"
+    }
+  ]
+}

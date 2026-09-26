@@ -1,0 +1,107 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_0e68ffec5b05b1199a13421b47f9c082",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "﻿﻿## Pinned\n- evil\nx\r﻿## Goal\revil\r\u003e ## Working\r- evil\r```\r## Remember\r- evil\r"
+        }
+      ],
+      "content_hash": "sha256:af3dc3c5197899e3dd2f009e68c56a3ae7a04cf2eac3d86019cc2a00994554b6"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_bc47af884d8e0199f3b32f197c300a86",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "﻿﻿## Pinned\n- evil\nx\r﻿## Goal\revil\r\u003e ## Working\r- evil\r```\r## Remember\r- evil\r"
+        }
+      ],
+      "content_hash": "sha256:212d585f55ed2d759a68bf44eba5f37021eebfb8d470b28a9efa879d2d67c201",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            84
+          ],
+          "slices": [
+            [
+              0,
+              84
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "block_quote",
+      "section": "WORKING",
+      "range": [
+        43,
+        53
+      ],
+      "access_scope": "SESSION"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "REMEMBER",
+      "range": [
+        65,
+        76
+      ],
+      "access_scope": "SESSION"
+    }
+  ]
+}

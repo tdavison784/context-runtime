@@ -1,0 +1,125 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_eecfc9d065843f87f0ee1d0c4fd415dc",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Remember unknown=secret-token\n- {color=red ttl=2} a\n"
+        }
+      ],
+      "content_hash": "sha256:c9f46f3a0654217570d7c7b1b77a2407541c215e61067f766311bfa593b9e34b"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_4b7ad489e5bb6e8f39e9580ef77f06fb",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "ttl_turns": 2,
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "a"
+        }
+      ],
+      "content_hash": "sha256:7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            33,
+            55
+          ],
+          "slices": [
+            [
+              53,
+              54
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "unknown_attribute",
+      "section": "REMEMBER",
+      "range": [
+        12,
+        32
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-7ffb4916b4148c86af50b323cb8b3aa911858655880f0c39ba8319203017f0c0",
+      "range": [
+        33,
+        55
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "unknown_attribute",
+      "section": "REMEMBER",
+      "range": [
+        36,
+        45
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

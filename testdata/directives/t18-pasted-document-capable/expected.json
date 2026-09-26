@@ -1,0 +1,136 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "GOAL",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        18,
+        46
+      ],
+      "heading_range": [
+        18,
+        26
+      ],
+      "body_range": [
+        26,
+        46
+      ],
+      "items": [
+        0
+      ]
+    },
+    {
+      "keyword": "PINNED",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        46,
+        100
+      ],
+      "heading_range": [
+        46,
+        56
+      ],
+      "body_range": [
+        56,
+        100
+      ],
+      "items": [
+        1
+      ]
+    },
+    {
+      "keyword": "RESOLVE",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        100,
+        120
+      ],
+      "heading_range": [
+        100,
+        120
+      ],
+      "body_range": [
+        120,
+        120
+      ],
+      "directive_id": "launch"
+    }
+  ],
+  "items": [
+    {
+      "section": "GOAL",
+      "section_index": 0,
+      "directive_id": "goal-9ec7b5f12bcd3455cb3a90957f010e9d0d5ced4e8a04c51db8bdde26480bc980",
+      "authority": "USER",
+      "text": "Ship Foo v2 by Q3.",
+      "content_hash": "sha256:9ec7b5f12bcd3455cb3a90957f010e9d0d5ced4e8a04c51db8bdde26480bc980",
+      "range": [
+        18,
+        46
+      ],
+      "text_ranges": [
+        [
+          26,
+          44
+        ]
+      ]
+    },
+    {
+      "section": "PINNED",
+      "section_index": 1,
+      "directive_id": "pinned-c66dd96c3f7b26b86a291df6c16507f2d7b65a0a1e3e35390f5661f5f3fe05a5",
+      "authority": "USER",
+      "text": "Document constraints apply to reviewers.",
+      "content_hash": "sha256:c66dd96c3f7b26b86a291df6c16507f2d7b65a0a1e3e35390f5661f5f3fe05a5",
+      "range": [
+        56,
+        99
+      ],
+      "text_ranges": [
+        [
+          58,
+          98
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [
+    {
+      "action": "RESOLVE",
+      "target_id": "launch",
+      "authority": "USER",
+      "range": [
+        100,
+        120
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "GOAL",
+      "directive_id": "goal-9ec7b5f12bcd3455cb3a90957f010e9d0d5ced4e8a04c51db8bdde26480bc980",
+      "range": [
+        18,
+        46
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-c66dd96c3f7b26b86a291df6c16507f2d7b65a0a1e3e35390f5661f5f3fe05a5",
+      "range": [
+        56,
+        99
+      ]
+    }
+  ]
+}

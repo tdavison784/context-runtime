@@ -1,0 +1,9 @@
+{
+  "description": "The final line needs no line break.",
+  "requirements": [
+    "FR-DIR-006",
+    "M4"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

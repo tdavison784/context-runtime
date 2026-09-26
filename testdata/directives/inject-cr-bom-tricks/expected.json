@@ -1,0 +1,28 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [],
+  "items": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "block_quote",
+      "section": "WORKING",
+      "range": [
+        43,
+        53
+      ]
+    },
+    {
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "REMEMBER",
+      "range": [
+        65,
+        76
+      ]
+    }
+  ]
+}

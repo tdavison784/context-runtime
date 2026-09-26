@@ -3,69 +3,140 @@ package sqlite
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
-func (t *transaction) Item(id string) (domain.ContextItem, error) {
+// verifyItemContent fails with domain.ErrIntegrity when a stored item's
+// parts no longer match its content hash, as for a row whose text 0001
+// altered before migration 0002 (R8). Such an item is never returned.
+func verifyItemContent(v domain.ContextItem) error {
+	if domain.ContentHash(v.Parts) != v.ContentHash || domain.SemanticBytes(v.Parts) != v.SemanticBytes {
+		return fmt.Errorf("%w: item %s content does not match its hash", domain.ErrIntegrity, v.ID)
+	}
+	return nil
+}
+
+// itemCacheFootprint reports the cache's entry count and text bytes.
+func (t *transaction) itemCacheFootprint() (entries, bytes int) { return t.itemCache.footprint() }
+
+func (t *transaction) Item(id string) (domain.ContextItem, error) { return t.loadItem(id, true) }
+
+// loadItem decodes and verifies an item, serving it from the transaction's
+// bounded cache when present. Decoding and verifying costs the item's size,
+// and ingest reads a span's transcript once per derived item, so point reads
+// cache what they verify (SPEC-3.1 item 2). Scan-driven lookups pass
+// cache=false: paging past many matches must neither grow memory nor evict
+// that working set (SPEC-4.1). Returned values are clones; only verified
+// items are cached.
+func (t *transaction) loadItem(id string, cache bool) (domain.ContextItem, error) {
+	if v, ok := t.itemCache.get(id); ok {
+		return v.Clone(), nil
+	}
 	var v domain.ContextItem
-	err := t.get("item", id, 0, &v)
-	return v, err
+	if err := t.get("item", id, 0, &v); err != nil {
+		return domain.ContextItem{}, err
+	}
+	t.itemBytesLoaded += v.SemanticBytes
+	if err := verifyItemContent(v); err != nil {
+		return domain.ContextItem{}, err
+	}
+	if cache {
+		if t.itemCache == nil {
+			t.itemCache = &itemCache{}
+		}
+		t.itemCache.put(id, v.Clone())
+	}
+	return v, nil
 }
 func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
-	items, err := listRecords[domain.ContextItem](t, "item")
+	q, args := itemQuery(t.session, f)
+	items, err := queryRecords[domain.ContextItem](t, "item", q, args...)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]domain.ContextItem, 0)
+	out := make([]domain.ContextItem, 0, len(items))
 	for _, v := range items {
-		if f.TaskID != "" && f.TaskID != v.TaskID || f.AgentID != "" && f.AgentID != v.AgentID || f.Residency != "" && f.Residency != v.Residency || f.DirectiveID != "" && f.DirectiveID != v.DirectiveID || f.EventID != "" && f.EventID != v.EventID || v.Seq < f.MinSeq || f.MaxSeq != 0 && v.Seq > f.MaxSeq {
-			continue
+		if err := verifyItemContent(v); err != nil {
+			return nil, err
 		}
-		if len(f.Kinds) > 0 {
-			ok := false
-			for _, k := range f.Kinds {
-				if k == v.Kind {
-					ok = true
-				}
-			}
-			if !ok {
-				continue
-			}
+		if len(f.Kinds) > 0 && !slices.Contains(f.Kinds, v.Kind) {
+			continue
 		}
 		out = append(out, v)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Seq != out[j].Seq {
-			return out[i].Seq < out[j].Seq
-		}
-		return out[i].ID < out[j].ID
-	})
 	return out, nil
 }
+
+// itemQuery pushes an item filter's equality and range predicates into SQL
+// (SPEC-1.3): a task filter uses the item_task_seq index instead of loading
+// the session. Kinds are filtered after decoding.
+func itemQuery(session string, f store.ItemFilter) (string, []any) {
+	q, args := schemas["item"].selectSQL+" WHERE session_id=?", []any{session}
+	for _, c := range []struct {
+		col, val string
+	}{{"f_task_id", f.TaskID}, {"f_agent_id", f.AgentID}, {"f_residency", string(f.Residency)}, {"f_directive_id", f.DirectiveID}, {"f_event_id", f.EventID}} {
+		if c.val != "" {
+			q += " AND " + c.col + "=?"
+			args = append(args, c.val)
+		}
+	}
+	if f.MinSeq > 0 {
+		q += " AND f_seq>=?"
+		args = append(args, int64(f.MinSeq))
+	}
+	if f.MaxSeq > 0 {
+		q += " AND f_seq<=?"
+		args = append(args, int64(f.MaxSeq))
+	}
+	return q + " ORDER BY f_seq, id", args
+}
+
 func (t *transaction) Relationships(f store.RelationshipFilter) ([]domain.Relationship, error) {
-	// Filtering is performed after decoding so all list methods share the
-	// same per-record typed-column decoder.
-	records, err := listRecords[domain.Relationship](t, "relationship")
+	q, args := relationshipQuery(t.session, f)
+	return queryRecords[domain.Relationship](t, "relationship", q, args...)
+}
+
+// relationshipQuery pushes a relationship filter into SQL (SPEC-1.3): a
+// type with a source or target uses relationship_from_seq or
+// relationship_to_seq.
+func relationshipQuery(session string, f store.RelationshipFilter) (string, []any) {
+	q, args := schemas["relationship"].selectSQL+" WHERE session_id=?", []any{session}
+	for _, c := range []struct {
+		col, val string
+	}{{"f_type", string(f.Type)}, {"f_from_id", f.FromID}, {"f_to_id", f.ToID}} {
+		if c.val != "" {
+			q += " AND " + c.col + "=?"
+			args = append(args, c.val)
+		}
+	}
+	return q + " ORDER BY f_seq, id", args
+}
+
+// queryRecords decodes the rows of a select over kind's table.
+func queryRecords[T any](t *transaction, kind, q string, args ...any) ([]T, error) {
+	s, err := schemaFor(kind)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]domain.Relationship, 0)
-	for _, v := range records {
-		if f.Type != "" && f.Type != v.Type || f.FromID != "" && f.FromID != v.FromID || f.ToID != "" && f.ToID != v.ToID {
-			continue
-		}
-		out = append(out, v)
+	rows, err := t.query(q, args...)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Seq != out[j].Seq {
-			return out[i].Seq < out[j].Seq
+	defer rows.Close()
+	out := make([]T, 0)
+	for rows.Next() {
+		v, err := s.scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", kind, err)
 		}
-		return out[i].ID < out[j].ID
-	})
-	return out, nil
+		out = append(out, v.Interface().(T))
+	}
+	return out, rows.Err()
 }
 func (t *transaction) Event(id string) (domain.EventRecord, error) {
 	var v domain.EventRecord
@@ -94,39 +165,56 @@ func (t *transaction) Blob(hash string) (domain.Blob, error) {
 	}
 	return v, nil
 }
-func (t *transaction) CurrentDirective(taskID, directiveID string, boundary domain.AccessBoundary) (string, error) {
-	if err := boundary.Validate(); err != nil {
+func (t *transaction) CurrentVersion(key domain.CurrentKey) (string, error) {
+	if err := key.Validate(); err != nil {
 		return "", err
 	}
-	// A boundary in another session names nothing here: reads report it as
-	// missing, never as invalid, so they cannot probe other sessions.
-	if boundary.SessionID != t.session {
-		return "", domain.ErrNotFound
-	}
-	var id string
-	err := t.conn.QueryRowContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND directive_id=? AND boundary_scope=? AND boundary_session_id=? AND boundary_workflow_id=? AND boundary_task_id=? AND boundary_agent_id=?", t.session, taskID, directiveID, boundary.Scope, boundary.SessionID, boundary.WorkflowID, boundary.TaskID, boundary.AgentID).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", domain.ErrNotFound
-	}
-	return id, err
+	return t.current(key.TaskID, key.ID, key.Access, key.Namespace)
 }
 
-func (t *transaction) CurrentDirectives(taskID, directiveID string) ([]string, error) {
-	rows, err := t.conn.QueryContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND directive_id=? ORDER BY item_id", t.session, taskID, directiveID)
+func (t *transaction) CurrentVersions(taskID string, ns domain.DirectiveNamespace, id string) ([]string, error) {
+	if !ns.Valid() {
+		return nil, fmt.Errorf("%w: invalid namespace %q", domain.ErrInvalidRecord, ns)
+	}
+	q, args := currentVersionsQuery(t.session, taskID, ns, id)
+	rows, err := t.query(q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var ids []string
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var itemID string
+		if err := rows.Scan(&itemID); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		ids = append(ids, itemID)
 	}
 	return ids, rows.Err()
 }
+
+// currentVersionsQuery reads the pointers of one (task, namespace, ID)
+// across boundaries through the directives primary key (SPEC-2.1).
+func currentVersionsQuery(session, taskID string, ns domain.DirectiveNamespace, id string) (string, []any) {
+	return "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND namespace=? AND directive_id=? ORDER BY item_id",
+		[]any{session, taskID, ns, id}
+}
+
+// current looks up one pointer. A boundary in another session names nothing
+// here: reads report it as missing, never as invalid, so they cannot probe
+// other sessions.
+func (t *transaction) current(taskID, id string, boundary domain.AccessBoundary, ns domain.DirectiveNamespace) (string, error) {
+	if boundary.SessionID != t.session {
+		return "", domain.ErrNotFound
+	}
+	var itemID string
+	err := t.conn.QueryRowContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND namespace=? AND directive_id=? AND boundary_scope=? AND boundary_session_id=? AND boundary_workflow_id=? AND boundary_task_id=? AND boundary_agent_id=?", t.session, taskID, ns, id, boundary.Scope, boundary.SessionID, boundary.WorkflowID, boundary.TaskID, boundary.AgentID).Scan(&itemID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", domain.ErrNotFound
+	}
+	return itemID, err
+}
+
 func (t *transaction) Obligation(id string) (domain.ObligationVersion, error) {
 	vs, err := t.ObligationVersions(id)
 	if err != nil {
@@ -138,19 +226,37 @@ func (t *transaction) Obligation(id string) (domain.ObligationVersion, error) {
 	return vs[len(vs)-1], nil
 }
 func (t *transaction) ObligationVersions(id string) ([]domain.ObligationVersion, error) {
-	records, err := listRecords[domain.ObligationVersion](t, "obligation")
+	q, args := obligationVersionsQuery(t.session, id)
+	return queryRecords[domain.ObligationVersion](t, "obligation", q, args...)
+}
+
+// obligationVersionsQuery reads one obligation's versions by primary key,
+// in version order (SPEC-2.1).
+func obligationVersionsQuery(session, id string) (string, []any) {
+	return schemas["obligation"].selectSQL + " WHERE session_id=? AND id=? ORDER BY subkey", []any{session, id}
+}
+
+func (t *transaction) ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("%w: obligations by source: limit must be positive", domain.ErrInvalidRecord)
+	}
+	q, args := obligationsBySourceQuery(t.session, sourceItemID, limit)
+	out, err := queryRecords[domain.ObligationVersion](t, "obligation", q, args...)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]domain.ObligationVersion, 0)
-	for _, v := range records {
-		if v.ObligationID == id {
-			out = append(out, v)
-		}
+	if len(out) > limit {
+		return nil, store.ErrLimitExceeded
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
 	return out, nil
 }
+
+// obligationsBySourceQuery reads at most limit+1 versions bound to a
+// source through the obligation_source index (0006).
+func obligationsBySourceQuery(session, sourceItemID string, limit int) (string, []any) {
+	return schemas["obligation"].selectSQL + " WHERE session_id=? AND f_source_item_id=? ORDER BY id, subkey LIMIT ?", []any{session, sourceItemID, limit + 1}
+}
+
 func (t *transaction) Obligations(taskID string) ([]domain.ObligationVersion, error) {
 	records, err := listRecords[domain.ObligationVersion](t, "obligation")
 	if err != nil {

@@ -42,12 +42,31 @@ type session struct {
 	committed bool
 }
 
-// directiveKey is a directive's identity (FR-DIR-002): versions in
-// different access boundaries are independent directives.
+// directiveKey is a current-version identity (FR-DIR-002, M6): versions in
+// different access boundaries or namespaces are independent.
 type directiveKey struct {
 	taskID, directiveID string
 	boundary            domain.AccessBoundary
+	namespace           domain.DirectiveNamespace
 }
+
+// currentIDKey is a current-version identity without its boundary.
+type currentIDKey struct {
+	taskID    string
+	namespace domain.DirectiveNamespace
+	id        string
+}
+
+// relKey keys relationships by type and one endpoint (SPEC-3.1 item 5), so
+// a typed read never walks another type's edges at the same endpoint.
+type relKey struct {
+	typ domain.RelationshipType
+	id  string
+}
+
+// relationshipTypes lists every type, for endpoint reads without a type.
+var relationshipTypes = []domain.RelationshipType{domain.RelDerivedFrom, domain.RelSupersedes, domain.RelDependsOn,
+	domain.RelReferences, domain.RelSatisfies, domain.RelDuplicateOf}
 
 type obligationKey struct {
 	id      string
@@ -66,8 +85,8 @@ type state struct {
 	rels         map[string]domain.Relationship
 	supersedes   map[string][]string // SUPERSEDES successors: FromID -> ToIDs
 	supersededBy map[string][]string // SUPERSEDES predecessors: ToID -> FromIDs
-	relsFrom     map[string][]string // relationship IDs by FromID
-	relsTo       map[string][]string // relationship IDs by ToID
+	relsFrom     map[relKey][]string // relationship IDs by (Type, FromID)
+	relsTo       map[relKey][]string // relationship IDs by (Type, ToID)
 	relsByType   map[domain.RelationshipType][]string
 	events       map[string]domain.EventRecord
 	blobs        map[string]domain.Blob
@@ -81,6 +100,23 @@ type state struct {
 	convs        map[string]domain.Conversation
 	calls        map[string]domain.CallRecord
 	attempts     map[attemptKey]domain.CallAttempt
+	receipts     map[string]domain.IngestReceipt // by occurrence ID
+	envelopes    map[string]domain.EventEnvelope // by occurrence ID
+	references   map[string]domain.UnresolvedReference
+
+	// Access-filtered lookup indexes (F1): keyed by owner columns, live-only
+	// where noted.
+	blobOwners  map[blobKey][]seqRef
+	canonical   map[canonicalKey][]seqRef // live
+	working     map[workingKey][]seqRef   // live
+	sources     map[sourceKey][]seqRef    // live
+	refOwners   map[sourceKey][]seqRef
+	itemsByTask map[string][]string // task ID -> item IDs (SPEC-1.3)
+	// Keyed secondary indexes (SPEC-2.1): the boundaries a (task,
+	// namespace, ID) has current-version pointers in, and the obligation
+	// versions bound to each source item.
+	currentIDs   map[currentIDKey]map[domain.AccessBoundary]bool
+	oblsBySource map[string]map[obligationKey]bool
 }
 
 func newState() *state {
@@ -89,8 +125,8 @@ func newState() *state {
 		rels:         map[string]domain.Relationship{},
 		supersedes:   map[string][]string{},
 		supersededBy: map[string][]string{},
-		relsFrom:     map[string][]string{},
-		relsTo:       map[string][]string{},
+		relsFrom:     map[relKey][]string{},
+		relsTo:       map[relKey][]string{},
 		relsByType:   map[domain.RelationshipType][]string{},
 		events:       map[string]domain.EventRecord{},
 		blobs:        map[string]domain.Blob{},
@@ -104,6 +140,17 @@ func newState() *state {
 		convs:        map[string]domain.Conversation{},
 		calls:        map[string]domain.CallRecord{},
 		attempts:     map[attemptKey]domain.CallAttempt{},
+		receipts:     map[string]domain.IngestReceipt{},
+		envelopes:    map[string]domain.EventEnvelope{},
+		references:   map[string]domain.UnresolvedReference{},
+		blobOwners:   map[blobKey][]seqRef{},
+		canonical:    map[canonicalKey][]seqRef{},
+		working:      map[workingKey][]seqRef{},
+		sources:      map[sourceKey][]seqRef{},
+		currentIDs:   map[currentIDKey]map[domain.AccessBoundary]bool{},
+		oblsBySource: map[string]map[obligationKey]bool{},
+		refOwners:    map[sourceKey][]seqRef{},
+		itemsByTask:  map[string][]string{},
 	}
 }
 
@@ -141,7 +188,12 @@ func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) 
 	defer sess.mu.Unlock()
 	t := &tx{readTx: newReadTx(sessionID, sess.st, true), baseSeq: sess.st.lastSeq}
 	defer t.finish()
-	if err := fn(t); err != nil {
+	g := store.NewGuard(t)
+	err = fn(g)
+	if p := g.Poisoned(); p != nil {
+		return p // the overlay is discarded: nothing commits (DUR-1.3)
+	}
+	if err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {

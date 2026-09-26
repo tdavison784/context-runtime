@@ -130,6 +130,19 @@ func mustInsert(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
 	}
 }
 
+// mustFile points each directive item's current-version map entry at it
+// directly through the store, modelling prior directive state without
+// re-running authorization: a directive item is current only while the
+// map names it (D10).
+func mustFile(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
+	t.Helper()
+	for _, it := range items {
+		if err := tx.SetCurrentVersion(it.ID); err != nil {
+			t.Fatalf("SetCurrentVersion(%s): %v", it.ID, err)
+		}
+	}
+}
+
 // -- T02: directive replacement ------------------------------------------
 
 func TestReplaceDirective_T02(t *testing.T) {
@@ -175,7 +188,7 @@ func TestReplaceDirective_T02(t *testing.T) {
 
 	err = s.View(ctx, sess, func(tx store.ReadTx) error {
 		boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: taskID}
-		cur, err := tx.CurrentDirective(taskID, dirID, boundary)
+		cur, err := tx.CurrentVersion(domain.CurrentKey{SessionID: sess, TaskID: taskID, Access: boundary, Namespace: domain.NamespaceDirective, ID: dirID})
 		if err != nil {
 			return err
 		}
@@ -307,6 +320,7 @@ func TestSupersedeSnapshot_NewItemNotWorking(t *testing.T) {
 		oldWorking = workingItem(sess, "old-working", tx.NextSeq(), domain.AuthorityUser)
 		notWorking = storetest.NewDirective(sess, "pinned-not-working", "some-pin", tx.NextSeq(), "text")
 		mustInsert(t, tx, oldWorking, notWorking)
+		mustFile(t, tx, oldWorking)
 		return nil
 	})
 	if err != nil {
@@ -500,19 +514,21 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityUser), taskID, dirID, u.ID, "evt-u")
 			return err
 		})
-		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
-			t.Fatalf("err = %v, want ErrInvalidAuthorityPromotion", err)
+		// R13: a boundary change through ID reuse rejects that item
+		// (ErrBoundaryConflict), distinct from an authorization failure.
+		if !errors.Is(err, ErrBoundaryConflict) || errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Fatalf("err = %v, want ErrBoundaryConflict only", err)
 		}
 
 		// h must remain the only current version; the rejected write left
 		// nothing behind.
 		err = s.View(ctx, sess, func(tx store.ReadTx) error {
-			versions, err := tx.CurrentDirectives(taskID, dirID)
+			versions, err := tx.CurrentVersions(taskID, domain.NamespaceAgentKey, dirID)
 			if err != nil {
 				return err
 			}
 			if len(versions) != 1 || versions[0] != "h" {
-				t.Errorf("CurrentDirectives(%s) = %v, want [h]", dirID, versions)
+				t.Errorf("CurrentVersions(%s) = %v, want [h]", dirID, versions)
 			}
 			return nil
 		})
@@ -778,9 +794,9 @@ func TestReplaceDirective_KeyedAgentWriteChain_T17(t *testing.T) {
 
 	err = s.View(ctx, sess, func(tx store.ReadTx) error {
 		boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: taskID}
-		cur, err := tx.CurrentDirective(taskID, dirID, boundary)
+		cur, err := tx.CurrentVersion(domain.CurrentKey{SessionID: sess, TaskID: taskID, Access: boundary, Namespace: domain.NamespaceAgentKey, ID: dirID})
 		if err != nil || cur != v2 {
-			t.Errorf("CurrentDirective = %q, %v; want %q, nil", cur, err, v2)
+			t.Errorf("CurrentVersion = %q, %v; want %q, nil", cur, err, v2)
 		}
 		if ok, err := IsCurrent(tx, v1); err != nil || ok {
 			t.Errorf("IsCurrent(v1) = %v, %v; want false, nil", ok, err)
@@ -816,11 +832,13 @@ func TestSupersedeSnapshot_FRDIR007(t *testing.T) {
 		otherAgentItem = agentScopedWorkingItem(sess, "agent-restricted", tx.NextSeq(), domain.AuthorityUser, "agent-b")
 		w2 = workingItem(sess, "w2", tx.NextSeq(), domain.AuthorityUser)
 		mustInsert(t, tx, w1a, otherAgentItem, w2)
+		mustFile(t, tx, w1a, otherAgentItem)
 
-		rels, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
+		res, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
 		if err != nil {
 			return err
 		}
+		rels := res.Supersedes
 		if len(rels) != 1 || rels[0].ToID != w1a.ID {
 			t.Errorf("SupersedeSnapshot relationships = %+v, want exactly one edge to %s", rels, w1a.ID)
 		}
@@ -870,11 +888,13 @@ func TestSupersedeSnapshot_MultipleOldItems(t *testing.T) {
 		w1b := workingItem(sess, "m-w1b", tx.NextSeq(), domain.AuthorityUser)
 		w2 := workingItem(sess, "m-w2", tx.NextSeq(), domain.AuthorityUser)
 		mustInsert(t, tx, w1a, w1b, w2)
+		mustFile(t, tx, w1a, w1b)
 
-		rels, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
+		res, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
 		if err != nil {
 			return err
 		}
+		rels := res.Supersedes
 		if len(rels) != 2 {
 			t.Errorf("SupersedeSnapshot relationships = %d, want 2", len(rels))
 		}
@@ -927,11 +947,13 @@ func TestSupersedeSnapshot_ConversationKindAndIndependentTaskState(t *testing.T)
 		independent = independentTaskStateItem(sess, "independent", tx.NextSeq(), domain.AuthorityUser)
 		newConv = workingConversationItem(sess, "new-conv", tx.NextSeq(), domain.AuthorityUser)
 		mustInsert(t, tx, oldConv, independent, newConv)
+		mustFile(t, tx, oldConv)
 
-		rels, err := SupersedeSnapshot(tx, actor, []string{newConv.ID}, taskID, "evt-conv")
+		res, err := SupersedeSnapshot(tx, actor, []string{newConv.ID}, taskID, "evt-conv")
 		if err != nil {
 			return err
 		}
+		rels := res.Supersedes
 		if len(rels) != 1 || rels[0].ToID != oldConv.ID {
 			t.Errorf("SupersedeSnapshot relationships = %+v, want exactly one edge to %s", rels, oldConv.ID)
 		}
@@ -1424,9 +1446,13 @@ func TestResolveLifecycleTarget_LiteralItemID(t *testing.T) {
 
 	var itemID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
-		it := taskItem(sess, "plain-item", tx.NextSeq(), domain.AuthorityUser)
+		// Lifecycle targets live in the DIRECTIVE namespace (R6): a
+		// current directive item resolves by its literal item ID.
+		it := storetest.NewDirective(sess, "pinned-item", "some-pin", tx.NextSeq(), "text")
 		itemID = it.ID
-		return tx.InsertItem(it)
+		mustInsert(t, tx, it)
+		mustFile(t, tx, it)
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("setup: %v", err)
@@ -1509,6 +1535,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			g := storetest.NewGoal(sess, "goal1", tx.NextSeq(), "Ship it")
 			g.DirectiveID = dirID
+			g.Section = domain.SectionGoal
 			goalID = g.ID
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, dirID, g.ID, "evt")
@@ -1539,6 +1566,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			hidden := agentScopedItem(sess, "hidden-goal", tx.NextSeq(), "agent-b")
 			hidden.DirectiveID = dirID
+			hidden.Section = domain.SectionPinned
 			mustInsert(t, tx, hidden)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-b"), taskID, dirID, hidden.ID, "evt")
 			return err
@@ -1572,6 +1600,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			private := agentScopedItem(sess, "d-private", tx.NextSeq(), "agent-a")
 			private.DirectiveID = dirID
+			private.Section = domain.SectionPinned
 			mustInsert(t, tx, private)
 			_, err := ReplaceDirective(tx, principalWithAgent(sess, domain.AuthorityUser, "agent-a"), taskID, dirID, private.ID, "evt-private")
 			return err
@@ -1583,6 +1612,7 @@ func TestResolveLifecycleTarget_DirectiveID(t *testing.T) {
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
 			taskWide := taskItem(sess, "d-task-wide", tx.NextSeq(), domain.AuthorityHarness)
 			taskWide.DirectiveID = dirID
+			taskWide.Section = domain.SectionPinned
 			mustInsert(t, tx, taskWide)
 			// A HARNESS/task-wide principal cannot see agent-a's private
 			// version, so this must succeed (round-1 AUTH-2.1 property: a
@@ -1635,6 +1665,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
+			g.Section = domain.SectionGoal
 			goalID = g.ID
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
@@ -1691,6 +1722,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
+			g.Section = domain.SectionGoal
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
 			return err
@@ -1699,11 +1731,13 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 			t.Fatalf("setup goal: %v", err)
 		}
 
-		// A second, unrelated item whose own item ID (not directive ID) is
-		// the same string, and IS accessible to actor.
+		// A second, unrelated current directive whose own item ID (not
+		// directive ID) is the same string, and IS accessible to actor.
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
-			it := taskItem(sess, sharedID, tx.NextSeq(), domain.AuthorityUser)
-			return tx.InsertItem(it)
+			it := storetest.NewDirective(sess, sharedID, "unrelated-pin", tx.NextSeq(), "text")
+			mustInsert(t, tx, it)
+			mustFile(t, tx, it)
+			return nil
 		})
 		if err != nil {
 			t.Fatalf("setup colliding item: %v", err)
@@ -1728,6 +1762,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			g := storetest.NewGoal(sess, "goal", tx.NextSeq(), "Ship it")
 			g.DirectiveID = sharedID
+			g.Section = domain.SectionGoal
 			mustInsert(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, taskID, sharedID, g.ID, "evt")
 			return err
@@ -1776,7 +1811,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 
 // TestResolveLifecycleTarget_StaleDirectivePointerNotReturned is AUTH-3.2:
 // SupersedeSnapshot (like a direct Supersede) retires an item without
-// touching the directive-pointer map, so tx.CurrentDirective(s) can still
+// touching the directive-pointer map, so the current-version map can still
 // name an item that is no longer current. ResolveLifecycleTarget must never
 // hand back a superseded version.
 func TestResolveLifecycleTarget_StaleDirectivePointerNotReturned(t *testing.T) {
@@ -1816,9 +1851,9 @@ func TestResolveLifecycleTarget_StaleDirectivePointerNotReturned(t *testing.T) {
 			t.Fatalf("IsCurrent(w1) = %v, %v; want false, nil (test setup invariant)", ok, err)
 		}
 		// The pointer is now stale: it still names w1.
-		stale, err := tx.CurrentDirective(taskID, dirID, boundary)
+		stale, err := tx.CurrentVersion(domain.CurrentKey{SessionID: sess, TaskID: taskID, Access: boundary, Namespace: domain.NamespaceDirective, ID: dirID})
 		if err != nil || stale != w1ID {
-			t.Fatalf("CurrentDirective = %q, %v; want stale pointer to %q (test setup invariant)", stale, err, w1ID)
+			t.Fatalf("CurrentVersion = %q, %v; want stale pointer to %q (test setup invariant)", stale, err, w1ID)
 		}
 		_, err = ResolveLifecycleTarget(tx, actor, taskID, dirID)
 		return err

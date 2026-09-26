@@ -1,0 +1,123 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_9e57436952def37bc6e5e88a9f736cc7",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Goal  [g]\nx\n## Goal [g]  kind=x\ny\n## Goal\t[g]\nz\n## Pinned [p] kind=instruction\nok\n"
+        }
+      ],
+      "content_hash": "sha256:50104f020d6d3ce1ca0c0df0f90d9de6fa7a73894793eee3aa96f9b2adf49fee"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_f8ca8aa2ee46994adaba12a000479857",
+      "kind": "instruction",
+      "section": "PINNED",
+      "directive_id": "p",
+      "generation": "PINNED",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "ok"
+        }
+      ],
+      "content_hash": "sha256:6b90d3dbaf89392d47a0d7bcc9f9b3af98deb163d5c22eb71bba4c2cdfd7a51c",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            51,
+            85
+          ],
+          "slices": [
+            [
+              82,
+              84
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "GOAL",
+      "range": [
+        0,
+        12
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "GOAL",
+      "range": [
+        15,
+        34
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "GOAL",
+      "range": [
+        37,
+        48
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

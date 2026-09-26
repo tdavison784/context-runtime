@@ -62,7 +62,12 @@ func (t *transaction) InsertItem(v domain.ContextItem) error {
 			return domain.ErrIntegrity
 		}
 	}
-	return t.put("item", v.ID, 0, v, false)
+	return t.atomic(func() error {
+		if err := t.put("item", v.ID, 0, v, false); err != nil {
+			return err
+		}
+		return t.indexLookups(v)
+	})
 }
 func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error) {
 	old, err := t.Item(id)
@@ -91,6 +96,7 @@ func (t *transaction) UpdateItem(id string, expected uint64, change domain.ItemC
 	if err = t.checkSeq(event.Seq); err != nil {
 		return domain.ContextItem{}, err
 	}
+	t.itemCache.remove(id) // the next read decodes the updated row
 	err = t.atomic(func() error {
 		if err := t.put("item", id, 0, v, true); err != nil {
 			return err
@@ -109,8 +115,13 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 	if err := t.checkSeq(v.Seq); err != nil {
 		return err
 	}
+	// Both endpoints must exist and verify (SPEC-4.4): an item whose text
+	// migration 0001 altered is never linked. Verification goes through the
+	// transaction's item cache, so each endpoint is decoded and hashed at
+	// most once per transaction while cached; the transcript every derived
+	// item links to stays hot, keeping linking linear (SPEC-3.1 item 2).
 	for _, id := range []string{v.FromID, v.ToID} {
-		if _, err := t.Item(id); err != nil {
+		if _, err := t.loadItem(id, true); err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				return domain.ErrDanglingRelationship
 			}
@@ -118,12 +129,7 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 		}
 	}
 	if v.Type == domain.RelSupersedes {
-		if err := t.loadSupersession(); err != nil {
-			return err
-		}
-		cycle, err := domain.WouldCreateCycle(v.FromID, v.ToID, func(id string) ([]string, error) {
-			return t.supersession[id], nil
-		})
+		cycle, _, err := t.closesSupersessionCycle(v.FromID, v.ToID)
 		if err != nil {
 			return err
 		}
@@ -131,50 +137,65 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 			return domain.ErrSupersessionCycle
 		}
 	}
-	if err := t.put("relationship", v.ID, 0, v, false); err != nil {
-		return err
-	}
-	if v.Type == domain.RelSupersedes {
-		t.supersession[v.FromID] = append(t.supersession[v.FromID], v.ToID)
-	}
-	return nil
-}
-
-// The graph is loaded once per transaction. Cycle walks then use the
-// transaction's own edges without issuing a SQL query for every visited node.
-func (t *transaction) loadSupersession() error {
-	if t.supersessionLoaded {
-		return nil
-	}
-	rows, err := t.conn.QueryContext(t.ctx, "SELECT f_from_id,f_to_id FROM rec_relationship WHERE session_id=? AND f_type=?", t.session, string(domain.RelSupersedes))
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	graph := make(map[string][]string)
-	for rows.Next() {
-		var from, to string
-		if err := rows.Scan(&from, &to); err != nil {
+	err := t.atomic(func() error {
+		if err := t.put("relationship", v.ID, 0, v, false); err != nil {
 			return err
 		}
-		graph[from] = append(graph[from], to)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	t.supersession = graph
-	t.supersessionLoaded = true
-	return nil
+		// A superseded or duplicate item is no longer live (F1).
+		switch v.Type {
+		case domain.RelSupersedes:
+			return t.retireLookups(v.ToID, false)
+		case domain.RelDuplicateOf:
+			return t.retireLookups(v.FromID, true)
+		}
+		return nil
+	})
+	return err
 }
-func (t *transaction) SetCurrentDirective(taskID, directiveID, itemID string) error {
+
+// closesSupersessionCycle reports whether a new edge from SUPERSEDES to
+// would close a cycle, i.e. whether from is reachable from to along
+// existing SUPERSEDES edges, and how many nodes it expanded (SPEC-2.1). A
+// cycle through the new edge needs an existing edge into from; a new
+// version has none, so the usual case reads one indexed row and walks
+// nothing. Otherwise it walks only the chain reachable from to, one
+// indexed (type, source) read per node, never the session's whole graph.
+func (t *transaction) closesSupersessionCycle(from, to string) (cycle bool, visited int, err error) {
+	if from == to {
+		return true, 0, nil
+	}
+	into, err := t.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: from})
+	if err != nil || len(into) == 0 {
+		return false, 0, err
+	}
+	cycle, err = domain.WouldCreateCycle(from, to, func(id string) ([]string, error) {
+		visited++
+		rels, err := t.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: id})
+		if err != nil {
+			return nil, err
+		}
+		next := make([]string, len(rels))
+		for i, r := range rels {
+			next[i] = r.ToID
+		}
+		return next, nil
+	})
+	return cycle, visited, err
+}
+func (t *transaction) SetCurrentVersion(itemID string) error {
 	v, err := t.Item(itemID)
 	if err != nil {
 		return err
 	}
-	if v.TaskID != taskID || v.DirectiveID != directiveID {
-		return fmt.Errorf("%w: directive item mismatch", domain.ErrInvalidRecord)
+	key, ok := v.CurrentKey()
+	if !ok {
+		return fmt.Errorf("%w: item %s has no directive ID", domain.ErrInvalidRecord, itemID)
 	}
-	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO directives(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id) DO UPDATE SET item_id=excluded.item_id", t.session, taskID, directiveID, v.Access.Scope, v.Access.SessionID, v.Access.WorkflowID, v.Access.TaskID, v.Access.AgentID, itemID)
+	if err := key.Validate(); err != nil {
+		return fmt.Errorf("item %s: %w", itemID, err)
+	}
+	a := key.Access
+	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO directives(session_id,task_id,namespace,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,task_id,namespace,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id) DO UPDATE SET item_id=excluded.item_id", t.session, key.TaskID, key.Namespace, key.ID, a.Scope, a.SessionID, a.WorkflowID, a.TaskID, a.AgentID, itemID)
 	if err == nil {
 		t.semanticWrite, t.wrote = true, true
 	}
@@ -239,6 +260,42 @@ func (t *transaction) InsertObligationVersion(v domain.ObligationVersion) error 
 		return domain.ErrVersionConflict
 	}
 	return t.put("obligation", v.ObligationID, int(v.Version), v, false)
+}
+func (t *transaction) RetireObligationVersion(obligationID string, version, expected uint64, event domain.LifecycleEvent) (domain.ObligationVersion, error) {
+	var old domain.ObligationVersion
+	if err := t.get("obligation", obligationID, int(version), &old); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	if old.Revision != expected {
+		return domain.ObligationVersion{}, domain.ErrVersionConflict
+	}
+	if !old.Current {
+		return domain.ObligationVersion{}, fmt.Errorf("%w: obligation %s/%d is already retired", domain.ErrInvalidTransition, obligationID, version)
+	}
+	if event.TargetKind != domain.TargetObligation || event.TargetID != obligationID {
+		return domain.ObligationVersion{}, fmt.Errorf("%w: lifecycle target mismatch", domain.ErrInvalidRecord)
+	}
+	if err := event.Validate(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	if err := t.checkSession(event.SessionID); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	if err := t.checkSeq(event.Seq); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	v := old.Clone()
+	v.Current, v.RetiredSeq, v.Revision = false, event.Seq, expected+1
+	if err := v.Validate(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	err := t.atomic(func() error {
+		if err := t.put("obligation", obligationID, int(version), v, true); err != nil {
+			return err
+		}
+		return t.AppendLifecycleEvent(event)
+	})
+	return v, err
 }
 func (t *transaction) UpdateObligationVersion(v domain.ObligationVersion, expected uint64) (domain.ObligationVersion, error) {
 	var old domain.ObligationVersion

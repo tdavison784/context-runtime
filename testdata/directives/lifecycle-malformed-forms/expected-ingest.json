@@ -1,0 +1,164 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_3b7dc3f74bb9df70ce3d11c0026c6f23",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Unpin [a]\n- [b]\n## Resolve\n\n## Resolve [g] done\n## Resolve [g] scope=TASK\n## Unpin\n- [c] {scope=TASK}\n- [d] because\n- e\n- [f]\n  more\n- [ok]\n"
+        }
+      ],
+      "content_hash": "sha256:af2acb9e969310aa6ce095ce28bab61e2ff871c4ebc2436859cac8c66e260780"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [
+    {
+      "action": "UNPIN",
+      "target_id": "ok",
+      "authority": "USER",
+      "actor_authority": "USER",
+      "status": "PARSED_NOT_EXECUTED",
+      "resolution": "NOT_FOUND",
+      "range": [
+        136,
+        143
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        0,
+        12
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "RESOLVE",
+      "range": [
+        19,
+        31
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "RESOLVE",
+      "range": [
+        31,
+        50
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "RESOLVE",
+      "range": [
+        51,
+        76
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 4,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        86,
+        105
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 5,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        105,
+        119
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 6,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        119,
+        123
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 7,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        123,
+        136
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 8,
+      "code": "ErrNotFound",
+      "reason": "unknown_target",
+      "section": "UNPIN",
+      "range": [
+        136,
+        143
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

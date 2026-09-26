@@ -1,0 +1,11 @@
+{
+  "description": "IDs longer than 80 bytes are malformed and create nothing; the lexer's search is bounded (FR-DIR-006).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "FR-DIR-006"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

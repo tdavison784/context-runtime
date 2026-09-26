@@ -1,0 +1,11 @@
+{
+  "description": "Only ASCII case folding: Kelvin sign, long s, dotless/dotted i, fullwidth, zero-width, NBSP and combining marks never form keywords (D4).",
+  "requirements": [
+    "FR-ING-004",
+    "SDD-9",
+    "D4"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

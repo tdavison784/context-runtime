@@ -1,0 +1,10 @@
+## Goal [goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef]
+hidden
+## Remember
+- [pinned-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef] hidden
+- [ephemeral-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef] hidden
+- [Goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef] explicit
+- [goal-0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF] explicit
+- [resolve-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef] explicit
+- [goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde] explicit
+- derived

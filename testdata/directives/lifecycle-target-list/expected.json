@@ -1,0 +1,53 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "UNPIN",
+      "status": "PARSED",
+      "level": 2,
+      "range": [
+        0,
+        47
+      ],
+      "heading_range": [
+        0,
+        9
+      ],
+      "body_range": [
+        9,
+        47
+      ]
+    }
+  ],
+  "items": [],
+  "lifecycle": [
+    {
+      "action": "UNPIN",
+      "target_id": "api",
+      "authority": "USER",
+      "range": [
+        9,
+        17
+      ]
+    },
+    {
+      "action": "UNPIN",
+      "target_id": "tests",
+      "authority": "USER",
+      "range": [
+        17,
+        30
+      ]
+    },
+    {
+      "action": "UNPIN",
+      "target_id": "architecture",
+      "authority": "USER",
+      "range": [
+        30,
+        47
+      ]
+    }
+  ],
+  "diagnostics": []
+}
