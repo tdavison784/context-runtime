@@ -24,7 +24,7 @@ func outcomeEvent(b domain.OutcomeBinding, text string) domain.Event {
 }
 
 func (f *fixture) ingestOutcome(b domain.OutcomeBinding, e domain.Event) (domain.IngestReceipt, error) {
-	return f.in.IngestOutcome(ctx, f.s, b, e)
+	return f.in.IngestOutcome(ctx, f.s, b, e, nil)
 }
 
 func (f *fixture) task() domain.TaskState {

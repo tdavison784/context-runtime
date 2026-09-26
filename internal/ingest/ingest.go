@@ -119,7 +119,7 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 	return r, sanitize(err)
 }
 
-func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event, b *domain.OutcomeBinding) (domain.IngestReceipt, error) {
+func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event, o *outcome) (domain.IngestReceipt, error) {
 	// Admission (SEC-2.1), from lengths alone and outside any write
 	// transaction: the hard ceiling first, then the configured limits. An
 	// over-limit event is admitted only as the retry of a known EventID
@@ -161,7 +161,7 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	}
 	var out domain.IngestReceipt
 	err := s.Update(ctx, p.SessionID, func(tx store.Tx) error {
-		r, err := g.apply(tx, p, e, anonymous, b)
+		r, err := g.apply(tx, p, e, anonymous, o)
 		if err != nil {
 			return err
 		}
@@ -189,12 +189,14 @@ func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	return r, sanitize(err)
 }
 
-func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string, b *domain.OutcomeBinding) (domain.IngestReceipt, error) {
-	if b != nil {
-		if err := checkOutcome(*b, e); err != nil {
+func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string, o *outcome) (domain.IngestReceipt, error) {
+	var b *domain.OutcomeBinding
+	var m *OutcomeMembership
+	if o != nil {
+		if err := checkOutcome(o.binding, e); err != nil {
 			return domain.IngestReceipt{}, err
 		}
-		p = b.Principal
+		b, m, p = &o.binding, o.membership, o.binding.Principal
 	}
 	limits := g.Limits.Effective()
 	// Admission from lengths alone (SEC-2.1), as in Ingest: over the
@@ -251,7 +253,7 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 		return domain.IngestReceipt{}, err
 	}
 
-	r := &run{g: g, pol: g.semantic(), tx: tx, p: p, e: e, binding: b, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
+	r := &run{g: g, pol: g.semantic(), tx: tx, p: p, e: e, binding: b, membership: m, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
 	rc, err := r.apply()
 	if err != nil {
 		// Everything above only read; from here the core has written. Any

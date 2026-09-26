@@ -15,6 +15,7 @@ import (
 type run struct {
 	g          Ingester
 	binding    *domain.OutcomeBinding // a provider outcome's originating context
+	membership *OutcomeMembership     // how that outcome joins its exchange, if at all
 	pol        *domain.Phase3Policy   // effective Phase 3 policy; nil only for frozen v2 (tests)
 	obl        *obligation.Service    // built on first use from pol
 	tx         store.Tx
@@ -100,6 +101,14 @@ func (r *run) apply() (domain.IngestReceipt, error) {
 	}
 	for oi, op := range r.e.Operations {
 		if err := r.operation(oi, op); err != nil {
+			return domain.IngestReceipt{}, err
+		}
+	}
+	if r.membership != nil {
+		if r.pol == nil {
+			return domain.IngestReceipt{}, domain.ErrUnsupportedSchema
+		}
+		if err := r.registerOutput(*r.membership); err != nil {
 			return domain.IngestReceipt{}, err
 		}
 	}
