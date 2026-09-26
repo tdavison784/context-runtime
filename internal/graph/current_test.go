@@ -142,7 +142,7 @@ func TestD10_UnmappedDirectiveItemNeverCurrent(t *testing.T) {
 		actor := principal(sess, domain.AuthorityUser)
 		var it domain.ContextItem
 		update(t, s, sess, func(tx store.Tx) error {
-			it = storetest.NewDirective(sess, "orphan", "orphan-d", tx.NextSeq(), "Never filed")
+			it = newDirective(sess, "orphan", "orphan-d", tx.NextSeq(), "Never filed")
 			mustInsert(t, tx, it)
 			return nil
 		})
@@ -174,19 +174,19 @@ func TestD10_StalePointerIsNotAPreviousVersion(t *testing.T) {
 
 		var old domain.ContextItem
 		update(t, s, sess, func(tx store.Tx) error {
-			old = storetest.NewDirective(sess, "x1", dirID, tx.NextSeq(), "first")
+			old = newDirective(sess, "x1", dirID, tx.NextSeq(), "first")
 			mustInsert(t, tx, old)
 			_, err := ReplaceDirective(tx, actor, "task", dirID, old.ID, "evt-x1")
 			return err
 		})
 		update(t, s, sess, func(tx store.Tx) error {
-			retirer := storetest.NewDirective(sess, "other", "other-d", tx.NextSeq(), "retirer")
+			retirer := newDirective(sess, "other", "other-d", tx.NextSeq(), "retirer")
 			mustInsert(t, tx, retirer)
 			_, err := Supersede(tx, actor, retirer.ID, old.ID, "evt-retire", "")
 			return err
 		})
 		update(t, s, sess, func(tx store.Tx) error {
-			x2 := storetest.NewDirective(sess, "x2", dirID, tx.NextSeq(), "second")
+			x2 := newDirective(sess, "x2", dirID, tx.NextSeq(), "second")
 			mustInsert(t, tx, x2)
 			prev, err := ReplaceDirective(tx, actor, "task", dirID, x2.ID, "evt-x2")
 			if err != nil {

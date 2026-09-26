@@ -265,7 +265,7 @@ func TestSnapshot_ExplicitIDComposes(t *testing.T) {
 			}
 		}
 		update(t, s, sess, func(tx store.Tx) error {
-			pin := storetest.NewDirective(sess, "pin-x", "x", tx.NextSeq(), "pinned x")
+			pin := newDirective(sess, "pin-x", "x", tx.NextSeq(), "pinned x")
 			mustInsert(t, tx, pin)
 			_, err := ReplaceDirective(tx, actor, "task", "x", pin.ID, "evt-pin")
 			return err
@@ -339,6 +339,7 @@ func TestSnapshot_PartitionsByBoundaryAndAuthority(t *testing.T) {
 				it := member(sess, id, seq, text)
 				it.Scope = domain.ScopeTurn
 				it.Access.Scope = domain.ScopeTurn
+				it.CreatedTurn = 1 // turn eligibility is part of the declaration
 				return it
 			}
 		}

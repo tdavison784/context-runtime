@@ -311,7 +311,7 @@ func TestLinkDuplicate_ComparesObligationClaim(t *testing.T) {
 		const sess = "sess-dup-claim"
 		actor := principal(sess, domain.AuthorityUser)
 		update(t, s, sess, func(tx store.Tx) error {
-			p := storetest.NewDirective(sess, "p1", "tests", tx.NextSeq(), "All tests pass")
+			p := newDirective(sess, "p1", "tests", tx.NextSeq(), "All tests pass")
 			mustInsert(t, tx, p)
 			if _, err := ReplaceDirective(tx, actor, "task", "tests", p.ID, "evt-p1"); err != nil {
 				return err
@@ -325,7 +325,7 @@ func TestLinkDuplicate_ComparesObligationClaim(t *testing.T) {
 			want  error
 		}{{"other_claim", ErrNotDuplicate}, {"", ErrNotDuplicate}, {"tests_pass", nil}} {
 			err := s.Update(ctx, sess, func(tx store.Tx) error {
-				d := storetest.NewDirective(sess, fmt.Sprintf("d%d", i), "tests", tx.NextSeq(), "All tests pass")
+				d := newDirective(sess, fmt.Sprintf("d%d", i), "tests", tx.NextSeq(), "All tests pass")
 				mustInsert(t, tx, d)
 				_, err := LinkDuplicate(tx, actor, d.ID, "p1", "evt-d", "", c.claim)
 				return err

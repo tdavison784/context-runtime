@@ -82,6 +82,14 @@ func agentDirective(sess, id, dirID string, seq uint64) domain.ContextItem {
 	return it
 }
 
+// newDirective is storetest.NewDirective with the explicit DIRECTIVE
+// namespace every new semantic write must carry (P3-3).
+func newDirective(sess, id, dirID string, seq uint64, text string) domain.ContextItem {
+	it := storetest.NewDirective(sess, id, dirID, seq, text)
+	it.Namespace = domain.NamespaceDirective
+	return it
+}
+
 // workingItem returns a TASK-scoped task_state item, as a Working section's
 // items are (FR-DIR-007).
 func workingItem(sess, id string, seq uint64, authority domain.Authority) domain.ContextItem {
@@ -174,7 +182,7 @@ func TestReplaceDirective_T02(t *testing.T) {
 
 	var p1ID, p2ID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
-		p1 := storetest.NewDirective(sess, "p1", dirID, tx.NextSeq(), "Use dependency v2.")
+		p1 := newDirective(sess, "p1", dirID, tx.NextSeq(), "Use dependency v2.")
 		p1ID = p1.ID
 		mustInsert(t, tx, p1)
 		prev, err := ReplaceDirective(tx, actor, taskID, dirID, p1.ID, "evt-p1")
@@ -191,7 +199,7 @@ func TestReplaceDirective_T02(t *testing.T) {
 	}
 
 	err = s.Update(ctx, sess, func(tx store.Tx) error {
-		p2 := storetest.NewDirective(sess, "p2", dirID, tx.NextSeq(), "Use dependency v3.")
+		p2 := newDirective(sess, "p2", dirID, tx.NextSeq(), "Use dependency v3.")
 		p2ID = p2.ID
 		mustInsert(t, tx, p2)
 		prev, err := ReplaceDirective(tx, actor, taskID, dirID, p2.ID, "evt-p2")
@@ -245,7 +253,7 @@ func TestReplaceDirective_MismatchedNewItem(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			it := storetest.NewDirective(sess, "wrong-dir", "some-other-directive", tx.NextSeq(), "text")
+			it := newDirective(sess, "wrong-dir", "some-other-directive", tx.NextSeq(), "text")
 			mustInsert(t, tx, it)
 			_, err := ReplaceDirective(tx, actor, taskID, dirID, it.ID, "evt")
 			return err
@@ -339,7 +347,7 @@ func TestSupersedeSnapshot_NewItemNotWorking(t *testing.T) {
 	var oldWorking, notWorking domain.ContextItem
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		oldWorking = workingItem(sess, "old-working", tx.NextSeq(), domain.AuthorityUser)
-		notWorking = storetest.NewDirective(sess, "pinned-not-working", "some-pin", tx.NextSeq(), "text")
+		notWorking = newDirective(sess, "pinned-not-working", "some-pin", tx.NextSeq(), "text")
 		mustInsert(t, tx, oldWorking, notWorking)
 		mustFile(t, tx, oldWorking)
 		return nil
@@ -490,7 +498,7 @@ func TestReplaceDirective_FirstVersionAuthorization(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			it := storetest.NewDirective(sess, "d4", dirID, tx.NextSeq(), "text")
+			it := newDirective(sess, "d4", dirID, tx.NextSeq(), "text")
 			it.Authority = domain.AuthoritySystem // outranks the USER actor below
 			mustInsert(t, tx, it)
 			_, err := ReplaceDirective(tx, principal(sess, domain.AuthorityUser), taskID, dirID, it.ID, "evt")
@@ -1469,7 +1477,7 @@ func TestResolveLifecycleTarget_LiteralItemID(t *testing.T) {
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		// Lifecycle targets live in the DIRECTIVE namespace (R6): a
 		// current directive item resolves by its literal item ID.
-		it := storetest.NewDirective(sess, "pinned-item", "some-pin", tx.NextSeq(), "text")
+		it := newDirective(sess, "pinned-item", "some-pin", tx.NextSeq(), "text")
 		itemID = it.ID
 		mustInsert(t, tx, it)
 		mustFile(t, tx, it)
@@ -1755,7 +1763,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 		// A second, unrelated current directive whose own item ID (not
 		// directive ID) is the same string, and IS accessible to actor.
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
-			it := storetest.NewDirective(sess, sharedID, "unrelated-pin", tx.NextSeq(), "text")
+			it := newDirective(sess, sharedID, "unrelated-pin", tx.NextSeq(), "text")
 			mustInsert(t, tx, it)
 			mustFile(t, tx, it)
 			return nil

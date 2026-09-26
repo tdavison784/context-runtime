@@ -5,7 +5,6 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
-	"github.com/tdavison784/context-runtime/internal/store/storetest"
 	"testing"
 )
 
@@ -49,7 +48,7 @@ func TestDirectiveFilingPassesExpectedPriorAndRollsBackCASFailure(t *testing.T) 
 		conflict     bool
 	}{{"first", "", false}, {"second", "first", false}, {"rejected", "second", true}} {
 		err := s.Update(ctx, "s", func(tx store.Tx) error {
-			item := storetest.NewDirective("s", step.id, "key", tx.NextSeq(), step.id)
+			item := newDirective("s", step.id, "key", tx.NextSeq(), step.id)
 			item.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, item)
 			backend := &currentCASBackend{tx: tx, conflict: step.conflict}
