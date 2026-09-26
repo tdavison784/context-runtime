@@ -166,13 +166,16 @@ func (r *run) linkPendingReferences(si int, actor domain.Principal, target domai
 // the reference's boundary is within the target's; otherwise it writes
 // nothing and reports nothing.
 func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextItem) (stop bool, err error) {
+	// A candidate that could never be linked is skipped before the budget
+	// is consulted, so truncation is reported only when a linkable link is
+	// actually dropped (DUR-2.2).
+	if !ref.Access.Permits(actor) || !target.Access.Permits(actor) || !ref.Access.Within(target.Access) {
+		return false, nil
+	}
 	// Optional links spend the event's own MaxReferenceLinks budget, never
 	// MaxRelationships (ruling 1); the receipt records it with the limits.
 	if r.refLinks >= r.limits.MaxReferenceLinks {
 		return true, nil
-	}
-	if !ref.Access.Permits(actor) || !target.Access.Permits(actor) || !ref.Access.Within(target.Access) {
-		return false, nil
 	}
 	_, err = graph.LinkReference(r.tx, actor, ref.ID, target.ID, r.graphEventID(), domain.LocatorRuleVersion)
 	if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
