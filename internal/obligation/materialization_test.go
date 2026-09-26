@@ -21,7 +21,7 @@ func (s *Service) setMat(t *testing.T, st store.Store, actor domain.Principal, i
 
 func TestSetMaterialization(t *testing.T) {
 	s := newTestService(t)
-	st := newTestStore()
+	st := newTestStore(t)
 	setupWorkspace(t, s, st, actorOf(domain.AuthorityHarness))
 	userRef, err := pinAndDeclare(t, s, st, "pu", "u", domain.AuthorityUser, "All tests must pass.", "")
 	if err != nil {

@@ -44,7 +44,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) fixture {
 	t.Helper()
-	f := fixture{s: newTestService(t), st: newTestStore(), harness: actorOf(domain.AuthorityHarness), system: actorOf(domain.AuthoritySystem), userP: actorOf(domain.AuthorityUser)}
+	f := fixture{s: newTestService(t), st: newTestStore(t), harness: actorOf(domain.AuthorityHarness), system: actorOf(domain.AuthoritySystem), userP: actorOf(domain.AuthorityUser)}
 	setupWorkspace(t, f.s, f.st, f.harness)
 	u, err := pinAndDeclare(t, f.s, f.st, "pu", "u", domain.AuthorityUser, "All tests must pass.", "")
 	if err != nil {

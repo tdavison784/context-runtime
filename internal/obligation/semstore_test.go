@@ -14,12 +14,15 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"sync"
+	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite"
 )
 
 type proofCache struct{ proof, assertion string }
@@ -39,6 +42,7 @@ type semState struct {
 	runs         map[string]domain.ObservationRun
 	observations map[string]domain.ObservationRecord
 	subjects     map[string]domain.SubjectState
+	changes      map[string]domain.SemanticChange // fallback only
 }
 
 func newSemState() *semState {
@@ -50,7 +54,7 @@ func newSemState() *semState {
 		resStates: map[string]domain.ResourceState{}, resUpdates: map[string]domain.ResourceUpdate{},
 		pathStates: map[string]domain.ResourcePathState{}, wsBindings: map[domain.WorkspaceBindingRef]domain.WorkspaceBinding{},
 		runs: map[string]domain.ObservationRun{}, observations: map[string]domain.ObservationRecord{},
-		subjects: map[string]domain.SubjectState{},
+		subjects: map[string]domain.SubjectState{}, changes: map[string]domain.SemanticChange{},
 	}
 }
 
@@ -61,7 +65,7 @@ func (s *semState) clone() *semState {
 		proofs: cloneMap(s.proofs), deps: cloneMap(s.deps), assertions: cloneMap(s.assertions),
 		details: cloneMap(s.details), resBindings: cloneMap(s.resBindings), resStates: cloneMap(s.resStates),
 		resUpdates: cloneMap(s.resUpdates), pathStates: cloneMap(s.pathStates), wsBindings: cloneMap(s.wsBindings),
-		runs: cloneMap(s.runs), observations: cloneMap(s.observations), subjects: cloneMap(s.subjects),
+		runs: cloneMap(s.runs), observations: cloneMap(s.observations), subjects: cloneMap(s.subjects), changes: cloneMap(s.changes),
 	}
 }
 
@@ -97,9 +101,27 @@ type testStore struct {
 
 var errInjected = errors.New("semstore: injected write failure")
 
-func newTestStore() *testStore {
-	return &testStore{Store: memory.New(), committed: map[string]*semState{}}
+// backendFactory builds the real store under the facet; tests default to
+// W2's memory backend, and the SQLite suite swaps in W2's SQLite backend.
+var backendFactory = func(t *testing.T) store.Store { return memory.New() }
+
+func newTestStore(t *testing.T) *testStore {
+	t.Helper()
+	return &testStore{Store: backendFactory(t), committed: map[string]*semState{}}
 }
+
+func sqliteBackend(t *testing.T) store.Store {
+	t.Helper()
+	st, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "w4.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
+// unsupported reports whether a real backend has not implemented a family.
+func unsupported(err error) bool { return errors.Is(err, domain.ErrUnsupportedSchema) }
 
 func (f *testStore) state(session string) *semState {
 	if s, ok := f.committed[session]; ok {
@@ -161,11 +183,19 @@ func (t *semTx) Poison(err error) {
 	t.Tx.Poison(err)
 }
 
+// backend binds W2's unguarded facet: probing a family the backend has not
+// published must not poison the transaction before the fallback runs. The
+// harness's own write wrapper applies Guard's poison discipline instead.
 func (t *semTx) backend() semBackend {
-	realW, err := store.Semantic(t.Tx)
-	if err != nil {
-		panic(err) // W2's memory facet is required
+	g, ok := t.Tx.(*store.Guard)
+	if !ok {
+		panic("semstore: transaction is not a store.Guard")
 	}
+	p, ok := g.TxBase.(store.SemanticBackendProvider)
+	if !ok {
+		panic("semstore: backend has no semantic facet")
+	}
+	realW := p.SemanticBackend()
 	return semBackend{rtx: t.Tx, tx: t, st: t.st, real: realW, realW: realW}
 }
 
@@ -173,6 +203,13 @@ func (t *semTx) SemanticTransaction() (store.SemanticTx, error) {
 	return &semGuarded{semBackend: t.backend()}, nil
 }
 func (t *semTx) SemanticBackend() store.SemanticTxBase {
+	b := t.backend()
+	return &b
+}
+
+// SemanticReadBackend overrides the embedded Guard's, so store.ReadSemantic
+// (used by graph) sees the same per-family fallback as writes.
+func (t *semTx) SemanticReadBackend() store.SemanticReader {
 	b := t.backend()
 	return &b
 }
@@ -193,7 +230,7 @@ type semBackend struct {
 	// (receipts, coverage, grants, current pointers); realW is its guarded
 	// writer, nil on read snapshots.
 	real  store.SemanticReader
-	realW store.SemanticTx
+	realW store.SemanticTxBase
 }
 
 var errFakeRead = errors.New("semstore: write on read snapshot")
@@ -339,7 +376,34 @@ func (b *semBackend) CurrentBoundObligationsBySubject(key string, p store.Page) 
 }
 
 func (b *semBackend) GrantsFor(action domain.Action, target domain.GrantTarget, limit int) ([]domain.MutationGrant, error) {
-	return b.real.GrantsFor(action, target, limit)
+	out, err := b.real.GrantsFor(action, target, limit)
+	if !unsupported(err) {
+		return out, err
+	}
+	// Fallback scan until the backend publishes its index.
+	if limit <= 0 {
+		return nil, domain.ErrInvalidRecord
+	}
+	all, err := b.rtx.Grants()
+	if err != nil {
+		return nil, err
+	}
+	out = nil
+	for _, g := range all {
+		if g.Action != action {
+			continue
+		}
+		for _, gt := range g.Targets {
+			if gt.AuthorizationKey == target.AuthorizationKey {
+				out = append(out, g.Clone())
+				break
+			}
+		}
+	}
+	if len(out) > limit {
+		return nil, store.ErrLimitExceeded
+	}
+	return out, nil
 }
 
 // --- workspace and resources ---
@@ -685,7 +749,32 @@ func (b *semBackend) AppendSemanticObligationTransition(t domain.ObligationTrans
 // --- current pointers ---
 
 func (b *semBackend) SetCurrentVersion(itemID, expectedPrior string) error {
-	return b.write(nil, func() error { return b.realW.SetCurrentVersion(itemID, expectedPrior) })
+	return b.write(nil, func() error {
+		err := b.realW.SetCurrentVersion(itemID, expectedPrior)
+		if !unsupported(err) {
+			return err
+		}
+		// Fallback CAS over the legacy pointer until the backend publishes it.
+		it, err := b.rtx.Item(itemID)
+		if err != nil {
+			return err
+		}
+		key, ok := it.CurrentKey()
+		if !ok {
+			return domain.ErrInvalidRecord
+		}
+		prior, err := b.rtx.CurrentVersion(key)
+		if errors.Is(err, domain.ErrNotFound) {
+			prior, err = "", nil
+		}
+		if err != nil {
+			return err
+		}
+		if prior != expectedPrior {
+			return domain.ErrVersionConflict
+		}
+		return b.tx.Tx.SetCurrentVersion(itemID)
+	})
 }
 
 // --- resource fan-out and subjects ---
@@ -893,9 +982,32 @@ func (b *semBackend) ObligationsByTaskOwner(taskID string, p store.Page) (store.
 // --- semantic changes (W2 facet) ---
 
 func (b *semBackend) InsertSemanticChange(c domain.SemanticChange) error {
-	return b.write(nil, func() error { return b.realW.InsertSemanticChange(c) })
+	return b.write(nil, func() error {
+		err := b.realW.InsertSemanticChange(c)
+		if !unsupported(err) {
+			return err
+		}
+		if err := c.Validate(); err != nil {
+			return err
+		}
+		if _, ok := b.st.changes[c.ID]; ok {
+			return domain.ErrImmutable
+		}
+		b.st.changes[c.ID] = c
+		return nil
+	})
 }
 
 func (b *semBackend) SemanticChanges(viewer domain.Principal, target domain.GrantTarget, p store.Page) (store.ResultPage[domain.SemanticChange], error) {
-	return b.real.SemanticChanges(viewer, target, p)
+	out, err := b.real.SemanticChanges(viewer, target, p)
+	if !unsupported(err) {
+		return out, err
+	}
+	var all []domain.SemanticChange
+	for _, c := range b.st.changes {
+		if c.Target.AuthorizationKey == target.AuthorizationKey && c.Access.Permits(viewer) {
+			all = append(all, c)
+		}
+	}
+	return page(all, func(c domain.SemanticChange) store.Cursor { return store.Cursor{Seq: c.Seq, ID: c.ID} }, p)
 }
