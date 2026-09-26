@@ -1,8 +1,10 @@
 package ingest
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -236,6 +238,49 @@ func TestReferenceLinkTruncationReporting_SPEC23_DUR22(t *testing.T) {
 		r = f.mustIngest(user, userEvent("docs", "## References\n- doc.md\n", true))
 		if links := len(f.references(semantic(r)[0].ID)); links != 1 || count(r) != 0 {
 			t.Errorf("complete link set: links %d, truncation diagnostics %d; want 1, 0", links, count(r))
+		}
+	})
+}
+
+// pageRecorder records the page limits of reference lookups.
+type pageRecorder struct {
+	store.Store
+	limits *[]int
+}
+
+func (s pageRecorder) Update(ctx context.Context, sessionID string, fn func(store.Tx) error) error {
+	return s.Store.Update(ctx, sessionID, func(tx store.Tx) error { return fn(pageTx{tx, s.limits}) })
+}
+
+type pageTx struct {
+	store.Tx
+	limits *[]int
+}
+
+func (t pageTx) SourceItems(f store.SourceFilter) (store.Lookup, error) {
+	*t.limits = append(*t.limits, f.Page.Limit)
+	return t.Tx.SourceItems(f)
+}
+
+// TestSourcePageSizedByBudget_DUR21: a source page never asks for more
+// items than the remaining reference-link budget could use, plus one to
+// detect truncation, instead of the full lookup limit.
+func TestSourcePageSizedByBudget_DUR21(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("u0", "hi", false))
+		for i := range 3 {
+			e := sourceEvent(fmt.Sprintf("s%d", i), "x.md", taskAccess())
+			e.Spans[0].Parts[0].Text = fmt.Sprintf("x.md revision %d", i)
+			f.mustIngest(user, e)
+		}
+		var pages []int
+		f.s = pageRecorder{f.s, &pages}
+		f.in.Limits = domain.Limits{MaxReferenceLinks: 5}
+		// The first entry links 3 sources, leaving 2 of 5 for the second.
+		f.mustIngest(user, userEvent("r", "## References\n- x.md\n- ./x.md\n", true))
+		if !slices.Equal(pages, []int{6, 3}) {
+			t.Errorf("page limits = %v, want [6 3] (remaining budget + 1)", pages)
 		}
 	})
 }
