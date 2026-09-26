@@ -27,7 +27,10 @@ rather than inferred.
   and `previous_response_id` values are replaced with `{length, sha256}`; `organization`,
   `project`, `user`, and `safety_identifier` are redacted. No headers, keys, or account
   identifiers are present (verified with
-  `git diff | grep -iE "sk-|api[_-]?key|bearer|authorization|org-|proj_"`, no matches).
+  `git diff | grep -iE "sk-|api[_-]?key|bearer|authorization|org-|proj_"`, no matches). Error
+  bodies are plain text, not JSON, so they bypass that key-based hashing; `scrubError` separately
+  regex-matches and hash-redacts embedded `resp_`/`rs_`/`msg_`/`call_`/`fc_`/`cmp_` object IDs
+  (SEC-1.5 fix; see `TestScrubErrorRedactsObjectIDs` in `probes/descriptor/openai/main_test.go`).
 - No additional API calls were made in this write-up session; all answers below come from the
   fixtures already committed. One question (C4 pricing multipliers) is answered from public OpenAI
   documentation instead, since the fixtures only show the accepted/rejected TTL *values*, not
@@ -61,7 +64,7 @@ FR-CAP-002 terms, and it is accepted with silent regeneration rather than an err
 `gpt_6_astra_r3_corrupt.json` flips one byte of the tool-turn reasoning item's
 `encrypted_content` and gets a 400:
 ```
-"message": "The encrypted content for item rs_0e1a837efed155ff016ab7c08642ec87d197604182ade7125e could not be verified. Reason: Encrypted content could not be decrypted or parsed.",
+"message": "The encrypted content for item <redacted id length=53 sha256=0cf21c80...> could not be verified. Reason: Encrypted content could not be decrypted or parsed.",
 "type": "invalid_request_error",
 "code": "invalid_encrypted_content"
 ```
@@ -101,7 +104,7 @@ re-emit it either. This is consistent with R2's LOSSY-not-REJECTED finding.
 observed incidentally).** `gpt_6_astra_stateless_previous.json` sends `store: false` on the first
 call, then tries `previous_response_id` on the second, and gets:
 ```
-"message": "Previous response with id 'resp_0e1a837efed155ff016ab7c084a82887d1821f5984226b74ab' not found.",
+"message": "Previous response with id '<redacted id length=55 sha256=d7df68a9...>' not found.",
 "code": "previous_response_not_found"
 ```
 By contrast, `gpt_6_astra_state_first.json`/`gpt_6_astra_state_previous.json` (`store: true`)
