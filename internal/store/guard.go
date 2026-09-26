@@ -17,7 +17,8 @@ var ErrPoisoned = errors.New("store: transaction poisoned")
 // without an override here fails it.
 type Guard struct {
 	TxBase
-	err error
+	err   error
+	wrote bool
 }
 
 var _ Tx = (*Guard)(nil)
@@ -177,4 +178,13 @@ func (g *Guard) PutCallAttempt(a domain.CallAttempt) error {
 		return g.err
 	}
 	return g.TxBase.PutCallAttempt(a)
+}
+
+// noteWrite enforces P3-1 even when a caller ignores a later write error.
+func (g *Guard) noteWrite(err error) {
+	if err == nil {
+		g.wrote = true
+	} else if g.wrote {
+		g.Poison(err)
+	}
 }
