@@ -13,7 +13,7 @@ import (
 func NewUnresolvedReference(sess, occurrenceID string, ordinal int, itemID, locatorKey string, seq uint64) domain.UnresolvedReference {
 	return domain.UnresolvedReference{
 		ID: domain.UnresolvedReferenceID(sess, occurrenceID, ordinal), SessionID: sess, OccurrenceID: occurrenceID,
-		Ordinal: ordinal, ItemID: itemID, LocatorKey: locatorKey, RuleVersion: "locator/v1",
+		Ordinal: ordinal, ItemID: itemID, LocatorKey: locatorKey, RuleVersion: domain.LocatorRuleVersion,
 		Access: PrivateBoundary(sess), Authority: domain.AuthorityUser, Seq: seq,
 	}
 }
@@ -54,35 +54,46 @@ func testUnresolvedReferences(t *testing.T, s store.Store) {
 		_, err = tx.UnresolvedReference("missing")
 		wantErr(t, err, domain.ErrNotFound)
 
-		refs, err := tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "repo:a/go.mod\xff", RuleVersion: "locator/v1", Limit: 3})
-		noErr(t, err)
+		refs := visibleRefs(t, tx, sessA, "repo:a/go.mod\xff")
 		assertEqual(t, "by locator key", refs, []domain.UnresolvedReference{first, second, later})
 		// Keys are exact bytes: the lossy spelling matches nothing.
-		refs, err = tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "repo:a/go.mod�", RuleVersion: "locator/v1", Limit: 3})
-		noErr(t, err)
-		assertEqual(t, "lossy key", refs, []domain.UnresolvedReference{})
-		refs, err = tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "repo:a/go.mod\xff", RuleVersion: "locator/v2", Limit: 3})
-		noErr(t, err)
-		assertEqual(t, "other rule version", refs, []domain.UnresolvedReference{})
-		refs, err = tx.UnresolvedReferences(store.ReferenceFilter{Limit: 4})
-		noErr(t, err)
-		if len(refs) != 4 {
-			t.Errorf("all references = %d, want 4", len(refs))
-		}
-		_, err = tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "repo:a/go.mod\xff", RuleVersion: "locator/v1", Limit: 2})
-		wantErr(t, err, store.ErrLimitExceeded)
-		_, err = tx.UnresolvedReferences(store.ReferenceFilter{})
-		wantErr(t, err, domain.ErrInvalidRecord)
+		assertEqual(t, "lossy key", visibleRefs(t, tx, sessA, "repo:a/go.mod\ufffd"), []domain.UnresolvedReference{})
+		assertEqual(t, "other key", visibleRefs(t, tx, sessA, "repo:b/go.mod"), []domain.UnresolvedReference{r2})
+		return nil
+	})
+	// A reference under another rule version is stored but never matched.
+	update(t, s, sessA, func(tx store.Tx) error {
+		old := NewUnresolvedReference(sessA, domain.CallerOccurrenceID(sessA, "evt-9"), 0, "ref-item", "repo:a/go.mod\xff", tx.NextSeq())
+		old.RuleVersion = "locator/v0"
+		return tx.InsertUnresolvedReference(old)
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		assertEqual(t, "after an old-rule reference", visibleRefs(t, tx, sessA, "repo:a/go.mod\xff"), []domain.UnresolvedReference{first, second, later})
 		return nil
 	})
 	view(t, s, sessB, func(tx store.ReadTx) error {
 		_, err := tx.UnresolvedReference(r0.ID)
 		wantErr(t, err, domain.ErrNotFound)
-		refs, err := tx.UnresolvedReferences(store.ReferenceFilter{Limit: 1})
-		noErr(t, err)
-		assertEqual(t, "another session", refs, []domain.UnresolvedReference{})
+		assertEqual(t, "another session", visibleRefs(t, tx, sessB, "repo:a/go.mod\xff"), []domain.UnresolvedReference{})
 		return nil
 	})
+}
+
+// visibleRefs returns every reference with key that a task-"task",
+// agent-"agent" principal of sess can see, paging through them.
+func visibleRefs(t *testing.T, tx store.ReadTx, sess, key string) []domain.UnresolvedReference {
+	t.Helper()
+	out := []domain.UnresolvedReference{}
+	f := store.VisibleReferenceFilter{Viewer: NewPrincipal(sess, domain.AuthorityUser), LocatorKey: key, Page: store.Page{Limit: 2}}
+	for {
+		refs, more, next, err := tx.VisibleReferences(f)
+		noErr(t, err)
+		out = append(out, refs...)
+		if !more {
+			return out
+		}
+		f.Page.After = next
+	}
 }
 
 func testUnresolvedReferenceInsertRules(t *testing.T, s store.Store) {
@@ -125,9 +136,7 @@ func testUnresolvedReferenceInsertRules(t *testing.T, s store.Store) {
 		})
 	}
 	view(t, s, sessA, func(tx store.ReadTx) error {
-		refs, err := tx.UnresolvedReferences(store.ReferenceFilter{Limit: 5})
-		noErr(t, err)
-		if len(refs) != 1 {
+		if refs := visibleRefs(t, tx, sessA, "k"); len(refs) != 1 {
 			t.Errorf("references after rolled-back inserts = %d, want 1", len(refs))
 		}
 		return nil
@@ -144,9 +153,7 @@ func testUnresolvedReferencesAcrossRestart(t *testing.T, open Opener) {
 	})
 	s = reopen(t, s, open)
 	view(t, s, sessA, func(tx store.ReadTx) error {
-		got, err := tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: want.LocatorKey, RuleVersion: want.RuleVersion, Limit: 1})
-		noErr(t, err)
-		assertEqual(t, "reference after restart", got, []domain.UnresolvedReference{want})
+		assertEqual(t, "reference after restart", visibleRefs(t, tx, sessA, want.LocatorKey), []domain.UnresolvedReference{want})
 		return nil
 	})
 }

@@ -196,3 +196,51 @@ func TestIngestionReasonsAndMismatch(t *testing.T) {
 		t.Fatal("mismatch without its accessible target accepted")
 	}
 }
+
+// TestIngestionReasonCodePairing is SPEC-1.6 (ADR 19 R19): each ingestion
+// reason has exactly one code — boundary_conflict with ErrMalformedDirective,
+// target_mismatch with ErrNotFound — and never a different one.
+func TestIngestionReasonCodePairing(t *testing.T) {
+	pair := map[DiagnosticReason]DiagnosticCode{ReasonBoundaryConflict: ErrMalformedDirective, ReasonTargetMismatch: DiagnosticNotFound}
+	codes := []DiagnosticCode{ErrUnsupportedDirective, ErrMalformedDirective, ErrAmbiguousDirective, DirectiveNotParsed, DiagnosticsTruncated, DirectiveIDDerived, DiagnosticNotFound}
+	for reason, want := range pair {
+		for _, code := range codes {
+			d := Diagnostic{Code: code, Reason: reason, ParserVersion: "directive/v1"}
+			if err := d.Validate(); (err == nil) != (code == want) {
+				t.Errorf("%s with %s: err = %v", reason, code, err)
+			}
+		}
+	}
+}
+
+// TestItemUnverifiedDiagnostic is DUR-1.4 (F1): a lookup match that fails
+// verification is excluded and reported with its own warning code, paired
+// with exactly one reason, carrying no item or directive ID.
+func TestItemUnverifiedDiagnostic(t *testing.T) {
+	d := Diagnostic{Code: ItemUnverified, Reason: ReasonUnverifiedItem, ParserVersion: "directive/v1"}
+	if err := d.Validate(); err != nil || ItemUnverified.Severity() != SeverityWarning {
+		t.Fatalf("valid unverified diagnostic rejected: %v", err)
+	}
+	for _, bad := range []Diagnostic{
+		{Code: ErrMalformedDirective, Reason: ReasonUnverifiedItem, ParserVersion: "v"},
+		{Code: ItemUnverified, Reason: ReasonInvalidSyntax, ParserVersion: "v"},
+		{Code: ItemUnverified, Reason: ReasonUnverifiedItem, DirectiveID: "x", ParserVersion: "v"},
+	} {
+		if bad.Validate() == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+}
+
+// TestReferenceLinksTruncated: an event that stops linking optional
+// REFERENCES edges at its MaxReferenceLinks budget reports it with its own
+// warning code and exactly one reason.
+func TestReferenceLinksTruncated(t *testing.T) {
+	d := Diagnostic{Code: ReferenceLinksTruncated, Reason: ReasonReferenceLinksTruncated, ParserVersion: "v"}
+	if err := d.Validate(); err != nil || ReferenceLinksTruncated.Severity() != SeverityWarning {
+		t.Fatalf("valid truncation diagnostic rejected: %v", err)
+	}
+	if (Diagnostic{Code: DiagnosticsTruncated, Reason: ReasonReferenceLinksTruncated, ParserVersion: "v"}).Validate() == nil {
+		t.Errorf("accepted the reason with another code")
+	}
+}

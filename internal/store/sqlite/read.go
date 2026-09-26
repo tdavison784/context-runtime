@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -31,60 +32,88 @@ func (t *transaction) Item(id string) (domain.ContextItem, error) {
 	return v, nil
 }
 func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
-	items, err := listRecords[domain.ContextItem](t, "item")
+	q, args := itemQuery(t.session, f)
+	items, err := queryRecords[domain.ContextItem](t, "item", q, args...)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]domain.ContextItem, 0)
+	out := make([]domain.ContextItem, 0, len(items))
 	for _, v := range items {
 		if err := verifyItemContent(v); err != nil {
 			return nil, err
 		}
-		if f.TaskID != "" && f.TaskID != v.TaskID || f.AgentID != "" && f.AgentID != v.AgentID || f.Residency != "" && f.Residency != v.Residency || f.DirectiveID != "" && f.DirectiveID != v.DirectiveID || f.EventID != "" && f.EventID != v.EventID || v.Seq < f.MinSeq || f.MaxSeq != 0 && v.Seq > f.MaxSeq {
+		if len(f.Kinds) > 0 && !slices.Contains(f.Kinds, v.Kind) {
 			continue
-		}
-		if len(f.Kinds) > 0 {
-			ok := false
-			for _, k := range f.Kinds {
-				if k == v.Kind {
-					ok = true
-				}
-			}
-			if !ok {
-				continue
-			}
 		}
 		out = append(out, v)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Seq != out[j].Seq {
-			return out[i].Seq < out[j].Seq
-		}
-		return out[i].ID < out[j].ID
-	})
 	return out, nil
 }
+
+// itemQuery pushes an item filter's equality and range predicates into SQL
+// (SPEC-1.3): a task filter uses the item_task index instead of loading
+// the session. Kinds are filtered after decoding.
+func itemQuery(session string, f store.ItemFilter) (string, []any) {
+	q, args := schemas["item"].selectSQL+" WHERE session_id=?", []any{session}
+	for _, c := range []struct {
+		col, val string
+	}{{"f_task_id", f.TaskID}, {"f_agent_id", f.AgentID}, {"f_residency", string(f.Residency)}, {"f_directive_id", f.DirectiveID}, {"f_event_id", f.EventID}} {
+		if c.val != "" {
+			q += " AND " + c.col + "=?"
+			args = append(args, c.val)
+		}
+	}
+	if f.MinSeq > 0 {
+		q += " AND f_seq>=?"
+		args = append(args, int64(f.MinSeq))
+	}
+	if f.MaxSeq > 0 {
+		q += " AND f_seq<=?"
+		args = append(args, int64(f.MaxSeq))
+	}
+	return q + " ORDER BY f_seq, id", args
+}
+
 func (t *transaction) Relationships(f store.RelationshipFilter) ([]domain.Relationship, error) {
-	// Filtering is performed after decoding so all list methods share the
-	// same per-record typed-column decoder.
-	records, err := listRecords[domain.Relationship](t, "relationship")
+	q, args := relationshipQuery(t.session, f)
+	return queryRecords[domain.Relationship](t, "relationship", q, args...)
+}
+
+// relationshipQuery pushes a relationship filter into SQL (SPEC-1.3): a
+// type with a source or target uses relationship_from or relationship_to.
+func relationshipQuery(session string, f store.RelationshipFilter) (string, []any) {
+	q, args := schemas["relationship"].selectSQL+" WHERE session_id=?", []any{session}
+	for _, c := range []struct {
+		col, val string
+	}{{"f_type", string(f.Type)}, {"f_from_id", f.FromID}, {"f_to_id", f.ToID}} {
+		if c.val != "" {
+			q += " AND " + c.col + "=?"
+			args = append(args, c.val)
+		}
+	}
+	return q + " ORDER BY f_seq, id", args
+}
+
+// queryRecords decodes the rows of a select over kind's table.
+func queryRecords[T any](t *transaction, kind, q string, args ...any) ([]T, error) {
+	s, err := schemaFor(kind)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]domain.Relationship, 0)
-	for _, v := range records {
-		if f.Type != "" && f.Type != v.Type || f.FromID != "" && f.FromID != v.FromID || f.ToID != "" && f.ToID != v.ToID {
-			continue
-		}
-		out = append(out, v)
+	rows, err := t.conn.QueryContext(t.ctx, q, args...)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Seq != out[j].Seq {
-			return out[i].Seq < out[j].Seq
+	defer rows.Close()
+	out := make([]T, 0)
+	for rows.Next() {
+		v, err := s.scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", kind, err)
 		}
-		return out[i].ID < out[j].ID
-	})
-	return out, nil
+		out = append(out, v.Interface().(T))
+	}
+	return out, rows.Err()
 }
 func (t *transaction) Event(id string) (domain.EventRecord, error) {
 	var v domain.EventRecord

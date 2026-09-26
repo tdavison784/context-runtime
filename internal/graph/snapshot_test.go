@@ -2,6 +2,7 @@ package graph
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -490,4 +491,78 @@ func TestSnapshot_RejectsBeforeWriting(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestSnapshot_DeterministicFailure_DUR17: when several planned retirements
+// would fail for different reasons, the error is always the one for the
+// earliest retired item by (Seq, ID), never whichever a map yields first.
+func TestSnapshot_DeterministicFailure_DUR17(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess = "sess-dur17"
+		actor := principal(sess, domain.AuthorityUser)
+		snapshot(t, s, actor, "evt-w1", m(sess, "w1", "prior"))
+		update(t, s, sess, func(tx store.Tx) error {
+			// w1 carries more bound obligations than the lookup bound, so
+			// retiring it fails with store.ErrLimitExceeded ...
+			for i := range maxBoundObligations + 1 {
+				o := storetest.NewObligation(sess, fmt.Sprintf("o%03d", i), 1, tx.NextSeq(), "w1")
+				if err := tx.InsertObligationVersion(o); err != nil {
+					return err
+				}
+			}
+			// ... and a later SYSTEM item holds the ID the new member
+			// reuses, so replacing it fails authorization.
+			sys := member(sess, "sys", tx.NextSeq(), "system")
+			sys.Authority = domain.AuthoritySystem
+			sys.DirectiveID = "status"
+			mustInsert(t, tx, sys)
+			mustFile(t, tx, sys)
+			return nil
+		})
+		for range 20 {
+			err := s.Update(ctx, sess, func(tx store.Tx) error {
+				it := member(sess, "n", tx.NextSeq(), "new")
+				it.DirectiveID = "status"
+				mustInsert(t, tx, it)
+				_, err := SupersedeSnapshot(tx, actor, []string{"n"}, "task", "evt-n")
+				return err
+			})
+			if !errors.Is(err, store.ErrLimitExceeded) {
+				t.Fatalf("err = %v, want the earliest item's store.ErrLimitExceeded every time", err)
+			}
+		}
+	})
+}
+
+// noScanTx fails any Items scan, proving a caller uses indexed lookups.
+type noScanTx struct {
+	store.Tx
+	t *testing.T
+}
+
+func (n noScanTx) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
+	n.t.Errorf("SupersedeSnapshot scanned items (%+v); it must use the indexed CurrentWorking lookup (SEC-1.2)", f)
+	return n.Tx.Items(f)
+}
+
+// TestSnapshot_NoTaskScan_SEC12: freezing a partition's prior set is an
+// indexed CurrentWorking lookup filtered to the actor, never a scan of the
+// task's items, and it still finds exactly the partition's current set.
+func TestSnapshot_NoTaskScan_SEC12(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess = "sess-sec12"
+		actor := principal(sess, domain.AuthorityUser)
+		snapshot(t, s, actor, "evt-w1", m(sess, "a1", "A"), m(sess, "b1", "B"))
+		var res SnapshotResult
+		update(t, s, sess, func(tx store.Tx) error {
+			it := member(sess, "c2", tx.NextSeq(), "C")
+			mustInsert(t, tx, it)
+			var err error
+			res, err = SupersedeSnapshot(noScanTx{tx, t}, actor, []string{"c2"}, "task", "evt-w2")
+			return err
+		})
+		if got, want := edges(res.Supersedes), []string{"c2->a1", "c2->b1"}; !slices.Equal(got, want) {
+			t.Errorf("SUPERSEDES = %v, want %v", got, want)
+		}
+	})
 }

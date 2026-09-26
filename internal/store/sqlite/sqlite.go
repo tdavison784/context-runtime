@@ -13,10 +13,8 @@ package sqlite
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"embed"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -138,8 +136,7 @@ func (s *Store) applyMigrations(ctx context.Context, source fs.FS) error {
 		if err != nil {
 			return err
 		}
-		sum := sha256.Sum256(sqlBytes)
-		checksum := hex.EncodeToString(sum[:])
+		checksum := migrationChecksum(sqlBytes, number)
 		conn, err := s.db.Conn(ctx)
 		if err != nil {
 			return err
@@ -163,8 +160,10 @@ func (s *Store) applyMigrations(ctx context.Context, source fs.FS) error {
 					return fmt.Errorf("migration %d checksum mismatch", number)
 				}
 			case errors.Is(err, sql.ErrNoRows):
-				if _, err = conn.ExecContext(ctx, string(sqlBytes)); err == nil && migrationSteps[number] != nil {
-					err = migrationSteps[number](ctx, conn)
+				if _, err = conn.ExecContext(ctx, string(sqlBytes)); err == nil {
+					if step, ok := migrationSteps[number]; ok {
+						err = step.run(ctx, conn)
+					}
 				}
 				if err == nil {
 					_, err = conn.ExecContext(ctx, "INSERT INTO schema_migrations(version,name,checksum) VALUES(?,?,?)", number, base, checksum)
@@ -260,7 +259,12 @@ func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) er
 		return err
 	}
 	tx := &transaction{conn: c, ctx: ctx, session: session, last: last, allocated: make(map[uint64]bool), writable: true}
-	if err = fn(tx); err != nil {
+	g := store.NewGuard(tx)
+	err = fn(g)
+	if p := g.Poisoned(); p != nil {
+		return p // the deferred ROLLBACK discards everything (DUR-1.3)
+	}
+	if err != nil {
 		return err
 	}
 	if err = ctx.Err(); err != nil {
@@ -348,7 +352,7 @@ type transaction struct {
 	semanticSeqs       map[uint64]bool
 }
 
-var _ store.Tx = (*transaction)(nil)
+var _ store.TxBase = (*transaction)(nil)
 
 func (t *transaction) SessionID() string { return t.session }
 func (t *transaction) LastSeq() uint64   { return t.last }

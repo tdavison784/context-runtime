@@ -31,11 +31,12 @@ type Ingester struct {
 	IDs domain.IDGenerator
 	// Now stamps CreatedAt, which is audit-only; nil means time.Now.
 	Now func() time.Time
-	// LookupLimit bounds every indexed store lookup ingestion makes (blob
-	// referrers, duplicate candidates, reference matches) (D17, R19); zero
-	// means DefaultLookupLimit. A lookup matching more records than this
-	// rejects the event (store.ErrLimitExceeded) rather than deciding on a
-	// partial answer.
+	// LookupLimit is the page size of the paged reference lookups and the
+	// bound on one exact-key candidate lookup (D17, F1); zero means
+	// DefaultLookupLimit. Every lookup is filtered to the source actor
+	// inside the store, and a candidate set holds only live items, so the
+	// bound is unreachable in routine use; exceeding it still rejects the
+	// event (store.ErrLimitExceeded) rather than deciding on a partial set.
 	LookupLimit int
 }
 
@@ -81,7 +82,9 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 
 func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event) (domain.IngestReceipt, error) {
 	e = e.Clone()
-	if err := e.ValidateFor(p, g.Limits); err != nil {
+	// Structure and authority only: configured limits apply after the
+	// idempotency lookup, to new events (F3).
+	if err := e.ValidateFor(p, retryCeiling(g.Limits)); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	var anonymous string
@@ -111,7 +114,9 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 // anonymous occurrence ID when e has no EventID and must be empty
 // otherwise; the caller generates it once per attempt, outside any retried
 // transaction callback. Apply revalidates e, so it is safe to call
-// directly. On error the caller must abort tx.
+// directly. It is failure-atomic: an error after its first write poisons
+// tx (store.Tx.Poison), so the caller's transaction commits nothing even if
+// the error is ignored; an error before any write leaves tx usable.
 //
 // Every error Ingest and Apply return is a bare public sentinel (or a join
 // of them): never text naming an item or other record (R20.1).
@@ -123,7 +128,7 @@ func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
 	e = e.Clone()
 	limits := g.Limits.Effective()
-	if err := e.ValidateFor(p, limits); err != nil {
+	if err := e.ValidateFor(p, retryCeiling(g.Limits)); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	if tx.SessionID() != p.SessionID {
@@ -152,9 +157,26 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 			return r, err
 		}
 	}
+	// Only a new occurrence is held to the currently configured limits
+	// (F3, SPEC-1.7, DUR-1.2): a retry above replayed its receipt whatever
+	// the limits are now.
+	if err := e.ValidateFor(p, limits); err != nil {
+		return domain.IngestReceipt{}, err
+	}
 
 	r := &run{g: g, tx: tx, p: p, e: e, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
-	return r.apply()
+	rc, err := r.apply()
+	if err != nil {
+		// Everything above only read; from here the core has written. Any
+		// failure poisons the caller's transaction, so no partial result
+		// can commit even if the caller ignores the error, and the EventID
+		// stays retryable (DUR-1.3). The poison carries only the public
+		// sentinel, never item details (R20.1).
+		err = sanitize(err)
+		tx.Poison(err)
+		return domain.IngestReceipt{}, err
+	}
+	return rc, nil
 }
 
 // lookupReceipt returns the stored receipt of a caller EventID (keyed by its
@@ -179,4 +201,30 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence, eventID, payload
 		return domain.IngestReceipt{}, true, err
 	}
 	return domain.IngestReceipt{}, false, nil
+}
+
+// retryCeiling returns the version-independent limits an event is validated
+// against before its idempotency lookup (F3): every structural and
+// authority rule of ValidateFor applies, but resource limits are only a
+// fixed hard ceiling (or the configured value, if larger) that bounds
+// hashing work. A committed event's retry is therefore never rejected by a
+// later, tighter configuration; the configured limits are checked only for
+// a new occurrence.
+func retryCeiling(configured domain.Limits) domain.Limits {
+	c := configured.Effective()
+	ceil := func(v *int, hard int) { *v = max(*v, hard) }
+	ceil(&c.MaxSpanBytes, 1<<30)
+	ceil(&c.MaxItemsPerSpan, 1<<20)
+	ceil(&c.MaxAttributes, 1<<10)
+	ceil(&c.MaxAttributeBytes, 1<<20)
+	ceil(&c.MaxHeadingBytes, 1<<20)
+	ceil(&c.MaxSpans, 1<<16)
+	ceil(&c.MaxParts, 1<<20)
+	ceil(&c.MaxEventBytes, 1<<30)
+	ceil(&c.MaxBlobBytes, 1<<30)
+	ceil(&c.MaxEventItems, 1<<20)
+	ceil(&c.MaxEventDiagnostics, 1<<20)
+	ceil(&c.MaxRelationships, 1<<22)
+	ceil(&c.MaxReferenceLinks, 1<<22)
+	return c
 }

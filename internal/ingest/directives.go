@@ -11,10 +11,6 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
-// maxClaimsPerSource bounds the obligation lookup when comparing a
-// duplicate's declaration with its canonical item's (R9, R11).
-const maxClaimsPerSource = 256
-
 // dedupRule names the deterministic rule recorded on DUPLICATE_OF edges
 // (FR-REL-007, M2).
 const dedupRule = policy.Version
@@ -48,7 +44,7 @@ func (r *run) buildDirective(c unitCtx, item directive.Item) (domain.ContextItem
 
 	access, ok := r.boundary(d.Scope, c.transcript.Access)
 	if !ok && item.Scope != "" {
-		r.diagnose(c, item, domain.ErrMalformedDirective, domain.ReasonInvalidAttribute)
+		r.diagnose(c, item, c.transcript.Access, domain.ErrMalformedDirective, domain.ReasonInvalidAttribute)
 		def, err := policy.ForSection(item.Section)
 		if err != nil {
 			return domain.ContextItem{}, err
@@ -78,9 +74,11 @@ func (r *run) buildDirective(c unitCtx, item directive.Item) (domain.ContextItem
 }
 
 // diagnose records an ingestion diagnostic for a parser item.
-func (r *run) diagnose(c unitCtx, item directive.Item, code domain.DiagnosticCode, reason domain.DiagnosticReason) {
-	r.unitDiags = append(r.unitDiags, domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason,
-		Section: string(item.Section), DirectiveID: item.DirectiveID, Range: item.Range})
+// It is readable at access: the narrower of the transcript's boundary and
+// the item's (F6, SEC-1.3).
+func (r *run) diagnose(c unitCtx, item directive.Item, access domain.AccessBoundary, code domain.DiagnosticCode, reason domain.DiagnosticReason) {
+	r.unitDiags = append(r.unitDiags, scopedDiag{domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason,
+		Section: string(item.Section), DirectiveID: item.DirectiveID, Range: item.Range}, access})
 }
 
 // directiveItem applies one non-Working directive item (FR-DIR-002, D10,
@@ -98,7 +96,7 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	}
 	if err := graph.CheckBoundaryConflict(r.tx, c.actor, it); err != nil {
 		if errors.Is(err, graph.ErrBoundaryConflict) {
-			r.diagnose(c, item, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
+			r.diagnose(c, item, it.Access, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
 			return nil
 		}
 		return err
@@ -112,12 +110,17 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	if err != nil {
 		return err
 	}
-	r.written[item.Range] = true
+	r.written[item.Range] = it.Access
 	if err := r.linkDerived(c, it); err != nil {
 		return err
 	}
+	// The duplicate or supersession edge counts against the event's
+	// relationship bound too (DUR-1.6).
+	if canonical.ID != "" && r.rels >= r.limits.MaxRelationships {
+		return errLimit("MaxRelationships")
+	}
 	if dup {
-		if _, err := graph.LinkDuplicate(r.tx, c.actor, it.ID, canonical.ID, r.graphEventID(), dedupRule); err != nil {
+		if _, err := graph.LinkDuplicate(r.tx, c.actor, it.ID, canonical.ID, r.graphEventID(), dedupRule, item.Obligation); err != nil {
 			return err
 		}
 		r.rels++
@@ -141,10 +144,10 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	return nil
 }
 
-// duplicateOf reports whether it would be an exact semantic duplicate of
-// its key's current version (D10, R11): same meaning under
-// graph.SameDirectiveSemantics and the same obligation declaration. A
-// lower-authority or otherwise different write is never a duplicate.
+// duplicateOf returns its key's current version, if any, and whether it
+// would be an exact semantic duplicate of it (D10) under graph's single
+// comparison, which includes the obligation declaration (R11, SPEC-1.12).
+// A lower-authority or otherwise different write is never a duplicate.
 func (r *run) duplicateOf(actor domain.Principal, it domain.ContextItem, claim string) (domain.ContextItem, bool, error) {
 	cur, err := graph.CurrentVersionFor(r.tx, actor, it)
 	if isNotFound(err) {
@@ -153,31 +156,11 @@ func (r *run) duplicateOf(actor domain.Principal, it domain.ContextItem, claim s
 	if err != nil {
 		return domain.ContextItem{}, false, err
 	}
-	if !graph.SameDirectiveSemantics(it, cur) {
-		return domain.ContextItem{}, false, nil
-	}
-	claims, err := r.currentClaims(cur.ID)
+	same, err := graph.SameDirective(r.tx, it, claim, cur)
 	if err != nil {
 		return domain.ContextItem{}, false, err
 	}
-	same := len(claims) == 0 && claim == "" || len(claims) == 1 && claims[0] == claim
 	return cur, same, nil
-}
-
-// currentClaims returns the claim names of the current obligation versions
-// bound to source.
-func (r *run) currentClaims(source string) ([]string, error) {
-	versions, err := r.tx.ObligationsBySource(source, maxClaimsPerSource)
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, v := range versions {
-		if v.Current {
-			out = append(out, v.Claim)
-		}
-	}
-	return out, nil
 }
 
 // declareObligation creates the UNRESOLVED obligation version a Pinned
@@ -264,7 +247,7 @@ func (r *run) residualInstruction(c unitCtx, slices []domain.ByteRange) error {
 	if err := r.linkDerived(c, it); err != nil {
 		return err
 	}
-	return r.detectDuplicate(c.actor, it)
+	return r.detectDuplicate(c.si, c.pi, c.actor, it)
 }
 
 // detectDuplicate links a new non-directive item (a transcript or residual
@@ -273,27 +256,32 @@ func (r *run) residualInstruction(c unitCtx, slices []domain.ByteRange) error {
 // same session and task (FR-ING-005, D10). It is detection only: the new
 // occurrence stays current pending input with its own turn and metadata,
 // and nothing crosses an authority, boundary, or task. Candidates come from
-// the store's bounded duplicate index (R19); more than the lookup limit
-// rejects the event (store.ErrLimitExceeded, D17).
-func (r *run) detectDuplicate(actor domain.Principal, it domain.ContextItem) error {
+// the store's exact-key live-candidate index, filtered to the actor inside
+// the query (F1, SEC-1.1, DUR-1.1): every earlier identical occurrence is
+// either the canonical one or already DUPLICATE_OF it and so no longer a
+// candidate, so the set is the canonical item plus the new one however
+// often the content repeats, and the limit is unreachable in routine use.
+// Excluded unverified matches are reported as ItemUnverified (DUR-1.4).
+func (r *run) detectDuplicate(si, pi int, actor domain.Principal, it domain.ContextItem) error {
 	if !it.Access.Permits(actor) {
 		return nil
 	}
-	items, err := r.tx.DuplicateCandidates(store.DuplicateFilter{
-		TaskID: it.TaskID, Section: domain.SectionNone, Role: it.Role, Authority: it.Authority,
-		Access: it.Access, ContentHash: it.ContentHash, Limit: r.g.lookupLimit(),
+	found, err := r.tx.CanonicalCandidates(store.CanonicalFilter{
+		Viewer: actor, TaskID: it.TaskID, Section: domain.SectionNone, DirectiveID: "", Kind: it.Kind, Role: it.Role,
+		Authority: it.Authority, Access: it.Access, ContentHash: it.ContentHash, Limit: r.g.lookupLimit(),
 	})
 	if err != nil {
 		return err
 	}
-	for _, c := range items {
-		if c.ID == it.ID || c.Seq >= it.Seq || c.DirectiveID != "" || c.Kind != it.Kind || c.Scope != it.Scope {
+	r.reportUnverified(si, pi, domain.ByteRange{}, it.Access, found.Unverified)
+	for _, c := range found.Items {
+		if c.ID == it.ID || c.Seq >= it.Seq || c.Scope != it.Scope {
 			continue
 		}
 		if r.rels >= r.limits.MaxRelationships {
 			return errLimit("MaxRelationships")
 		}
-		_, err := graph.LinkDuplicate(r.tx, actor, it.ID, c.ID, r.graphEventID(), dedupRule)
+		_, err := graph.LinkDuplicate(r.tx, actor, it.ID, c.ID, r.graphEventID(), dedupRule, "")
 		switch {
 		case errors.Is(err, graph.ErrNotDuplicate):
 			continue // c is itself a duplicate; a later candidate may be canonical
