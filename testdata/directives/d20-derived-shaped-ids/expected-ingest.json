@@ -1,0 +1,333 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_88c6aa729b12790bcb9dec4b715fdb85",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Goal [goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef]\nhidden\n## Remember\n- [pinned-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef] hidden\n- [ephemeral-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef] hidden\n- [Goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef] explicit\n- [goal-0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF] explicit\n- [resolve-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef] explicit\n- [goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde] explicit\n- derived\n"
+        }
+      ],
+      "content_hash": "sha256:c77ac84f5ed4e09016eaad2f331a3eb4362d9c92018a9827f7beb0a9ccea2f55"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_7577003a4eece1275dd99a7ec1734a90",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "Goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "explicit"
+        }
+      ],
+      "content_hash": "sha256:f81f16954486427d932f49f04aa10317c3414b4dbac9b49d9e928320d85718d8",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            268,
+            351
+          ],
+          "slices": [
+            [
+              342,
+              350
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_3273124d67f01d97d45c59c5fb62bf97",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "goal-0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "explicit"
+        }
+      ],
+      "content_hash": "sha256:f81f16954486427d932f49f04aa10317c3414b4dbac9b49d9e928320d85718d8",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            351,
+            434
+          ],
+          "slices": [
+            [
+              425,
+              433
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#3",
+      "id": "itm_3915a8c35e6c656301a852c10be3c492",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "resolve-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "explicit"
+        }
+      ],
+      "content_hash": "sha256:f81f16954486427d932f49f04aa10317c3414b4dbac9b49d9e928320d85718d8",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            434,
+            520
+          ],
+          "slices": [
+            [
+              511,
+              519
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#4",
+      "id": "itm_076650ac3a904307bbbe6980a6cd9b4a",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "goal-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "explicit"
+        }
+      ],
+      "content_hash": "sha256:f81f16954486427d932f49f04aa10317c3414b4dbac9b49d9e928320d85718d8",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            520,
+            602
+          ],
+          "slices": [
+            [
+              593,
+              601
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#5",
+      "id": "itm_6f06f30ef8b355361e23a3242b585877",
+      "kind": "fact",
+      "section": "REMEMBER",
+      "directive_id": "remember-f3496b942711cc64094f508010648cf5808ff4f5adc9e1106eaa2655107bfb24",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "derived"
+        }
+      ],
+      "content_hash": "sha256:f3496b942711cc64094f508010648cf5808ff4f5adc9e1106eaa2655107bfb24",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            602,
+            612
+          ],
+          "slices": [
+            [
+              604,
+              611
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#3",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#4",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#5",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "derived_id",
+      "section": "GOAL",
+      "range": [
+        0,
+        87
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "range": [
+        99,
+        182
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrMalformedDirective",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "range": [
+        182,
+        268
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 3,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "REMEMBER",
+      "directive_id": "remember-f3496b942711cc64094f508010648cf5808ff4f5adc9e1106eaa2655107bfb24",
+      "range": [
+        602,
+        612
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

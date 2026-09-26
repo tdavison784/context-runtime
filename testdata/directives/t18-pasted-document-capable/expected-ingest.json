@@ -1,0 +1,188 @@
+{
+  "seq": 4,
+  "opened_turn": 2,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_3bdc42ab639c8757bbced499ec6f37d9",
+      "role": "TRANSCRIPT",
+      "kind": "user_message",
+      "generation": "WORKING",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "# Design: Foo v2\n\n## Goal\nShip Foo v2 by Q3.\n\n## Pinned\n- Document constraints apply to reviewers.\n\n## Resolve [launch]\n"
+        }
+      ],
+      "content_hash": "sha256:21d5674b27420e51326bf27cd9a19b1cb7a2baa7add0d8b45c09b2dba1dc2854"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_94fb88aa9accc24f0e7e2bcc61b4d0cf",
+      "kind": "goal",
+      "section": "GOAL",
+      "directive_id": "goal-9ec7b5f12bcd3455cb3a90957f010e9d0d5ced4e8a04c51db8bdde26480bc980",
+      "generation": "DURABLE",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "goal_status": "OPEN",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Ship Foo v2 by Q3."
+        }
+      ],
+      "content_hash": "sha256:9ec7b5f12bcd3455cb3a90957f010e9d0d5ced4e8a04c51db8bdde26480bc980",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            18,
+            46
+          ],
+          "slices": [
+            [
+              26,
+              44
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "event#2",
+      "id": "itm_009e204d644d320b938a7ff62f261869",
+      "kind": "constraint",
+      "section": "PINNED",
+      "directive_id": "pinned-c66dd96c3f7b26b86a291df6c16507f2d7b65a0a1e3e35390f5661f5f3fe05a5",
+      "generation": "PINNED",
+      "authority": "USER",
+      "scope": "TASK",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "PROTECTED",
+      "created_turn": 2,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "Document constraints apply to reviewers."
+        }
+      ],
+      "content_hash": "sha256:c66dd96c3f7b26b86a291df6c16507f2d7b65a0a1e3e35390f5661f5f3fe05a5",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            56,
+            99
+          ],
+          "slices": [
+            [
+              58,
+              98
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    },
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#2",
+      "to": "event#0",
+      "authority": "USER",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [
+    {
+      "action": "RESOLVE",
+      "target_id": "launch",
+      "authority": "USER",
+      "actor_authority": "USER",
+      "status": "PARSED_NOT_EXECUTED",
+      "resolution": "NOT_FOUND",
+      "range": [
+        100,
+        120
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "GOAL",
+      "directive_id": "goal-9ec7b5f12bcd3455cb3a90957f010e9d0d5ced4e8a04c51db8bdde26480bc980",
+      "range": [
+        18,
+        46
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "PINNED",
+      "directive_id": "pinned-c66dd96c3f7b26b86a291df6c16507f2d7b65a0a1e3e35390f5661f5f3fe05a5",
+      "range": [
+        56,
+        99
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 2,
+      "code": "ErrNotFound",
+      "reason": "unknown_target",
+      "section": "RESOLVE",
+      "range": [
+        100,
+        120
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

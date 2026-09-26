@@ -1,0 +1,107 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_eb7fe7a23b51914e29a48ef325577c7e",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "```\n``` \n## Pinned\n- hidden\n```\n## Goal\nhidden\n"
+        }
+      ],
+      "content_hash": "sha256:304bdc631d4e31969cbfd10d8e39fe6d3ca7055ec7236b2c69f1e7d86c82ae2f"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_e0bda00f37e306537ad5ccc2d0eaac4d",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "```\n``` \n## Pinned\n- hidden\n```\n## Goal\nhidden"
+        }
+      ],
+      "content_hash": "sha256:5d642f69ac35f11139f35ada5a579c080ee825f6240f01ef31d67a76630209a4",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            49
+          ],
+          "slices": [
+            [
+              0,
+              49
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "PINNED",
+      "range": [
+        10,
+        19
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "DirectiveNotParsed",
+      "reason": "fenced_code",
+      "section": "GOAL",
+      "range": [
+        35,
+        42
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}
