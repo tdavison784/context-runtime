@@ -28,20 +28,39 @@ distinct from the frozen inference principal.
   `SENT→PREPARED` (retry); `SENT→UNKNOWN`; `UNKNOWN→COMPLETED`/
   `UNKNOWN→FAILED` (reconciliation); `UNKNOWN→ABANDONED`. No `SENT→SENT` or
   `UNKNOWN→SENT` (FR-CALL-002).
-- **Evidence-gated `UpdateCall`: the store itself, not just ledger-package
-  discipline, refuses a call transition unless its evidencing attempt is
-  already stored in the matching closed state.** `store.Tx.UpdateCall`'s
-  contract requires, for every way of leaving SENT or UNKNOWN:
-  `→COMPLETED` needs attempt `c.Attempts` stored COMPLETED with
-  `OutcomeHash == c.OutcomeHash`; `→FAILED` needs it stored FAILED with the
-  same hash agreement; `→PREPARED` (retry, from SENT only) needs it stored
-  FAILED **and** `Retryable`; `→UNKNOWN`/`→ABANDONED` need it stored in the
-  matching attempt state. `PREPARED→SENT` needs attempt `c.Attempts` stored
-  SENT. Any mismatch fails `ErrInvalidTransition` at the store layer, so a
-  caller cannot commit a call-state transition whose attempt-level evidence
-  doesn't already exist in the same or an earlier commit — this is stronger
-  than "the ledger package happens to write both in one transaction," which
-  a differently-written caller could bypass.
+- **Evidence-gated `UpdateCall`, judged against the stored *current*
+  attempt (round 1, DUR-1.1).** `store.Tx.UpdateCall`'s contract requires,
+  for every way of leaving SENT or UNKNOWN: `→COMPLETED` needs attempt
+  `c.Attempts` stored COMPLETED with `OutcomeHash == c.OutcomeHash`;
+  `→FAILED` needs it stored FAILED with the same hash agreement;
+  `→PREPARED` (retry, from SENT only) needs it stored FAILED **and**
+  `Retryable`; `→UNKNOWN`/`→ABANDONED` need it stored in the matching
+  attempt state. `PREPARED→SENT` needs attempt `c.Attempts` stored SENT.
+  Critically, `next.Attempts` itself is now constrained: it must equal
+  `old.Attempts` for every transition **except** `PREPARED→SENT`, which
+  requires exactly `old.Attempts+1`. Before this constraint, a caller could
+  present evidence for an *older* attempt number while a newer attempt was
+  still open — e.g. move a call to a terminal state citing attempt 1's
+  closed, failed outcome while attempt 2 (opened by a retry) was still
+  SENT, then release the reservation and prepare a second operation while
+  attempt 2 remained live in flight, forking the conversation (INV-15,
+  FR-CALL-005). Fixing `Attempts` to the stored value (or its exact
+  successor) makes "the evidence" and "the current attempt" the same
+  question, closing that gap. **Terminal calls (COMPLETED, FAILED,
+  ABANDONED) are now fully immutable at the store layer:** any `UpdateCall`
+  against a terminal call fails `ErrImmutable`, regardless of what it tries
+  to change — before this, a same-state update (leaving `State` unchanged)
+  was accepted with no constraint on `Attempts`/`Outcome`/`OutcomeHash`/
+  `Reason`/`FinishedSeq`, so a caller could rewrite a COMPLETED call's
+  recorded outcome after the fact; the two stores even disagreed about it
+  (memory silently allowed rewriting a COMPLETED outcome, SQLite refused
+  with `ErrCallOutcomeConflict`). Any mismatch on any of the rules above
+  fails `ErrInvalidTransition` (or `ErrImmutable` for a terminal call) at
+  the store layer, so a caller cannot commit a call-state transition whose
+  attempt-level evidence doesn't already exist, or whose call is already
+  finished — this is stronger than "the ledger package happens to write
+  both in one transaction," which a differently-written caller could
+  bypass, and it makes both stores agree.
 - **Attempt transition table and immutability.** `CallAttempt` gains a
   `Retryable` field (a FAILED attempt the retry policy may retry — checked
   by `CallAttempt.Validate`: `Retryable` is only valid on a FAILED attempt).
@@ -77,6 +96,24 @@ distinct from the frozen inference principal.
   indistinguishable from "sent, no ack," and treating it as more certain
   risks either a duplicate send or discarding a call that completed
   server-side (INV-15).
+- **`RecoverAll` closes the "which sessions exist" gap in startup recovery
+  (round 1, DUR-1.8).** `Recover` operates one session at a time and needs
+  a `Principal` for that session; nothing previously let the runtime
+  discover *which* sessions might have a SENT call to recover, so T10 step
+  3 ("restart recovers UNKNOWN calls") silently depended on the embedding
+  harness independently tracking every session ID it had ever used and
+  calling `Recover` for each — a SENT call in an untracked session would
+  never become UNKNOWN and would keep its reservation forever, and
+  `Abandon` cannot clear it because `Abandon` requires UNKNOWN first (a
+  liveness gap, not a safety one). The fix: `store.Store.Sessions(ctx)
+  ([]string, error)` lists every session with committed records, in
+  ascending order; `Ledger.RecoverAll(ctx, actorFor func(sessionID string)
+  domain.Principal)` iterates it, recovers each session in its own
+  transaction under the actor `actorFor` supplies (rejecting a mismatched
+  session for that actor), continues past a failing session rather than
+  stopping, and returns every recovered UNKNOWN call plus the joined
+  errors. Startup recovery no longer depends on anything the store itself
+  doesn't already know.
 - Outcome idempotency is per attempt (ADR 4): `CallOutcome.Attempt` plus
   `OutcomeHash()` identify one attempt's outcome; repeating the same audited
   outcome for the same attempt is a no-op, a differing one is
@@ -125,6 +162,32 @@ distinct from the frozen inference principal.
   writes call lifecycle events, which is what makes the count exact.
   Relevance-based filtering (deciding a newer event doesn't actually matter)
   is deferred to Phase 4/5 once the planner exists.
+- **The store now guarantees `semanticStale`'s assumption instead of the
+  ledger merely hoping it holds (round 1, DUR-1.3).** `semanticStale`
+  assumes every semantic change consumes a sequence number visible as a
+  non-`TargetCall` lifecycle event. That assumption was previously false at
+  the store level: `UpdateObligationVersion` (changing `Current`/
+  `MaterializationDisabled`), `SetCurrentDirective` alone, and `PutTask`
+  without a status change could all commit without allocating a `Seq` or
+  writing any audit record — a preview planned before such a change would
+  incorrectly pass `Prepare`/`MarkSent` as still current, breaking
+  FR-CALL-001's "a stale preview fails with `ErrVersionConflict`" and T10
+  step 2. The fix is a **store-wide semantic-write rule**, not a per-method
+  patch: any transaction that performs a semantic write (any write other
+  than `PutConversation`/`InsertCall`/`UpdateCall`/`PutCallAttempt`/
+  `TargetCall` lifecycle events) must also write at least one record
+  carrying a `Seq` allocated in that same transaction — an item,
+  relationship, event record, obligation version or transition, grant, or
+  non-`TargetCall` lifecycle event — or the commit fails
+  `domain.ErrInvalidRecord`. This makes "did a semantic write happen" and
+  "did a sequence number get allocated for it" the same question, which is
+  exactly what `semanticStale`'s count comparison needs to be sound.
+  `PutTask` now always requires its audit event for this reason (previously
+  optional, non-status changes could skip it). Blobs are exempted from this
+  rule: a blob is content-addressed and inert until a sequenced record
+  references it, and the ledger itself stores response/audit blobs in
+  ledger-only transactions that must not be forced to also carry a
+  semantic write.
 - Sequence allocation and audit: every ledger transition allocates its
   sequence number with `store.Tx.NextSeq()` inside the same transaction as
   the state change and appends exactly one `domain.LifecycleEvent` with
@@ -136,14 +199,31 @@ distinct from the frozen inference principal.
   package can forge a ledger audit entry.
 - No database transaction is held across transport: `Prepare`, `MarkSent`,
   `RecordOutcome` are separate `store.Update` calls.
-- **Service grant deferred.** `CallRecord` freezes the inference `Principal`
-  separately from `ServiceActor`, but Phase 1 does not yet implement §8's
+- **Service grant deferred; the owner-match floor is decided but not yet
+  applied everywhere it should be (round 1, SPEC-1.2, unassigned as of this
+  writing).** `CallRecord` freezes the inference `Principal` separately
+  from `ServiceActor`, but Phase 1 does not yet implement §8's
   "conversation-specific service grant": `internal/invocation
   .checkServiceActor` requires the actor's authority be SYSTEM or HARNESS,
   and `checkActorScope` requires the actor's non-empty owner fields match
-  the call's inference principal — an owner-match check, not a grant lookup.
-  A dedicated `ActionDispatchCall` grant type (letting a narrower-scoped
-  dispatcher drive a call it doesn't directly own) is open for Phase 5.
+  the call's inference principal — an owner-match check, not a grant
+  lookup. **This decision is not yet enforced on the reservation path
+  itself:** `Prepare` calls only `checkServiceActor` (authority) and never
+  `checkActorScope` (owner-match), while `MarkSent`, `RecordOutcome`,
+  `Cancel`, and `Recover` all call both. A HARNESS actor scoped to task
+  A/agent A can therefore successfully `Prepare` a reservation for task
+  B/agent B's conversation; because later methods *do* check scope, the
+  wrongly-scoped actor cannot itself drive or cancel what it reserved, so
+  the reservation is stuck until task B's correctly-scoped actor happens to
+  clear it (`ErrCallInFlight` in the meantime) — reproduced directly against
+  this worktree. This is a real Phase 1 gate blocker, not a documentation
+  gap; it is not currently assigned to a worker in the round-1 fix table
+  and needs one. The fix is mechanical: apply `checkActorScope(req
+  .ServiceActor, call)` in `Prepare` before any idempotent return or
+  reservation write, matching every other ledger method. A dedicated
+  `ActionDispatchCall` grant type (letting a narrower-scoped dispatcher
+  drive a call it doesn't directly own, replacing the owner-match floor
+  entirely) remains open for Phase 5.
 - `CallRecord.Validate` enforces `ProposalHash == CallProposalHash(c)` and
   `State.Terminal() == (FinishedSeq != 0)`, so a record's frozen identity and
   its state/audit trail can never disagree.
@@ -186,7 +266,23 @@ distinct from the frozen inference principal.
   Rejected for Phase 1: no grant-issuance machinery for dispatch actions
   exists yet, and SYSTEM/HARNESS-plus-owner-match is a sound, conservative
   subset (never permits an unrelated dispatcher) to build the rest of the
-  ledger against.
+  ledger against — provided it is actually applied everywhere, which
+  SPEC-1.2 found `Prepare` currently is not (see above).
+- **Constraining `next.Attempts` to equal `old.Attempts` (or +1 only on
+  `PREPARED→SENT`) instead of trusting the evidence-gating rule alone.**
+  Rejected as insufficient on its own (DUR-1.1): evidence-gating checks that
+  *some* attempt in the right closed state exists, but without also pinning
+  `Attempts` to the stored current value, a caller could satisfy that check
+  using an *older* attempt's evidence while a newer attempt was still open.
+  Both constraints are required together.
+- **A per-method patch for the semantic-write rule (e.g. only fixing
+  `PutTask`) instead of a store-wide rule.** Rejected (DUR-1.3): the same
+  gap existed independently in `UpdateObligationVersion` and
+  `SetCurrentDirective`; a store-wide rule (any semantic write commits with
+  a sequenced record, blobs exempted) closes the whole class rather than
+  the three instances found so far, and is the only formulation
+  `semanticStale` can rely on going forward without re-auditing every
+  store method again for the next one.
 
 ## Consequences / compatibility impact
 
@@ -200,9 +296,24 @@ distinct from the frozen inference principal.
   strictly narrower than §8 eventually requires (owner-match only); Phase 5
   must add the grant type without weakening the current SYSTEM/HARNESS +
   owner-match floor.
+- **SPEC-1.2 is an open Phase 1 gate blocker with no assigned owner as of
+  this writing.** Until `Prepare` applies `checkActorScope`, the owner-match
+  floor this ADR documents as decided is not actually enforced on the
+  reservation path, and a misconfigured or compromised dispatcher scoped to
+  one task/agent can reserve — though not itself complete — another
+  conversation's call slot. Flagging prominently rather than silently
+  updating the Decision text to match the code, since the code is the thing
+  that needs to change here, not the ADR.
 - `LogicalCalls` advancing only on inference completions means usage
   accounting keyed to "completed logical inference index" must read
   `LogicalCalls`, not a raw completed-call count.
+- The store-wide semantic-write rule (DUR-1.3) and the `Attempts`/terminal-
+  immutability constraints (DUR-1.1) are breaking changes to the Phase 1
+  store interface and any existing caller of `UpdateObligationVersion`,
+  `SetCurrentDirective`, `PutTask`, or `UpdateCall`; no production data
+  exists yet, so this is a clean signature/behavior change, not a
+  migration, but every store implementation and conformance test must be
+  updated together.
 
 ## Tests that lock the behavior
 
@@ -252,6 +363,45 @@ distinct from the frozen inference principal.
   same ledger properties against the real SQLite store, not just the memory
   store.
 
+### Round 1 additions (findings DUR-1.1, 1.3, 1.8; SPEC-1.2)
+
+The store contract changes for DUR-1.1/1.3/1.8 are merged in
+`internal/store/store.go`, but `internal/store/memory`,
+`internal/store/sqlite`, and `internal/store/storetest` do not currently
+compile against the new signatures (`PutTask`'s event now required,
+`Store.Sessions`, boundary-keyed `CurrentDirective`) — that implementation
+and its tests are `memstore-worker`/`sqlite-worker`'s in-flight fix.
+Required once landed:
+
+- `internal/store/storetest`: a case rejecting `UpdateCall` where
+  `next.Attempts != old.Attempts` on any transition other than
+  `PREPARED→SENT`, and rejecting `PREPARED→SENT` unless `next.Attempts ==
+  old.Attempts+1` (the exact DUR-1.1 reproduction: citing an older attempt's
+  evidence while a newer attempt is still open must fail, not succeed); a
+  case asserting **any** `UpdateCall` against an already-terminal call fails
+  `ErrImmutable`, including a byte-identical same-state update and
+  rewriting a COMPLETED call's `Outcome` — and that memory and SQLite agree
+  (they previously didn't). A case for each of `UpdateObligationVersion`,
+  `SetCurrentDirective`, and non-status `PutTask` alone (no accompanying
+  sequenced record) failing `ErrInvalidRecord`, and passing when paired
+  with one; a ledger-only transaction (conversation/call/attempt/
+  `TargetCall` event writes alone, or a lone blob insert) succeeding
+  without one.
+- `internal/invocation`: a `TestPrepare*` regression for DUR-1.3 — seed an
+  item and an obligation, `Prepare` a preview at the current `LastSeq`,
+  change only `MaterializationDisabled` via `UpdateObligationVersion`
+  (no accompanying item/relationship/event write), then assert `MarkSent`
+  now fails `ErrVersionConflict` where it previously silently succeeded.
+  A `TestRecoverAll*` suite: recovers SENT calls across multiple sessions
+  from one `Store.Sessions` listing; a mismatched `actorFor` session is
+  reported in the joined error and does not stop other sessions'
+  recovery; an empty store recovers nothing without error.
+- **Required, unassigned:** an `internal/invocation` test for SPEC-1.2 —
+  `Prepare` with a `ServiceActor` scoped to a different task/agent than
+  the conversation's inference principal must fail (matching what
+  `MarkSent`/`Cancel`/`RecordOutcome` already enforce via `checkActorScope`),
+  and must leave no reservation held afterward.
+
 ## Open questions
 
 - Design of the Phase 5 `ActionDispatchCall` service grant: how a
@@ -260,6 +410,11 @@ distinct from the frozen inference principal.
 - Whether `CallAttempt.ProviderRequestID` is sufficient for FR-CALL-004's
   reconciliation mechanism, or reconciliation needs more provider-specific
   fields decided in ADR 9.
+- **Needs an owner: SPEC-1.2** (`Prepare` doesn't apply `checkActorScope`).
+  Round-1 fix assignments didn't name a worker for this finding; it should
+  be picked up alongside `internal/invocation`'s other round-1 work
+  (`ledger-worker`) since it's the same package and the same actor-scope
+  helper the DUR-1.1/1.8 fixes already touch.
 
 ## Review
 
@@ -295,3 +450,26 @@ epoch before comparing the in-flight record's `ProposalHash`, and
 populates `ProposalHash` before `InsertCall`. `TestStaleDuplicatePreview`
 locks the regression directly. Finding N1 is closed; the Consequences and
 Open questions tracking items above are removed accordingly.
+
+**Round 1 review** (PR #2; SPEC — Codex GPT-6, `spec-pr-comment-round1.md`;
+DUR — Claude Opus, `dur-review-round1.md`). DUR-1.1 (HIGH): `UpdateCall`
+judged evidence by the *new* record's `Attempts` with no constraint tying
+it to the stored current attempt, and terminal calls were only immutable
+by convention, not enforcement — reproduced as a forkable conversation and
+an outcome-rewrite that the two stores even disagreed on; fixed by pinning
+`Attempts` to `old.Attempts` (+1 only on `PREPARED→SENT`) and making every
+`UpdateCall` on a terminal call fail `ErrImmutable`. DUR-1.3 (MEDIUM):
+`semanticStale`'s "every semantic change gets a sequence number" assumption
+was false for three store methods; fixed by a store-wide semantic-write
+rule instead of patching each one. DUR-1.8 (LOW): startup recovery had no
+way to discover which sessions to recover; fixed by `Store.Sessions` +
+`Ledger.RecoverAll`. **SPEC-1.2 (HIGH, newly found, currently unassigned):**
+`Prepare` never applies the owner-match check (`checkActorScope`) this ADR
+documents as the Phase 1 floor, unlike every other ledger method — I
+reproduced this directly against the merged worktree (a HARNESS actor
+scoped to task A/agent A can `Prepare` task B/agent B's reservation) and
+recorded it in the Decision, Consequences, and Open questions rather than
+silently editing the Decision text to match the unfixed code. DUR-1.2,
+1.4, 1.5, 1.6, 1.7 (commit-cancellation semantics, error mapping,
+re-entrancy, concurrent `Open`, interrupted migration) are ADR 3's scope,
+not this ADR's.

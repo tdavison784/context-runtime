@@ -62,6 +62,65 @@ preserve valid state.
 - Migrations are tracked in `schema_migrations(version INTEGER PRIMARY KEY,
   name TEXT, checksum TEXT)`; `Open` compares each applied version's stored
   checksum against the embedded file's and fails to open on any mismatch.
+- **Commit is never cancelled; context/I/O errors are returned as
+  themselves (round 1, DUR-1.2/1.4, decided in `store.go`'s contract,
+  `sqlite-worker`'s implementation in progress).** Two related failures
+  were reproduced against the pre-round-1 SQLite store. First (DUR-1.2):
+  the final `UPDATE sessions`/`COMMIT` ran under the caller's `ctx`; if that
+  context was cancelled while `COMMIT` was in flight, `modernc.org/sqlite`
+  can return `ctx.Err()` even though the commit succeeded, so `Update`
+  reported failure for a transaction that had, in fact, committed — 3000
+  trials with a randomly-timed cancellation reproduced 52 reported
+  failures, 26 of which had committed anyway. For the ledger this means
+  `MarkSent` could report an error after SENT was already durable (leaving
+  the dispatcher unable to send, `Cancel` unable to cancel, and the
+  reservation stuck until restart triggers `Recover`), and `Prepare` could
+  report an error while still holding a PREPARED reservation with no
+  returned `CallID` to reference it by. **Decision:** once the context-
+  cancellation check before commit passes, run the last statement and
+  `COMMIT` under `context.WithoutCancel(ctx)`, so cancellation can only
+  ever prevent a commit, never misreport one that happened.
+  Second (DUR-1.4): `get` wrapped every `Scan` error, including driver
+  BUSY/IO errors and a cancelled context, as `ErrIntegrity` with `%v` (not
+  `%w`), so `errors.Is(err, context.Canceled)` was always false after a
+  cancellation and a timeout was indistinguishable from data corruption —
+  `RecordOutcome` would report a cancelled context as "integrity check
+  failed," which is actively misleading during incident response.
+  **Decision:** `ErrIntegrity` is reserved for verification failures only
+  (a blob whose bytes no longer match its hash, a row that fails to
+  decode); every other error, including context and driver errors, is
+  returned as itself (wrapped with `%w`, not converted), and `Update`/
+  `View` return `ctx.Err()` directly when the context is done. Both
+  decisions are now the documented contract in `store.Store`'s doc comment;
+  the memory store already satisfies both trivially (no cancellable
+  commit phase, no `Scan`-based decoding).
+- **Re-entrant `Store` calls from inside `fn` are forbidden, not detected
+  (round 1, DUR-1.5).** With the single-connection-per-store, single-
+  writer-mutex-per-session design, calling back into the same `Store` from
+  inside `Update`'s or `View`'s `fn` — even for a *different* session —
+  deadlocks under SQLite (reproduced: blocks until the context deadline)
+  while the memory store happens to tolerate it. No current caller nests
+  calls. **Decision:** document the prohibition on the `Store` interface
+  rather than add re-entrancy detection now; a ctx-marker-based fail-fast
+  check is an available future hardening step (Phase 11) if a caller ever
+  needs to nest legitimately, but no such caller exists yet to justify the
+  complexity.
+- **Concurrent `Open` on a fresh database file, and interrupted-migration
+  recovery (round 1, DUR-1.6/1.7, decided; `sqlite-worker`'s implementation
+  pending).** Reproduced: several concurrent `Open` calls against a
+  brand-new file mostly fail `SQLITE_BUSY` at the `PRAGMA journal_mode=WAL`
+  step (3 of 4 failed in 5 of 6 runs) — `busy_timeout` was applied only
+  *after* that pragma, and each migration's implicit deferred transaction
+  cannot wait out a concurrent writer at the WAL switch. **Decision:**
+  apply `busy_timeout` through the connection DSN (`_pragma=busy_timeout`)
+  so it is in effect before the WAL switch, retry the WAL-mode switch on
+  `SQLITE_BUSY`, and run each migration under `BEGIN IMMEDIATE` rather than
+  a deferred transaction. Separately, ADR 3 already requires a migration
+  interrupted partway through to leave the database in a state a restart
+  can cleanly recover from (no partial `schema_migrations` row, no partial
+  `rec_*` tables) — an explicit test for this (interrupt a migration whose
+  last statement fails; assert both tables are absent, then reopen
+  successfully) does not exist yet and is still required.
 
 ## Alternatives considered
 
@@ -84,6 +143,27 @@ preserve valid state.
 - **Postgres for V1.** Rejected: ADR 13 fixes V1 as an embedded, single-process
   deployment; Postgres targets a separate deployment model FR-PER-001 defers
   ("may implement the same interface after SQLite acceptance").
+- **Checking `ctx.Err()` only before commit, accepting that a cancellation
+  mid-commit might misreport a success as a failure.** Rejected (DUR-1.2):
+  "might" was measured at roughly half of reported cancellation failures
+  actually having committed — that is not a rare race to accept, it is the
+  common case once a cancellation lands in the commit window, and the
+  ledger-level consequences (a stuck reservation, a `MarkSent` that can't
+  tell the caller SENT already happened) are exactly the failure modes
+  this whole ADR's durability decisions exist to prevent.
+- **Detecting re-entrant `Store` calls with a ctx marker now, instead of
+  just documenting the prohibition.** Rejected for Phase 1 (DUR-1.5): no
+  caller currently nests calls, so the detection code would have no test
+  driving it beyond a synthetic one; documenting the constraint is the
+  proportionate fix until a real caller needs to violate it, at which point
+  the design question is "should this caller nest" rather than "how do we
+  detect nesting."
+- **Retrying only the WAL-mode switch on `SQLITE_BUSY`, without also moving
+  `busy_timeout` earlier or changing the migration transaction mode.**
+  Rejected (DUR-1.6): reproduced as insufficient on its own — setting
+  `busy_timeout` first together with `_txlock=immediate` still left
+  failures at the WAL switch in testing; the fix needs the DSN-level
+  pragma, the retry, and `BEGIN IMMEDIATE` migrations together.
 
 ## Consequences / compatibility impact
 
@@ -109,6 +189,21 @@ preserve valid state.
   serialization is an accepted Phase 1 cost, not a bug to design around with
   a writer-dispatch pool. Revisit only if NFR profiling (Phase 11) shows
   contention is an actual bottleneck.
+- `context.WithoutCancel` on the final statement/`COMMIT` means a caller's
+  cancellation can no longer abort a transaction that has begun committing;
+  this is intentional (the alternative is misreporting), but it does mean
+  a cancelled `ctx` bounds *when* a transaction can still be aborted, not a
+  hard guarantee that cancellation always aborts it.
+- Reserving `ErrIntegrity` for verification failures only is a breaking
+  behavior change for any caller that was matching on `ErrIntegrity` to
+  detect a broad "something went wrong reading from SQLite" condition;
+  such a caller must now handle context/driver errors separately, which is
+  the point of the fix (they are different failure classes with different
+  correct responses).
+- The DUR-1.6/1.7 SQLite implementation work is not yet landed as of this
+  ADR update; until it is, concurrent `Open` on a fresh file remains
+  unreliable and no interrupted-migration test exists, both genuine gaps
+  against this ADR's decided design.
 
 ## Tests that lock the behavior
 
@@ -148,10 +243,37 @@ preserve valid state.
   `go test -race ./... -count=1` (measured on this branch), consistent with
   a real SQLite file per test rather than a mocked backend.
 
+### Round 1 additions (findings DUR-1.2, 1.4, 1.6, 1.7) — required, `sqlite-worker`'s fix in flight
+
+None of the following exist yet; the `internal/store/sqlite` implementation
+for round 1 has not landed as of this update (the package currently does
+not compile against the merged `store.go` contract — see ADR 16/17 for the
+same blocking state in `internal/graph`/`internal/store/memory`).
+
+- A test that cancels the context at a randomly-timed point during
+  `Update` and asserts: if an error is returned, the transaction did **not**
+  commit (`errors.Is(err, context.Canceled)` and the write is absent on
+  reopen); reproduces DUR-1.2's exact scenario (thousands of trials with
+  cancellation timed across the commit window) as a bounded, deterministic
+  test rather than a one-off experiment.
+- A test asserting a cancelled context surfaces as
+  `errors.Is(err, context.Canceled)` from `tx.Item`/`tx.Call`/etc., never
+  wrapped as `ErrIntegrity` (DUR-1.4); a genuine decode failure (corrupt
+  row bytes) still produces `ErrIntegrity`.
+- `TestSQLiteConcurrentOpen` (or similar): N goroutines calling `Open` on
+  the same fresh file path concurrently all succeed (DUR-1.6); today this
+  reproduces mostly-`SQLITE_BUSY` failures.
+- The interrupted-migration replay test ADR 3 has called for since its
+  first version (DUR-1.7): a migration whose last statement fails leaves
+  `schema_migrations` empty and no `rec_*` tables present, and a subsequent
+  `Open` on the same file succeeds cleanly.
+
 ## Open questions
 
 None remaining for this ADR's original scope; `busy_timeout` (5s default,
-`WithBusyTimeout` to override) is now decided in code.
+`WithBusyTimeout` to override) is decided in code. Round 1 leaves four
+required tests and their implementation (DUR-1.2/1.4/1.6/1.7) outstanding,
+tracked in the section above.
 
 ## Review
 
@@ -166,3 +288,24 @@ Verified against the integrated `internal/store/sqlite` implementation
 the typed-column schema, concrete connection settings, and the specific
 tests above replace what were "Required" placeholders in the first-pass
 version of this ADR. No further Codex finding is open against this ADR.
+
+**Round 1 review** (PR #2; DUR — Claude Opus, `dur-review-round1.md`).
+DUR-1.2 (MEDIUM): a context cancellation during `COMMIT` could report
+failure for a transaction that actually committed (measured: about half of
+reported failures had committed); fixed by running the final statement and
+`COMMIT` under `context.WithoutCancel` once the pre-commit cancellation
+check passes. DUR-1.4 (MEDIUM): every `Scan` error, including context
+cancellation, was mapped to `ErrIntegrity`, making a timeout indistinguishable
+from data corruption; fixed by reserving `ErrIntegrity` for verification
+failures and returning context/driver errors as themselves. DUR-1.5 (LOW):
+re-entrant `Store` calls deadlock under SQLite; documented as forbidden
+rather than detected, since no caller currently nests. DUR-1.6 (LOW):
+concurrent `Open` on a fresh file mostly fails `SQLITE_BUSY` at the WAL-mode
+switch; decided fix is DSN-level `busy_timeout`, a WAL-switch retry, and
+`BEGIN IMMEDIATE` migrations. DUR-1.7 (LOW): the interrupted-migration
+replay test this ADR has called for since its first version still doesn't
+exist. All five decisions are recorded above; DUR-1.2/1.4 have a decided
+contract in `store.go` today, while DUR-1.6/1.7's SQLite-side implementation
+and all four findings' tests are `sqlite-worker`'s in-flight round-1 fix —
+this ADR's Tests section marks them accordingly rather than claiming they
+already pass.

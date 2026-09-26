@@ -84,6 +84,29 @@ requires stable input identities for deterministic replay.
   `shortHash` truncation — those are opaque storage keys with no grammar
   constraint, while a directive ID is user-facing and must satisfy
   FR-DIR-006's `id` production.
+- **Directive identity now includes the access boundary (round 1, AUTH-1.2,
+  SDD v0.7).** A directive's full key is `(session, task, access boundary,
+  directive ID)`, not `(session, task, directive ID)` — implemented by
+  `store.ReadTx.CurrentDirective(taskID, directiveID, boundary
+  domain.AccessBoundary)` and `Tx.SetCurrentDirective`. Two versions of the
+  same directive ID in two different boundaries are independent directives:
+  neither blocks the other's ID reuse, and neither's existence or content is
+  revealed by attempting to resolve the other. This closes a probe:
+  previously a single (task, directiveID) pointer meant a narrower-boundary
+  version could return `ErrNotFound` for one caller and
+  `ErrInvalidAuthorityPromotion` for another on the exact same ID, letting
+  the response itself disclose that a hidden version exists. Keying by
+  boundary makes "no version in *your* boundary" and "no version at all"
+  the same observable outcome.
+- **`ContextItem.Section` (round 1, SPEC-1.1).** A new immutable
+  `domain.DirectiveSection` field (`GOAL`/`PINNED`/`WORKING`/`REMEMBER`/
+  `REFERENCES`/`EPHEMERAL`/`""`) records which directive section created an
+  item, independent of its `Kind`. `Validate` requires a non-empty `Section`
+  to carry a `DirectiveID`. This is provenance the ID scheme alone cannot
+  express: FR-DIR-003 allows a Working section to declare `kind=conversation`
+  or other kinds, so `Kind` cannot be used to find "every current Working
+  item" — `Section` can. (ADR 16 covers the supersession-selection
+  consequence.)
 
 ## SDD amendment (applied in v0.6)
 
@@ -99,6 +122,26 @@ inviting arbitrarily long hand-typed identifiers.
 characters. Rejected because it reintroduces a collision surface — two
 directives with different content but colliding truncated hashes would
 silently supersede one another under FR-DIR-002's ID-reuse rule.
+
+## SDD amendment (applied in v0.7)
+
+Round-1 finding AUTH-1.2 (existence disclosure through a shared directive
+ID across boundaries) is resolved by amending FR-DIR-002: "Each (session,
+task, access boundary, directive ID) has one current version; versions in
+different boundaries are independent directives, so a boundary a principal
+cannot access never blocks or reveals itself through a shared ID." FR-DIR-004
+and FR-DIR-007 are amended to name the recorded directive section
+(commit `4329e29`).
+
+**Alternative rejected:** rejecting directive items whose boundary is
+narrower than the task's, so every version of an ID is visible to everyone
+who can reuse it (round-1 fix guidance's "Option 2"). Rejected: this would
+forbid a legitimate narrower-boundary directive (e.g. an AGENT-scoped
+working note reusing a task-wide ID) rather than just fixing the
+disclosure, and it conflicts with `AccessBoundary` being a first-class,
+intentional narrowing mechanism (ADR 6) rather than an error condition.
+Boundary-keyed identity (this ADR's "Option 1") fixes the disclosure without
+restricting what a directive's boundary may be.
 
 ## Alternatives considered
 
@@ -177,6 +220,20 @@ silently supersede one another under FR-DIR-002's ID-reuse rule.
   `TestConformance/Events` covers `InsertEvent` idempotency (trace T10 step
   1); `TestConformance/ItemBlobIntegrity` and `.../Blobs` cover session-
   scoped blob existence, including a blob stored only in another session.
+- Required (round 1, memstore/sqlite-worker in progress as of this writing):
+  a `storetest` case for boundary-keyed `CurrentDirective` — two directive
+  items with the same `(task, directiveID)` but different access
+  boundaries are independent current pointers, and resolving one in the
+  wrong boundary returns exactly the same `ErrNotFound` as an unused ID
+  (not a different error revealing the other boundary's version exists).
+  `internal/store/storetest` does not compile as of this ADR's last check
+  because `CurrentDirective`/`SetCurrentDirective`'s callers haven't
+  adopted the new boundary parameter yet; this is the other workers'
+  in-flight fix for the store contract change already merged.
+- Required (round 1, domain-tests-worker in progress): a
+  `domain/item_test.go` case for `ContextItem.Validate` rejecting a
+  non-empty `Section` without a `DirectiveID`, and accepting every valid
+  `DirectiveSection` value.
 
 ## Open questions
 
@@ -211,3 +268,15 @@ Verified against the integrated ledger fix (commit `0c8ce40` plus tests
 staleness, and epoch before comparing the in-flight `ProposalHash`;
 `TestStaleDuplicatePreview` locks the exact regression. Finding N1 is
 closed for this ADR's scope.
+
+**Round 1 review** (PR #2; SPEC — Codex GPT-6, `spec-pr-comment-round1.md`;
+AUTH — Claude Opus, `auth-review-round1.md`): SPEC-1.3 confirmed this ADR's
+N1 account was correctly updated (no further change needed there) and
+flagged only that the historical dating stay clear, which the existing
+"first pass"/"second pass" structure above already provides. AUTH-1.2
+(directive identity disclosure across boundaries) is this round's
+substantive change to this ADR: directive identity now includes the access
+boundary, recorded above and in the new "SDD amendment (applied in v0.7)"
+section. Also recorded `ContextItem.Section` (SPEC-1.1), which this ADR
+covers because it is new immutable per-item identity data, even though its
+consuming rule (Working-snapshot selection) is ADR 16's.
