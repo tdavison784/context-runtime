@@ -1609,154 +1609,256 @@ each with its own fix and test.
 
 ## Tests that lock the behavior
 
-Concrete test names are cited per clause below where they exist
-(SPEC-1.4: nearly all now do, confirmed against the merged integration
-head); a clause still phrased as a requirement rather than naming a test
-is a genuine gap for `p2-tests` to close, not an unwritten placeholder
-for the whole section.
+**(SPEC-2.2, reworded)** Concrete test names are cited per clause below.
+Every clause below now names at least one currently-existing test,
+grep-verified against the merged integration head (`go test -list` or
+`grep -rn "^func Test" internal/...`) while writing this revision — the
+opener's earlier framing ("a clause without one is a genuine gap") was
+itself wrong for roughly twenty clauses that had tests all along but no
+citation; that gap was in this section's bookkeeping, not in test
+coverage. Where a clause's own requirement has no dedicated test and is
+instead covered only as a consequence of a broader property (or genuinely
+isn't covered), that is called out explicitly rather than left silent.
 
-- **§1 (lifecycle commands):** `internal/ingest` — an unauthorized source
-  actor's Resolve/Unpin aborts the whole event (no partial mutation); an
-  unknown/inaccessible/ambiguous target produces the expected diagnostic
-  without aborting; a resolved, authorized command is recorded
-  `PARSED_NOT_EXECUTED` and changes no goal/pin/obligation state. Trace
-  T06's parse/authorization half, both stores.
-- **§2 (classification):** `internal/policy` — table-driven unit tests per
-  (event/span type, section) → defaults; `internal/ingest` — a surface
-  token (`MUST`, `PASS`, a JSON role label) in ordinary text creates no
-  privileged record; an unsupported event variant is rejected.
-- **§3 (bytes/hashes):** `internal/store/storetest` — a common byte
-  round-trip case across memory and SQLite for invalid UTF-8, a lone CR,
-  and a leading BOM, asserting `ContentHash` identity survives a restart;
-  a dedicated SQLite regression for the fixed lossy encoding (R8, its own
-  commit).
-- **§4 (grammar):** `internal/directive` fuzz tests (seed corpus
-  committed) for panics, O(n) time, offsets-in-bounds, round-trip
-  invariants, and capability gating; `testdata/directives/` canonical
-  examples including the SDD's own worked example, golden-JSON expected
-  items/diagnostics; targeted unit tests for each D5/D6/D7 boundary case
-  (short fence closer, comment-wrapped keyword, deeper non-keyword
-  heading, trailing-whitespace-significant item, invalid `[id]` dropped
-  not salvaged).
-- **§5 (transcript/derived items, isolation):** `internal/ingest` —
-  exactly one transcript item per span plus expected directive items,
-  `DERIVED_FROM` coverage naming the transcript item; a trusted heading
-  fragment split across two spans creates no directive; a fence opened in
-  one span and closed in another creates no suppression; an
-  image/document part interrupts text parsing. Trace T18 end-to-end on
-  both stores.
-- **§6 (derived vs. explicit IDs):** `internal/directive` — an explicit
-  `[id]` with derived-ID shape is dropped with `ErrMalformedDirective`,
-  never silently reassigned a derived ID.
-- **§7 (dedup/replacement/Working):** `internal/graph` — a duplicate
-  directive never resolves as current by literal ID (closing the review's
-  reproduced hole); `internal/store/storetest` — cross-turn/cross-TTL-origin
-  items are never deduplicated as stand-ins; `internal/graph` —
-  `W1={a,b}→W2={a}` correctly retires `b`; identical-snapshot,
-  partial-overlap, repeated-explicit-ID, mixed-boundary, and
-  multiple-Working-sections-in-one-event cases; two retirements of the
-  same old target in one event do not collide on audit ID.
-- **§8 (attributes/TTL/scope):** `internal/policy`/`internal/directive` —
-  exact-case attribute/scope rejection; `ttl=0001` accepted (leading
-  zeros); a `ttl` value above 2147483647 fails event validation with the
-  representation-limit error, not a silent ignore; USER-span
-  WORKFLOW/SESSION widening ignored with a diagnostic; AGENT scope never
-  removes an existing task/workflow constraint.
-- **§9 (obligations):** `internal/graph`/`internal/domain` — a Pinned
-  `obligation=` declaration creates an UNRESOLVED version bound to its
-  source; replacing the pin retires the old obligation version in the
-  same transaction and starts a fresh UNRESOLVED version only if the new
-  source redeclares one; dropping `obligation=` on replacement retires
-  without creating a replacement. Trace T02's obligation half.
-- **§10 (idempotency/receipts):** `internal/store/storetest` — a repeated
-  identical `EventID`/payload returns the *original* receipt even after an
-  intervening lifecycle mutation or policy-version upgrade; a conflicting
-  payload/principal fails `ErrEventIDConflict`; anonymous (no-`EventID`)
-  events remain isolated from each other under an empty key;
-  `internal/ingest` — the transaction-scoped core never re-enters
-  `Store.Update`/`View` (a deadlock regression test against SQLite
-  specifically). Trace T10.
-- **§11 (authority/actor):** `internal/ingest` — a SYSTEM-carried USER
-  span's Resolve executes (once Phase 3 lands) at USER authority, never
-  SYSTEM; directive-capable marking on an AGENT/TOOL/RETRIEVED_CONTENT
-  span rejects the event; an inaccessible target lookup returns bare
-  `ErrNotFound`.
-- **§12 (diagnostics):** `internal/store/storetest` — a diagnostic is
-  unreadable by a principal outside its source's access boundary;
-  migration/rollback/restart/replay coverage; the 256-plus-one truncation
-  marker is stable and stored.
-- **§13 (limits):** `internal/directive` fuzz/benchmark — a pathological
-  many-small-spans input is bounded in total work, not just per-span; an
-  oversized event is rejected wholesale with no partial state change.
-- **§14 (turns):** `internal/domain`/`internal/ingest` — an
-  AGENT/TOOL/RETRIEVED_CONTENT payload cannot advance a turn; a first
-  task-bound event creates Turn=0→1 correctly; a TURN-scoped item expires
-  on the next turn even with a larger `ttl`; an exact retry never
-  re-advances the turn. Trace T03/T10.
-- **§15 (blobs):** `internal/ingest` — a blob hash reference not already
-  referenced by an accessible item in-session is rejected, requiring bytes
-  instead; missing and inaccessible references are indistinguishable.
-- **§16 (references):** `internal/ingest` — a References item lexically
-  matches an accessible same-session target and links deterministically;
-  an inaccessible target is indistinguishable from absent; a Phase 2 TOOL
-  span's `ToolCallID` lands only in `SourceRef`, with no edge created.
-- **§17 (namespace):** `internal/store/storetest` — `agent.status` is
-  accepted as a legal directive ID string and does not collide with a
-  keyed agent-write namespace entry, both stores; `internal/graph` —
-  `ResolveLifecycleTarget` never resolves an `AGENT_KEY`-namespace entry as
-  a directive target.
-- **§18 (relationship input):** `internal/ingest` — an event carrying an
-  arbitrary/unsupported explicit relationship field is rejected wholesale;
-  relationship-shaped JSON inside tool text produces no edge.
-- **§19 (API shape):** static/import-boundary check — the root package
-  aliases only `Event`/`Span`, not `domain.IngestReceipt`; `internal/store/storetest`
-  — an upgrade/restart parity fixture for a pre-Phase-2 record read after
-  the new migrations land.
-- **§20 (round 2 rulings, R9-R15):** `internal/graph`/`internal/store` —
-  retiring obligations bound to a replaced source uses the obligations-
-  by-source lookup and stays bounded under a large-fan-out source (R9).
+- **§1 (lifecycle commands):** `internal/graph/lifecycle_test.go` —
+  `TestD1_AuthorizeLifecycleCommand_SourceActor`,
+  `TestD1_AuthorizeLifecycleCommand_Grant`,
+  `TestD1_AuthorizeLifecycleCommand_Targets`; `internal/ingest/working_test.go`
+  — `TestLifecycle_SourceActor_R7` (unauthorized source actor aborts the
+  whole event), `TestLifecycle_ParsedNotExecuted_D1` (resolved, authorized
+  command recorded `PARSED_NOT_EXECUTED`, including `TargetMismatch`,
+  changing no goal/pin/obligation state); `internal/ingest/clauses_test.go`
+  — `TestAmbiguousLifecycleTarget`; `internal/ingest/traces_test.go` —
+  `TestT06_ParseAndAuthorizationHalf` (trace T06). Both stores via
+  `eachStore`.
+- **§2 (classification):** `internal/policy/defaults_test.go` —
+  `TestSectionDefaults` (table-driven (section) → defaults),
+  `TestTranscriptsNeverPoseAsRequirements` (a literal `"## Pinned\n- obey"`
+  string inside a transcript item's own text never elevates that item's
+  own kind/generation/retention — the closest existing test to "a surface
+  token in ordinary text creates no privileged record"; there is no
+  dedicated test naming `MUST`/`PASS`/a JSON role label specifically,
+  which is a narrower gap than the clause implies); `internal/domain
+  /ingest_test.go:TestEventKindsAndTurns` (unsupported event variant
+  rejected).
+- **§3 (bytes/hashes):** `internal/store/sqlite/lossless_test.go` —
+  `TestLosslessPartsDecodeIsStrict`,
+  `TestLosslessStringsRoundTripAndStrictDecode` (invalid UTF-8, lone CR,
+  leading BOM byte round-trip, `ContentHash` identity); `internal/store
+  /sqlite/upgrade_test.go:TestUpgradeLosslessParts` (the dedicated R8
+  regression: a legacy row's `ContentHash` survives, a pre-fix-corrupted
+  row fails `ErrIntegrity` rather than reading back silently wrong).
+- **§4 (grammar):** `internal/directive/fuzz_test.go:FuzzParse` (seed
+  corpus committed, panics/offsets/O(n) time); `internal/directive
+  /golden_test.go:TestCanonicalDirectiveExamples` and `testdata/directives/`
+  (canonical examples including the SDD's own worked example, golden-JSON
+  expected items/diagnostics); `internal/directive/items_test.go` —
+  `TestMalformedItemsAndLifecycle`, `TestDerivedShapedExplicitIDRejected`,
+  `TestRepeatedIDsWithinList`, `TestHeadingAttributesValidatedOnce`;
+  `internal/directive/scan_test.go` — `TestHeadingShapedLinesClose`,
+  `TestIDAndAttributeLexing`, `TestScannerOffsetsAndExtents`;
+  `internal/directive/attacks_test.go:TestSuppressedListContent` (D5/D6/D7
+  boundary cases: short fence closer, comment-wrapped keyword, deeper
+  non-keyword heading, trailing-whitespace-significant item, invalid
+  `[id]` dropped not salvaged); `internal/ingest/golden_test.go
+  :TestCanonicalExamplesThroughIngest` (the same canonical examples through
+  the full ingest pipeline).
+- **§5 (transcript/derived items, isolation):** `internal/policy
+  /defaults_test.go` — `TestTranscriptDefaults`, `TestResidualRows` (the
+  two separate rows this clause's own corrected text distinguishes);
+  `internal/ingest/directives_test.go:TestDirectives_Residual_D8`;
+  `internal/directive/canonical_test.go
+  :TestT18PastedDocumentAndWorkingSections`; `internal/ingest/working_test.go
+  :TestWorking_T18`; `internal/ingest/t18_test.go:TestT18_EndToEnd` (trace
+  T18 end-to-end, both stores); `internal/ingest/ingest_test.go
+  :TestT18_PastedDocument`.
+- **§6 (derived vs. explicit IDs):** `internal/directive/items_test.go
+  :TestDerivedShapedExplicitIDRejected`; `internal/domain/ids_test.go` —
+  `TestDerivedDirectiveIDFormat`, `TestDerivedDirectiveID_LowercasesKeyword`,
+  `TestDerivedDirectiveID_StripsHashPrefixOnly`; `internal/policy
+  /ids_test.go:TestExplicitIDNamespaceD20`.
+- **§7 (dedup/replacement/Working):** `internal/graph/current_test.go` —
+  `TestD10_DuplicateDirectiveNeverCurrent`, `TestD10_MappedDuplicateNeverCurrent`
+  (closing the review's reproduced hole), `TestD10_UnmappedDirectiveItemNeverCurrent`,
+  `TestD10_StalePointerIsNotAPreviousVersion`,
+  `TestD10_CurrentVersionsDeterministicAndFiltered`; `internal/graph
+  /duplicate_test.go` — `TestLinkDuplicate_DirectiveDuplicate`,
+  `TestLinkDuplicate_RestatedAcrossTurns` (cross-turn/cross-TTL-origin items
+  never deduplicated as stand-ins), `TestLinkDuplicate_ComparesObligationClaim`,
+  `TestLinkDuplicate_RejectsNonDuplicates`,
+  `TestLinkDuplicate_CannotRetireExistingItems`; `internal/graph
+  /snapshot_test.go` — `TestSnapshot_T18_RepeatedMemberRetiresAll`
+  (`W1={a,b}→W2={a}` retires `b`), `TestSnapshot_IdenticalIsDuplicate`,
+  `TestSnapshot_ChangedSnapshots`, `TestSnapshot_ExplicitIDComposes`,
+  `TestSnapshot_MultipleSectionsOneEvent`,
+  `TestSnapshot_PartitionsByBoundaryAndAuthority`,
+  `TestSnapshot_RejectsBeforeWriting`; `TestSupersede_AuditIdentityNamesSuccessor`
+  (two retirements of the same old target in one event do not collide on
+  audit ID).
+- **§8 (attributes/TTL/scope):** `internal/policy/attributes_test.go` —
+  `TestAttributeAllowList`, `TestAttributeValuesExact` (exact-case
+  rejection), `TestParseTTLR1` (`ttl=0001` leading zeros;
+  above-2147483647 representation-limit failure), `TestScopeExactAndWidening`
+  (USER-span WORKFLOW/SESSION widening ignored with a diagnostic; AGENT
+  scope never removes an existing constraint), `TestForDirectiveFailsClosed`;
+  `internal/directive/items_test.go:TestTTLRepresentationLimit`;
+  `internal/directive/policycheck_test.go:TestRepresentationLimitAgreement`.
+- **§9 (obligations):** `internal/graph/obligation_test.go` —
+  `TestD13_ReplacementRetiresBoundObligations` (replacing the pin retires
+  the old version and starts a fresh UNRESOLVED version only if
+  redeclared), `TestD13_SnapshotIDReplacementRetiresObligations`,
+  `TestD13_DuplicateLeavesObligations`,
+  `TestD13_UnauthorizedIndirectRetirementAbortsReplacement`;
+  `internal/domain/obligation_test.go
+  :TestDerivedObligationIDKeyedByDirectiveNotClaim`; `internal/ingest
+  /directives_test.go:TestDirectives_ReplacementAndObligations_T02` (trace
+  T02's obligation half).
+- **§10 (idempotency/receipts):** `internal/ingest/retry_test.go` —
+  `TestRetryIdentity_SessionScoped`, `TestRetryIdentity_SessionScopedRich`,
+  `TestRetryIdentity_RichReceipt`, `TestRetryConflict_EveryPayloadField`
+  (a conflicting payload/principal fails `ErrEventIDConflict`);
+  `internal/ingest/gate_test.go` — `TestReceiptIsImmutable_D14`,
+  `TestConcurrentRetries_D14`; `internal/ingest/retry_concurrency_test.go`
+  — `TestAnonymousOccurrencesNeverAlias` (anonymous events stay isolated
+  under an empty key), `TestConcurrentIdenticalRetries_Rich`,
+  `TestConcurrentAnonymous`; `internal/ingest/clauses_test.go
+  :TestReplayNeverRecomputes` (a retry after a changed `Limits`/version
+  configuration replays the original receipt unchanged — the property
+  SPEC-1.10's ruling below relies on for the version-bump case). No test
+  is named for a literal `Store.Update`/`View` reentrancy deadlock
+  specifically; every SQLite-backed case above would hang rather than pass
+  if the transaction-scoped core reentered, so the property is exercised
+  continuously rather than by one dedicated regression.
+- **§11 (authority/actor):** `internal/ingest/ingest_test.go
+  :TestAuthority_D15`; `internal/ingest/directives_test.go
+  :TestDirectives_ConfusedDeputy_D15`; `internal/domain/item_test.go
+  :TestContextItemValidate_SectionRequiresLifecycleAuthority` (directive-capable
+  marking on an AGENT/TOOL/RETRIEVED_CONTENT item fails validation);
+  `internal/domain/authz_test.go` —
+  `TestAuthorizeMutation_InaccessibleTargetReturnsNotFoundBeforeAuthority`,
+  `TestAuthorizeSupersession_InaccessibleEndpointNotFound` (bare
+  `ErrNotFound`, access checked before authority). The SYSTEM-carried
+  USER-span-executes-at-USER-authority half is explicitly a Phase 3
+  behavior per this clause's own text ("once Phase 3 lands"); Phase 2 has
+  no test for it because Phase 2 does not execute lifecycle commands at
+  all (D1, §1).
+- **§12 (diagnostics):** `internal/domain/diagnostic_test.go
+  :TestDiagnosticRecordKeysAndAccess` (unreadable outside the source's
+  access boundary), `TestIngestionReasonCodePairing`;
+  `internal/ingest/retry_concurrency_test.go:TestDiagnosticsCapTruncates`;
+  `internal/ingest/clauses_test.go:TestTruncationPersistedAndReplayed`
+  (the 256-plus-one marker, stable and stored, replayed unchanged);
+  `internal/store/sqlite/durability_test.go:TestRestartPreservesRecords`;
+  `internal/store/sqlite/ingestion_test.go:TestReceiptRowCoversReceipt`
+  (migration/restart/replay coverage). No dedicated rollback-of-diagnostics
+  test exists distinct from the general poison/rollback conformance rows
+  (DUR-1.3, §27); that is inherited coverage, not a clause-specific test.
+- **§13 (limits):** `internal/directive/adversarial_test.go` —
+  `TestPathologicalLinearScan` (many-small-units input bounded in total
+  work), `TestPerUnitMetadataLimits`; `internal/directive/attacks_test.go
+  :TestAdversarialFatalLimits`; `internal/ingest/gate_test.go` —
+  `TestLimits_D17`, `TestItemsPerSpanAcrossParts_D17` (an oversized event
+  rejected wholesale with no partial state change); `internal/domain
+  /limits_test.go:TestDefaultLimitValues`.
+- **§14 (turns):** `internal/ingest/ingest_test.go:TestTurns_D18` (Turn=0→1
+  on a first task-bound event; AGENT/TOOL/RETRIEVED_CONTENT cannot advance
+  a turn), `TestTurnOwnership_D18`; `internal/ingest/clauses_test.go
+  :TestCompletedTaskNeverReactivated`,
+  `:TestRetrievedBeforeFirstTurn`; `internal/domain/source_range_test.go
+  :TestTurnOwnershipAndTTL` (a TURN-scoped item expires next turn even
+  with a larger `ttl`). "An exact retry never re-advances the turn" is
+  exercised inside `TestReplayNeverRecomputes` (§10) rather than a
+  dedicated turn-specific test.
+- **§15 (blobs):** `internal/ingest/ingest_test.go:TestBlobReferences_R5`.
+- **§16 (references):** `internal/ingest/references_test.go` —
+  `TestReferences_M5`, `TestLocatorKey_M5`, `TestReferences_SurviveRestart`,
+  `TestReferencesByItemID_F4`, `TestReferenceLinkBudget_Ruling1`;
+  `internal/graph/reference_test.go:TestLinkReference_M5`;
+  `internal/ingest/clauses_test.go:TestToolCallIDCreatesNoEdge` (a Phase 2
+  TOOL span's `ToolCallID` lands only in `SourceRef`, no edge created).
+- **§17 (namespace):** `internal/domain/namespace_test.go
+  :TestItemNamespaceSeparatesDirectivesFromAgentKeys` (`agent.status`
+  accepted as a legal directive ID string, no collision with a keyed
+  agent-write entry); `internal/graph/namespace_test.go` —
+  `TestR6_LifecycleResolvesOnlyDirectiveNamespace`,
+  `TestR6_NamespacesNeverReplaceEachOther`; `internal/store/sqlite
+  /current_directives_test.go:TestCurrentDirectivesAcrossBoundaries`
+  (SQLite-specific).
+- **§18 (relationship input):** no dedicated test, and this is a genuine
+  structural point rather than a test gap (SPEC-2.2): `domain.Event` has
+  no caller-supplied relationship field at all — there is nothing for
+  `Event.Validate` to reject, because the grammar admits no such input in
+  the first place. "Relationship-shaped JSON inside tool text produces no
+  edge" is covered only as an instance of the general property that
+  ordinary content text is never interpreted as anything but text (§2's
+  `TestTranscriptsNeverPoseAsRequirements` is the closest existing
+  evidence); no test names a relationship-shaped JSON payload specifically,
+  which is a real, if narrow, gap for `p2-tests`.
+- **§19 (API shape):** `api_test.go:TestRootAliasesOnlyIngestInputTypes`;
+  `imports_test.go:TestPackageBoundaries` (static/import-boundary check —
+  the root package aliases only `Event`/`Span`, not `domain.IngestReceipt`);
+  `internal/store/sqlite/upgrade_test.go` — `TestUpgradeProvenanceColumns`,
+  `TestUpgradeCurrentNamespace`, `TestUpgradeLosslessParts`,
+  `TestUpgradeLosslessStringLists`, `TestUpgradeReceiptLimits` (the
+  upgrade/restart parity fixtures for each pre-Phase-2 record shape read
+  after the new migrations land).
+- **§20 (round 2 rulings, R9-R15):** `internal/graph/fanout_test.go
+  :TestReplaceDirective_ObligationFanOut` (R9: retiring obligations bound
+  to a replaced source uses the obligations-by-source lookup and stays
+  bounded under a large fan-out).
   **R10's `ErrNamespaceConflict` transitional rule (SPEC-1.4: removed
   here) never needed a test:** the typed namespace switch (M6/R6) landed
   directly, with no gap for a transitional fail-closed rule to cover, so
   no such symbol exists and none should be expected.
-  `SameDirectiveSemantics` includes creation turn, TTL origin, and
-  obligation declaration in its comparison, both in `internal/graph` unit
-  tests and as the single comparison `internal/ingest` calls (R11); the
-  Working-snapshot duplicate-vs-changed decision is scoped per `(task,
-  authority, boundary)`, confirmed with two different-boundary snapshots
-  under the same task never being compared to each other (R12); a same-ID
-  boundary conflict on one item among several in one event rejects only
-  that item with `boundary_conflict` and commits the rest, while the same
-  conflict inside a Working section blocks that section's snapshot
-  replacement without aborting the event, distinct from an
-  authorization/integrity/idempotency/resource failure that still aborts
-  the whole event (R13); Resolve on a non-OPEN goal and Unpin on a
-  non-pinned target each produce a diagnostic and commit the rest of the
-  event, never an abort (R14).
-- **§21 (round 3 ruling, R16):** `internal/ingest` — a directive
-  `internal/directive` accepts but `policy.ForDirective` would reject
-  (e.g. a disallowed attribute combination the parser doesn't itself
-  enforce) is not classified as if accepted; `p2-tests` — a fuzz/property
-  cross-check that every `internal/directive`-accepted directive in
-  `testdata/directives/` is also `policy.ForDirective`-accepted; an event
-  whose kind implies lower authority than one of its spans is rejected
-  wholesale, never silently downgraded or upgraded; an `EventID` containing
-  non-printable-ASCII bytes or exceeding 256 bytes is rejected before any
-  idempotency lookup; a HARNESS residual instruction item is never selected
-  as mandatory by FR-DOM-007's policy-mandatory path; `internal/directive`'s
-  `Item.TextRanges` and `internal/domain`'s `SourceRef.Slices` round-trip
-  the same byte ranges for a canonical fixture.
-- **§22 (round 4 rulings, R17-R18):** `internal/ingest` — a directive
-  `internal/directive` accepts is also `policy.ForDirective`-accepted
-  (R17, reconfirming R16); a span whose diagnostics split across multiple
-  parts are capped per-span after merging in part order, then again at
-  the whole-event total, never per-part independently (R17); two list
-  items sharing one explicit ID are both absent from the result, not
-  one-survives-one-diagnosed (R17); a column-0 fence/quote marker inside a
-  list body malforms the whole section (R17); an out-of-range `ttl`
-  aborts the event rather than leaving the item live with no TTL (R17,
-  confirming R1); every persisted item/diagnostic/receipt records parser
-  version `directive/v1` (R17). `internal/store/storetest` —
+  `internal/graph/duplicate_test.go:TestLinkDuplicate_ComparesObligationClaim`
+  and `TestLinkDuplicate_RestatedAcrossTurns` (`SameDirectiveSemantics`
+  includes creation turn, TTL origin, and obligation declaration in its
+  comparison, both in `internal/graph` unit tests and as the single
+  comparison `internal/ingest` calls, R11); `internal/graph/snapshot_test.go
+  :TestSnapshot_PartitionsByBoundaryAndAuthority` (the Working-snapshot
+  duplicate-vs-changed decision is scoped per `(task, authority,
+  boundary)`, R12); `internal/graph/namespace_test.go
+  :TestR13_CheckBoundaryConflict` and `internal/ingest/directives_test.go
+  :TestDirectives_BoundaryConflict_R13` (a same-ID boundary conflict on one
+  item among several rejects only that item and commits the rest, R13);
+  `internal/ingest/working_test.go:TestLifecycle_ParsedNotExecuted_D1`
+  (Resolve on a non-OPEN goal / Unpin on a non-pinned target each produce a
+  diagnostic and commit the rest of the event, R14, `TargetMismatch`).
+- **§21 (round 3 ruling, R16):** `internal/directive/policycheck_test.go`
+  — `TestParserAcceptedImpliesPolicyAccepted`, `FuzzPolicyAgreement` (the
+  fuzz/property cross-check that every `internal/directive`-accepted
+  directive is also `policy.ForDirective`-accepted, so a directive
+  `internal/directive` accepts but policy would reject is never classified
+  as if accepted); `internal/domain/ingest_test.go
+  :TestEventIDAndToolCallRules` (an `EventID` with non-printable-ASCII
+  bytes or over 256 bytes rejected before any idempotency lookup);
+  `internal/policy/defaults_test.go:TestResidualRows` (a HARNESS residual
+  instruction item is never mandatory under FR-DOM-007's policy-mandatory
+  path); `internal/domain/source_range_test.go:TestItemSourceRanges`
+  (`Item.TextRanges`/`SourceRef.Slices` round-trip the same byte ranges for
+  a canonical fixture). No test is named specifically for "an event whose
+  kind implies lower authority than one of its spans is rejected
+  wholesale"; `internal/domain/ingest_test.go:TestEventValidationAuthorityAndLimits`
+  is the closest existing coverage of event/span authority validation, but
+  does not name this exact kind-vs-span-authority mismatch case — a
+  narrow gap for `p2-tests`.
+- **§22 (round 4 rulings, R17-R18):** `internal/directive/policycheck_test.go
+  :TestParserAcceptedImpliesPolicyAccepted` (R17, reconfirming R16); a span
+  whose diagnostics split across multiple parts are capped per-span after
+  merging in part order, then again at the whole-event total (R17) — no
+  test name is given for this exact merge-then-cap-twice ordering
+  specifically, a narrow gap; `internal/directive/items_test.go
+  :TestRepeatedIDsWithinList` (two list items sharing one explicit ID are
+  both absent, not one-survives-one-diagnosed, R17);
+  `internal/directive/attacks_test.go:TestSuppressedListContent` (a
+  column-0 fence/quote marker inside a list body malforms the whole
+  section, R17); `internal/directive/items_test.go
+  :TestTTLRepresentationLimit` (an out-of-range `ttl` aborts the event
+  rather than leaving the item live with no TTL, R17, confirming R1); every
+  persisted item/diagnostic/receipt records parser version `directive/v1`
+  (R17) — asserted structurally by every golden/canonical fixture's
+  expected `ParserVersion` field rather than one dedicated test.
+  `internal/store/storetest` —
   `ObligationsBySource` with a `limit` lower than the bound source's
   obligation count fails `store.ErrLimitExceeded` (SPEC-1.4: corrected —
   not "returns exactly `limit` versions"; R9/D17's bounded-scan discipline
@@ -1767,14 +1869,17 @@ for the whole section.
   current, n)` is `false` for every `current`/`n` (R18); `domain
   .UnresolvedReference` round-trips through migration 0008 and survives
   restart (R18).
-- **§23 (round 5 ruling, R19):** `internal/domain` — a derived item's
-  `SourceRanges` alone reconstructs its transcript coverage, with no
-  companion section record to keep consistent (R19); an `IngestReceipt`
-  with `OpenedTurn`/`TurnID` set has its turn-opening pending-input items
-  exactly in `Items` (R19); a diagnostic paired with `ReasonBoundaryConflict`
-  always carries `Code: ErrMalformedDirective`, and one paired with
-  `ReasonTargetMismatch` always carries `Code: DiagnosticNotFound`, never
-  a different code for either (R19, the pinning decision above).
+- **§23 (round 5 ruling, R19):** `internal/domain/source_range_test.go
+  :TestItemSourceRanges` (a derived item's `SourceRanges` alone
+  reconstructs its transcript coverage, with no companion section record
+  to keep consistent, R19); `internal/domain/receipt_test.go
+  :TestIngestReceiptValidate` (an `IngestReceipt` with `OpenedTurn`/`TurnID`
+  set has its turn-opening pending-input items exactly in `Items`, R19);
+  `internal/domain/diagnostic_test.go:TestIngestionReasonCodePairing` (a
+  diagnostic paired with `ReasonBoundaryConflict` always carries `Code:
+  ErrMalformedDirective`, one paired with `ReasonTargetMismatch` always
+  `DiagnosticNotFound`, never a different code for either — the pinning
+  decision above).
   `internal/ingest` — `TestRetrievedBeforeFirstTurn` (`clauses_test.go`)
   confirms a TOOL or RETRIEVED_CONTENT event for a task with `Turn=0` is
   rejected before any item is created (R19); a References locator match
@@ -1798,23 +1903,30 @@ for the whole section.
 - **§24 (round 6 ruling, R20 — all landed, SPEC-1.4):** `internal/domain
   /ingest_test.go:TestEventIDRejectsReservedPrefixes` — an `EventID` equal
   to or prefixed like `evc_`, `eva_`, any `IDDomain` prefix, or `lce_`
-  fails `Event.Validate`. `internal/ingest` — a `DirectiveIDDerived`
+  fails `Event.Validate`. `internal/ingest/r20_test.go` —
+  `TestR20_2_NoDerivedNoticeForRefusedItems` (a `DirectiveIDDerived`
   diagnostic for an item whose section ingest refused is absent from the
-  receipt (the `!r.written[d.Range]` filter, `derive.go`); a residual
+  receipt — the filter is `_, ok := r.written[d.Range]; !ok`,
+  `derive.go`; **SPEC-2.2: `r.written` is `map[domain.ByteRange
+  ]domain.AccessBoundary`, so the earlier `!r.written[d.Range]`
+  quote — a boolean negation of a non-bool map value — no longer matches
+  the code and is corrected here**), `TestR20_3_Residuals` (a residual
   instruction is never created for a leading-BOM-only or whitespace-only
-  residue (`blankResidue`); a residual instruction's content includes
+  residue, `blankResidue`; a residual instruction's content includes
   leading and trailing whitespace exactly as it appeared in the
-  transcript (`residue` keeps bytes exactly, no separate trim-for-content
-  step); a malformed section inside a SYSTEM or HARNESS span still
-  produces a residual instruction item from its bytes. Also confirmed:
+  transcript, `residue` keeps bytes exactly; a malformed section inside a
+  SYSTEM or HARNESS span still produces a residual instruction item from
+  its bytes), `TestR20_1_ErrorsNeverEchoItemIDs`. Also confirmed by
+  `internal/ingest/working_test.go:TestWorking_DuplicateAndMalformed`:
   `workingSection` creates zero items for a `Malformed` section or one
   with no items, the correct (stricter) reading of D11; a boundary
   conflict on any Working-section member aborts the whole section's write
   with `ErrMalformedDirective`/`ReasonBoundaryConflict`, never a partial
   commit, confirming §23's pinning.
-- **§25 (round 7 ruling, R21 — landed with R20, SPEC-1.4):** `internal/ingest` — a
-  unit whose only residue is a bare malformed heading with no body creates
-  no residual instruction item (R21); a malformed Resolve/Unpin/
+- **§25 (round 7 ruling, R21 — landed with R20, SPEC-1.4):**
+  `internal/ingest/r21_test.go:TestR21_ResidualExclusions` — a unit whose
+  only residue is a bare malformed heading with no body creates no
+  residual instruction item (R21); a malformed Resolve/Unpin/
   unsupported-lifecycle-word section in a SYSTEM or HARNESS span never
   produces a residual instruction, staying transcript-only with its
   diagnostic, even though a malformed content section in the same span
@@ -1823,7 +1935,10 @@ for the whole section.
   both a refused section and an earlier-positioned trusted directive item
   creates its residual instruction item, if any, after every directive
   item and lifecycle command the unit produced, never ordered by the
-  residual's own byte position (R21, amending M3's creation order).
+  residual's own byte position (R21, amending M3's creation order) — no
+  test asserts this creation-order claim specifically by ID/`Seq`, a
+  genuine gap for `p2-tests`; it is implied by, but not the same
+  assertion as, `TestR20_3_Residuals`'s content checks above.
 - **§26 (F1-F6, all landed):** `TestAccessLookupsUseIndex`,
   `TestUpgradeAccessLookups`, `TestGraphReadsUseIndex`,
   `TestLegacyLookupsDropped`, `TestLegacyUnverifiedNeverBlocks` (SQLite,
