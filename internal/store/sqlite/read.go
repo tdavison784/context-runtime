@@ -100,6 +100,7 @@ func queryRecords[T any](t *transaction, kind, q string, args ...any) ([]T, erro
 	if err != nil {
 		return nil, err
 	}
+	t.lastQuery = q
 	rows, err := t.conn.QueryContext(t.ctx, q, args...)
 	if err != nil {
 		return nil, err

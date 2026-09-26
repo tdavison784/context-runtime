@@ -351,6 +351,9 @@ type transaction struct {
 	// lookupRows and lookupLoads count index rows read and items loaded by
 	// access-filtered lookups, so tests can assert bounded work (DUR-2.1).
 	lookupRows, lookupLoads int
+	// lastQuery is the SQL the latest record read ran, so tests can assert
+	// that hot reads use their plan-guarded builders (SPEC-2.1).
+	lastQuery string
 }
 
 var _ store.TxBase = (*transaction)(nil)
@@ -504,6 +507,7 @@ func listRecords[T any](t *transaction, kind string) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
+	t.lastQuery = s.selectSQL + " WHERE session_id=?"
 	rows, err := t.conn.QueryContext(t.ctx, s.selectSQL+" WHERE session_id=?", t.session)
 	if err != nil {
 		return nil, err
