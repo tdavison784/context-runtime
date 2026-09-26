@@ -3,6 +3,7 @@ package graph
 import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
+	"github.com/tdavison784/context-runtime/internal/store/memory"
 	"testing"
 )
 
@@ -29,6 +30,13 @@ func (f *projectionDependencyFixture) Item(string) (domain.ContextItem, error) {
 	return f.original, nil
 }
 
+type projectionCoverageTx struct {
+	store.Tx
+	reader store.SemanticReader
+}
+
+func (t *projectionCoverageTx) SemanticReadBackend() store.SemanticReader { return t.reader }
+
 func TestProjectionCoverageNeverSubstitutesANewerLease(t *testing.T) {
 	actor := principal("s", domain.AuthorityHarness)
 	original := taskItem("s", "original", 1, domain.AuthorityUser)
@@ -47,6 +55,29 @@ func TestProjectionCoverageNeverSubstitutesANewerLease(t *testing.T) {
 	deps, err := projectionDependencies(f, actor, source, source.Access)
 	if err != nil || len(deps) != 2 || deps[0].LeaseID != "old-lease" || *deps[0].Source != ref || deps[1].NestedCoverageID != "nested" {
 		t.Fatalf("lost original dependencies: %v, %v", deps, err)
+	}
+	s := memory.New()
+	defer s.Close()
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		original.Seq, source.Seq = tx.NextSeq(), tx.NextSeq()
+		derived := taskItem("s", "derived", tx.NextSeq(), domain.AuthorityUser)
+		mustInsert(t, tx, original, source, derived)
+		plan, err := planDerivedCoverage(&projectionCoverageTx{Tx: tx, reader: f}, actor, derived.ID, []string{source.ID}, domain.CoverageProvenance, "event", 3)
+		if err != nil {
+			return err
+		}
+		if len(plan.members) != 3 {
+			t.Fatalf("projection coverage member count = %d, want 3", len(plan.members))
+		}
+		for _, member := range plan.members {
+			key, err := member.Key()
+			if err != nil || member.ID != key {
+				t.Fatalf("noncanonical coverage member ID %q, key %q: %v", member.ID, key, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	f.lease.ID = "new-lease"
 	if _, err := projectionDependencies(f, actor, source, source.Access); err == nil {
