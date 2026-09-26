@@ -409,7 +409,9 @@ func testTasks(t *testing.T, s store.Store) {
 		x.Status, x.CompletedSeq = domain.TaskCompleted, seq
 		return x
 	}
-	same := func(x domain.TaskState) func(uint64) domain.TaskState { return func(uint64) domain.TaskState { return x } }
+	same := func(x domain.TaskState) func(uint64) domain.TaskState {
+		return func(uint64) domain.TaskState { return x }
+	}
 	valid := func(seq uint64) domain.LifecycleEvent { return taskEvent("lx", seq) }
 	cases := []struct {
 		name     string
