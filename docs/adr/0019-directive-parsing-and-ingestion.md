@@ -1013,6 +1013,61 @@ creation-order amendment to M3.
   unit's directive items and lifecycle commands in source order, then
   finally its residual instruction item, if any.
 
+### 26. PR #5 review round 1: F2's accepted residual risk (SEC-1.5)
+
+The first external review of this PR (`round1-p5-fixes.md`) produced
+commander rulings F1-F6. F1 and F3-F6 require code changes in
+`internal/store`/`internal/graph`/`internal/ingest` that are other
+workers' assignments and had not landed as of this revision; this ADR
+will reconcile their exact landed shape in a final pass once every fix is
+in, rather than describing an intended design ahead of the code (the
+mistake SPEC-1.4 found with this ADR's earlier "not yet landed"
+paragraphs). F2 is recorded in full now because the commander ruled it a
+documentation-only mitigation with no code change beyond a verification
+test:
+
+- **F2 (SEC-1.5 — caller `EventID` namespace, refines §10/§11, D14/D15).**
+  `CallerOccurrenceID(session, eventID)` ignores the principal, so a
+  session-wide `EventID` collision across tasks/agents/workflows lets one
+  principal's guessable ID block another's identical retry and lets an
+  attacker probe which IDs another principal has used (reproduced:
+  `TestSEC_EventIDCrossPrincipal`, a `wf2/T2` principal using `EventID:
+  "turn-2"` blocks a later, unrelated `T`-scoped event with the same ID).
+  Ruling: mitigation, not redesign — FR-ING-006's session-scoped identity
+  is unchanged; a different principal reusing an `EventID` still fails
+  `domain.ErrEventIDConflict`
+  (`errors.New("event ID conflict")`, `internal/domain/errors.go:24`),
+  returned bare with no ID, principal, or session detail
+  (`internal/ingest/ingest.go:170,177`) — `p2-contract` verifies this with
+  a test. **Accepted residual risk, recorded here:** an `EventID` is a
+  session-wide idempotency key, not a per-principal one; a harness that
+  lets predictable, cross-principal-guessable `EventID`s reach the runtime
+  (sequential counters, fixed strings like `"turn-2"`, anything derived
+  from public state) allows one principal to block another's retry using
+  the same ID, and to learn *that* another principal has used it, though
+  never what payload it carried or that principal's identity beyond
+  "someone already used this ID." **Harness guidance (binding on
+  integrations, not enforced by the runtime):** generate `EventID`s with
+  enough entropy that they cannot be guessed across principals, and
+  prefix or otherwise derive them so that two principals never
+  legitimately produce the same one by construction (for example,
+  `<principal-scoped-namespace>:<random>` chosen by the harness, not the
+  runtime). This is deliberately not enforced in `Event.Validate` — R20's
+  reserved-prefix check (§24) rejects a caller `EventID` that collides
+  with an *internal* generated-ID shape, but a harness's own entropy and
+  uniqueness discipline across its principals is outside the runtime's
+  authority to verify, and inventing a per-principal namespace now (the
+  redesign SEC-1.5 offered as an alternative) was rejected: it would
+  change FR-ING-006's session-scoped retry-key contract for every caller
+  to close a risk that only materializes when a harness supplies
+  low-entropy, cross-principal-predictable IDs against its own guidance.
+
+F1 (bounded lookups, `p2-store`/`p2-graph`), F3 (retry-before-limits,
+`p2-graph`), F4 (References-by-item-ID, `p2-graph`), F5 (migration 0011's
+Go step, `p2-store`; ADR 3 records the mechanism once landed, SPEC-1.9
+below), and F6 (diagnostic/lifecycle-command record access, `p2-graph`)
+are tracked, not yet described here, pending their code landing.
+
 ## Alternatives considered
 
 - **D1:** the brief's read-only resolution without an explicit
@@ -1331,6 +1386,11 @@ reconciles exact names in a later round.
   creates its residual instruction item, if any, after every directive
   item and lifecycle command the unit produced, never ordered by the
   residual's own byte position (R21, amending M3's creation order).
+- **§26 (F2, SEC-1.5):** `internal/domain`/`internal/ingest` — a repeated
+  `EventID` from a different principal fails `domain.ErrEventIDConflict`
+  and the returned error is the bare sentinel: no ID, principal, or
+  session detail is present in its text or wrapped chain
+  (`p2-contract`'s verification test for this finding).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
