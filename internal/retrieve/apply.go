@@ -79,6 +79,9 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	if err != nil {
 		return out, err
 	}
+	if got.Item.Role == domain.RoleProjection {
+		return out, domain.ErrIncompleteCoverage
+	}
 	source := got.Observed.Source
 	lease, found, err := findActiveLease(sem, actor, source, task, conv, tx.LastSeq(), execution.MaxPageSize, execution.MaxTransactionWork)
 	if err != nil {

@@ -149,3 +149,18 @@ func TestApplyPoisonsTransactionAfterPartialWrite(t *testing.T) {
 		t.Fatalf("partial write was not poisoned: %v / %v", err, tx.poisoned)
 	}
 }
+
+func TestApplyRejectsProjectionSourceWithoutInheritedCoverage(t *testing.T) {
+	p := storetest.NewPrincipal("s", domain.AuthorityHarness)
+	source := storetest.NewItem("s", "old-projection", 1, "copied content")
+	source.Role, source.Kind, source.Authority = domain.RoleProjection, domain.KindToolResult, domain.AuthorityTool
+	sem := &applySemantic{results: map[string]domain.RetrievalResult{}, receipts: map[string]domain.MutationReceipt{}}
+	tx := &applyTx{sem: sem, source: source, seq: 1,
+		task: domain.TaskState{SessionID: "s", TaskID: p.TaskID, WorkflowID: p.WorkflowID, Status: domain.TaskActive, Turn: 1, TurnID: "turn", Version: 1},
+		conv: domain.Conversation{SessionID: "s", ConversationID: domain.ConversationIDFor(p.TaskID, p.AgentID), TaskID: p.TaskID, AgentID: p.AgentID, Version: 1, Revision: 1}}
+	i := AdmissionIntent{Rehydrate: domain.RehydrateIntent{RequestID: "request", ItemID: source.ID}, Origin: domain.RetrievalOrigin{Holder: p, ConversationID: tx.conv.ConversationID, TurnID: "turn"}, Method: "rehydrate"}
+	_, err := Apply(tx, p, i, leasePolicy(), false)
+	if !errors.Is(err, domain.ErrIncompleteCoverage) || tx.seq != 1 || len(sem.leases) != 0 {
+		t.Fatalf("projection renewed without inherited lease: %v", err)
+	}
+}
