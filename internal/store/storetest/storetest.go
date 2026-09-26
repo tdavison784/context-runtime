@@ -66,6 +66,9 @@ var suite = []testCase{
 	{"SessionIsolation", testSessionIsolation},
 	{"ForeignSessionRecords", testForeignSessionRecords},
 	{"DeepCopies", testDeepCopies},
+	{"PoisonRollsBack", testPoisonRollsBack},
+	{"PoisonFirstErrorWins", testPoisonFirstErrorWins},
+	{"PoisonBlocksEveryWrite", testPoisonBlocksEveryWrite},
 
 	// Semantic state.
 	{"ItemRichRoundTrip", testItemRichRoundTrip},
