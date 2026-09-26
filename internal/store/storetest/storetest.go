@@ -149,6 +149,17 @@ func view(t *testing.T, s store.Store, sess string, fn func(tx store.ReadTx) err
 	}
 }
 
+// rejected runs fn in its own transaction and fails the test unless Update
+// returns want. A write that fails after another write succeeded poisons its
+// transaction (P3-1), so a rejection case never shares a transaction with
+// setup writes it expects to commit.
+func rejected(t *testing.T, s store.Store, sess string, want error, fn func(tx store.Tx) error) {
+	t.Helper()
+	if err := s.Update(ctx, sess, fn); !errors.Is(err, want) {
+		t.Fatalf("error = %v, want %v", err, want)
+	}
+}
+
 // wantErr fails unless errors.Is(err, want).
 func wantErr(t *testing.T, err, want error) {
 	t.Helper()

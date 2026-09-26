@@ -58,13 +58,14 @@ func testCurrentNamespaces(t *testing.T, s store.Store) {
 		wantErr(t, err, domain.ErrNotFound)
 		return nil
 	})
-	err := s.Update(ctx, sessA, func(tx store.Tx) error {
+	update(t, s, sessA, func(tx store.Tx) error {
 		noErr(t, tx.InsertItem(NewItem(sessA, "plain", tx.NextSeq(), "no ID")))
-		wantErr(t, tx.SetCurrentVersion("plain"), domain.ErrInvalidRecord)
-		wantErr(t, tx.SetCurrentVersion("missing"), domain.ErrNotFound)
-		bad := NewAgentKeyItem(sessA, "bad", "has space", tx.NextSeq(), "x")
-		noErr(t, tx.InsertItem(bad))
-		wantErr(t, tx.SetCurrentVersion("bad"), domain.ErrInvalidRecord)
+		return tx.InsertItem(NewAgentKeyItem(sessA, "bad", "has space", tx.NextSeq(), "x"))
+	})
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error { return tx.SetCurrentVersion("plain") })
+	rejected(t, s, sessA, domain.ErrNotFound, func(tx store.Tx) error { return tx.SetCurrentVersion("missing") })
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error { return tx.SetCurrentVersion("bad") })
+	err := s.Update(ctx, sessA, func(tx store.Tx) error {
 		// Rolled back below: a second agent-key version moves only its own
 		// namespace's pointer.
 		noErr(t, tx.InsertItem(NewAgentKeyItem(sessA, "key2", id, tx.NextSeq(), "agent state 2")))
