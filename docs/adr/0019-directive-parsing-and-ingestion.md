@@ -604,6 +604,61 @@ explicit handling rather than an invented executable default.
 Owner: `internal/domain`/root package (alias scope), `internal/store`
 (forward migrations + parity fixtures).
 
+### 20. Round 2 rulings (p2-graph questions): R9-R15
+
+Answers to `p2-graph`'s implementation questions, appended to
+`phase2-amendments.md` as R9-R15. Each refines a numbered group above
+rather than replacing it.
+
+- **R9 (refines §9, D13 — obligation retirement plumbing).** `p2-store`
+  adds an obligations-by-source lookup; `internal/graph` retires every
+  obligation version bound to a replaced source through that lookup,
+  bounded per §13/D17's resource limits (never an unbounded scan);
+  `internal/ingest` creates a replacement UNRESOLVED obligation version
+  only when the new source itself declares `obligation=` (unchanged from
+  D13, now with the lookup that makes retirement itself efficient and
+  bounded).
+- **R10 (refines §17, M6/R6 — transitional namespace fail-closed).** Until
+  `internal/store` actually keys current versions by the typed
+  DIRECTIVE/AGENT_KEY namespace (R6's forward migration),
+  `internal/graph` fails closed with a new `ErrNamespaceConflict` rather
+  than guessing a namespace from ID shape — a transitional safety rule for
+  any code that runs against the pre-migration schema during the phase.
+- **R11 (refines §7, D10 — `SameDirectiveSemantics` comparison basis).**
+  D10's duplicate-vs-current comparison is implemented as
+  `SameDirectiveSemantics`, comparing (in addition to D10's listed fields)
+  creation turn, TTL origin, and obligation declaration once each is
+  available on the item — the same eligibility-origin fields D10 already
+  required, now named to one function so `p2-graph` and `p2-ingest`
+  implement one comparison, not two.
+- **R12 (refines §7, D11 — duplicate-snapshot partition key).** A Working
+  snapshot's duplicate-vs-changed decision (D11) is made per `(task,
+  authority, boundary)` partition — the same partition D11 already uses to
+  freeze the prior current set — confirming FR-DIR-007's
+  same-authority-and-boundary supersession scope applies to duplicate
+  detection too, not only to replacement.
+- **R13 (refines §7 and §11 — per-item vs. whole-event failure).** A
+  same-ID write whose boundary differs from a visible current version
+  (explicit-ID or derived-ID) rejects only *that item*, with a
+  `boundary_conflict` diagnostic, and writes nothing for it; the rest of
+  the event proceeds — except that a Working section containing such an
+  item is a partially malformed section under D11 (§7), so it performs no
+  snapshot replacement at all. This is narrower than D1/R7's event-wide
+  abort: authorization, integrity, ownership, idempotency, and
+  resource-limit failures still abort the whole event (§1, §11, §13); a
+  same-ID boundary conflict on one item among several does not.
+- **R14 (refines §1, D1/R7 — target-state mismatch is a diagnostic).** A
+  lifecycle command whose target exists and is authorized but is in the
+  wrong state for the action — Resolve on a non-OPEN goal, Unpin on a
+  non-pinned target — is a diagnostic, not an event abort, matching how D1
+  already treats an unknown/inaccessible/ambiguous target (R7 only makes
+  an *unauthorized source actor* abort the event).
+- **R15 (process note, §17).** Phase 1 test fixtures that needed updating
+  for R6's namespace contract (e.g. a fixture constructing a
+  current-version key without a namespace) are accepted as the contract
+  change itself, not as regressions to preserve — `p2-graph`/`p2-store`
+  update them in place rather than special-casing the pre-namespace shape.
+
 ## Alternatives considered
 
 - **D1:** the brief's read-only resolution without an explicit
@@ -823,6 +878,25 @@ reconciles exact names in a later round.
   aliases only `Event`/`Span`, not `IngestResult`; `internal/store/storetest`
   — an upgrade/restart parity fixture for a pre-Phase-2 record read after
   the new migrations land.
+- **§20 (round 2 rulings, R9-R15):** `internal/graph`/`internal/store` —
+  retiring obligations bound to a replaced source uses the obligations-
+  by-source lookup and stays bounded under a large-fan-out source (R9);
+  `internal/graph` returns `ErrNamespaceConflict` for an ambiguous
+  pre-migration lookup rather than guessing a namespace (R10);
+  `SameDirectiveSemantics` includes creation turn, TTL origin, and
+  obligation declaration in its comparison, both in `internal/graph` unit
+  tests and as the single comparison `internal/ingest` calls (R11); the
+  Working-snapshot duplicate-vs-changed decision is scoped per `(task,
+  authority, boundary)`, confirmed with two different-boundary snapshots
+  under the same task never being compared to each other (R12); a same-ID
+  boundary conflict on one item among several in one event rejects only
+  that item with `boundary_conflict` and commits the rest, while the same
+  conflict inside a Working section blocks that section's snapshot
+  replacement without aborting the event, distinct from an
+  authorization/integrity/idempotency/resource failure that still aborts
+  the whole event (R13); Resolve on a non-OPEN goal and Unpin on a
+  non-pinned target each produce a diagnostic and commit the rest of the
+  event, never an abort (R14).
 - **Cross-cutting (decision-review gate additions):** every path above run
   under `-race` where concurrent ingestion applies; injection-resistance
   tests for each §9-of-the-SDD item reachable in Phase 2 (retrieved/tool
