@@ -1,5 +1,7 @@
 package domain
 
+import "strings"
+
 // ByteRange is a half-open [Start, End) range in the original text part's
 // bytes, before BOM handling, newline interpretation, or item normalization.
 type ByteRange struct{ Start, End int }
@@ -27,12 +29,30 @@ const (
 	DiagnosticNotFound      DiagnosticCode = "ErrNotFound"
 )
 
-func (c DiagnosticCode) Valid() bool {
+func (c DiagnosticCode) Valid() bool { return c.Severity() != "" }
+
+// DiagnosticSeverity classifies a code. No diagnostic aborts an event:
+// authorization, integrity, ownership, idempotency, and resource failures
+// are errors that reject the event, never diagnostics (M4).
+type DiagnosticSeverity string
+
+const (
+	SeverityInfo    DiagnosticSeverity = "INFO"
+	SeverityWarning DiagnosticSeverity = "WARNING"
+	SeverityError   DiagnosticSeverity = "ERROR"
+)
+
+// Severity returns the code's fixed severity, or "" for an unknown code.
+func (c DiagnosticCode) Severity() DiagnosticSeverity {
 	switch c {
-	case ErrUnsupportedDirective, ErrMalformedDirective, ErrAmbiguousDirective, DirectiveNotParsed, DiagnosticsTruncated, DirectiveIDDerived, DiagnosticNotFound:
-		return true
+	case DirectiveNotParsed, DirectiveIDDerived:
+		return SeverityInfo
+	case DiagnosticsTruncated:
+		return SeverityWarning
+	case ErrUnsupportedDirective, ErrMalformedDirective, ErrAmbiguousDirective, DiagnosticNotFound:
+		return SeverityError
 	}
-	return false
+	return ""
 }
 
 // DiagnosticReason identifies a content-free explanation. Never place source
@@ -59,24 +79,28 @@ const (
 	ReasonAmbiguousTarget      DiagnosticReason = "ambiguous_target"
 	ReasonLimit                DiagnosticReason = "limit"
 	ReasonDerivedID            DiagnosticReason = "derived_id"
+	ReasonDuplicateAttribute   DiagnosticReason = "duplicate_attribute"
+	ReasonDuplicateID          DiagnosticReason = "duplicate_id"
+	ReasonEmptySection         DiagnosticReason = "empty_section"
+	ReasonPartialSnapshot      DiagnosticReason = "partial_snapshot"
 )
 
 func (r DiagnosticReason) Valid() bool {
 	switch r {
-	case ReasonNone, ReasonSourceNotCapable, ReasonIndented, ReasonFencedCode, ReasonBlockQuote, ReasonHTMLComment, ReasonInvalidSyntax, ReasonInvalidID, ReasonEmptyItem, ReasonHeadingIDOnList, ReasonUnknownAttribute, ReasonDisallowedAttribute, ReasonInvalidAttribute, ReasonScopeWidening, ReasonUnsupportedLifecycle, ReasonUnknownTarget, ReasonAmbiguousTarget, ReasonLimit, ReasonDerivedID:
+	case ReasonNone, ReasonSourceNotCapable, ReasonIndented, ReasonFencedCode, ReasonBlockQuote, ReasonHTMLComment, ReasonInvalidSyntax, ReasonInvalidID, ReasonEmptyItem, ReasonHeadingIDOnList, ReasonUnknownAttribute, ReasonDisallowedAttribute, ReasonInvalidAttribute, ReasonScopeWidening, ReasonUnsupportedLifecycle, ReasonUnknownTarget, ReasonAmbiguousTarget, ReasonLimit, ReasonDerivedID,
+		ReasonDuplicateAttribute, ReasonDuplicateID, ReasonEmptySection, ReasonPartialSnapshot:
 		return true
 	}
 	return false
 }
 
-// Diagnostic records parser/ingestion output without source content (D16).
+// Diagnostic is parser/ingestion output without source content (D16).
 // SpanIndex, PartIndex, and Index are zero-based. Index is unique within the
-// event's span, across parts. Ingestion fills SessionID/EventID before storing;
-// a pure parser may leave both empty. ParserVersion is always required.
-// Section is a canonical content keyword or lifecycle keyword, or empty.
+// event's span, across parts (ingestion rebases per-part parser indexes).
+// ParserVersion is always required. Section is a canonical content keyword or
+// lifecycle keyword, or empty. DirectiveID is set only to a validated ID.
+// Ingestion persists diagnostics as DiagnosticRecords.
 type Diagnostic struct {
-	SessionID     string
-	EventID       string
 	SpanIndex     int
 	PartIndex     int
 	Index         int
@@ -92,9 +116,6 @@ func (d Diagnostic) Validate() error {
 	if !d.Code.Valid() || !d.Reason.Valid() || d.ParserVersion == "" {
 		return invalid("diagnostic: invalid code, reason, or parser version")
 	}
-	if (d.SessionID == "") != (d.EventID == "") {
-		return invalid("diagnostic: session and event must both be present or absent")
-	}
 	if d.SpanIndex < 0 || d.PartIndex < 0 || d.Index < 0 {
 		return invalid("diagnostic: negative index")
 	}
@@ -106,6 +127,66 @@ func (d Diagnostic) Validate() error {
 	}
 	return d.Range.Validate()
 }
+
+// Message is the diagnostic's fixed template. It never echoes source text,
+// malformed tokens, locators, or target IDs.
+func (d Diagnostic) Message() string {
+	if d.Reason == ReasonNone {
+		return string(d.Code)
+	}
+	return string(d.Code) + " (" + string(d.Reason) + ")"
+}
+
+// DiagnosticSchemaVersion versions the persisted DiagnosticRecord layout.
+const DiagnosticSchemaVersion = "diagnostic/v1"
+
+// DiagnosticRecord is one immutable persisted diagnostic (D16), written in
+// the event transaction and returned unchanged by idempotent replay. It is
+// keyed by (session, occurrence, span, index); ID derives from that key, so
+// anonymous events never alias. The caller EventID is only a lookup key.
+// Access is the source span's boundary: IDs, ranges, counts, and reasons are
+// exposed only to principals it permits (VisibleTo).
+type DiagnosticRecord struct {
+	ID            string
+	SessionID     string
+	OccurrenceID  string
+	EventID       string
+	Access        AccessBoundary
+	SchemaVersion string
+	Diagnostic
+}
+
+// DiagnosticRecordID derives a record ID from its key.
+func DiagnosticRecordID(sessionID, occurrenceID string, spanIndex, index int) string {
+	return DerivedArtifactID(IDDomainDiagnostic, sessionID, occurrenceID, uint64(spanIndex), uint64(index))
+}
+
+// Validate checks the record's key, schema, and access boundary.
+func (r DiagnosticRecord) Validate() error {
+	if err := r.Diagnostic.Validate(); err != nil {
+		return err
+	}
+	if r.SessionID == "" || !ValidOccurrenceID(r.OccurrenceID) || r.SchemaVersion != DiagnosticSchemaVersion {
+		return invalid("diagnostic record: session, occurrence, and schema version are required")
+	}
+	if r.ID != DiagnosticRecordID(r.SessionID, r.OccurrenceID, r.SpanIndex, r.Index) {
+		return invalid("diagnostic record: ID does not match its key")
+	}
+	if r.EventID != "" && r.OccurrenceID != CallerOccurrenceID(r.SessionID, r.EventID) ||
+		r.EventID == "" && strings.HasPrefix(r.OccurrenceID, callerOccurrencePrefix) {
+		return invalid("diagnostic record: event ID disagrees with occurrence")
+	}
+	if err := r.Access.Validate(); err != nil {
+		return err
+	}
+	if r.Access.SessionID != r.SessionID {
+		return invalid("diagnostic record: access boundary belongs to another session")
+	}
+	return nil
+}
+
+// VisibleTo reports whether p may read the record at all.
+func (r DiagnosticRecord) VisibleTo(p Principal) bool { return r.Access.Permits(p) }
 
 // ValidDirectiveID implements FR-DIR-006's exact ASCII ID grammar.
 func ValidDirectiveID(id string) bool {
