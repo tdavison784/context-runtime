@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -12,21 +13,34 @@ import (
 
 var planViewer = domain.Principal{SessionID: "s", WorkflowID: "wf", TaskID: "task", AgentID: "agent", Authority: domain.AuthorityUser}
 
-// TestAccessLookupsUseIndex locks every F1 lookup to an index probe: no
-// lookup scans a table, whatever the session holds (SEC-1.1, SEC-1.2,
-// SPEC-1.3).
+// TestAccessLookupsUseIndex locks every F1 lookup, through its production
+// query builder, to an exact-key index search with a LIMIT (SPEC-2.1,
+// DUR-2.1): no lookup scans or reads more than one batch per query,
+// whatever the session holds.
 func TestAccessLookupsUseIndex(t *testing.T) {
 	s, _ := openTemp(t)
-	clause, args, _ := ownerClause("workflow_id", "task_id", "agent_id", planViewer)
-	assertIndexed(t, s, []string{"session_id", "blob_hash", "workflow_id", "task_id", "agent_id"}, "SELECT item_id FROM lookup_blob WHERE session_id=? AND blob_hash=? AND "+clause+" ORDER BY seq, item_id",
-		append([]any{"s", "h"}, args...)...)
-	assertIndexed(t, s, []string{"session_id", "content_hash", "task_id", "section", "directive_id", "kind", "role", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, canonicalSQL, "s", "h", "task", "", "", "fact", "", "USER", "TASK", "s", "", "task", "")
-	assertIndexed(t, s, []string{"session_id", "task_id", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, workingSQL, "s", "task", "USER", "TASK", "s", "", "task", "")
-	assertIndexed(t, s, []string{"session_id", "rule_version", "locator_key", "workflow_id", "task_id", "agent_id"}, "SELECT item_id FROM lookup_source WHERE session_id=? AND rule_version=? AND locator_key=? AND "+clause+
-		" AND (seq > ? OR seq = ? AND item_id > ?) ORDER BY seq, item_id", append(append([]any{"s", "v", "k"}, args...), 0, 0, "")...)
-	rclause, rargs, _ := ownerClause("f_access_workflow_id", "f_access_task_id", "f_access_agent_id", planViewer)
-	assertIndexed(t, s, []string{"session_id", "f_locator_key", "f_rule_version", "f_access_workflow_id", "f_access_task_id", "f_access_agent_id"}, "SELECT id FROM rec_reference WHERE session_id=? AND f_locator_key=? AND f_rule_version=? AND "+rclause+
-		" AND (f_seq > ? OR f_seq = ? AND id > ?) ORDER BY f_seq, id LIMIT ?", append(append([]any{"s", "k", "v"}, rargs...), 0, 0, "", 2)...)
+	mid := store.Cursor{Seq: 7, ID: "m"}
+	check := func(keys []string, q string, args []any) {
+		t.Helper()
+		if !strings.Contains(q, "LIMIT ?") {
+			t.Errorf("query has no LIMIT: %q", q)
+		}
+		assertIndexed(t, s, keys, q, args...)
+	}
+	owners := []string{"workflow_id", "task_id", "agent_id"}
+	blob, _ := blobReferrerQuery("s", "h", planViewer, planViewer)
+	q, args := blob(mid, lookupBatch)
+	check(append([]string{"session_id", "blob_hash"}, owners...), q, args)
+	q, args = canonicalQuery("s", store.CanonicalFilter{TaskID: "task", Kind: domain.KindFact, Authority: domain.AuthorityUser,
+		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, ContentHash: "h"})(mid, lookupBatch)
+	check([]string{"session_id", "content_hash", "task_id", "section", "directive_id", "kind", "role", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, q, args)
+	q, args = workingQuery("s", store.WorkingFilter{TaskID: "task", Authority: domain.AuthorityUser,
+		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}})(mid, lookupBatch)
+	check([]string{"session_id", "task_id", "authority", "scope", "access_session_id", "workflow_id", "access_task_id", "agent_id"}, q, args)
+	q, args = sourceItemsQuery("s", "k", planViewer)(mid, lookupBatch)
+	check(append([]string{"session_id", "rule_version", "locator_key"}, owners...), q, args)
+	q, args = visibleReferencesQuery("s", "k", planViewer, mid, 3)
+	check([]string{"session_id", "f_locator_key", "f_rule_version", "f_access_workflow_id", "f_access_task_id", "f_access_agent_id"}, q, args)
 }
 
 // TestUpgradeAccessLookups checks migration 0012's backfill: live items are

@@ -348,6 +348,9 @@ type transaction struct {
 	wrote             bool
 	ledgerSeqs        map[uint64]bool
 	semanticSeqs      map[uint64]bool
+	// lookupRows and lookupLoads count index rows read and items loaded by
+	// access-filtered lookups, so tests can assert bounded work (DUR-2.1).
+	lookupRows, lookupLoads int
 }
 
 var _ store.TxBase = (*transaction)(nil)

@@ -138,9 +138,9 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 		// A superseded or duplicate item is no longer live (F1).
 		switch v.Type {
 		case domain.RelSupersedes:
-			return t.retireLookups(v.ToID)
+			return t.retireLookups(v.ToID, false)
 		case domain.RelDuplicateOf:
-			return t.retireLookups(v.FromID)
+			return t.retireLookups(v.FromID, true)
 		}
 		return nil
 	})
