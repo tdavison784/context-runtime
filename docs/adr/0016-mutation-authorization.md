@@ -32,29 +32,51 @@ performs a Resolve in V1.
   can authorize only what its issuer could do directly, including access —
   an issuer scoped to task A can no longer name a target in task B and have
   a grantee in B pass authorization on the issuer's say-so.
-- `AuthorizeGrantIssuance(g, targets)` is a new, separate check run when a
-  grant is *issued or revoked* (not when it is applied): every named target
-  must match `g.TargetIDs` exactly, the issuer must access every target
-  (`ErrNotFound` on failure, so issuance cannot probe for existence), and
-  the issuer's authority must be at least each target's. `store.Tx
-  .InsertGrant`'s doc comment requires callers to run this check first — the
-  store does not re-derive it, since only the caller has the target records'
-  authority/boundary in hand at issuance time.
+- `AuthorizeGrantIssuance(g, targets)` is the check run when a grant is
+  *issued*. `sameTargetSet` first requires `g.TargetIDs` to contain no
+  duplicates and `targets` to be exactly that set, one record per ID —
+  neither a target missing from the supplied list nor a repeated ID (e.g.
+  `TargetIDs [A,B]` with `targets [A,A]`) can pass. `authorizeOver` then
+  requires the issuer to access every target (`ErrNotFound` first, so
+  issuance cannot probe for existence) and hold authority at least each
+  target's. `store.Tx.InsertGrant`'s doc comment requires callers to run
+  this check first — the store does not re-derive it, since only the caller
+  has the target records' authority/boundary in hand at issuance time.
+- `AuthorizeGrantRevocation(actor, g, targets)` is the separate check run
+  when a grant is *revoked*: it takes an explicit revoking `actor` (not the
+  original issuer), requires the same session and the same exact target set
+  as issuance, and requires the actor be SYSTEM/HARNESS/USER with access and
+  authority over every target — an actor that fails the authority test still
+  gets `ErrNotFound` first if it also lacks access, so revocation cannot
+  disclose target authority to a principal that cannot see the target.
+  `store.Tx.RevokeGrant` now takes the audit `LifecycleEvent` (`TargetGrant`)
+  and applies it atomically with the revocation, and requires callers to run
+  this check first.
 - Matcher grants are limited to `ActionAssertObligation`:
   `MutationGrant.Validate` now rejects a matcher grantee for any other
   action. A registered matcher evaluates its own obligation (FR-OBL-004);
   it must not be usable to receive a `waive_obligation` or `resolve` grant,
   which FR-AUTH-002 never contemplated for a matcher.
-- Supersession (FR-REL-006) is checked by `AuthorizeSupersession`: boundaries
-  **equal**, not `Within` (narrowing would hide the original from principals
-  who could see it before); superseding authority ≥ superseded; actor's
-  authority ≥ superseding item's own authority. The actor is now also
-  restricted by kind: SYSTEM/HARNESS/USER may supersede as before; an AGENT
-  actor may supersede **only** an AGENT item with an AGENT item (the keyed
-  agent-write case, FR-TOOL-002); a TOOL or RETRIEVED_CONTENT actor can
-  never create a SUPERSEDES edge, full stop — closing the gap where a TOOL
-  actor could otherwise supersede TOOL content and suppress current state
-  under FR-ING-005/§9's "tool output cannot ... supersede."
+- Supersession (FR-REL-006) is checked by `AuthorizeSupersession`, in this
+  order: **access first** — both endpoints' `Access.Permits(actor)` are
+  checked before any authority-kind test, so an inaccessible endpoint always
+  yields `ErrNotFound` regardless of the actor's or the endpoint's
+  authority. This ordering itself is load-bearing: checking authority kind
+  first (as v2 did) let a caller distinguish an inaccessible AGENT item
+  (`ErrNotFound` from the AGENT-kind branch) from an inaccessible USER item
+  (`ErrInvalidAuthorityPromotion` from the authority-kind branch) purely
+  from the error returned, disclosing the item's authority class without
+  ever granting access to it. After access, the actor is restricted by
+  kind: SYSTEM/HARNESS/USER may supersede as before (subject to the
+  boundary-equality and authority-ordering checks below); an AGENT actor
+  may supersede **only** a keyed agent write with the identical key
+  (FR-TOOL-002): both items must be AGENT authority **and** share the same
+  `"agent.<key>"` `DirectiveID` — not merely "both AGENT," which would let
+  one keyed write supersede an unrelated one. A TOOL or RETRIEVED_CONTENT
+  actor can never create a SUPERSEDES edge, full stop. Boundaries must
+  still be **equal**, not `Within` (narrowing would hide the original from
+  principals who could see it before); superseding authority ≥ superseded;
+  actor's authority ≥ superseding item's own authority.
 - FR-DIR-007's amendment (SDD v0.6) is implemented by the same equal-
   boundary rule `AuthorizeSupersession` already enforces: "same authority in
   the same task" is replaced by "same authority and access boundary,"
@@ -70,9 +92,20 @@ performs a Resolve in V1.
   audit record.
 - Obligation transitions follow `domain.ValidObligationTransition`
   (UNRESOLVED↔BLOCKED, UNRESOLVED↔SATISFIED, any status→WAIVED terminal).
-  `store.Tx.AppendObligationTransition` now applies the transition and
-  returns the updated version atomically, rather than leaving status and
-  transition history as two separate writes a caller could split.
+  `store.Tx.AppendObligationTransition(t, expectedRevision)` applies the
+  transition and returns the updated version atomically, and now also takes
+  `expectedRevision` under compare-and-swap: the version's stored `Revision`
+  must equal it or the write fails `ErrVersionConflict`. This closes an ABA
+  race this ADR's authorization matrix cannot close by itself — a matcher
+  can evaluate evidence against one obligation revision, a resource change
+  can move the same obligation through SATISFIED and back to UNRESOLVED
+  (revision N+2), and without the CAS the matcher's stale transition would
+  still satisfy `From == UNRESOLVED` and apply anyway, applying proof
+  evaluated against a state the obligation is no longer in (FR-OBL-005,
+  INV-16). The applicability-fingerprint and matcher-versioning rules that
+  motivate *why* freshness matters are ADR 8's territory (Phase 3); this
+  ADR only fixes the authorization-adjacent mechanism — the transition
+  cannot commit against a revision the evaluator didn't actually see.
 
 ## SDD amendment (applied in v0.6)
 
@@ -106,6 +139,23 @@ boundary rule rather than conflicting with it.
   keyed-write exception is scoped to AGENT specifically; TOOL/RETRIEVED_
   CONTENT superseding anything, including their own kind, is exactly the
   "tool output suppresses state" case §9 forbids.
+- **Letting the AGENT exception match on authority alone ("both items
+  AGENT"), without requiring the same keyed `DirectiveID`.** Rejected: that
+  would let one agent key's write supersede an unrelated agent key's item as
+  long as both happen to be AGENT authority in the same boundary —
+  FR-TOOL-002 only ever describes a write to an *existing key* superseding
+  its own previous version, not cross-key suppression.
+- **Checking actor-authority kind before endpoint access in
+  `AuthorizeSupersession`.** Rejected: this is what v2 shipped, and it lets a
+  caller learn an inaccessible endpoint's authority class from which error
+  comes back (`ErrNotFound` vs. `ErrInvalidAuthorityPromotion`) — exactly
+  the disclosure §9 and ADR 6 forbid. Access must be checked first,
+  unconditionally.
+- **A single grant-authorization function reused for issuance and
+  revocation, keyed on the original issuer.** Rejected: revocation is a
+  distinct action taken by a distinct (possibly different) actor;
+  `AuthorizeGrantRevocation` takes that actor explicitly rather than
+  assuming only the original issuer may ever revoke.
 - **`Within` instead of equality for supersession/Working-snapshot
   boundaries.** Rejected: permits narrowing, which both FR-REL-006 and the
   amended FR-DIR-007 forbid.
@@ -117,15 +167,18 @@ boundary rule rather than conflicting with it.
 
 ## Consequences / compatibility impact
 
-- `AuthorizeGrantIssuance` is a new required call site for every grant-
-  issuing/revoking path; any Phase 3+ code that calls `store.Tx.InsertGrant`
-  directly without it violates the store's own doc comment.
-- The AGENT-same-kind restriction on `AuthorizeSupersession` means any
-  future feature that wants AGENT to supersede a non-AGENT item (none
-  currently proposed) needs its own ADR, not a loosening of this function.
-- `UpdateItem`/`AppendObligationTransition`'s new atomic-audit signatures are
-  breaking changes to the Phase 1 store interface; no production data exists
-  yet, so this is a clean signature change, not a migration.
+- `AuthorizeGrantIssuance` and `AuthorizeGrantRevocation` are required call
+  sites for every grant-issuing/revoking path; any Phase 3+ code that calls
+  `store.Tx.InsertGrant`/`RevokeGrant` directly without them violates the
+  store's own doc comment.
+- The AGENT-same-key restriction on `AuthorizeSupersession` means any future
+  feature that wants AGENT to supersede a different key or a non-AGENT item
+  (none currently proposed) needs its own ADR, not a loosening of this
+  function.
+- `UpdateItem`/`AppendObligationTransition`/`RevokeGrant`'s new atomic-audit
+  and CAS signatures are breaking changes to the Phase 1 store interface; no
+  production data exists yet, so this is a clean signature change, not a
+  migration.
 - The FR-TOOL-003/FR-DIR-007 amendments are applied; no further SDD change
   is pending for this ADR's scope.
 
@@ -136,20 +189,33 @@ boundary rule rather than conflicting with it.
   revoked grant, under-authority issuer, and now an issuer lacking access to
   the target (must fail even with sufficient authority rank).
 - `internal/domain/authz_test.go`: `AuthorizeGrantIssuance` — issuer access
-  and authority required per target; a target list not matching
-  `TargetIDs` rejected; revocation runs the same check.
+  and authority required per target; duplicate IDs in `TargetIDs` rejected;
+  a supplied `targets` list with a repeated ID or a missing ID rejected
+  (the `TargetIDs [A,B]`/`targets [A,A]` case from finding N3).
+- `internal/domain/authz_test.go`: `AuthorizeGrantRevocation` — a
+  non-SYSTEM/HARNESS/USER actor fails; an actor lacking access to any target
+  fails `ErrNotFound` even with sufficient authority; a different-session
+  actor fails; the same exact-target-set check as issuance applies.
 - `internal/domain/authz_test.go`: `MutationGrant.Validate` rejects a
   matcher grantee for any action other than `ActionAssertObligation`.
-- `internal/domain/authz_test.go`: `AuthorizeSupersession` equal-boundary
-  success for SYSTEM/HARNESS/USER; AGENT-AGENT success; AGENT superseding a
-  non-AGENT item fails; TOOL/RETRIEVED_CONTENT actor always fails regardless
-  of boundary or authority match.
+- `internal/domain/authz_test.go`: `AuthorizeSupersession` — an inaccessible
+  endpoint yields `ErrNotFound` regardless of actor or endpoint authority
+  kind (the access-ordering regression from finding N4, asserted for both an
+  inaccessible AGENT item and an inaccessible USER item, confirming neither
+  disclosure path exists); equal-boundary success for SYSTEM/HARNESS/USER;
+  AGENT-AGENT success only with matching `"agent.<key>"` `DirectiveID`s, and
+  failure when the keys differ even though both items are AGENT; TOOL/
+  RETRIEVED_CONTENT actor always fails regardless of boundary or authority
+  match.
 - `internal/domain/obligation_test.go`: `ValidObligationTransition`
-  exhaustive; WAIVED terminal.
+  exhaustive; WAIVED terminal; `AppendObligationTransition` CAS — a stale
+  `expectedRevision` fails `ErrVersionConflict` even when `From` still
+  matches the version's current status (the ABA regression from finding N2).
 - `internal/store/storetest`: `UpdateItem` fails without a matching
   `TargetItem`/`TargetID` event allocated in the same transaction;
   `AppendObligationTransition` returns the updated version with `Status`/
-  `EvidenceIDs` set from the transition, not a separately written value.
+  `EvidenceIDs` set from the transition, not a separately written value;
+  `RevokeGrant` fails without its `TargetGrant` audit event.
 - Traces T02, T06, and T18 (Working snapshots) are the Phase 3 integration
   fixtures once directive replacement and CompleteTask exist end-to-end.
 
@@ -162,13 +228,26 @@ boundary rule rather than conflicting with it.
 
 ## Review
 
-Scrutinized by Codex gpt-6-sol xhigh (`codex-decision-review-out.md`,
-findings 1, 2, 6, 8, 10, 11, 12). Changed: `findGrant` now checks issuer
-access to the target (finding 1); added `AuthorizeGrantIssuance` for the
-issue/revoke path (finding 1); `AuthorizeSupersession` rejects TOOL/
-RETRIEVED_CONTENT actors outright and restricts AGENT to AGENT-on-AGENT
-(finding 2); matcher grants limited to `ActionAssertObligation` (finding
-10); `UpdateItem`/`AppendObligationTransition` made atomic with their audit
-records (finding 8); FR-DIR-007 amended to same-boundary, matching the
-supersession rule instead of conflicting with it (finding 11); FR-TOOL-003's
-amendment reported as applied rather than proposed (finding 12).
+First pass (Codex gpt-6-sol xhigh, `codex-decision-review-out.md`, findings
+1, 2, 6, 8, 10, 11, 12): `findGrant` checks issuer access to the target;
+added `AuthorizeGrantIssuance`; `AuthorizeSupersession` rejects TOOL/
+RETRIEVED_CONTENT actors and restricts AGENT to AGENT-on-AGENT; matcher
+grants limited to `ActionAssertObligation`; `UpdateItem`/
+`AppendObligationTransition` made atomic with their audit records;
+FR-DIR-007 amended to same-boundary; FR-TOOL-003's amendment reported as
+applied.
+
+Second pass (Codex gpt-6-sol xhigh, `codex-contract-v2-review.md`, findings
+N2, N3, N4, verifying PARTIAL on findings 1, 2, 8): the first pass's fixes
+were each incomplete. Changed: `AuthorizeGrantIssuance` now rejects
+duplicate/mismatched target sets via `sameTargetSet`, not just length
+equality (N3); added `AuthorizeGrantRevocation` with an explicit revoking
+actor, since the first pass never added a revocation-side check at all
+(N3); `AuthorizeSupersession` now checks both endpoints' access **before**
+the actor-authority-kind switch, closing the authority-class disclosure the
+first pass's ordering still permitted (N4); the AGENT exception now
+requires the identical `"agent.<key>"` `DirectiveID` on both items, not
+just "both AGENT" (N4, tightening finding 2's original fix);
+`AppendObligationTransition` now takes `expectedRevision` under CAS,
+closing the ABA race the first pass's atomic-but-unversioned transition
+still allowed (N2).
