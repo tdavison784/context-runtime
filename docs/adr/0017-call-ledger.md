@@ -3,6 +3,17 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
+## Amended in Phase 2 (ADR 19, 2026-09-26)
+
+Every reference below to `SetCurrentDirective` (part of this ADR's
+store-contract atomic-audit-event list) and to `CurrentDirective` (the
+round-1 SQLite boundary-disclosure fix) names a Phase 1 method Phase 2
+replaced with the typed, namespaced `store.SetCurrentVersion(itemID)` and
+`store.CurrentVersion(domain.CurrentKey)` (see ADR 4's amendment note;
+M6/R6, ADR 19 §17). This ADR's atomic-audit-event requirement and the
+disclosure fix it describes both still hold for the typed methods; only
+the names changed.
+
 ## Context
 
 FR-CALL-001 through FR-CALL-005 define the provider-call lifecycle: Prepare
