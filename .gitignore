@@ -1,2 +1,7 @@
 # Per-worker git worktrees (coordinated development)
 /.worktrees/
+
+# Local environment and secrets (provider API keys)
+.env
+.env.*
+!.env.example
