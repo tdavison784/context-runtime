@@ -207,8 +207,10 @@ func blankResidue(text string, rs []domain.ByteRange) bool {
 // (a dropped member, stray prose, an empty body) replaces nothing, so a
 // parse error can never retire an omitted member; its bytes stay in the
 // transcript and its problems in diagnostics. A member whose ID is current
-// at another visible boundary is dropped with boundary_conflict and makes
-// the section partially malformed too (R13): no member is written. Every
+// at another visible boundary, or whose derived ID's slot is held by an
+// authority it does not dominate (DUR-1.5), is reported with
+// boundary_conflict and makes the section partially malformed too (R13): no
+// member is written. Every
 // other failure, including a denied replacement, aborts the event.
 func (r *run) workingSection(c unitCtx, si int) error {
 	sec := c.res.Sections[si]
@@ -229,6 +231,15 @@ func (r *run) workingSection(c unitCtx, si int) error {
 			}
 			r.diagnose(c, item, it.Access, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
 			conflict = true
+		} else if !item.ExplicitID {
+			lower, err := r.derivedSlotHeldAbove(c.actor, it)
+			if err != nil {
+				return err
+			}
+			if lower {
+				r.diagnose(c, item, it.Access, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict)
+				conflict = true
+			}
 		}
 		members = append(members, it)
 	}
@@ -265,6 +276,24 @@ func (r *run) workingSection(c unitCtx, si int) error {
 		return errLimit("MaxRelationships")
 	}
 	return nil
+}
+
+// derivedSlotHeldAbove reports whether a Working member with a derived ID
+// would collide with a current version of another authority that its own
+// authority does not dominate (DUR-1.5, ruling option A). A derived ID
+// carries no authority, so identical text under two authorities shares one
+// current-version slot: a same-or-higher authority supersedes it by ID as
+// usual, but a lower one must not abort its whole event, so its section is
+// refused like a boundary conflict (R13) and the rest of the event applies.
+func (r *run) derivedSlotHeldAbove(actor domain.Principal, it domain.ContextItem) (bool, error) {
+	cur, err := graph.CurrentVersionFor(r.tx, actor, it)
+	switch {
+	case isNotFound(err):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return !it.Authority.AtLeast(cur.Authority), nil
 }
 
 // lifecycle records one parsed Resolve/Unpin at its position in event
