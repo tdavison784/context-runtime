@@ -27,9 +27,9 @@ func testUnresolvedReferences(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		noErr(t, tx.InsertItem(NewItem(sessA, "ref-item", tx.NextSeq(), "## References\n- go.mod")))
 		seq := tx.NextSeq()
-		r1 = NewUnresolvedReference(sessA, occ, 1, "ref-item", "repo:a/go.mod\xff", seq)
-		r0 = NewUnresolvedReference(sessA, occ, 0, "ref-item", "repo:a/go.mod\xff", seq)
-		r2 = NewUnresolvedReference(sessA, occ, 2, "ref-item", "repo:b/go.mod", seq)
+		r1 = NewUnresolvedReference(sessA, occ, 1, "ref-item", "loc:a/go.mod\xff", seq)
+		r0 = NewUnresolvedReference(sessA, occ, 0, "ref-item", "loc:a/go.mod\xff", seq)
+		r2 = NewUnresolvedReference(sessA, occ, 2, "ref-item", "loc:b/go.mod", seq)
 		for _, r := range []domain.UnresolvedReference{r1, r0, r2} {
 			noErr(t, tx.InsertUnresolvedReference(r))
 		}
@@ -40,7 +40,7 @@ func testUnresolvedReferences(t *testing.T, s store.Store) {
 	})
 	var later domain.UnresolvedReference
 	update(t, s, sessA, func(tx store.Tx) error {
-		later = NewUnresolvedReference(sessA, domain.CallerOccurrenceID(sessA, "evt-0"), 0, "ref-item", "repo:a/go.mod\xff", tx.NextSeq())
+		later = NewUnresolvedReference(sessA, domain.CallerOccurrenceID(sessA, "evt-0"), 0, "ref-item", "loc:a/go.mod\xff", tx.NextSeq())
 		return tx.InsertUnresolvedReference(later)
 	})
 	first, second := r0, r1
@@ -54,14 +54,14 @@ func testUnresolvedReferences(t *testing.T, s store.Store) {
 		_, err = tx.UnresolvedReference("missing")
 		wantErr(t, err, domain.ErrNotFound)
 
-		refs, err := tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "repo:a/go.mod\xff", RuleVersion: "locator/v1", Limit: 3})
+		refs, err := tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "loc:a/go.mod\xff", RuleVersion: "locator/v1", Limit: 3})
 		noErr(t, err)
 		assertEqual(t, "by locator key", refs, []domain.UnresolvedReference{first, second, later})
 		// Keys are exact bytes: the lossy spelling matches nothing.
-		refs, err = tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "repo:a/go.mod�", RuleVersion: "locator/v1", Limit: 3})
+		refs, err = tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "loc:a/go.mod�", RuleVersion: "locator/v1", Limit: 3})
 		noErr(t, err)
 		assertEqual(t, "lossy key", refs, []domain.UnresolvedReference{})
-		refs, err = tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "repo:a/go.mod\xff", RuleVersion: "locator/v2", Limit: 3})
+		refs, err = tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "loc:a/go.mod\xff", RuleVersion: "locator/v2", Limit: 3})
 		noErr(t, err)
 		assertEqual(t, "other rule version", refs, []domain.UnresolvedReference{})
 		refs, err = tx.UnresolvedReferences(store.ReferenceFilter{Limit: 4})
@@ -69,7 +69,7 @@ func testUnresolvedReferences(t *testing.T, s store.Store) {
 		if len(refs) != 4 {
 			t.Errorf("all references = %d, want 4", len(refs))
 		}
-		_, err = tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "repo:a/go.mod\xff", RuleVersion: "locator/v1", Limit: 2})
+		_, err = tx.UnresolvedReferences(store.ReferenceFilter{LocatorKey: "loc:a/go.mod\xff", RuleVersion: "locator/v1", Limit: 2})
 		wantErr(t, err, store.ErrLimitExceeded)
 		_, err = tx.UnresolvedReferences(store.ReferenceFilter{})
 		wantErr(t, err, domain.ErrInvalidRecord)
@@ -139,7 +139,7 @@ func testUnresolvedReferencesAcrossRestart(t *testing.T, open Opener) {
 	var want domain.UnresolvedReference
 	update(t, s, sessA, func(tx store.Tx) error {
 		noErr(t, tx.InsertItem(NewItem(sessA, "ref-item", tx.NextSeq(), "refs")))
-		want = NewUnresolvedReference(sessA, domain.NewAnonymousOccurrenceID(anonymousIDs), 0, "ref-item", "repo:a/\xfe", tx.NextSeq())
+		want = NewUnresolvedReference(sessA, domain.NewAnonymousOccurrenceID(anonymousIDs), 0, "ref-item", "loc:a/\xfe", tx.NextSeq())
 		return tx.InsertUnresolvedReference(want)
 	})
 	s = reopen(t, s, open)

@@ -10,7 +10,7 @@ func referenceFixture() UnresolvedReference {
 	occ := CallerOccurrenceID("s1", "e1")
 	return UnresolvedReference{
 		ID: UnresolvedReferenceID("s1", occ, 1), SessionID: "s1", OccurrenceID: occ, Ordinal: 1, SpanIndex: 0,
-		ItemID: "itm_ref", LocatorKey: "repo:example/base:.:path:docs/architecture.md", RuleVersion: "locator/v1",
+		ItemID: "itm_ref", LocatorKey: "loc:example/base:.:path:docs/architecture.md", RuleVersion: "locator/v1",
 		Access: AccessBoundary{Scope: ScopeTask, SessionID: "s1", TaskID: "t1"}, Authority: AuthorityUser, Seq: 9,
 	}
 }

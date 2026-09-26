@@ -10,8 +10,10 @@ const MaxLocatorKeyBytes = 4096
 // (Access and Authority) as well as the later event's authorization, so an
 // old broad reference can never disclose newly ingested private evidence.
 // LocatorKey is lexical: the versioned identity rule derives it from the
-// locator plus its repository/resource namespace and base directory without
-// touching the filesystem or network. ItemID is the reference item that
+// locator's bytes alone (a "url:" or "path:" prefix plus the locator or its
+// cleaned relative path), with no repository or namespace component in V1
+// (R19; see LocatorKey), and never touches the filesystem or network. ItemID
+// is the reference item that
 // declared it; SpanIndex is its span in the declaring event. ID derives from
 // (session, occurrence, ordinal), so retries reproduce it and anonymous
 // events never alias.
