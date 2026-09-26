@@ -34,6 +34,23 @@ var (
 	// ErrCoverageMismatch reports a LinkDerived call whose caller-supplied
 	// coverage.ItemIDs disagrees with the sources actually being linked.
 	ErrCoverageMismatch = errors.New("graph: coverage item IDs do not match the linked sources")
+	// ErrSnapshotNotWorking reports a SupersedeSnapshot call whose new item
+	// was not itself written as part of a Working section (Section !=
+	// SectionWorking): only a Working section can retire other Working
+	// items (SPEC-2.1).
+	ErrSnapshotNotWorking = errors.New("graph: new snapshot item's section is not WORKING")
+	// ErrDerivedLinkNotAtCreation reports a LinkDerived call whose eventID
+	// does not match the derived item's own creating EventID (AUTH-2.4):
+	// provenance may only be attached by the event that writes the derived
+	// item, never post-hoc by a later, possibly lower-authority, actor.
+	ErrDerivedLinkNotAtCreation = errors.New("graph: derived item's provenance can only be linked by the event that created it")
+	// ErrAmbiguousDirective reports a lifecycle target (SDD section 8, v0.8)
+	// that names more than one directive version the actor can currently
+	// see: FR-DIR-002 keys a directive by (task, directive ID, access
+	// boundary), so one bare ID can legitimately have several current,
+	// mutually visible versions, and a lifecycle mutation must never guess
+	// which one is meant.
+	ErrAmbiguousDirective = errors.New("graph: directive ID names more than one accessible current version")
 )
 
 // loadAccessible loads item id and confirms it is visible to actor (AUTH-
@@ -77,6 +94,34 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 	}
 	if !actor.Authority.AtLeast(newItem.Authority) {
 		return domain.ErrInvalidAuthorityPromotion
+	}
+	return nil
+}
+
+// rejectVisibleBoundaryConflict fails with domain.ErrInvalidAuthorityPromotion
+// if actor can access any current version of (taskID, directiveID) at a
+// boundary other than the one ReplaceDirective already confirmed has none
+// (AUTH-2.1): reusing a directive ID at a boundary the actor can see is a
+// scope change, which FR-DIR-002 requires to go through an explicit
+// authorized replacement, not a silent fork into two current versions.
+// Boundaries actor cannot access are never consulted for this check, so it
+// discloses nothing beyond what the actor could already see.
+func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, taskID, directiveID string) error {
+	ids, err := tx.CurrentDirectives(taskID, directiveID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		it, err := tx.Item(id)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			return err
+		}
+		if it.Access.Permits(actor) {
+			return domain.ErrInvalidAuthorityPromotion
+		}
 	}
 	return nil
 }
@@ -147,15 +192,19 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 }
 
 // ReplaceDirective files newItemID as the current version of (taskID,
-// directiveID, newItemID's access boundary) (FR-DIR-002, v0.7: the current-
-// directive key includes the access boundary, so two boundaries never share
-// or contend for the same pointer and neither can probe the other's
-// versions, AUTH-1.2): if a current version already exists at that
-// boundary, it first Supersedes it, then points the directive at
+// directiveID, newItemID's access boundary) (FR-DIR-002, v0.7/v0.8: the
+// current-directive key includes the access boundary, so a boundary the
+// actor cannot see is an independent directive and never blocks or leaks
+// through a shared ID, AUTH-1.2): if a current version already exists at
+// that boundary, it first Supersedes it, then points the directive at
 // newItemID. If none exists yet, newItemID must itself be authorized as a
-// first version (authorizeFirstVersionDirective, AUTH-1.5). Both writes
-// commit atomically within the caller's transaction. previousID is "" when
-// newItemID is the directive's first version at that boundary.
+// first version (authorizeFirstVersionDirective, AUTH-1.5), and no current
+// version at a DIFFERENT boundary the actor can see may already hold the ID
+// (rejectVisibleBoundaryConflict, AUTH-2.1): reusing a visible ID is a scope
+// change, which still needs an explicit authorized replacement policy, not
+// a silent fork into two current versions. Both writes commit atomically
+// within the caller's transaction. previousID is "" when newItemID is the
+// directive's first version at that boundary.
 func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string) (string, error) {
 	newItem, err := loadAccessible(tx, actor, newItemID)
 	if err != nil {
@@ -168,6 +217,14 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 	previousID, err := tx.CurrentDirective(taskID, directiveID, newItem.Access)
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
+		// FR-DIR-002 v0.8: a boundary the actor cannot see is an
+		// independent directive, but reusing an ID at a boundary the actor
+		// CAN see is a scope change, which still requires an explicit
+		// authorized replacement policy (AUTH-2.1) rather than silently
+		// forking a second current version.
+		if err := rejectVisibleBoundaryConflict(tx, actor, taskID, directiveID); err != nil {
+			return "", err
+		}
 		if err := authorizeFirstVersionDirective(actor, newItem); err != nil {
 			return "", err
 		}
@@ -186,20 +243,25 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 	return previousID, nil
 }
 
-// SupersedeSnapshot ingests a Working section (FR-DIR-007 v0.6, SPEC-1.1):
-// for each new item in newIDs, it finds every other current item in taskID
-// whose DirectiveSection is WORKING (of any kind FR-DIR-003 permits there,
-// such as a conversation summary, not only task_state) and that shares that
-// new item's authority and access boundary exactly, and Supersedes it. Only
-// the Working section is ever a candidate: an item that happens to share
-// authority and boundary but was not written as part of a Working section
-// (Section != WORKING) is independent state and is left alone. Boundary
-// equality, not mere task membership, further narrows candidates, so an
-// item scoped more narrowly than the snapshot (for example an AGENT-scoped
-// Working item belonging to a different agent) is also left untouched even
-// though it lives in the same task. Items in newIDs are never candidates to
-// supersede each other. It returns every SUPERSEDES relationship created, or
-// nothing if none matched.
+// SupersedeSnapshot ingests a Working section (FR-DIR-007 v0.6/v0.7,
+// SPEC-1.1): every item in newIDs must itself be Section==WORKING, checked
+// before any candidate is scanned or edge written (SPEC-2.1: a snapshot can
+// only be replaced by another snapshot, never by an arbitrary item such as a
+// PINNED directive; domain.ContextItem.Validate independently requires a
+// directive-section item to carry SYSTEM, HARNESS, or USER authority,
+// AUTH-2.2). For each new item, it then finds every other current item in
+// taskID whose DirectiveSection is WORKING (of any kind FR-DIR-003 permits
+// there, such as a conversation summary, not only task_state) and that
+// shares that new item's authority and access boundary exactly, and
+// Supersedes it. Only the Working section is ever a candidate: an item that
+// happens to share authority and boundary but was not written as part of a
+// Working section (Section != WORKING) is independent state and is left
+// alone. Boundary equality, not mere task membership, further narrows
+// candidates, so an item scoped more narrowly than the snapshot (for
+// example an AGENT-scoped Working item belonging to a different agent) is
+// also left untouched even though it lives in the same task. Items in
+// newIDs are never candidates to supersede each other. It returns every
+// SUPERSEDES relationship created, or nothing if none matched.
 func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, taskID, eventID string) ([]domain.Relationship, error) {
 	if len(newIDs) == 0 {
 		return nil, nil
@@ -214,6 +276,9 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 		}
 		if it.TaskID != taskID {
 			return nil, ErrSnapshotTaskMismatch
+		}
+		if it.Section != domain.SectionWorking {
+			return nil, ErrSnapshotNotWorking
 		}
 		newItems = append(newItems, it)
 		newSet[id] = true
@@ -262,6 +327,69 @@ func IsCurrent(tx store.ReadTx, itemID string) (bool, error) {
 		return false, err
 	}
 	return len(rels) == 0, nil
+}
+
+// ResolveLifecycleTarget resolves a lifecycle command's bare id (SDD v0.8,
+// SPEC-2.2, e.g. "Resolve [id]" or "Unpin [id]") to exactly one accessible,
+// current item ID. id is tried two ways, since a caller may hold either
+// form:
+//
+//  1. As a literal item ID: if id names an item, it must be accessible to
+//     actor and current, or the call fails with domain.ErrNotFound (an
+//     inaccessible or superseded item is not a valid target and is never
+//     distinguished from a missing one).
+//  2. As a directive ID: id's current versions are read across every
+//     access boundary in taskID (FR-DIR-002 v0.7/v0.8: a directive's
+//     identity includes its boundary, so one bare ID can have several
+//     simultaneously current versions) and filtered to those actor can
+//     access. Zero accessible versions is domain.ErrNotFound. Exactly one
+//     is the answer. More than one is ErrAmbiguousDirective: a lifecycle
+//     mutation must never guess which visible version was meant.
+//
+// Boundaries actor cannot access are never consulted, so the result
+// discloses nothing beyond what actor could already see.
+func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id string) (string, error) {
+	if it, err := tx.Item(id); err == nil {
+		if !it.Access.Permits(actor) {
+			return "", domain.ErrNotFound
+		}
+		cur, err := IsCurrent(tx, id)
+		if err != nil {
+			return "", err
+		}
+		if !cur {
+			return "", domain.ErrNotFound
+		}
+		return id, nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return "", err
+	}
+
+	versions, err := tx.CurrentDirectives(taskID, id)
+	if err != nil {
+		return "", err
+	}
+	var accessible []string
+	for _, versionID := range versions {
+		it, err := tx.Item(versionID)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			return "", err
+		}
+		if it.Access.Permits(actor) {
+			accessible = append(accessible, versionID)
+		}
+	}
+	switch len(accessible) {
+	case 0:
+		return "", domain.ErrNotFound
+	case 1:
+		return accessible[0], nil
+	default:
+		return "", ErrAmbiguousDirective
+	}
 }
 
 // SupersessionChain returns every item in the supersession chain containing
@@ -345,6 +473,11 @@ func CheckDerivedBoundary(derived domain.AccessBoundary, sources []domain.Contex
 // item's provenance and, under ADR 6's eligibility recheck, later forcing it
 // out of context. TOOL and RETRIEVED_CONTENT actors are always rejected,
 // mirroring AuthorizeSupersession.
+//
+// eventID must equal derived.EventID (AUTH-2.4, ErrDerivedLinkNotAtCreation
+// otherwise): provenance may only be attached by the very event that wrote
+// the derived item, never post-hoc by a later, possibly lower-authority
+// actor reaching into an existing item's history.
 func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) ([]domain.Relationship, error) {
 	if err := actor.Validate(); err != nil {
 		return nil, err
@@ -356,6 +489,9 @@ func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceID
 	if !(actor.Authority.CanHoldLifecycleAuthority() || actor.Authority == domain.AuthorityAgent) ||
 		!actor.Authority.AtLeast(derived.Authority) {
 		return nil, domain.ErrInvalidAuthorityPromotion
+	}
+	if derived.EventID == "" || derived.EventID != eventID {
+		return nil, ErrDerivedLinkNotAtCreation
 	}
 
 	sources := make([]domain.ContextItem, 0, len(sourceIDs))
