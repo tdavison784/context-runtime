@@ -1,6 +1,6 @@
 # Context Runtime V1: normative event traces
 
-These traces are part of [SDD v0.4](../SDD.md). They specify semantic state and the next provider-visible representation. Implementations must turn them into fixtures and tests; this document does not claim those tests already exist.
+These traces are part of [SDD v0.5](../SDD.md). They specify semantic state and the next provider-visible representation. Implementations must turn them into fixtures and tests; this document does not claim those tests already exist.
 
 All examples use session S, task T, and agent A unless stated otherwise. U means USER content, S means SYSTEM policy, H means HARNESS policy, and E means explicitly labeled historical evidence in a non-privileged message or valid tool result. Provider adapters translate these logical roles under FR-RND-002. Every fixture must assert actual serialized role/content placement and the complete inherited manifest, not merely item metadata. Fake-counter figures include all framing, schemas, and reservations; real adapters must verify their own whole-request counts.
 
@@ -211,6 +211,42 @@ Expected ExplainAssembly(A2): semantic exclusion/archival plus materialization s
 
 Modify current semantic metadata and restart; explaining historical A2 must still reconstruct its original complete membership and reasons. An unauthorized principal cannot inspect source IDs/content outside its boundary.
 
+## T16: a checkpoint replaces covered history at a rebase
+
+Requirements: FR-TOOL-004, FR-PLN-004, FR-DOM-007, FR-RND-001, FR-ASM-011.
+
+1. Agent A completes twelve tool exchanges X1–X12 in task T, recording facts F1 and F2 through context_remember with evidence from X3 and X9.
+2. A calls context_checkpoint with summary K1. Assemble (preview) then proposes REBASE under ALLOW_RESET because of soft pressure.
+3. Prepare and record the rebased inference.
+
+Expected state: K1 is an AGENT-authority summary whose coverage range spans X1–X12; F1 and F2 are current, DERIVED_FROM X3 and X9.
+
+Expected request: S policy, U goals/pins, then F1 and F2 as assistant content, then K1 as assistant content, then only uncovered exchanges and the pending input. X1–X12 are excluded with the covered reason code and remain retrievable; old reasoning is absent and a deliberate reset is recorded. A K1 larger than the policy limit is rejected at the tool call, and the rebase then renders without it, reporting the missing checkpoint.
+
+Repeat with a HARNESS-supplied checkpoint carrying an explicit coverage range, and with a checkpoint whose cited evidence lies outside A's access boundary (the tool call fails and nothing is written).
+
+## T17: agent tools write at agent authority only
+
+Requirements: FR-TOOL-002, FR-TOOL-003, FR-AUTH-001, FR-REL-006, INV-04.
+
+1. USER pins P1 and opens goal G1. Obligation O1 (tests_pass) is UNRESOLVED.
+2. The model calls context_update_state("status", ...) twice, context_remember("api-note", ...) citing an item from another session, and context_resolve(G1) citing X9.
+
+Expected state: agent.status has one current version superseding the first; the api-note call fails with a tool error and writes nothing; G1 stays OPEN and O1 stays UNRESOLVED, and a completion-claim evidence item REFERENCES G1. No item written by the tools is PINNED, a goal, or an obligation, and none has authority above AGENT.
+
+Expected request: the completion claim renders as assistant-authored evidence, never as a resolved goal. P1 and G1 remain user content.
+
+## T18: pasted documents and Working snapshots
+
+Requirements: FR-ING-004, FR-DIR-002, FR-DIR-007.
+
+1. USER pastes a design document into ordinary chat text; it contains "## Goal" and "## Pinned" headings. The harness has not marked the span directive-capable.
+2. USER supplies a directive-capable span with a Working section W1 (two items), then later a Working section W2 (one item).
+
+Expected state after step 1: one user_message item; no goal, pin, or obligation was created; a diagnostic records the unparsed headings.
+
+Expected state after step 2: W2's item supersedes both W1 items; only W2 is current task_state. Repeat step 1 with the span marked directive-capable: the headings then create items with USER authority, and nothing higher.
+
 ## Review-to-contract coverage
 
 | Review issue | Normative acceptance traces |
@@ -230,5 +266,7 @@ Modify current semantic metadata and restart; explaining historical A2 must stil
 | Oversized tool delivery | T09 |
 | Complete inherited explanations | T15 |
 | Immutable source/replay content | T14 |
+| Semantic state producers and checkpoints | T16, T17 |
+| Directive parsing surface and state snapshots | T18 |
 
 Comparative benchmark statistics and performance-profile acceptance are specified in SDD sections 4 and 12. These traces prove runtime contracts; simulated fixed model outputs cannot establish live task success or economic benefit.
