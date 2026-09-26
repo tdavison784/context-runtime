@@ -299,6 +299,7 @@ func (t *tx) InsertObligationVersion(o domain.ObligationVersion) error {
 			o.ObligationID, o.Version, latest+1, domain.ErrVersionConflict)
 	}
 	t.obligations.put(obligationKey{o.ObligationID, o.Version}, o)
+	t.noteObligation(domain.ObligationVersion{}, o)
 	t.latest.put(o.ObligationID, o.Version)
 	t.oblsBySource.add(o.SourceItemID, obligationKey{o.ObligationID, o.Version})
 	t.markSequenced()
@@ -340,6 +341,7 @@ func (t *tx) UpdateObligationVersion(o domain.ObligationVersion, expectedRevisio
 		return domain.ObligationVersion{}, err
 	}
 	t.obligations.put(key, next)
+	t.noteObligation(cur, next)
 	t.markSemantic()
 	return next, nil
 }
@@ -369,6 +371,7 @@ func (t *tx) RetireObligationVersion(obligationID string, version, expectedRevis
 		return domain.ObligationVersion{}, err
 	}
 	t.obligations.put(key, next)
+	t.noteObligation(cur, next)
 	t.putLifecycle(event)
 	t.markSequenced()
 	return next.Clone(), nil
@@ -383,45 +386,19 @@ func sameObligation(a, b domain.ObligationVersion) bool {
 }
 
 func (t *tx) AppendObligationTransition(tr domain.ObligationTransition, expectedRevision uint64) (domain.ObligationVersion, error) {
-	if err := t.own(tr.SessionID); err != nil {
+	// Phase 3 transitions carry a cause and a detail and go through the
+	// semantic facet; a declared Phase 3 version never moves on this path.
+	if tr.Cause != "" {
+		return domain.ObligationVersion{}, invalid("obligation transition %s: a semantic transition requires its detail", tr.ID)
+	}
+	if cur, ok := t.obligations.peek(obligationKey{tr.ObligationID, tr.Version}); ok && cur.DeclarationKind != "" {
+		return domain.ObligationVersion{}, invalid("obligation %s/%d: a declared version transitions only with its detail", tr.ObligationID, tr.Version)
+	}
+	cur, next, err := t.checkTransition(tr, expectedRevision)
+	if err != nil {
 		return domain.ObligationVersion{}, err
 	}
-	if err := tr.Validate(); err != nil {
-		return domain.ObligationVersion{}, err
-	}
-	if err := t.fresh("obligation transition "+tr.ID, tr.Seq); err != nil {
-		return domain.ObligationVersion{}, err
-	}
-	if t.transitions.has(tr.ID) {
-		return domain.ObligationVersion{}, fmt.Errorf("obligation transition %s: %w", tr.ID, domain.ErrImmutable)
-	}
-	key := obligationKey{tr.ObligationID, tr.Version}
-	cur, ok := t.obligations.peek(key)
-	if !ok {
-		return domain.ObligationVersion{}, notFound("obligation", fmt.Sprintf("%s/%d", tr.ObligationID, tr.Version))
-	}
-	if cur.Revision != expectedRevision {
-		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: revision %d, expected %d: %w",
-			tr.ObligationID, tr.Version, cur.Revision, expectedRevision, domain.ErrVersionConflict)
-	}
-	if !cur.Current {
-		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: retired versions do not transition: %w",
-			tr.ObligationID, tr.Version, domain.ErrInvalidTransition)
-	}
-	if cur.Status != tr.From {
-		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: transition from %s but status is %s: %w",
-			tr.ObligationID, tr.Version, tr.From, cur.Status, domain.ErrInvalidTransition)
-	}
-	next := cur.Clone()
-	next.Status = tr.To
-	next.EvidenceIDs = nil
-	if tr.To == domain.ObligationSatisfied {
-		next.EvidenceIDs = slices.Clone(tr.EvidenceIDs)
-	}
-	next.Revision++
-	t.transitions.put(tr.ID, tr)
-	t.obligations.put(key, next)
-	t.markSequenced()
+	t.writeTransition(tr, cur, next)
 	return next, nil
 }
 
