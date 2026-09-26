@@ -19,7 +19,8 @@ func bindingFor(callID string, n uint64) domain.OutcomeBinding {
 }
 
 func outcomeEvent(b domain.OutcomeBinding, text string) domain.Event {
-	return domain.Event{EventID: OutcomeEventID(b), Kind: domain.EventAgent, Spans: []domain.Span{textSpan(domain.AuthorityAgent, false, text)}}
+	id, _ := domain.OutcomeEventID(b)
+	return domain.Event{EventID: id, Kind: domain.EventAgent, Spans: []domain.Span{textSpan(domain.AuthorityAgent, false, text)}}
 }
 
 func (f *fixture) ingestOutcome(b domain.OutcomeBinding, e domain.Event) (domain.IngestReceipt, error) {

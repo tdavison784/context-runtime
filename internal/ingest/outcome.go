@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -16,24 +15,11 @@ import (
 // for one is audit history, which task-lifecycle eligibility keeps out of
 // current context.
 
-// outcomeIDPrefix marks derived outcome EventIDs; it is not a reserved
-// internal ID prefix.
-const outcomeIDPrefix = "outcome-"
-
-// OutcomeEventID is the EventID of the outcome bound by b. Deriving it from
-// every binding field makes the binding part of the request identity: the
-// same outcome cannot be retried under another call, exchange, or turn.
-func OutcomeEventID(b domain.OutcomeBinding) string {
-	c := domain.NewCanonicalEncoder("context-runtime/ingest/outcome-event-id/v1")
-	c.String(b.Principal.SessionID).String(b.Principal.WorkflowID).String(b.Principal.TaskID).String(b.Principal.AgentID).String(string(b.Principal.Authority))
-	c.String(b.ConversationID).String(b.ExchangeID).String(b.CallID).String(b.TurnID).Uint(b.Turn)
-	h := c.Hash()
-	return outcomeIDPrefix + h[strings.IndexByte(h, ':')+1:]
-}
-
 // IngestOutcome ingests e, a provider outcome, for the originating context
 // b in one transaction of b's session. e must be an AGENT or TOOL event
-// with no typed operations, under EventID OutcomeEventID(b).
+// with no typed operations, under EventID domain.OutcomeEventID(b), so the
+// whole binding is part of the request identity: the same outcome cannot
+// be retried under another call, exchange, or turn.
 func (g Ingester) IngestOutcome(ctx context.Context, s store.Store, b domain.OutcomeBinding, e domain.Event) (domain.IngestReceipt, error) {
 	if err := checkOutcome(b, e); err != nil {
 		return domain.IngestReceipt{}, err
@@ -56,7 +42,8 @@ func checkOutcome(b domain.OutcomeBinding, e domain.Event) error {
 	if b.Validate() != nil {
 		return domain.ErrInvalidRecord
 	}
-	if e.Kind != domain.EventAgent && e.Kind != domain.EventTool || semanticShaped(e) || e.EventID != OutcomeEventID(b) {
+	id, err := domain.OutcomeEventID(b)
+	if err != nil || e.Kind != domain.EventAgent && e.Kind != domain.EventTool || semanticShaped(e) || e.EventID != id {
 		return domain.ErrInvalidRecord
 	}
 	return nil
