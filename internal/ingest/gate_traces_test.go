@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
+	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -18,6 +20,45 @@ import (
 func transitionEvent(id string, kind domain.EventKind, o domain.ObligationVersion, to domain.ObligationStatus, mode domain.AssertionMode) domain.Event {
 	return domain.Event{EventID: id, Kind: kind, Operations: []domain.SemanticOperation{{Kind: domain.OperationTransition, Transition: &domain.TransitionIntent{
 		Target: domain.ObligationRef{SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version}, ExpectedRevision: o.Revision, To: to, AssertionMode: mode}}}}
+}
+
+// eligibility evaluates W3's pure eligibility policy for itemID as p at
+// the task's current turn, from one consistent read of ingested state: the
+// item's exact revision, its currentness, and the dispatching task. No
+// lease exists (retrieval is W6's); a semantic item has no raw or opaque
+// representation dependency.
+func (f *fixture) eligibility(itemID string, p domain.Principal) policy.EligibilityResult {
+	f.t.Helper()
+	var out policy.EligibilityResult
+	f.view(func(tx store.ReadTx) error {
+		it, err := tx.Item(itemID)
+		if err != nil {
+			return err
+		}
+		task, err := tx.Task(p.TaskID)
+		if err != nil {
+			return err
+		}
+		cur := domain.ItemUnkeyed
+		if it.DirectiveID != "" {
+			cur = domain.ItemHistorical
+			if ok, err := graph.IsCurrent(tx, it.ID); err != nil {
+				return err
+			} else if ok {
+				cur = domain.ItemCurrent
+			}
+		}
+		snap := policy.EligibilitySnapshot{
+			OwnerSnapshot:  policy.OwnerSnapshot{Seq: tx.LastSeq(), Task: &task},
+			Item:           domain.ItemRevisionRef{ItemID: it.ID, Version: it.Version},
+			Currentness:    cur,
+			Representation: domain.ExpiryLive,
+			DispatchTask:   &task,
+		}
+		out = policy.Eligibility(it, snap, p, task.TurnID)
+		return nil
+	})
+	return out
 }
 
 // currentObligation is the current slot-0 obligation version of source.
@@ -128,7 +169,24 @@ func TestGateT03_NewTurnExpiresTurnContent(t *testing.T) {
 			}
 		})
 	})
-	t.Run("E1 ineligible, still accessible, no lease", func(t *testing.T) { pending(t, depW3Elig) })
+	t.Run("E1 ineligible, still accessible, no lease", func(t *testing.T) {
+		semanticStores(t, func(t *testing.T, f *fixture) {
+			user := principal(domain.AuthorityUser)
+			e1 := mustDirective(t, f.mustIngest(user, userEvent("t03-1", "## Ephemeral [e1]\ntemporary diagnostic A\n", true)), "e1")
+			// Turn N: E1 is live and selectable for the owning task.
+			if r := f.eligibility(e1.ID, user); !r.Access || !r.OrdinaryTemporal || !r.NewSelection {
+				t.Fatalf("turn N eligibility = %+v", r)
+			}
+			f.mustIngest(user, userEvent("t03-2", "An unrelated question.", false))
+			// Turn N+1: still accessible for audit, automatically
+			// ineligible because its turn ended, and no lease admits it.
+			r := f.eligibility(e1.ID, user)
+			if !r.Access || r.OrdinaryTemporal || r.NewSelection || r.LeaseAdmission ||
+				r.TemporalReason != policy.ReasonExpiredTurn || r.LeaseReason != policy.ReasonMissingLease {
+				t.Fatalf("turn N+1 eligibility = %+v", r)
+			}
+		})
+	})
 	t.Run("rehydrate issues exact current-turn lease; E1 not a directive", func(t *testing.T) { pending(t, depW6) })
 	t.Run("lease expiry propagates through nested projections", func(t *testing.T) { pending(t, depW6+"; "+depW3Elig) })
 }
