@@ -59,6 +59,46 @@ func TestRelationshipValidate(t *testing.T) {
 			},
 			nil,
 		},
+		{
+			"coverage item IDs sorted and unique ok",
+			func(r Relationship) Relationship {
+				r.Coverage = &Coverage{ConversationID: "c", FromSeq: 1, ToSeq: 5, ItemIDs: []string{"a", "b", "c"}}
+				return r
+			},
+			nil,
+		},
+		{
+			"empty coverage item IDs ok",
+			func(r Relationship) Relationship {
+				r.Coverage = &Coverage{ConversationID: "c", FromSeq: 1, ToSeq: 5}
+				return r
+			},
+			nil,
+		},
+		{
+			"unsorted coverage item IDs rejected",
+			func(r Relationship) Relationship {
+				r.Coverage = &Coverage{ConversationID: "c", FromSeq: 1, ToSeq: 5, ItemIDs: []string{"b", "a", "c"}}
+				return r
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"duplicate coverage item IDs rejected",
+			func(r Relationship) Relationship {
+				r.Coverage = &Coverage{ConversationID: "c", FromSeq: 1, ToSeq: 5, ItemIDs: []string{"a", "a", "b"}}
+				return r
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"single coverage item ID is trivially sorted and unique",
+			func(r Relationship) Relationship {
+				r.Coverage = &Coverage{ConversationID: "c", FromSeq: 1, ToSeq: 5, ItemIDs: []string{"a"}}
+				return r
+			},
+			nil,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -73,6 +113,44 @@ func TestRelationshipValidate(t *testing.T) {
 				t.Fatalf("Validate() = %v, want error wrapping %v", err, c.wantErr)
 			}
 		})
+	}
+}
+
+// TestRelationshipClone checks Clone deep-copies Coverage, including its
+// ItemIDs slice, so mutating a clone's coverage never affects the original
+// (FR-DOM-008 immutability depends on callers being able to clone-then-edit
+// safely).
+func TestRelationshipClone(t *testing.T) {
+	r := Relationship{
+		ID: "r1", SessionID: "s1", Type: RelDerivedFrom, FromID: "a", ToID: "b", Seq: 1, Authority: AuthorityUser,
+		Coverage: &Coverage{ConversationID: "c1", FromSeq: 1, ToSeq: 5, ItemIDs: []string{"i1", "i2"}},
+	}
+
+	clone := r.Clone()
+	clone.Coverage.ConversationID = "mutated"
+	clone.Coverage.FromSeq = 99
+	clone.Coverage.ItemIDs[0] = "mutated"
+	clone.Coverage.ItemIDs = append(clone.Coverage.ItemIDs, "i3")
+
+	if r.Coverage.ConversationID != "c1" {
+		t.Error("mutating clone.Coverage.ConversationID affected the original")
+	}
+	if r.Coverage.FromSeq != 1 {
+		t.Error("mutating clone.Coverage.FromSeq affected the original")
+	}
+	if r.Coverage.ItemIDs[0] != "i1" {
+		t.Error("mutating clone.Coverage.ItemIDs affected the original")
+	}
+	if len(r.Coverage.ItemIDs) != 2 {
+		t.Error("appending to clone.Coverage.ItemIDs affected the original's length")
+	}
+}
+
+func TestRelationshipClone_NilCoverageStaysNil(t *testing.T) {
+	r := Relationship{ID: "r1", SessionID: "s1", Type: RelDerivedFrom, FromID: "a", ToID: "b", Seq: 1, Authority: AuthorityUser}
+	clone := r.Clone()
+	if clone.Coverage != nil {
+		t.Error("Clone() populated Coverage that was nil on the original")
 	}
 }
 

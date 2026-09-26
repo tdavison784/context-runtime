@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -46,8 +47,23 @@ func TestMutationGrantValidate(t *testing.T) {
 		{"valid grantee grant", func(g MutationGrant) MutationGrant { return g }, nil},
 		{
 			"valid matcher grant",
-			func(g MutationGrant) MutationGrant { g.Grantee = nil; g.Matcher = &matcher; return g },
+			func(g MutationGrant) MutationGrant {
+				g.Grantee = nil
+				g.Matcher = &matcher
+				g.Action = ActionAssertObligation // matcher grants are limited to this action
+				return g
+			},
 			nil,
+		},
+		{
+			"matcher grant for a non-assert action rejected",
+			func(g MutationGrant) MutationGrant {
+				g.Grantee = nil
+				g.Matcher = &matcher
+				g.Action = ActionWaiveObligation
+				return g
+			},
+			ErrInvalidRecord,
 		},
 		{"missing ID", func(g MutationGrant) MutationGrant { g.ID = ""; return g }, ErrInvalidRecord},
 		{"missing session", func(g MutationGrant) MutationGrant { g.SessionID = ""; return g }, ErrInvalidRecord},
@@ -565,6 +581,240 @@ func TestAuthorizeMutation_GranteeIdentityMismatchIgnoresGrant(t *testing.T) {
 	}
 }
 
+// TestAuthorizeMutation_IssuerWithoutTargetAccessIgnoresGrant is the Codex
+// review's finding 1 scenario: a SYSTEM principal acting for task A must not
+// be able to issue a grant that authorizes a mutation on a SYSTEM-authority
+// goal in task B, even though the issuer's authority alone would outrank the
+// target's. findGrant now also requires the issuer to have access to the
+// target (t.Access.Permits(g.Issuer)).
+func TestAuthorizeMutation_IssuerWithoutTargetAccessIgnoresGrant(t *testing.T) {
+	issuerInTaskA := Principal{SessionID: "s1", TaskID: "task-a", Authority: AuthoritySystem}
+	granteeInTaskB := Principal{SessionID: "s1", TaskID: "task-b", Authority: AuthorityUser}
+	targetInTaskB := MutationTarget{
+		ID: "G-b", Authority: AuthoritySystem,
+		Access: AccessBoundary{Scope: ScopeTask, SessionID: "s1", TaskID: "task-b"},
+	}
+	grant := MutationGrant{
+		ID: "grant_cross_task", SessionID: "s1", Action: ActionResolve,
+		TargetIDs: []string{"G-b"}, Issuer: issuerInTaskA, Grantee: &granteeInTaskB, IssuedSeq: 1,
+	}
+
+	_, err := AuthorizeMutation(MutationRequest{
+		Actor: granteeInTaskB, Action: ActionResolve, Targets: []MutationTarget{targetInTaskB},
+		Grants: []MutationGrant{grant}, Seq: 1,
+	})
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeMutation() error = %v, want ErrInvalidAuthorityPromotion (issuer cannot access the target's task)", err)
+	}
+}
+
+// TestAuthorizeMutation_IssuerWithTargetAccessSucceeds is the positive
+// control for the above: the same shape of grant succeeds once the issuer's
+// own task matches the target's.
+func TestAuthorizeMutation_IssuerWithTargetAccessSucceeds(t *testing.T) {
+	issuerInTaskB := Principal{SessionID: "s1", TaskID: "task-b", Authority: AuthoritySystem}
+	granteeInTaskB := Principal{SessionID: "s1", TaskID: "task-b", Authority: AuthorityUser}
+	targetInTaskB := MutationTarget{
+		ID: "G-b", Authority: AuthoritySystem,
+		Access: AccessBoundary{Scope: ScopeTask, SessionID: "s1", TaskID: "task-b"},
+	}
+	grant := MutationGrant{
+		ID: "grant_same_task", SessionID: "s1", Action: ActionResolve,
+		TargetIDs: []string{"G-b"}, Issuer: issuerInTaskB, Grantee: &granteeInTaskB, IssuedSeq: 1,
+	}
+
+	auth, err := AuthorizeMutation(MutationRequest{
+		Actor: granteeInTaskB, Action: ActionResolve, Targets: []MutationTarget{targetInTaskB},
+		Grants: []MutationGrant{grant}, Seq: 1,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizeMutation() error = %v, want nil", err)
+	}
+	if auth.GrantIDs["G-b"] != "grant_same_task" {
+		t.Errorf("GrantIDs[G-b] = %q, want grant_same_task", auth.GrantIDs["G-b"])
+	}
+}
+
+// --- AuthorizeGrantIssuance --------------------------------------------------
+
+func TestAuthorizeGrantIssuance(t *testing.T) {
+	grantee := userActor()
+	validTargets := func() []MutationTarget { return []MutationTarget{systemGoalTarget()} }
+	validGrantForIssuance := func() MutationGrant {
+		return MutationGrant{
+			ID: "grant_issue", SessionID: "s1", Action: ActionResolve,
+			TargetIDs: []string{"G"}, Issuer: systemActor(), Grantee: &grantee, IssuedSeq: 1,
+		}
+	}
+
+	t.Run("valid issuance", func(t *testing.T) {
+		if err := AuthorizeGrantIssuance(validGrantForIssuance(), validTargets()); err != nil {
+			t.Fatalf("AuthorizeGrantIssuance() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("structurally invalid grant propagates", func(t *testing.T) {
+		g := validGrantForIssuance()
+		g.Action = "bogus"
+		if err := AuthorizeGrantIssuance(g, validTargets()); !errors.Is(err, ErrInvalidRecord) {
+			t.Fatalf("error = %v, want ErrInvalidRecord", err)
+		}
+	})
+
+	t.Run("targets do not match target ID count", func(t *testing.T) {
+		err := AuthorizeGrantIssuance(validGrantForIssuance(), []MutationTarget{systemGoalTarget(), systemObligationTarget()})
+		if !errors.Is(err, ErrInvalidRecord) {
+			t.Fatalf("error = %v, want ErrInvalidRecord", err)
+		}
+	})
+
+	t.Run("target not named by the grant", func(t *testing.T) {
+		unrelated := MutationTarget{ID: "OTHER", Authority: AuthoritySystem, Access: taskBoundary}
+		if err := AuthorizeGrantIssuance(validGrantForIssuance(), []MutationTarget{unrelated}); !errors.Is(err, ErrInvalidRecord) {
+			t.Fatalf("error = %v, want ErrInvalidRecord", err)
+		}
+	})
+
+	// Codex review finding N3: a grant naming two distinct targets must be
+	// issued for exactly those two targets, each once. Passing the same
+	// target record twice (matching the count but not the set) must fail,
+	// not silently treat the duplicate as covering the missing target.
+	t.Run("duplicate target does not satisfy a two-target grant (Codex N3)", func(t *testing.T) {
+		g := MutationGrant{
+			ID: "grant_two", SessionID: "s1", Action: ActionResolve,
+			TargetIDs: []string{"G", "O"}, Issuer: systemActor(), Grantee: &grantee, IssuedSeq: 1,
+		}
+		targets := []MutationTarget{systemGoalTarget(), systemGoalTarget()} // [G, G], not [G, O]
+		if err := AuthorizeGrantIssuance(g, targets); !errors.Is(err, ErrInvalidRecord) {
+			t.Fatalf("error = %v, want ErrInvalidRecord (duplicate target must not satisfy the named set)", err)
+		}
+	})
+
+	t.Run("exact two-target set in either order is valid", func(t *testing.T) {
+		g := MutationGrant{
+			ID: "grant_two", SessionID: "s1", Action: ActionResolve,
+			TargetIDs: []string{"G", "O"}, Issuer: systemActor(), Grantee: &grantee, IssuedSeq: 1,
+		}
+		targets := []MutationTarget{systemObligationTarget(), systemGoalTarget()} // order-independent
+		if err := AuthorizeGrantIssuance(g, targets); err != nil {
+			t.Fatalf("AuthorizeGrantIssuance() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("grant's own TargetIDs list cannot itself contain a duplicate", func(t *testing.T) {
+		g := MutationGrant{
+			ID: "grant_dup", SessionID: "s1", Action: ActionResolve,
+			TargetIDs: []string{"G", "G"}, Issuer: systemActor(), Grantee: &grantee, IssuedSeq: 1,
+		}
+		if err := AuthorizeGrantIssuance(g, []MutationTarget{systemGoalTarget()}); !errors.Is(err, ErrInvalidRecord) {
+			t.Fatalf("error = %v, want ErrInvalidRecord (duplicate target ID in the grant itself)", err)
+		}
+	})
+
+	t.Run("issuer lacks access to the target", func(t *testing.T) {
+		g := validGrantForIssuance()
+		g.Issuer = Principal{SessionID: "s1", TaskID: "other-task", Authority: AuthoritySystem}
+		if err := AuthorizeGrantIssuance(g, validTargets()); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("issuer authority below target authority", func(t *testing.T) {
+		g := validGrantForIssuance()
+		// A USER issuer can still hold lifecycle authority and issue grants
+		// in general, but not for a SYSTEM-authority target.
+		g.Issuer = Principal{SessionID: "s1", TaskID: "t1", Authority: AuthorityUser}
+		if err := AuthorizeGrantIssuance(g, validTargets()); !errors.Is(err, ErrInvalidAuthorityPromotion) {
+			t.Fatalf("error = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+	})
+}
+
+// TestAuthorizeGrantIssuance_RevocationUsesSameCheck models revoking a
+// grant: the revoking principal must pass the identical access-and-authority
+// check as issuance (contract v2 doc: "Revocation requires the same check
+// against the revoking principal").
+// TestAuthorizeGrantRevocation is the full matrix for AuthorizeGrantRevocation
+// (contract v3): the revoking actor must be validated, belong to the grant's
+// session, name exactly the grant's target set, and either hold lifecycle
+// authority with access and sufficient rank over every target, or (for an
+// actor that cannot hold lifecycle authority at all) still have its access
+// checked first so an inaccessible target is never disclosed through the
+// authority-promotion error.
+func TestAuthorizeGrantRevocation(t *testing.T) {
+	grantee := userActor()
+	grant := MutationGrant{
+		ID: "grant_issue", SessionID: "s1", Action: ActionResolve,
+		TargetIDs: []string{"G"}, Issuer: systemActor(), Grantee: &grantee, IssuedSeq: 1,
+	}
+	targets := func() []MutationTarget { return []MutationTarget{systemGoalTarget()} }
+
+	t.Run("invalid actor propagates", func(t *testing.T) {
+		bogus := Principal{SessionID: "s1", Authority: "bogus"}
+		if err := AuthorizeGrantRevocation(bogus, grant, targets()); !errors.Is(err, ErrInvalidRecord) {
+			t.Fatalf("error = %v, want ErrInvalidRecord", err)
+		}
+	})
+
+	t.Run("actor in another session is not found", func(t *testing.T) {
+		other := Principal{SessionID: "s2", Authority: AuthoritySystem}
+		if err := AuthorizeGrantRevocation(other, grant, targets()); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("target set mismatch rejected", func(t *testing.T) {
+		wrong := []MutationTarget{systemGoalTarget(), systemObligationTarget()}
+		if err := AuthorizeGrantRevocation(systemActor(), grant, wrong); !errors.Is(err, ErrInvalidRecord) {
+			t.Fatalf("error = %v, want ErrInvalidRecord", err)
+		}
+	})
+
+	t.Run("lifecycle-capable actor with access and sufficient authority may revoke", func(t *testing.T) {
+		if err := AuthorizeGrantRevocation(systemActor(), grant, targets()); err != nil {
+			t.Fatalf("AuthorizeGrantRevocation() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("lifecycle-capable actor without target access is not found", func(t *testing.T) {
+		other := Principal{SessionID: "s1", TaskID: "other-task", Authority: AuthoritySystem}
+		if err := AuthorizeGrantRevocation(other, grant, targets()); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("lifecycle-capable actor below target authority rejected", func(t *testing.T) {
+		low := Principal{SessionID: "s1", TaskID: "t1", Authority: AuthorityUser}
+		if err := AuthorizeGrantRevocation(low, grant, targets()); !errors.Is(err, ErrInvalidAuthorityPromotion) {
+			t.Fatalf("error = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+	})
+
+	t.Run("non-lifecycle actor (AGENT) with access to every target still fails on authority", func(t *testing.T) {
+		agent := Principal{SessionID: "s1", TaskID: "t1", Authority: AuthorityAgent}
+		if err := AuthorizeGrantRevocation(agent, grant, targets()); !errors.Is(err, ErrInvalidAuthorityPromotion) {
+			t.Fatalf("error = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+	})
+
+	t.Run("non-lifecycle actor (AGENT) without target access is not found, not a promotion error", func(t *testing.T) {
+		// Even though an AGENT could never revoke anything, an inaccessible
+		// target must still surface as ErrNotFound, not ErrInvalidAuthorityPromotion,
+		// so the failure never discloses whether the target exists.
+		agentElsewhere := Principal{SessionID: "s1", TaskID: "other-task", Authority: AuthorityAgent}
+		if err := AuthorizeGrantRevocation(agentElsewhere, grant, targets()); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("non-lifecycle actor (TOOL) with access still fails on authority", func(t *testing.T) {
+		tool := Principal{SessionID: "s1", TaskID: "t1", Authority: AuthorityTool}
+		if err := AuthorizeGrantRevocation(tool, grant, targets()); !errors.Is(err, ErrInvalidAuthorityPromotion) {
+			t.Fatalf("error = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+	})
+}
+
 func TestAuthorizeMutation_StructuralValidation(t *testing.T) {
 	t.Run("invalid actor", func(t *testing.T) {
 		_, err := AuthorizeMutation(MutationRequest{
@@ -610,11 +860,63 @@ func itemWith(authority Authority, access AccessBoundary) ContextItem {
 	return ContextItem{ID: "itm", SessionID: access.SessionID, Authority: authority, Access: access}
 }
 
+// keyedAgentItem returns an AGENT-authority item written under the given
+// key (FR-TOOL-002): its DirectiveID is "agent.<key>".
+func keyedAgentItem(key string, access AccessBoundary) ContextItem {
+	it := itemWith(AuthorityAgent, access)
+	it.DirectiveID = AgentKeyID(key)
+	return it
+}
+
+// TestAuthorizeSupersession_AgentSupersedingAgentOK covers the v3-narrowed
+// AGENT exception: an AGENT actor may supersede only a keyed agent write
+// with the SAME key (FR-TOOL-002), not any two AGENT-authority items.
 func TestAuthorizeSupersession_AgentSupersedingAgentOK(t *testing.T) {
-	superseding := itemWith(AuthorityAgent, taskBoundary)
-	superseded := itemWith(AuthorityAgent, taskBoundary)
+	superseding := keyedAgentItem("status", taskBoundary)
+	superseded := keyedAgentItem("status", taskBoundary)
 	if err := AuthorizeSupersession(agentActor(), superseding, superseded); err != nil {
 		t.Fatalf("AuthorizeSupersession() error = %v, want nil", err)
+	}
+}
+
+// TestAuthorizeSupersession_AgentDifferentKeyFails checks two AGENT items
+// with different keys never supersede each other, even though both are
+// AGENT authority in the same access boundary.
+func TestAuthorizeSupersession_AgentDifferentKeyFails(t *testing.T) {
+	superseding := keyedAgentItem("status", taskBoundary)
+	superseded := keyedAgentItem("other-key", taskBoundary)
+	err := AuthorizeSupersession(agentActor(), superseding, superseded)
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeSupersession() error = %v, want ErrInvalidAuthorityPromotion (different keys)", err)
+	}
+}
+
+// TestAuthorizeSupersession_AgentNonKeyedDirectiveIDFails checks an
+// AGENT-authority item whose DirectiveID isn't a keyed agent write at all
+// (no "agent." prefix, e.g. a plain directive ID) never qualifies for the
+// AGENT exception, even matched against itself.
+func TestAuthorizeSupersession_AgentNonKeyedDirectiveIDFails(t *testing.T) {
+	superseding := itemWith(AuthorityAgent, taskBoundary)
+	superseding.DirectiveID = "goal-" + strings.Repeat("a", 64)
+	superseded := superseding
+	err := AuthorizeSupersession(agentActor(), superseding, superseded)
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeSupersession() error = %v, want ErrInvalidAuthorityPromotion (not a keyed agent write)", err)
+	}
+}
+
+// TestAuthorizeSupersession_AccessCheckedBeforeAuthority is the access-first
+// ordering contract (v3): an inaccessible endpoint always yields ErrNotFound,
+// even for an actor/item combination (AGENT actor, USER-authority superseded
+// item) that would otherwise fail on authority grounds first. Access must
+// never leak whether the reason would have been an authority mismatch.
+func TestAuthorizeSupersession_AccessCheckedBeforeAuthority(t *testing.T) {
+	inaccessible := AccessBoundary{Scope: ScopeTask, SessionID: "s1", TaskID: "other-task"}
+	superseding := itemWith(AuthorityAgent, inaccessible)
+	superseded := itemWith(AuthorityUser, inaccessible) // AGENT could never supersede USER anyway
+	err := AuthorizeSupersession(agentActor(), superseding, superseded)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("AuthorizeSupersession() error = %v, want ErrNotFound (access checked before authority)", err)
 	}
 }
 
@@ -655,6 +957,20 @@ func TestAuthorizeSupersession_InaccessibleEndpointNotFound(t *testing.T) {
 	}
 }
 
+// TestAuthorizeSupersession_SupersedingBelowSupersededAuthorityFails checks
+// the final comparison: even when the actor itself has ample authority and
+// both items share the same access boundary, the superseding item's own
+// authority must be at least the superseded item's (T02: a replacement can
+// never launder a lower-authority claim over a higher-authority one).
+func TestAuthorizeSupersession_SupersedingBelowSupersededAuthorityFails(t *testing.T) {
+	superseding := itemWith(AuthorityUser, taskBoundary)
+	superseded := itemWith(AuthoritySystem, taskBoundary)
+	err := AuthorizeSupersession(systemActor(), superseding, superseded)
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeSupersession() error = %v, want ErrInvalidAuthorityPromotion (superseding below superseded)", err)
+	}
+}
+
 func TestAuthorizeSupersession_ActorBelowSupersedingAuthorityFails(t *testing.T) {
 	// Actor is USER; superseding item claims SYSTEM authority. Even though
 	// SYSTEM would legitimately outrank the superseded USER item, the actor
@@ -664,6 +980,71 @@ func TestAuthorizeSupersession_ActorBelowSupersedingAuthorityFails(t *testing.T)
 	err := AuthorizeSupersession(userActor(), superseding, superseded)
 	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
 		t.Fatalf("AuthorizeSupersession() error = %v, want ErrInvalidAuthorityPromotion", err)
+	}
+}
+
+// TestAuthorizeSupersession_ToolActorNeverSupersedes checks contract v2's
+// tightened actor rule: a TOOL actor can never create a SUPERSEDES edge, even
+// between two TOOL-authority items in the same access boundary that would
+// otherwise satisfy every other check (tool output must not suppress state).
+func TestAuthorizeSupersession_ToolActorNeverSupersedes(t *testing.T) {
+	superseding := itemWith(AuthorityTool, taskBoundary)
+	superseded := itemWith(AuthorityTool, taskBoundary)
+	err := AuthorizeSupersession(toolActor(), superseding, superseded)
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeSupersession() error = %v, want ErrInvalidAuthorityPromotion (TOOL actor)", err)
+	}
+}
+
+// TestAuthorizeSupersession_RetrievedContentActorNeverSupersedes is the same
+// rule for RETRIEVED_CONTENT.
+func TestAuthorizeSupersession_RetrievedContentActorNeverSupersedes(t *testing.T) {
+	retrievedActor := Principal{SessionID: "s1", TaskID: "t1", Authority: AuthorityRetrievedContent}
+	superseding := itemWith(AuthorityRetrievedContent, taskBoundary)
+	superseded := itemWith(AuthorityRetrievedContent, taskBoundary)
+	err := AuthorizeSupersession(retrievedActor, superseding, superseded)
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeSupersession() error = %v, want ErrInvalidAuthorityPromotion (RETRIEVED_CONTENT actor)", err)
+	}
+}
+
+// TestAuthorizeSupersession_AgentActorRestrictedToAgentItems checks the
+// narrow AGENT exception (keyed agent writes, FR-TOOL-002): an AGENT actor
+// may only supersede when BOTH endpoints are AGENT-authority. Either
+// endpoint being a higher authority must fail, even superseded-side only.
+func TestAuthorizeSupersession_AgentActorRestrictedToAgentItems(t *testing.T) {
+	cases := []struct {
+		name        string
+		superseding Authority
+		superseded  Authority
+	}{
+		{"superseding is USER", AuthorityUser, AuthorityAgent},
+		{"superseded is USER", AuthorityAgent, AuthorityUser},
+		{"both are USER", AuthorityUser, AuthorityUser},
+		{"superseding is TOOL", AuthorityTool, AuthorityAgent},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			superseding := itemWith(c.superseding, taskBoundary)
+			superseded := itemWith(c.superseded, taskBoundary)
+			err := AuthorizeSupersession(agentActor(), superseding, superseded)
+			if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+				t.Fatalf("AuthorizeSupersession() error = %v, want ErrInvalidAuthorityPromotion", err)
+			}
+		})
+	}
+}
+
+// TestAuthorizeSupersession_ToolActorFailsRegardlessOfItemAuthority checks a
+// disallowed actor authority (the switch's default arm) fails even when the
+// items themselves are high-authority (SYSTEM), confirming the actor-authority
+// gate runs independently of, and before, the item-authority comparisons.
+func TestAuthorizeSupersession_ToolActorFailsRegardlessOfItemAuthority(t *testing.T) {
+	superseding := itemWith(AuthoritySystem, taskBoundary)
+	superseded := itemWith(AuthoritySystem, taskBoundary)
+	err := AuthorizeSupersession(toolActor(), superseding, superseded)
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeSupersession() error = %v, want ErrInvalidAuthorityPromotion (TOOL actor, default arm)", err)
 	}
 }
 

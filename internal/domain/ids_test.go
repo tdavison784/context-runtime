@@ -122,16 +122,24 @@ func TestDerivedCallIDDeterministic(t *testing.T) {
 	}
 }
 
+// TestDerivedCallIDSensitiveToEachInput checks DerivedCallID(sessionID,
+// conversationID, conversationRevision, proposalHash) changes when any of
+// the four v2 inputs changes. conversationRevision is the conversation's
+// revision at the moment the reservation is taken (not a base semantic
+// version), and proposalHash is CallProposalHash's whole-proposal identity
+// (not a bare request hash) — a later operation at an unchanged
+// conversation version, or a different frozen proposal, must derive a
+// different ID.
 func TestDerivedCallIDSensitiveToEachInput(t *testing.T) {
-	reqHash := "sha256:" + strings.Repeat("a", 64)
-	otherHash := "sha256:" + strings.Repeat("b", 64)
-	base := DerivedCallID("s1", "c1", 3, reqHash)
+	proposalHash := "sha256:" + strings.Repeat("a", 64)
+	otherProposalHash := "sha256:" + strings.Repeat("b", 64)
+	base := DerivedCallID("s1", "c1", 3, proposalHash)
 
 	cases := map[string]string{
-		"session":      DerivedCallID("s2", "c1", 3, reqHash),
-		"conversation": DerivedCallID("s1", "c2", 3, reqHash),
-		"base version": DerivedCallID("s1", "c1", 4, reqHash),
-		"request hash": DerivedCallID("s1", "c1", 3, otherHash),
+		"session":               DerivedCallID("s2", "c1", 3, proposalHash),
+		"conversation":          DerivedCallID("s1", "c2", 3, proposalHash),
+		"conversation revision": DerivedCallID("s1", "c1", 4, proposalHash),
+		"proposal hash":         DerivedCallID("s1", "c1", 3, otherProposalHash),
 	}
 	for name, other := range cases {
 		if other == base {
@@ -140,14 +148,32 @@ func TestDerivedCallIDSensitiveToEachInput(t *testing.T) {
 	}
 }
 
-func TestDerivedCallID_RepeatedPrepareIsIdempotent(t *testing.T) {
-	// FR-CALL-001: repeating an identical PrepareCall against the same base
-	// conversation version returns the same logical CallID.
-	reqHash := "sha256:" + strings.Repeat("a", 64)
-	first := DerivedCallID("s1", "conv_1", 5, reqHash)
-	second := DerivedCallID("s1", "conv_1", 5, reqHash)
+func TestDerivedCallID_SameProposalAtSameRevisionIsIdempotent(t *testing.T) {
+	// FR-CALL-001: repeating an identical PrepareCall against the same
+	// conversation revision derives the same logical CallID; the in-flight
+	// record's ProposalHash (not the ID) is what actually detects and
+	// revalidates a repeated prepare (contract v2), but the ID itself must
+	// still be reproducible for a truly identical proposal.
+	proposalHash := "sha256:" + strings.Repeat("a", 64)
+	first := DerivedCallID("s1", "conv_1", 5, proposalHash)
+	second := DerivedCallID("s1", "conv_1", 5, proposalHash)
 	if first != second {
-		t.Error("DerivedCallID must be idempotent for a repeated identical prepare")
+		t.Error("DerivedCallID must be reproducible for a repeated identical prepare")
+	}
+}
+
+// TestDerivedCallID_ReleasedReservationGetsANewID checks that a later
+// operation at the same conversation revision (for example after a prior
+// reservation was released by cancellation or failure) but with a different
+// frozen proposal derives a different CallID, so it can never alias a
+// terminal or unrelated call occupying an ID from an earlier proposal.
+func TestDerivedCallID_ReleasedReservationGetsANewID(t *testing.T) {
+	firstProposal := "sha256:" + strings.Repeat("a", 64)
+	secondProposal := "sha256:" + strings.Repeat("c", 64)
+	first := DerivedCallID("s1", "conv_1", 5, firstProposal)
+	second := DerivedCallID("s1", "conv_1", 5, secondProposal)
+	if first == second {
+		t.Error("DerivedCallID must not alias two different frozen proposals at the same conversation revision")
 	}
 }
 
