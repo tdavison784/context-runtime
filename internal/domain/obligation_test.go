@@ -420,17 +420,48 @@ func TestObligationTransitionValidate(t *testing.T) {
 			func(o ObligationTransition) ObligationTransition {
 				o.To = ObligationSatisfied
 				o.Matcher = &matcher
+				o.GrantID = "grant_1"
 				o.EvidenceIDs = nil
 				return o
 			},
 			ErrInvalidRecord,
 		},
 		{
-			"matcher satisfaction with evidence ok",
+			"matcher satisfaction with evidence and a grant ID ok",
 			func(o ObligationTransition) ObligationTransition {
 				o.To = ObligationSatisfied
 				o.Matcher = &matcher
+				o.GrantID = "grant_1"
 				o.EvidenceIDs = []string{"e1"}
+				return o
+			},
+			nil,
+		},
+		{
+			"matcher transition without a grant ID rejected, even with evidence",
+			func(o ObligationTransition) ObligationTransition {
+				o.To = ObligationSatisfied
+				o.Matcher = &matcher
+				o.GrantID = ""
+				o.EvidenceIDs = []string{"e1"}
+				return o
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"direct assertion (no matcher) needs no grant ID",
+			func(o ObligationTransition) ObligationTransition {
+				o.Matcher = nil
+				o.GrantID = ""
+				return o
+			},
+			nil,
+		},
+		{
+			"direct assertion may still carry a grant ID (an authorized assertion under a grant)",
+			func(o ObligationTransition) ObligationTransition {
+				o.Matcher = nil
+				o.GrantID = "grant_1"
 				return o
 			},
 			nil,

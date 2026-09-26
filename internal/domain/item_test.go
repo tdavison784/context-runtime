@@ -100,6 +100,33 @@ func TestContextItemValidate_FailureBranches(t *testing.T) {
 			func(it ContextItem) ContextItem { it.Section = SectionWorking; it.DirectiveID = ""; return it },
 			ErrInvalidRecord,
 		},
+		{
+			"directive-section item with AGENT authority rejected",
+			func(it ContextItem) ContextItem {
+				it.Section = SectionWorking
+				it.Authority = AuthorityAgent
+				return it
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"directive-section item with TOOL authority rejected",
+			func(it ContextItem) ContextItem {
+				it.Section = SectionGoal
+				it.Authority = AuthorityTool
+				return it
+			},
+			ErrInvalidRecord,
+		},
+		{
+			"directive-section item with RETRIEVED_CONTENT authority rejected",
+			func(it ContextItem) ContextItem {
+				it.Section = SectionPinned
+				it.Authority = AuthorityRetrievedContent
+				return it
+			},
+			ErrInvalidRecord,
+		},
 		{"invalid retention", func(it ContextItem) ContextItem { it.Retention = "bogus"; return it }, ErrInvalidRecord},
 		{
 			"access boundary itself invalid",
@@ -306,6 +333,60 @@ func TestContextItemValidate_EachSectionWithDirectiveIDPasses(t *testing.T) {
 			it.DirectiveID = "goal-" + strings.Repeat("a", 64)
 			if err := it.Validate(); err != nil {
 				t.Fatalf("valid %s-section item failed Validate: %v", s, err)
+			}
+		})
+	}
+}
+
+// TestContextItemValidate_SectionRequiresLifecycleAuthority checks AUTH-2.2:
+// a non-empty directive section requires SYSTEM, HARNESS, or USER authority
+// (FR-ING-004: directive sections are parsed only from SYSTEM/HARNESS spans
+// and marked USER spans; AGENT, TOOL, and RETRIEVED_CONTENT never carry
+// one), across every authority value.
+func TestContextItemValidate_SectionRequiresLifecycleAuthority(t *testing.T) {
+	directiveID := "goal-" + strings.Repeat("a", 64)
+	cases := []struct {
+		authority Authority
+		wantErr   bool
+	}{
+		{AuthoritySystem, false},
+		{AuthorityHarness, false},
+		{AuthorityUser, false},
+		{AuthorityAgent, true},
+		{AuthorityTool, true},
+		{AuthorityRetrievedContent, true},
+	}
+	for _, c := range cases {
+		t.Run(string(c.authority), func(t *testing.T) {
+			it := validItem()
+			it.Section = SectionGoal
+			it.DirectiveID = directiveID
+			it.Authority = c.authority
+			err := it.Validate()
+			if c.wantErr {
+				if !errors.Is(err, ErrInvalidRecord) {
+					t.Fatalf("Validate() = %v, want ErrInvalidRecord for %s authority with a section", err, c.authority)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Validate() = %v, want nil for %s authority with a section", err, c.authority)
+			}
+		})
+	}
+}
+
+// TestContextItemValidate_NonDirectiveItemAllowsAnyAuthority checks the
+// Section-authority restriction applies only to directive-section items: an
+// item with SectionNone may carry any authority, including AGENT/TOOL/
+// RETRIEVED_CONTENT.
+func TestContextItemValidate_NonDirectiveItemAllowsAnyAuthority(t *testing.T) {
+	for _, a := range []Authority{AuthorityAgent, AuthorityTool, AuthorityRetrievedContent} {
+		t.Run(string(a), func(t *testing.T) {
+			it := validItem() // Section stays SectionNone
+			it.Authority = a
+			if err := it.Validate(); err != nil {
+				t.Fatalf("Validate() = %v, want nil for a non-directive %s item", err, a)
 			}
 		})
 	}
