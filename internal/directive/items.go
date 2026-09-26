@@ -8,6 +8,15 @@ import (
 )
 
 func (p *coreParser) extract() {
+	defer func() {
+		// FR-DIR-002: publish derived IDs only for items that survived every
+		// check, so a dropped item is never reported as if it existed.
+		for _, it := range p.items {
+			if !it.explicit && !it.lifecycle {
+				p.diagnostic("DirectiveIDDerived", "derived directive ID", it.section, it.id, it.byteRange)
+			}
+		}
+	}()
 	for si := range p.sections {
 		s := &p.sections[si]
 		h := s.heading
@@ -265,7 +274,6 @@ func (p *coreParser) addItem(item rawItem) {
 	}
 	if item.id == "" {
 		item.id = derivedID(item.section, item.text)
-		p.diagnostic("DirectiveIDDerived", "derived directive ID", item.section, item.id, item.byteRange)
 	}
 	p.items = append(p.items, item)
 }

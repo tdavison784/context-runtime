@@ -234,6 +234,21 @@ func TestRepeatedIDsWithinList(t *testing.T) {
 		}
 	}
 }
+func TestDerivedIDDiagnosticsOnlyForSurvivors(t *testing.T) {
+	r := Parse([]byte("## Working\n- same\n- same\n- other"), Options{Authority: domain.AuthoritySystem})
+	derived := 0
+	for _, d := range r.Diagnostics {
+		if d.Code == domain.DirectiveIDDerived {
+			derived++
+			if len(r.Items) != 1 || d.DirectiveID != r.Items[0].DirectiveID {
+				t.Fatalf("%+v", r)
+			}
+		}
+	}
+	if derived != 1 {
+		t.Fatal(r.Diagnostics)
+	}
+}
 func TestDerivedIDsAndItemLimit(t *testing.T) {
 	p := parsedCore("## Remember\n- same\n## Remember\n- same")
 	hash := domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: "same"}})
