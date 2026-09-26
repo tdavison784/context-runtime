@@ -17,6 +17,10 @@ CREATE TABLE records (
     from_id TEXT NOT NULL DEFAULT '',
     to_id TEXT NOT NULL DEFAULT '',
     state TEXT NOT NULL DEFAULT '',
+    proposal_hash TEXT NOT NULL DEFAULT '',
+    outcome_hash TEXT NOT NULL DEFAULT '',
+    retryable INTEGER NOT NULL DEFAULT 0 CHECK (retryable IN (0, 1)),
+    coverage_item_ids TEXT NOT NULL DEFAULT '',
     data BLOB NOT NULL,
     PRIMARY KEY (session_id, kind, id, subkey),
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)

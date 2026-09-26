@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -136,7 +137,12 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 			return domain.ErrSupersessionCycle
 		}
 	}
-	return t.put("relationship", v.ID, 0, recordMeta{seq: v.Seq, from: v.FromID, to: v.ToID, event: v.EventID, state: string(v.Type)}, v, false)
+	meta := recordMeta{seq: v.Seq, from: v.FromID, to: v.ToID, event: v.EventID, state: string(v.Type)}
+	if v.Coverage != nil {
+		b, _ := json.Marshal(v.Coverage.ItemIDs)
+		meta.coverageItemIDs = string(b)
+	}
+	return t.put("relationship", v.ID, 0, meta, v, false)
 }
 func (t *transaction) SetCurrentDirective(taskID, directiveID, itemID string) error {
 	v, err := t.Item(itemID)
@@ -187,7 +193,7 @@ func (t *transaction) InsertObligationVersion(v domain.ObligationVersion) error 
 		return fmt.Errorf("%w: inserted obligation revision must be 1", domain.ErrInvalidRecord)
 	}
 	if v.Status != domain.ObligationUnresolved {
-		return domain.ErrInvalidTransition
+		return fmt.Errorf("%w: inserted obligation must start unresolved", domain.ErrInvalidRecord)
 	}
 	if v.RetiredSeq != 0 {
 		if err := t.checkSeq(v.RetiredSeq); err != nil {
@@ -241,7 +247,7 @@ func (t *transaction) UpdateObligationVersion(v domain.ObligationVersion, expect
 	err = t.put("obligation", v.ObligationID, int(v.Version), recordMeta{seq: v.CreatedSeq, version: v.Version, revision: v.Revision, task: v.TaskID, state: string(v.Status)}, v, true)
 	return v.Clone(), err
 }
-func (t *transaction) AppendObligationTransition(v domain.ObligationTransition) (domain.ObligationVersion, error) {
+func (t *transaction) AppendObligationTransition(v domain.ObligationTransition, expectedRevision uint64) (domain.ObligationVersion, error) {
 	if err := v.Validate(); err != nil {
 		return domain.ObligationVersion{}, err
 	}
@@ -260,6 +266,9 @@ func (t *transaction) AppendObligationTransition(v domain.ObligationTransition) 
 	var current domain.ObligationVersion
 	if err := t.get("obligation", v.ObligationID, int(v.Version), &current); err != nil {
 		return domain.ObligationVersion{}, err
+	}
+	if current.Revision != expectedRevision {
+		return domain.ObligationVersion{}, domain.ErrVersionConflict
 	}
 	if !current.Current || v.From != current.Status {
 		return domain.ObligationVersion{}, domain.ErrInvalidTransition
@@ -293,62 +302,105 @@ func (t *transaction) InsertGrant(v domain.MutationGrant) error {
 		return err
 	}
 	if v.RevokedSeq != 0 {
-		if err := t.checkSeq(v.RevokedSeq); err != nil {
-			return err
-		}
+		return fmt.Errorf("%w: new grant cannot be revoked", domain.ErrInvalidRecord)
 	}
 	return t.put("grant", v.ID, 0, recordMeta{seq: v.IssuedSeq}, v, false)
 }
-func (t *transaction) RevokeGrant(id string, seq uint64) error {
-	if err := t.checkSeq(seq); err != nil {
-		return err
-	}
+func (t *transaction) RevokeGrant(id string, event domain.LifecycleEvent) (domain.MutationGrant, error) {
 	v, err := t.Grant(id)
 	if err != nil {
-		return err
+		return domain.MutationGrant{}, err
 	}
 	if v.RevokedSeq != 0 {
-		return domain.ErrInvalidTransition
+		return domain.MutationGrant{}, domain.ErrInvalidTransition
 	}
-	v.RevokedSeq = seq
+	if event.TargetKind != domain.TargetGrant || event.TargetID != id {
+		return domain.MutationGrant{}, fmt.Errorf("%w: grant audit target mismatch", domain.ErrInvalidRecord)
+	}
+	if err := event.Validate(); err != nil {
+		return domain.MutationGrant{}, err
+	}
+	if err := t.checkSession(event.SessionID); err != nil {
+		return domain.MutationGrant{}, err
+	}
+	if err := t.checkSeq(event.Seq); err != nil {
+		return domain.MutationGrant{}, err
+	}
+	v.RevokedSeq = event.Seq
 	if err = v.Validate(); err != nil {
-		return err
+		return domain.MutationGrant{}, err
 	}
-	return t.put("grant", id, 0, recordMeta{seq: v.IssuedSeq}, v, true)
+	err = t.atomic(func() error {
+		if err := t.put("grant", id, 0, recordMeta{seq: v.IssuedSeq}, v, true); err != nil {
+			return err
+		}
+		return t.AppendLifecycleEvent(event)
+	})
+	return v.Clone(), err
 }
-func (t *transaction) PutTask(v domain.TaskState, expected uint64) (domain.TaskState, error) {
-	v.Version = expected + 1
-	if err := v.Validate(); err != nil {
-		return domain.TaskState{}, err
-	}
+func (t *transaction) PutTask(v domain.TaskState, expected uint64, event *domain.LifecycleEvent) (domain.TaskState, error) {
 	if err := t.checkSession(v.SessionID); err != nil {
 		return domain.TaskState{}, err
 	}
 	old, err := t.Task(v.TaskID)
-	if errors.Is(err, domain.ErrNotFound) {
-		if expected != 0 {
-			return domain.TaskState{}, domain.ErrVersionConflict
+	creating := errors.Is(err, domain.ErrNotFound)
+	if err != nil && !creating {
+		return domain.TaskState{}, err
+	}
+	if creating && expected != 0 || !creating && old.Version != expected {
+		return domain.TaskState{}, domain.ErrVersionConflict
+	}
+	v.Version = expected + 1
+	if err := v.Validate(); err != nil {
+		return domain.TaskState{}, err
+	}
+	needsEvent := creating || old.Status != v.Status
+	if needsEvent != (event != nil) {
+		return domain.TaskState{}, fmt.Errorf("%w: task status change requires exactly one audit event", domain.ErrInvalidRecord)
+	}
+	if event != nil {
+		if event.TargetKind != domain.TargetTask || event.TargetID != v.TaskID {
+			return domain.TaskState{}, fmt.Errorf("%w: task audit target mismatch", domain.ErrInvalidRecord)
 		}
+		if err := event.Validate(); err != nil {
+			return domain.TaskState{}, err
+		}
+		if err := t.checkSession(event.SessionID); err != nil {
+			return domain.TaskState{}, err
+		}
+		if err := t.checkSeq(event.Seq); err != nil {
+			return domain.TaskState{}, err
+		}
+	}
+	if errors.Is(err, domain.ErrNotFound) {
 		if v.CompletedSeq != 0 {
 			if err = t.checkSeq(v.CompletedSeq); err != nil {
 				return domain.TaskState{}, err
 			}
 		}
-		err = t.put("task", v.TaskID, 0, recordMeta{version: v.Version, task: v.TaskID, state: string(v.Status)}, v, false)
+		err = t.atomic(func() error {
+			if err := t.put("task", v.TaskID, 0, recordMeta{version: v.Version, task: v.TaskID, state: string(v.Status)}, v, false); err != nil {
+				return err
+			}
+			return t.AppendLifecycleEvent(*event)
+		})
 		return v, err
-	}
-	if err != nil {
-		return domain.TaskState{}, err
-	}
-	if old.Version != expected {
-		return domain.TaskState{}, domain.ErrVersionConflict
 	}
 	if v.CompletedSeq != old.CompletedSeq && v.CompletedSeq != 0 {
 		if err = t.checkSeq(v.CompletedSeq); err != nil {
 			return domain.TaskState{}, err
 		}
 	}
-	err = t.put("task", v.TaskID, 0, recordMeta{version: v.Version, task: v.TaskID, state: string(v.Status)}, v, true)
+	if event != nil {
+		err = t.atomic(func() error {
+			if err := t.put("task", v.TaskID, 0, recordMeta{version: v.Version, task: v.TaskID, state: string(v.Status)}, v, true); err != nil {
+				return err
+			}
+			return t.AppendLifecycleEvent(*event)
+		})
+	} else {
+		err = t.put("task", v.TaskID, 0, recordMeta{version: v.Version, task: v.TaskID, state: string(v.Status)}, v, true)
+	}
 	return v, err
 }
 func (t *transaction) AppendLifecycleEvent(v domain.LifecycleEvent) error {
@@ -425,7 +477,7 @@ func (t *transaction) InsertCall(v domain.CallRecord) error {
 			}
 		}
 	}
-	return t.put("call", v.CallID, 0, recordMeta{seq: v.PreparedSeq, revision: v.Revision, from: v.ConversationID, state: string(v.State)}, v, false)
+	return t.put("call", v.CallID, 0, recordMeta{seq: v.PreparedSeq, revision: v.Revision, from: v.ConversationID, state: string(v.State), proposalHash: v.ProposalHash, outcomeHash: v.OutcomeHash}, v, false)
 }
 func domainCallFilter(id string) store.CallFilter { return store.CallFilter{ConversationID: id} }
 func (t *transaction) UpdateCall(v domain.CallRecord, expected uint64) (domain.CallRecord, error) {
@@ -437,6 +489,9 @@ func (t *transaction) UpdateCall(v domain.CallRecord, expected uint64) (domain.C
 		return domain.CallRecord{}, domain.ErrVersionConflict
 	}
 	v.Revision = expected + 1
+	if err = v.Validate(); err != nil {
+		return domain.CallRecord{}, err
+	}
 	if old.State != v.State && !domain.ValidCallTransition(old.State, v.State) {
 		return domain.CallRecord{}, domain.ErrInvalidTransition
 	}
@@ -455,11 +510,13 @@ func (t *transaction) UpdateCall(v domain.CallRecord, expected uint64) (domain.C
 	if !reflect.DeepEqual(a, b) {
 		return domain.CallRecord{}, domain.ErrImmutable
 	}
-	if err = v.Validate(); err != nil {
-		return domain.CallRecord{}, err
-	}
 	if err = t.checkSession(v.SessionID); err != nil {
 		return domain.CallRecord{}, err
+	}
+	if old.State != v.State {
+		if err = t.checkCallEvidence(old, v); err != nil {
+			return domain.CallRecord{}, err
+		}
 	}
 	if v.FinishedSeq != old.FinishedSeq && v.FinishedSeq != 0 {
 		if err = t.checkSeq(v.FinishedSeq); err != nil {
@@ -477,8 +534,48 @@ func (t *transaction) UpdateCall(v domain.CallRecord, expected uint64) (domain.C
 			}
 		}
 	}
-	err = t.put("call", v.CallID, 0, recordMeta{seq: v.PreparedSeq, revision: v.Revision, from: v.ConversationID, state: string(v.State)}, v, true)
+	err = t.put("call", v.CallID, 0, recordMeta{seq: v.PreparedSeq, revision: v.Revision, from: v.ConversationID, state: string(v.State), proposalHash: v.ProposalHash, outcomeHash: v.OutcomeHash}, v, true)
 	return v.Clone(), err
+}
+
+func (t *transaction) checkCallEvidence(old, next domain.CallRecord) error {
+	if old.State != domain.CallPrepared && old.State != domain.CallSent && old.State != domain.CallUnknown {
+		return nil
+	}
+	if old.State == domain.CallPrepared && next.State != domain.CallSent {
+		return nil
+	}
+	var a domain.CallAttempt
+	if err := t.get("attempt", next.CallID, next.Attempts, &a); err != nil {
+		return domain.ErrInvalidTransition
+	}
+	switch {
+	case old.State == domain.CallPrepared && next.State == domain.CallSent:
+		if a.State != domain.AttemptSent {
+			return domain.ErrInvalidTransition
+		}
+	case next.State == domain.CallCompleted:
+		if a.State != domain.AttemptCompleted || a.OutcomeHash != next.OutcomeHash {
+			return domain.ErrInvalidTransition
+		}
+	case next.State == domain.CallFailed:
+		if a.State != domain.AttemptFailed || a.OutcomeHash != next.OutcomeHash {
+			return domain.ErrInvalidTransition
+		}
+	case next.State == domain.CallPrepared:
+		if old.State != domain.CallSent || a.State != domain.AttemptFailed || !a.Retryable {
+			return domain.ErrInvalidTransition
+		}
+	case next.State == domain.CallUnknown:
+		if a.State != domain.AttemptUnknown {
+			return domain.ErrInvalidTransition
+		}
+	case next.State == domain.CallAbandoned:
+		if a.State != domain.AttemptAbandoned {
+			return domain.ErrInvalidTransition
+		}
+	}
+	return nil
 }
 func (t *transaction) PutCallAttempt(v domain.CallAttempt) error {
 	if err := v.Validate(); err != nil {
@@ -487,12 +584,16 @@ func (t *transaction) PutCallAttempt(v domain.CallAttempt) error {
 	if err := t.checkSession(v.SessionID); err != nil {
 		return err
 	}
-	if _, err := t.Call(v.CallID); err != nil {
+	call, err := t.Call(v.CallID)
+	if err != nil {
 		return err
 	}
 	var old domain.CallAttempt
-	err := t.get("attempt", v.CallID, v.Attempt, &old)
+	err = t.get("attempt", v.CallID, v.Attempt, &old)
 	if errors.Is(err, domain.ErrNotFound) {
+		if call.State != domain.CallPrepared || v.State != domain.AttemptSent {
+			return domain.ErrInvalidTransition
+		}
 		attempts, err := t.CallAttempts(v.CallID)
 		if err != nil {
 			return err
@@ -508,24 +609,39 @@ func (t *transaction) PutCallAttempt(v domain.CallAttempt) error {
 				return err
 			}
 		}
-		return t.put("attempt", v.CallID, v.Attempt, recordMeta{seq: v.SentSeq, state: string(v.State)}, v, false)
+		return t.put("attempt", v.CallID, v.Attempt, recordMeta{seq: v.SentSeq, state: string(v.State), outcomeHash: v.OutcomeHash, retryable: v.Retryable}, v, false)
 	}
 	if err != nil {
 		return err
 	}
-	if old.SentSeq != v.SentSeq || !old.SentAt.Equal(v.SentAt) || old.ProviderRequestID != v.ProviderRequestID {
+	if old.State == domain.AttemptCompleted || old.State == domain.AttemptFailed || old.State == domain.AttemptAbandoned {
+		if reflect.DeepEqual(old, v) {
+			return nil
+		}
 		return domain.ErrImmutable
 	}
-	if old.OutcomeHash != "" && (old.OutcomeHash != v.OutcomeHash || old.State != v.State) {
+	unchanged := v
+	unchanged.State = old.State
+	unchanged.OutcomeHash = old.OutcomeHash
+	unchanged.Retryable = old.Retryable
+	unchanged.FinishedSeq = old.FinishedSeq
+	unchanged.FinishedAt = old.FinishedAt
+	if !reflect.DeepEqual(unchanged, old) {
 		return domain.ErrImmutable
 	}
-	if old.OutcomeHash != "" && old.FinishedSeq != v.FinishedSeq {
-		return domain.ErrImmutable
+	if old.State == v.State {
+		if reflect.DeepEqual(old, v) {
+			return nil
+		}
+		return domain.ErrInvalidTransition
+	}
+	if !domain.ValidAttemptTransition(old.State, v.State) {
+		return domain.ErrInvalidTransition
 	}
 	if v.FinishedSeq != old.FinishedSeq && v.FinishedSeq != 0 {
 		if err = t.checkSeq(v.FinishedSeq); err != nil {
 			return err
 		}
 	}
-	return t.put("attempt", v.CallID, v.Attempt, recordMeta{seq: v.SentSeq, state: string(v.State)}, v, true)
+	return t.put("attempt", v.CallID, v.Attempt, recordMeta{seq: v.SentSeq, state: string(v.State), outcomeHash: v.OutcomeHash, retryable: v.Retryable}, v, true)
 }

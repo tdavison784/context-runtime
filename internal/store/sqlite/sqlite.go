@@ -282,6 +282,8 @@ func (t *transaction) checkSeq(seq uint64) error {
 type recordMeta struct {
 	seq, version, revision                         uint64
 	task, agent, directive, event, from, to, state string
+	proposalHash, outcomeHash, coverageItemIDs     string
+	retryable                                      bool
 }
 
 // atomic keeps a multi-record method indivisible if its caller handles an
@@ -305,8 +307,8 @@ func (t *transaction) put(kind, id string, sub int, meta recordMeta, value any, 
 		return err
 	}
 	if replace {
-		r, err := t.conn.ExecContext(t.ctx, `UPDATE records SET seq=?,version=?,revision=?,task_id=?,agent_id=?,directive_id=?,event_id=?,from_id=?,to_id=?,state=?,data=? WHERE session_id=? AND kind=? AND id=? AND subkey=?`,
-			meta.seq, meta.version, meta.revision, meta.task, meta.agent, meta.directive, meta.event, meta.from, meta.to, meta.state, b, t.session, kind, id, sub)
+		r, err := t.conn.ExecContext(t.ctx, `UPDATE records SET seq=?,version=?,revision=?,task_id=?,agent_id=?,directive_id=?,event_id=?,from_id=?,to_id=?,state=?,proposal_hash=?,outcome_hash=?,retryable=?,coverage_item_ids=?,data=? WHERE session_id=? AND kind=? AND id=? AND subkey=?`,
+			meta.seq, meta.version, meta.revision, meta.task, meta.agent, meta.directive, meta.event, meta.from, meta.to, meta.state, meta.proposalHash, meta.outcomeHash, meta.retryable, meta.coverageItemIDs, b, t.session, kind, id, sub)
 		if err != nil {
 			return err
 		}
@@ -316,8 +318,8 @@ func (t *transaction) put(kind, id string, sub int, meta recordMeta, value any, 
 		}
 		return nil
 	}
-	_, err = t.conn.ExecContext(t.ctx, `INSERT INTO records(session_id,kind,id,subkey,seq,version,revision,task_id,agent_id,directive_id,event_id,from_id,to_id,state,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		t.session, kind, id, sub, meta.seq, meta.version, meta.revision, meta.task, meta.agent, meta.directive, meta.event, meta.from, meta.to, meta.state, b)
+	_, err = t.conn.ExecContext(t.ctx, `INSERT INTO records(session_id,kind,id,subkey,seq,version,revision,task_id,agent_id,directive_id,event_id,from_id,to_id,state,proposal_hash,outcome_hash,retryable,coverage_item_ids,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		t.session, kind, id, sub, meta.seq, meta.version, meta.revision, meta.task, meta.agent, meta.directive, meta.event, meta.from, meta.to, meta.state, meta.proposalHash, meta.outcomeHash, meta.retryable, meta.coverageItemIDs, b)
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "PRIMARY KEY constraint failed")) {
 		return fmt.Errorf("%w: %s %s", domain.ErrImmutable, kind, id)
 	}

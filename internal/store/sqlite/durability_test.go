@@ -49,7 +49,8 @@ func TestRestartPreservesRecords(t *testing.T) {
 		if err := tx.SetCurrentDirective("task", "d1", "i1"); err != nil {
 			return err
 		}
-		rel := domain.Relationship{ID: "r1", SessionID: "s", Type: domain.RelDerivedFrom, FromID: "i2", ToID: "i1", Seq: tx.NextSeq(), Authority: domain.AuthorityUser}
+		rel := domain.Relationship{ID: "r1", SessionID: "s", Type: domain.RelDerivedFrom, FromID: "i2", ToID: "i1", Seq: tx.NextSeq(), Authority: domain.AuthorityUser,
+			Coverage: &domain.Coverage{ConversationID: "c1", FromSeq: 1, ToSeq: 2, ItemIDs: []string{"i1", "i2"}}}
 		if err := tx.InsertRelationship(rel); err != nil {
 			return err
 		}
@@ -62,14 +63,15 @@ func TestRestartPreservesRecords(t *testing.T) {
 			return err
 		}
 		tr := domain.ObligationTransition{ID: "tr1", SessionID: "s", ObligationID: "o1", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Actor: harness, EvidenceIDs: []string{"i2"}}
-		if _, err := tx.AppendObligationTransition(tr); err != nil {
+		if _, err := tx.AppendObligationTransition(tr, 1); err != nil {
 			return err
 		}
 		grant := domain.MutationGrant{ID: "g1", SessionID: "s", Action: domain.ActionResolve, TargetIDs: []string{"i1"}, Issuer: harness, Grantee: &principal, IssuedSeq: tx.NextSeq()}
 		if err := tx.InsertGrant(grant); err != nil {
 			return err
 		}
-		if _, err := tx.PutTask(domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive, Version: 999}, 0); err != nil {
+		taskEvent := domain.LifecycleEvent{ID: "task-created", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "create", Actor: harness}
+		if _, err := tx.PutTask(domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive, Version: 999}, 0, &taskEvent); err != nil {
 			return err
 		}
 		life := domain.LifecycleEvent{ID: "l1", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetItem, TargetID: "i1", Action: "test", Actor: harness}
@@ -282,5 +284,60 @@ func TestFileCreatedPrivate(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0600 {
 		t.Fatalf("file mode = %o, want 600", got)
+	}
+}
+
+func TestCallTransitionsRequireAttemptEvidence(t *testing.T) {
+	s, _ := openTemp(t)
+	actor := domain.Principal{SessionID: "s", Authority: domain.AuthorityHarness}
+	err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		request := []byte("request")
+		call := domain.CallRecord{CallID: "call", SessionID: "s", ConversationID: "conversation", Operation: domain.OperationInference,
+			State: domain.CallPrepared, Principal: actor, ServiceActor: actor, Request: request, RequestHash: domain.HashBytes(request),
+			PreparedSeq: tx.NextSeq(), Revision: 1}
+		call.ProposalHash = domain.CallProposalHash(call)
+		if err := tx.InsertCall(call); err != nil {
+			return err
+		}
+		attempt := domain.CallAttempt{CallID: "call", SessionID: "s", Attempt: 1, State: domain.AttemptSent, SentSeq: tx.NextSeq()}
+		if err := tx.PutCallAttempt(attempt); err != nil {
+			return err
+		}
+		call.State = domain.CallSent
+		call.Attempts = 1
+		var err error
+		call, err = tx.UpdateCall(call, 1)
+		if err != nil {
+			return err
+		}
+		response := []byte("response")
+		outcome := domain.CallOutcome{Attempt: 1, State: domain.CallCompleted, Response: response, ResponseHash: domain.HashBytes(response)}
+		premature := call.Clone()
+		premature.State = domain.CallCompleted
+		premature.Outcome = &outcome
+		premature.OutcomeHash = outcome.OutcomeHash()
+		premature.FinishedSeq = tx.NextSeq()
+		if _, err := tx.UpdateCall(premature, call.Revision); !errors.Is(err, domain.ErrInvalidTransition) {
+			t.Fatalf("premature completion = %v", err)
+		}
+		attempt.State = domain.AttemptCompleted
+		attempt.OutcomeHash = outcome.OutcomeHash()
+		attempt.FinishedSeq = tx.NextSeq()
+		if err := tx.PutCallAttempt(attempt); err != nil {
+			return err
+		}
+		premature.FinishedSeq = tx.NextSeq()
+		if _, err := tx.UpdateCall(premature, call.Revision); err != nil {
+			return err
+		}
+		changed := attempt
+		changed.ProviderRequestID = "changed"
+		if err := tx.PutCallAttempt(changed); !errors.Is(err, domain.ErrImmutable) {
+			t.Fatalf("closed attempt mutation = %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
