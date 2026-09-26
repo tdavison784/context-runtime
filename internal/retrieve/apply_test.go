@@ -111,6 +111,13 @@ func TestApplyPersistsLeaseAndReplaysWithoutRenewal(t *testing.T) {
 	if err != nil || len(sem.leases) != 1 || len(tx.items) != 1 || len(sem.coverages) != 1 || len(sem.projections) != 1 || len(sem.events) != 1 || source.Residency != domain.ResidencyArchived {
 		t.Fatalf("persisted retrieval = %+v, %v", first, err)
 	}
+	oldLease := sem.leases[0]
+	i.Rehydrate.RequestID = "coalesced-request"
+	coalesced, err := Apply(tx, p, i, leasePolicy(), false)
+	if err != nil || len(sem.leases) != 1 || coalesced.LeaseID != oldLease.ID || sem.leases[0] != oldLease || sem.projections[1].LeaseID != oldLease.ID {
+		t.Fatalf("active request extended lease: %+v, %v", coalesced, err)
+	}
+	i.Rehydrate.RequestID = "request"
 	seq, reads := tx.seq, tx.taskReads
 	tx.conv.LogicalCalls = 2
 	tx.task.Status, tx.task.CompletedSeq = domain.TaskCompleted, seq
