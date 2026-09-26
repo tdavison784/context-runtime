@@ -140,7 +140,19 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		r.rels++
 		r.repls = append(r.repls, domain.IngestLink{ItemID: it.ID, TargetID: prev})
 	}
-	if item.Obligation != "" {
+	if r.pol != nil && it.Section == domain.SectionPinned {
+		// P3-12: the new, current, nonduplicate Pinned source declares its
+		// slot-0 obligation through W4: explicit obligation= wins, else the
+		// claim pattern decides whether one exists, with an immutable
+		// binding or a fixed UNBOUND reason. A duplicate returned above.
+		svc, err := r.obligations()
+		if err != nil {
+			return err
+		}
+		if _, err := svc.DeclarePinnedTx(r.tx, c.actor, it.ID, item.Obligation, r.tx.NextSeq()); err != nil {
+			return err
+		}
+	} else if item.Obligation != "" {
 		return r.declareObligation(it, item.Obligation)
 	}
 	if it.Section == domain.SectionReferences {
@@ -188,8 +200,8 @@ func (r *run) declare(it domain.ContextItem, claim string) error {
 	return err
 }
 
-// declareObligation creates the UNRESOLVED obligation version a Pinned
-// item's obligation=<claim> declares (D13): its identity derives from the
+// declareObligation creates the frozen v2 (Phase 2) UNRESOLVED obligation
+// version a Pinned item's obligation=<claim> declares (D13): its identity derives from the
 // directive's full current-version key and slot 0, never from the claim, so
 // replacing the directive versions the same obligation. The claim is only a
 // name; no matcher is bound and no grant issued.

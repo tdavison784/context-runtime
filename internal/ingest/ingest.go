@@ -18,6 +18,7 @@ import (
 
 	"github.com/tdavison784/context-runtime/internal/directive"
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -55,6 +56,10 @@ type Ingester struct {
 	// under a Phase 3 policy (P3-35); a resolved command with no executor
 	// fails closed.
 	Lifecycle LifecycleExecutor
+	// Obligations is the obligation service (W4) for Pinned declarations
+	// and W4 typed operations; nil builds one from the recorded policy and
+	// the frozen matcher registry.
+	Obligations *obligation.Service
 }
 
 // DefaultLookupLimit is the default bound on one indexed lookup.

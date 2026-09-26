@@ -26,17 +26,12 @@ func phase3Stores(t *testing.T, fn func(t *testing.T, f *fixture)) {
 	})
 }
 
-// testPolicy is a complete finite Phase 3 policy for tests.
+// testPolicy is the default Phase 3 policy (whose registry versions the
+// services accept) with a tighter operation ceiling for limit tests.
 func testPolicy() domain.Phase3Policy {
-	return domain.Phase3Policy{
-		MaxPageSize: 64, MaxReceiptBytes: 1 << 20, MaxGCDecisions: 256,
-		CheckpointGeneration: domain.GenerationWorking, CheckpointRetention: domain.RetentionNormal,
-		Version: domain.Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs-state/1",
-		Eligibility: "eligibility/1", Locator: "resource-locator/v1", Coverage: "coverage/1", Dedup: "dedup/1",
-		MaxOperations: 16, MaxMetadataBytes: 1 << 16, MaxTargets: 16, MaxEvidence: 16, MaxCoverageMembers: 256,
-		MaxTransactionWork: 4096, MaxToolResultBytes: 1 << 16, MaxCheckpointSemanticBytes: domain.DefaultMaxCheckpointSemanticBytes,
-		DefaultLeaseCalls: 2, MaxLeaseCalls: 8,
-	}
+	p := policy.DefaultPhase3Policy()
+	p.MaxOperations = 16
+	return p
 }
 
 func spanOp(i int) domain.SemanticOperation {

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -15,6 +16,7 @@ type run struct {
 	g          Ingester
 	binding    *domain.OutcomeBinding // a provider outcome's originating context
 	pol        *domain.Phase3Policy   // effective Phase 3 policy; nil only for frozen v2 (tests)
+	obl        *obligation.Service    // built on first use from pol
 	tx         store.Tx
 	p          domain.Principal
 	e          domain.Event

@@ -3,6 +3,7 @@ package ingest
 import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/lifecycle"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -71,9 +72,9 @@ type Created struct {
 // aliases, derives its request identity, allocates its sequence, and runs
 // its handler as the operation's source actor.
 func (r *run) typedOperation(oi int, op domain.SemanticOperation) error {
-	h, ok := r.g.Operations[op.Kind]
-	if !ok || h == nil {
-		return domain.ErrUnsupportedSchema
+	h, err := r.handler(op.Kind)
+	if err != nil {
+		return err
 	}
 	actor, err := r.operationActor(op)
 	if err != nil {
@@ -106,6 +107,44 @@ func (r *run) typedOperation(oi int, op domain.SemanticOperation) error {
 	r.mutationReceipts = append(r.mutationReceipts, out.MutationReceiptID)
 	r.alias(op.Alias, out.Created)
 	return nil
+}
+
+// handler is the executor of kind: a configured Ingester.Operations entry,
+// else the obligation service's adapter for a W4 kind; anything else fails
+// closed.
+func (r *run) handler(kind domain.SemanticOperationKind) (OperationHandler, error) {
+	if h, ok := r.g.Operations[kind]; ok && h != nil {
+		return h, nil
+	}
+	op, ok := obligationOps[kind]
+	if !ok {
+		return nil, domain.ErrUnsupportedSchema
+	}
+	svc, err := r.obligations()
+	if err != nil {
+		return nil, err
+	}
+	return obligationHandler{svc, op}, nil
+}
+
+// obligations is the obligation service for this run: the configured one,
+// else one built from the run's recorded policy and the frozen registry.
+func (r *run) obligations() (*obligation.Service, error) {
+	if r.obl != nil {
+		return r.obl, nil
+	}
+	if r.pol == nil {
+		return nil, domain.ErrUnsupportedSchema
+	}
+	svc := r.g.Obligations
+	if svc == nil {
+		var err error
+		if svc, err = obligation.New(*r.pol, obligation.DefaultRegistry()); err != nil {
+			return nil, err
+		}
+	}
+	r.obl = svc
+	return svc, nil
 }
 
 // operationActor is the principal an operation runs as: the source actor
