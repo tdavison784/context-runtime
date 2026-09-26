@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"bytes"
-	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -116,15 +115,16 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 	if err := t.checkSeq(v.Seq); err != nil {
 		return err
 	}
-	// Endpoints need only exist (SPEC-3.1 item 2): a primary-key probe,
-	// never a decode of what may be a large transcript.
+	// Both endpoints must exist and verify (SPEC-4.4): an item whose text
+	// migration 0001 altered is never linked. Verification goes through the
+	// transaction's item cache, so each endpoint is decoded and hashed at
+	// most once per transaction while cached; the transcript every derived
+	// item links to stays hot, keeping linking linear (SPEC-3.1 item 2).
 	for _, id := range []string{v.FromID, v.ToID} {
-		var one int
-		err := t.conn.QueryRowContext(t.ctx, "SELECT 1 FROM rec_item WHERE session_id=? AND id=? AND subkey=0", t.session, id).Scan(&one)
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.ErrDanglingRelationship
-		}
-		if err != nil {
+		if _, err := t.loadItem(id, true); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return domain.ErrDanglingRelationship
+			}
 			return err
 		}
 	}

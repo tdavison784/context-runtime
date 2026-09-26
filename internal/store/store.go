@@ -332,7 +332,9 @@ type TxBase interface {
 	UpdateItem(id string, expectedVersion uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error)
 
 	// InsertRelationship stores an edge. Both endpoints must be items in
-	// this session (domain.ErrDanglingRelationship otherwise). A SUPERSEDES
+	// this session (domain.ErrDanglingRelationship otherwise) whose content
+	// verifies against their hash (domain.ErrIntegrity otherwise, SPEC-4.4),
+	// so a corrupted legacy item is never linked. A SUPERSEDES
 	// edge that would close a cycle fails with domain.ErrSupersessionCycle.
 	// Reusing an ID fails with domain.ErrImmutable.
 	InsertRelationship(r domain.Relationship) error
