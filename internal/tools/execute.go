@@ -150,12 +150,11 @@ func (s *Service) associateResult(tx store.Tx, i domain.ToolInvocation, invocati
 	}
 	p, x := i.Principal, state.exchange
 	parts := []domain.ContentPart{{Type: domain.PartText, MediaType: "text/plain", Text: text}}
-	boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: p.SessionID, WorkflowID: p.WorkflowID, TaskID: p.TaskID, AgentID: p.AgentID}
 	item := domain.ContextItem{
 		ID: toolID("toolresult", invocationID), Role: domain.RoleTranscript, Seq: tx.NextSeq(),
 		SessionID: p.SessionID, WorkflowID: p.WorkflowID, TaskID: p.TaskID, AgentID: p.AgentID, TurnID: x.TurnID,
 		Kind: domain.KindToolResult, Generation: domain.GenerationWorking, Authority: domain.AuthorityTool,
-		Scope: domain.ScopeTask, Access: boundary, Residency: domain.ResidencyResident, Retention: domain.RetentionNormal,
+		Scope: domain.ScopeTask, Access: conversationBoundary(p), Residency: domain.ResidencyResident, Retention: domain.RetentionNormal,
 		Parts: parts, ContentHash: domain.ContentHash(parts), SemanticBytes: domain.SemanticBytes(parts),
 		CreatedTurn: x.Turn, Source: &domain.SourceRef{Kind: domain.SourceTool, ToolCallID: i.ToolCallID}, Version: 1,
 	}

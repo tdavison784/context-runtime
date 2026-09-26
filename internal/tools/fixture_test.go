@@ -34,24 +34,41 @@ func toolFixture(t *testing.T) (store.Store, domain.ToolInvocation) {
 
 func seedToolFixture(t *testing.T, s store.Store) domain.ToolInvocation {
 	t.Helper()
+	return seedAgentInvocation(t, s, "agent")
+}
+
+// seedAgentInvocation opens the task once, then registers one executing
+// exchange of agent whose completed output issued tool call "tool".
+func seedAgentInvocation(t *testing.T, s store.Store, agent string) domain.ToolInvocation {
+	t.Helper()
+	suffix := ""
+	if agent != "agent" {
+		suffix = "-" + agent
+	}
 	var i domain.ToolInvocation
 	update(t, s, func(tx store.Tx) error {
 		actor := storetest.NewPrincipal("s", domain.AuthorityHarness)
 		p := storetest.NewPrincipal("s", domain.AuthorityAgent)
-		task := storetest.NewTask("s", p.TaskID)
-		if _, err := tx.PutTask(task, 0, domain.LifecycleEvent{ID: "task-open", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: task.TaskID, Actor: actor, Action: "open"}); err != nil {
-			return err
+		actor.AgentID, p.AgentID = agent, agent
+		task, err := tx.Task(p.TaskID)
+		if err != nil {
+			task = storetest.NewTask("s", p.TaskID)
+			if _, err = tx.PutTask(task, 0, domain.LifecycleEvent{ID: "task-open", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: task.TaskID, Actor: actor, Action: "open"}); err != nil {
+				return err
+			}
 		}
 		membership, err := graph.NewMembershipService(testPolicy())
 		if err != nil {
 			return err
 		}
-		x, err := membership.RegisterExchange(tx, actor, domain.RegisterExchangeIntent{RequestID: "exchange", Principal: p, TurnID: task.TurnID, Turn: task.Turn})
+		x, err := membership.RegisterExchange(tx, actor, domain.RegisterExchangeIntent{RequestID: "exchange" + suffix, Principal: p, TurnID: task.TurnID, Turn: task.Turn})
 		if err != nil {
 			return err
 		}
-		i = domain.ToolInvocation{SessionID: "s", Principal: p, ConversationID: domain.ConversationIDFor(p.TaskID, p.AgentID), ExchangeID: x.IDs[0], CallID: "producing", ToolCallID: "tool", TurnID: task.TurnID}
+		i = domain.ToolInvocation{SessionID: "s", Principal: p, ConversationID: domain.ConversationIDFor(p.TaskID, p.AgentID), ExchangeID: x.IDs[0], CallID: "producing" + suffix, ToolCallID: "tool", TurnID: task.TurnID}
 		call := storetest.NewCall("s", i.CallID, i.ConversationID, tx.NextSeq())
+		call.Principal, call.ServiceActor = p, actor
+		call = storetest.Reseal(call)
 		if err := tx.InsertCall(call); err != nil {
 			return err
 		}
@@ -71,19 +88,44 @@ func seedToolFixture(t *testing.T, s store.Store) domain.ToolInvocation {
 		if _, err := tx.UpdateCall(call, call.Revision); err != nil {
 			return err
 		}
-		output := storetest.NewItem("s", "output", tx.NextSeq(), "assistant output")
-		output.Authority, output.CreatedTurn, output.Role = domain.AuthorityAgent, task.Turn, domain.RoleTranscript
+		output := storetest.NewItem("s", "output"+suffix, tx.NextSeq(), "assistant output")
+		output.Authority, output.CreatedTurn, output.Role, output.AgentID = domain.AuthorityAgent, task.Turn, domain.RoleTranscript, agent
+		output.Scope, output.Access = domain.ScopeTask, conversationBoundary(p)
 		if err := tx.InsertItem(output); err != nil {
 			return err
 		}
-		member := domain.RegisterExchangeMemberIntent{RequestID: "output", ExchangeID: i.ExchangeID, ExpectedRevision: 1, Position: 1, Role: domain.MemberOutput, Source: storetest.ContentRef(output), CallID: i.CallID}
+		member := domain.RegisterExchangeMemberIntent{RequestID: "output" + suffix, ExchangeID: i.ExchangeID, ExpectedRevision: 1, Position: 1, Role: domain.MemberOutput, Source: storetest.ContentRef(output), CallID: i.CallID}
 		if _, err := membership.RegisterExchangeMember(tx, actor, member); err != nil {
 			return err
 		}
-		member.RequestID, member.ExpectedRevision, member.Position, member.Role, member.ToolCallID = "tool", 2, 2, domain.MemberToolCall, i.ToolCallID
+		member.RequestID, member.ExpectedRevision, member.Position, member.Role, member.ToolCallID = "tool"+suffix, 2, 2, domain.MemberToolCall, i.ToolCallID
 		_, err = membership.RegisterExchangeMember(tx, actor, member)
 		return err
 	})
+	return i
+}
+
+// addToolCall registers another tool call of i's output and returns its
+// invocation, as the harness would for a second call in one response.
+func addToolCall(t *testing.T, s store.Store, i domain.ToolInvocation, toolCallID string) domain.ToolInvocation {
+	t.Helper()
+	update(t, s, func(tx store.Tx) error {
+		membership, _ := graph.NewMembershipService(testPolicy())
+		sem, _ := store.Semantic(tx)
+		x, err := sem.LogicalExchange(i.ExchangeID)
+		if err != nil {
+			return err
+		}
+		members, err := sem.ExchangeMembers(x.ID, store.Page{Limit: 64})
+		if err != nil {
+			return err
+		}
+		actor := i.Principal
+		actor.Authority = domain.AuthorityHarness
+		_, err = membership.RegisterExchangeMember(tx, actor, domain.RegisterExchangeMemberIntent{RequestID: "call-" + i.CallID + "-" + toolCallID, ExchangeID: x.ID, ExpectedRevision: x.Revision, Position: uint64(len(members.Records)) + 1, Role: domain.MemberToolCall, Source: members.Records[0].Source, CallID: i.CallID, ToolCallID: toolCallID})
+		return err
+	})
+	i.ToolCallID = toolCallID
 	return i
 }
 

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
-	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
@@ -119,16 +118,7 @@ func TestExecuteFailureLeavesNoEffectEvenWhenIgnored(t *testing.T) {
 func TestExecuteDistinguishesToolCallsOfOneOutput(t *testing.T) {
 	st, i := toolFixture(t)
 	s := testService(t)
-	second := i
-	second.ToolCallID = "tool-2"
-	update(t, st, func(tx store.Tx) error {
-		membership, _ := graph.NewMembershipService(testPolicy())
-		sem, _ := store.Semantic(tx)
-		x, _ := sem.LogicalExchange(i.ExchangeID)
-		output, _ := tx.Item("output")
-		_, err := membership.RegisterExchangeMember(tx, storetest.NewPrincipal("s", domain.AuthorityHarness), domain.RegisterExchangeMemberIntent{RequestID: "tool-2", ExchangeID: x.ID, ExpectedRevision: x.Revision, Position: 3, Role: domain.MemberToolCall, Source: storetest.ContentRef(output), CallID: i.CallID, ToolCallID: second.ToolCallID})
-		return err
-	})
+	second := addToolCall(t, st, i, "tool-2")
 	var calls int
 	update(t, st, func(tx store.Tx) error {
 		a, err := runStub(s, tx, i, stubIntent{RequestID: "a", Value: "v"}, &calls)
