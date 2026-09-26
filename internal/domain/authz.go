@@ -103,6 +103,11 @@ func (g MutationGrant) Validate() error {
 	if g.Matcher != nil && (g.Matcher.Name == "" || g.Matcher.Version == "") {
 		return invalid("grant %s: matcher name and version are required", g.ID)
 	}
+	// A matcher only evaluates its obligation (FR-AUTH-002, FR-OBL-004); it
+	// can never block, unblock, waive, resolve, or complete.
+	if g.Matcher != nil && g.Action != ActionAssertObligation {
+		return invalid("grant %s: matcher grants are limited to %s", g.ID, ActionAssertObligation)
+	}
 	if g.ExpiresAtSeq != 0 && g.ExpiresAtSeq < g.IssuedSeq {
 		return invalid("grant %s: expires before it was issued", g.ID)
 	}
@@ -210,7 +215,10 @@ func findGrant(r MutationRequest, t MutationTarget) (string, bool) {
 		if g.Validate() != nil || g.SessionID != r.Actor.SessionID || g.Action != r.Action || !g.activeAt(r.Seq) {
 			continue
 		}
-		if !slices.Contains(g.TargetIDs, t.ID) || !g.Issuer.Authority.AtLeast(t.Authority) {
+		// The issuer must still be able to act on the target directly: a
+		// grant never carries authority its issuer lacks, including access
+		// to a target outside the issuer's boundary.
+		if !slices.Contains(g.TargetIDs, t.ID) || !g.Issuer.Authority.AtLeast(t.Authority) || !t.Access.Permits(g.Issuer) {
 			continue
 		}
 		switch {
@@ -231,6 +239,34 @@ func findGrant(r MutationRequest, t MutationTarget) (string, bool) {
 	return "", false
 }
 
+// AuthorizeGrantIssuance checks that g's issuer may issue it for targets,
+// which must be exactly the records named by g.TargetIDs (FR-AUTH-002). The
+// issuer must access every target (ErrNotFound otherwise, so issuance cannot
+// probe for existence) and hold authority at least each target's. Revocation
+// requires the same check against the revoking principal.
+func AuthorizeGrantIssuance(g MutationGrant, targets []MutationTarget) error {
+	if err := g.Validate(); err != nil {
+		return err
+	}
+	if len(targets) != len(g.TargetIDs) {
+		return invalid("grant %s: targets do not match target IDs", g.ID)
+	}
+	for _, t := range targets {
+		if !slices.Contains(g.TargetIDs, t.ID) {
+			return invalid("grant %s: target %s is not named by the grant", g.ID, t.ID)
+		}
+		if !t.Access.Permits(g.Issuer) {
+			return ErrNotFound
+		}
+	}
+	for _, t := range targets {
+		if !g.Issuer.Authority.AtLeast(t.Authority) {
+			return ErrInvalidAuthorityPromotion
+		}
+	}
+	return nil
+}
+
 // AuthorizeSupersession checks FR-REL-006 for one SUPERSEDES edge created by
 // actor: the actor can access both endpoints, the superseding item's
 // authority is at least the superseded item's, both belong to the same
@@ -238,9 +274,24 @@ func findGrant(r MutationRequest, t MutationTarget) (string, bool) {
 // hide an item from a principal who cannot see the replacement. Widening or
 // narrowing an item's boundary needs an explicit authorized replacement
 // policy (FR-DIR-002), which V1 does not provide.
+//
+// TOOL and RETRIEVED_CONTENT actors never create SUPERSEDES edges: tool
+// output cannot suppress state (section 9). Deterministic observation rules
+// (FR-REL-007) run under a trusted SYSTEM or HARNESS principal. An AGENT
+// actor may supersede only AGENT items, which covers keyed agent writes
+// (FR-TOOL-002).
 func AuthorizeSupersession(actor Principal, superseding, superseded ContextItem) error {
 	if err := actor.Validate(); err != nil {
 		return err
+	}
+	switch actor.Authority {
+	case AuthoritySystem, AuthorityHarness, AuthorityUser:
+	case AuthorityAgent:
+		if superseding.Authority != AuthorityAgent || superseded.Authority != AuthorityAgent {
+			return ErrInvalidAuthorityPromotion
+		}
+	default:
+		return ErrInvalidAuthorityPromotion
 	}
 	if !superseding.Access.Permits(actor) || !superseded.Access.Permits(actor) {
 		return ErrNotFound

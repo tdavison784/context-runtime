@@ -8,9 +8,12 @@ import (
 )
 
 // Canonical encodings (ADR 4). Every hashed or sized representation is a
-// sequence of length-prefixed fields preceded by a version domain tag, so two
-// different values never share an encoding and a future encoding cannot
-// collide with this one. Changing an encoding requires a new tag.
+// sequence of length-prefixed fields preceded by a version domain tag.
+// Injectivity holds per schema: each tag fixes the field types and order, so
+// two different values of one schema never share an encoding, and different
+// tags cannot collide. Fields carry no type tags (String(""), Bytes(nil), and
+// Uint(0) all encode as 0x00), so any change to a schema's field types,
+// order, or count requires a new tag.
 const (
 	contentEncodingV1 = "context-runtime/content/v1"
 	hashPrefix        = "sha256:"
