@@ -1,4 +1,3 @@
-// Package directive implements the source-gated directive grammar (FR-DIR-006).
 package directive
 
 import (
