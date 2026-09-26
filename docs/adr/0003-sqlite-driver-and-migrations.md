@@ -155,7 +155,7 @@ preserve valid state.
     bounded lookups — `item_blobs`, an index on
     `rec_item(content_hash, task, section, role, authority, access
     boundary)`, and `item_sources` respectively, the last via a **Go
-    migration step** (`backfillItemSources`) run inside the same
+    migration step** (`backfillItemSourcesV1`) run inside the same
     transaction as the SQL. **This generation was superseded one review
     round later and no longer exists** (below); it is kept in this list
     because a committed migration is a historical fact this ADR's rule
@@ -190,7 +190,16 @@ preserve valid state.
     records the `domain.Limits.MaxReferenceLinks` budget an event's
     References edges were checked against (D14/D17); a pre-0014 receipt
     reads NULL as 0 (unrecorded), never backfilled with the current
-    default (M8).
+    default (M8). `TestUpgradeReceiptLimits`
+    (`internal/store/sqlite/upgrade_test.go`, SPEC-2.6: previously
+    uncited) locks the pre-0014-reads-as-0 upgrade path.
+  - `0015_ordered_graph_indexes.sql` (SPEC-2.1, p2-store) adds
+    `relationship_from_seq`/`relationship_to_seq` on
+    `rec_relationship(session_id, f_type, f_from_id|f_to_id, f_seq, id)`
+    and `item_task_seq` on `rec_item(session_id, f_task_id, f_seq, id)`,
+    dropping the key-only `relationship_from`/`relationship_to`/`item_task`
+    indexes they supersede — see "The access-filtered lookup API" below
+    for why the key-only indexes were not enough on their own.
 
   **The access-filtered lookup API (F1), landed:** `store.BlobReferrer`,
   `CanonicalCandidates`, `CurrentWorking`, and `SourceItems`
@@ -206,7 +215,12 @@ preserve valid state.
   `store.VisibleReferences` follows the same shape for References.
   `store.PermittedOwners` turns `domain.AccessBoundary.Permits` into the
   indexed equality clause every lookup issues. `TestAccessLookupsUseIndex`
-  asserts each lookup's exact query plan; `TestUpgradeAccessLookups`
+  asserts each lookup's `EXPLAIN QUERY PLAN` searches an index whose
+  constraint covers every key column the lookup filters on, never merely
+  an unindexed scan or a session-prefix-only `SEARCH` (SPEC-2.1: `assertIndexed`
+  was strengthened, below, to take the expected key columns and require
+  them in the plan's constraint — it no longer passes on a plan that
+  narrows only by `session_id`); `TestUpgradeAccessLookups`
   checks the 0012 backfill end to end (a canonical item, a blob referrer,
   and a sourced item, each found post-upgrade); `TestUpgradeItemBlobIndex`/
   `TestUpgradeDuplicateIndex`/`TestUpgradeItemSourceIndex` still exist and
@@ -215,14 +229,40 @@ preserve valid state.
 
   SPEC-1.3 separately found that *other* per-item graph/ingest reads —
   `Relationships` filtered by type/from/to, and `Items` filtered by task —
-  were not indexed even though R19's three named lookups were; 0012's
-  `relationship_to` index and an item-by-task index close this, locked by
-  `TestGraphReadsUseIndex`. `tx.Grants()` (obligation retirement, lifecycle
-  command authorization) remains an unfiltered whole-session read,
-  deliberately deferred to Phase 3 as a performance-only item: a
-  `MutationGrant` can only be created by an authorized issuer, so the read
-  discloses nothing and never blocks a legitimate mutation, only slows it
-  (ADR 19 §13 records this ruling in full).
+  were not indexed even though R19's three named lookups were. 0012's own
+  `relationship_to`/item-task indexes did not actually close this (SPEC-2.1:
+  they carried the key but not the `(Seq, ID)` order, so SQLite preferred a
+  session-wide order index to avoid a sort — each read still grew with the
+  session, and `TestGraphReadsUseIndex`'s plan guard could not yet catch it,
+  since it only rejected an unindexed `SCAN`, not a session-prefix `SEARCH`).
+  **`0015_ordered_graph_indexes.sql` (SPEC-2.1, p2-store) fixes this
+  properly:** `relationship_from_seq`/`relationship_to_seq` on
+  `rec_relationship(session_id, f_type, f_from_id|f_to_id, f_seq, id)` and
+  `item_task_seq` on `rec_item(session_id, f_task_id, f_seq, id)` carry both
+  the key and the order in one index, dropping the 0012 key-only indexes
+  they supersede (`relationship_from`, `relationship_to`, `item_task`); a
+  strengthened plan guard now requires the exact key columns in the index's
+  search constraint, not merely that some index is used
+  (`internal/store/sqlite/lookups_test.go`'s `assertIndexed`,
+  `TestGraphReadsUseIndex`). Obligation reads (`Obligation`,
+  `ObligationVersions`) were also found quadratic in the same review round —
+  `read.go` decoded every obligation in the session per lookup — and are
+  now read by `(session_id, id)` primary key (`obligationVersionsQuery`),
+  with `ObligationsBySource` going through the same builder over the 0006
+  index. `InsertRelationship`'s supersession-cycle check no longer walks
+  every `SUPERSEDES` edge in the session either: a cycle through `from ->
+  to` needs an existing edge into `from` (one indexed read, or none), and
+  otherwise the check walks only the chain reachable from `to`.
+  **Still an unfiltered whole-session read, deliberately deferred (not on
+  the per-item ingest path):** `tx.Grants()` (obligation retirement,
+  lifecycle command authorization — a `MutationGrant` can only be created
+  by an authorized issuer, so the read discloses nothing and only costs
+  time), `ObligationTransitions`, `LifecycleEvents`, `Obligations(taskID)`
+  (the whole-task listing, distinct from the now-keyed per-ID/per-source
+  reads above), and `Diagnostics`/`LifecycleCommands` when called with no
+  `OccurrenceID` (`visibleReceipts` then lists every receipt) — none of
+  these run during ingestion itself (ADR 19 §13 records the ruling in
+  full).
 
   "Migrations are forward-only; no down migrations ship" (above) is now a
   literal test, not only documented policy: `committedMigrations`
@@ -261,16 +301,22 @@ preserve valid state.
   exported field name, and a nil slice/pointer is JSON `null` — so
   arbitrary byte sequences (invalid UTF-8, an embedded NUL) round-trip
   exactly instead of being silently corrupted by `encoding/json`'s UTF-8
-  repair. Decoding is strict: an unknown/missing field, invalid hex, a
-  wrong JSON type, or trailing data fails as `domain.ErrIntegrity` at the
-  caller rather than a value being invented, so extending a listed type
-  needs a forward migration (M8), not a decoder that silently accepts old
-  and new shapes alike. Migrations 0002/0003 rewrote every row stored in
-  the old plain-JSON form; a row `0001` had already corrupted (e.g. a
-  content part whose hash no longer matches its now-`\uFFFD`-repaired
-  text) reads back as `domain.ErrIntegrity` after upgrade rather than a
-  silently wrong value, matching M8's "no invented executable state for a
-  record that predates new metadata."
+  repair. Decoding the wire format itself is strict: an unknown/missing
+  field, invalid hex, a wrong JSON type, or trailing data fails as
+  `domain.ErrIntegrity` at the caller rather than a value being invented,
+  so extending a listed type needs a forward migration (M8), not a decoder
+  that silently accepts old and new shapes alike. Migrations 0002/0003
+  rewrote every row stored in the old plain-JSON form; a row `0001` had
+  already corrupted a *content part* (its hash no longer matches its
+  now-`\uFFFD`-repaired text) reads back as `domain.ErrIntegrity` after
+  upgrade rather than a silently wrong value, matching M8's "no invented
+  executable state for a
+  record that predates new metadata." **(SPEC-2.6) This content-hash check
+  is content-part-specific** (`verifyItemContent`, below): a lossless
+  tag/ID list corrupted the same way decodes cleanly (the wire format
+  itself is intact) and is returned as-is with no `ErrIntegrity`, since
+  nothing compares it against a separate hash \u2014 see
+  `TestUpgradeLosslessStringLists` below.
 ## Alternatives considered
 
 - **`mattn/go-sqlite3` (cgo).** Rejected for V1: faster in some benchmarks,
@@ -400,8 +446,9 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all eleven migrations replay on a fresh database (SPEC-1.9:
-    corrected from an earlier, stale "seven"), still matches every Go
+    after all fourteen migrations replay on a fresh database (SPEC-2.6:
+    corrected from an earlier, stale "eleven", itself corrected from a
+    stale "seven"), still matches every Go
     struct field exactly, locking the no-opaque-copy design above against
     every migration added since Phase 1, not only 0001.
   - `TestFileCreatedPrivate` asserts a freshly created database file is mode
@@ -463,9 +510,15 @@ preserve valid state.
   from a fresh database.
 - `internal/store/sqlite/access_lookups_test.go` (F1: SEC-1.1, SEC-1.2,
   DUR-1.1, DUR-1.4, SPEC-1.3): `TestAccessLookupsUseIndex` asserts every
-  access-filtered lookup's exact query plan (`lookup_blob`,
-  `lookup_canonical`, `lookup_working`, `lookup_source`, `rec_reference`
-  by locator key, `rec_relationship` by type/target); `TestUpgradeAccessLookups`
+  access-filtered lookup's `EXPLAIN QUERY PLAN` searches an index whose
+  constraint covers every expected key column (`lookup_blob`,
+  `lookup_canonical`, `lookup_working`, `lookup_source`, `rec_reference` by
+  locator key, `rec_relationship` by type/target) — SPEC-2.1 found the
+  original version only checked that *some* index was used, which a
+  same-session-prefix scan would also pass; `assertIndexed` now takes the
+  expected keys and requires a `SEARCH` step whose parenthesized
+  constraint contains each one, closing that hole for both this test and
+  `TestGraphReadsUseIndex` (below); `TestUpgradeAccessLookups`
   checks migration 0012's backfill end to end — a canonical item, a blob
   referrer, and a sourced item are each found through the new API after
   upgrade, while a `DUPLICATE_OF` item is not; `TestLegacyUnverifiedNeverBlocks`

@@ -74,7 +74,7 @@ func testUnresolvedReferences(t *testing.T, s store.Store) {
 	view(t, s, sessB, func(tx store.ReadTx) error {
 		_, err := tx.UnresolvedReference(r0.ID)
 		wantErr(t, err, domain.ErrNotFound)
-		assertEqual(t, "another session", visibleRefs(t, tx, sessB, "repo:a/go.mod\xff"), []domain.UnresolvedReference{})
+		assertEqual(t, "another session", visibleRefs(t, tx, sessB, "loc:a/go.mod\xff"), []domain.UnresolvedReference{})
 		return nil
 	})
 }

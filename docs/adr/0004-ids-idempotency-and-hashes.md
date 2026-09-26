@@ -3,7 +3,7 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
-## Amended in Phase 2 (ADR 19, 2026-09-26; corrected 2026-09-27 per SPEC-1.8)
+## Amended in Phase 2 (ADR 19, 2026-09-26; corrected 2026-09-26 per SPEC-1.8)
 
 `store.ReadTx.CurrentDirective(taskID, directiveID, boundary)`,
 `CurrentDirectives(taskID, directiveID)`, and `Tx.SetCurrentDirective(...)`,
@@ -71,7 +71,7 @@ New Phase 2 ID forms this ADR's original ID taxonomy does not name:
 `IDDomain` derived-artifact domains (`dgn`, `cmd`, `sec`, `ref`), and
 `DerivedTurnID`. An anonymous (no caller `EventID`) event's items also now
 get deterministic `itm_`-prefixed IDs derived from the occurrence
-(`internal/ingest/run.go:58-63,164`), not the random `IDGenerator` this
+(`internal/ingest/run.go:58-63,165`), not the random `IDGenerator` this
 ADR's Decision section describes as the anonymous-event path; the random
 generator remains available but is no longer what ingestion actually uses
 for that path.
@@ -384,7 +384,9 @@ item ID only when it actually occurs, is less disruptive and matches how
 - `internal/store/storetest/semantic.go:testCurrentDirectivesOrder`
   (`TestConformance/CurrentVersions(DIRECTIVE)Order` — SPEC-1.8: renamed
   from `CurrentDirectivesOrder` when the store switched to the typed
-  namespaced methods; the `-run` filter must use the new name) locks
+  namespaced methods; as a `go test -run` argument the parentheses must be
+  escaped, e.g. `-run 'TestConformance/CurrentVersions\(DIRECTIVE\)Order'`,
+  or the unescaped form is a regex group that matches nothing) locks
   `CurrentVersions`
   exactly: every current version's item ID across boundaries in a task,
   ordered by item ID, empty (not an error) when none exist. Both

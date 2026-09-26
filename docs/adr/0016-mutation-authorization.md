@@ -3,7 +3,7 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
-## Amended in Phase 2 (ADR 19, 2026-09-26; corrected 2026-09-27 per SPEC-1.8)
+## Amended in Phase 2 (ADR 19, 2026-09-26; corrected 2026-09-26 per SPEC-1.8)
 
 The store methods this ADR's `ResolveLifecycleTarget` and
 `rejectVisibleBoundaryConflict` decisions call — `CurrentDirective`/
@@ -43,7 +43,7 @@ changed in Phase 2, most visibly here:**
   ADR's `TestSupersedeSnapshot_*` citations below describe.
 
 Only the store call site's name, its added namespace argument, and the
-five points above differ from the authorization/ambiguity/stale-pointer
+four points above differ from the authorization/ambiguity/stale-pointer
 text below; the rest of this ADR's decisions (grant issuance/revocation,
 the AGENT-same-key supersession exception, obligation-transition
 authorization, `LinkDerived`'s actor-authority gate) are unaffected by

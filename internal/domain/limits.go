@@ -7,9 +7,13 @@ const MaxDiagnosticsPerSpanCap = 256
 // Limits bounds ingestion and parsing (D17). Limits are trusted runtime
 // configuration, never directive attributes. Zero fields select defaults;
 // negative fields are invalid. ID and heading-marker limits may be reduced
-// but never exceed the grammar. Exceeding any limit rejects the whole event
-// before any write; accepted semantic input is never silently truncated
-// (only diagnostics are, with a marker).
+// but never exceed the grammar. Exceeding most limits rejects the whole
+// event before any write; MaxReferenceLinks is the documented exception
+// (ADR 19 §13/SPEC-2.4, a departure from FR-DIR-003's literal text): once
+// spent, further REFERENCES edges for the rest of the event are silently
+// skipped with a ReferenceLinksTruncated diagnostic rather than rejecting
+// the event. Diagnostics past MaxEventDiagnostics/MaxDiagnosticsPerSpan
+// are truncated the same way, with a marker.
 type Limits struct {
 	// Per parse unit.
 	MaxSpanBytes          int // text bytes of one span
@@ -29,7 +33,7 @@ type Limits struct {
 	MaxEventItems       int
 	MaxEventDiagnostics int
 	MaxRelationships    int // relationships the event may generate
-	MaxReferenceLinks   int // optional REFERENCES edges one event may create in total (ruling 1)
+	MaxReferenceLinks   int // optional REFERENCES edges one event may create in total, across every References entry and source (ruling 1)
 }
 
 // DefaultLimits returns the Phase 2 resource limits (D17).
