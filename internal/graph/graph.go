@@ -302,6 +302,24 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 	if newItem.TaskID != taskID || newItem.DirectiveID != directiveID {
 		return "", ErrDirectiveMismatch
 	}
+	if err := newItem.ValidateSemantic(); err != nil {
+		return "", err
+	}
+	if !tx.Allocated(newItem.Seq) {
+		return "", ErrDerivedLinkNotAtCreation
+	}
+	if newItem.Namespace == domain.NamespaceObservation {
+		return "", domain.ErrInvalidAuthorityPromotion
+	}
+	sem, err := store.Semantic(tx)
+	if err != nil {
+		return "", err
+	}
+	key, _ := newItem.CurrentKey()
+	expectedPrior, err := tx.CurrentVersion(key)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return "", err
+	}
 
 	ns, _ := newItem.DirectiveNamespace()
 	previousID, err := currentVersionAt(tx, taskID, ns, directiveID, newItem.Access)
@@ -327,7 +345,7 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 		}
 	}
 
-	if err := tx.SetCurrentVersion(newItemID); err != nil {
+	if err := sem.SetCurrentVersion(newItemID, expectedPrior); err != nil {
 		return "", err
 	}
 	return previousID, nil

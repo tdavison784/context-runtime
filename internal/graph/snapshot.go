@@ -101,6 +101,10 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	if err != nil {
 		return SnapshotResult{}, err
 	}
+	sem, err := store.Semantic(tx)
+	if err != nil {
+		return SnapshotResult{}, err
+	}
 	parts, unverified, err := freezePartitions(tx, actor, taskID, members)
 	if err != nil {
 		return SnapshotResult{}, err
@@ -109,6 +113,7 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	// Plan: retire[oldID] = successor, one entry per retired item.
 	retire := map[string]domain.ContextItem{}
 	retired := map[string]domain.ContextItem{}
+	expectedPrior := map[string]string{}
 	var filed, dupes, dupeOf []domain.ContextItem
 	for _, p := range parts {
 		dupSnapshot, err := isDuplicateSnapshot(tx, p)
@@ -121,6 +126,12 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 			continue
 		}
 		for _, n := range p.members {
+			key, _ := n.CurrentKey()
+			prior, err := tx.CurrentVersion(key)
+			if err != nil && !errors.Is(err, domain.ErrNotFound) {
+				return SnapshotResult{}, err
+			}
+			expectedPrior[n.ID] = prior
 			prevID, err := currentVersionAt(tx, taskID, domain.NamespaceDirective, n.DirectiveID, n.Access)
 			switch {
 			case errors.Is(err, domain.ErrNotFound):
@@ -175,7 +186,7 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 		res.Supersedes = append(res.Supersedes, rel)
 	}
 	for _, n := range filed {
-		if err := tx.SetCurrentVersion(n.ID); err != nil {
+		if err := sem.SetCurrentVersion(n.ID, expectedPrior[n.ID]); err != nil {
 			return SnapshotResult{}, err
 		}
 	}
@@ -207,8 +218,11 @@ func loadSnapshotMembers(tx store.Tx, actor domain.Principal, newIDs []string, t
 		if it.TaskID != taskID {
 			return nil, ErrSnapshotTaskMismatch
 		}
-		if it.Section != domain.SectionWorking {
+		if it.Section != domain.SectionWorking || it.Namespace != domain.NamespaceDirective {
 			return nil, ErrSnapshotNotWorking
+		}
+		if err := it.ValidateSemantic(); err != nil {
+			return nil, err
 		}
 		if !tx.Allocated(it.Seq) {
 			return nil, ErrSnapshotNotAtCreation
