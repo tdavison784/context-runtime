@@ -253,6 +253,10 @@ func (r *run) workingSection(c unitCtx, si int) error {
 		if err != nil {
 			return err
 		}
+		// Snapshot identity compares member declarations (W1 00804b5).
+		if err := r.declare(it, ""); err != nil {
+			return err
+		}
 		if err := r.linkDerived(c, it); err != nil {
 			return err
 		}

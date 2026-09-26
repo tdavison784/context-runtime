@@ -101,12 +101,17 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		}
 		return err
 	}
-	canonical, dup, err := r.duplicateOf(c.actor, it, item.Obligation)
+	// Insert, declare, then compare (W1 6594958): duplicate detection
+	// compares immutable creation declarations, so the new occurrence's
+	// declaration must exist before SameDirective sees it.
+	it, err = r.newItem(it)
 	if err != nil {
 		return err
 	}
-
-	it, err = r.newItem(it)
+	if err := r.declare(it, item.Obligation); err != nil {
+		return err
+	}
+	canonical, dup, err := r.duplicateOf(c.actor, it, item.Obligation)
 	if err != nil {
 		return err
 	}
@@ -161,6 +166,26 @@ func (r *run) duplicateOf(actor domain.Principal, it domain.ContextItem, claim s
 		return domain.ContextItem{}, false, err
 	}
 	return cur, same, nil
+}
+
+// declare records its immutable creation declaration (P3-4) under the
+// policy's dedup registry. The declaration takes every creation default
+// from the stored item; the only accepted attribute that the stored fields
+// do not already capture is an explicit obligation=<claim>, recorded as
+// such, so adding or dropping a declared obligation is never a duplicate.
+// Kind, scope and TTL attributes are captured by their effect; restating a
+// default explicitly is a nonsemantic spelling difference. Frozen v2
+// identity (tests only) records none.
+func (r *run) declare(it domain.ContextItem, claim string) error {
+	if r.pol == nil {
+		return nil
+	}
+	accepted := graph.CreationAcceptance{PolicyVersion: r.pol.Dedup}
+	if claim != "" {
+		accepted.AcceptedAttributes = []string{"obligation=" + claim}
+	}
+	_, err := graph.DeclareCreation(r.tx, it, accepted)
+	return err
 }
 
 // declareObligation creates the UNRESOLVED obligation version a Pinned
