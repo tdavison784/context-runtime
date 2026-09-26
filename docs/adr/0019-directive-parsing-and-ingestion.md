@@ -1247,24 +1247,40 @@ each with its own fix and test.
   /PoisonRollsBack`, `.../PoisonFirstErrorWins`, `.../PoisonBlocksEveryWrite`
   (`internal/store/storetest/poison.go`).
 - **DUR-1.5: Working-snapshot derived-ID collisions across authorities,
-  option A (refines §7, D11/FR-DIR-007).** A Working member with a
-  *derived* ID (no explicit `[id]`) ran the same same-ID replacement path
-  as an explicit-ID member, but a derived ID carries no authority
-  (`DerivedDirectiveID(section, contentHash)`), so an identical line under
-  a different authority either aborted the whole event or partially
-  erased the other authority's snapshot set. Of the two options the
-  finding offered — restricting by-ID replacement to explicit IDs, or
-  folding authority into the derived-ID hash — **option A was chosen**:
-  `internal/ingest/derive.go`'s `workingSection` now checks, only for a
-  member without an explicit ID, whether its derived-ID slot is already
-  held by a current version at an authority the new item does not
-  dominate (`derivedSlotHeldAbove`, via `graph.CurrentVersionFor`); if so,
-  that member alone is refused with `ErrMalformedDirective`/
-  `ReasonBoundaryConflict` (R13's item-level pattern, §7), and the event
-  continues, rather than aborting with `ErrInvalidAuthorityPromotion` or
-  silently erasing part of another authority's set. Explicit-ID members
-  are unaffected. Test: `TestWorking_DerivedIDAcrossAuthorities_DUR15`
-  (`internal/ingest/working_test.go`).
+  option A (refines §7, D11/FR-DIR-007; description corrected, SPEC-2.4).**
+  A Working member with a *derived* ID (no explicit `[id]`) ran the same
+  same-ID replacement path as an explicit-ID member, but a derived ID
+  carries no authority (`DerivedDirectiveID(section, contentHash)`), so an
+  identical line under a different authority either aborted the whole
+  event or partially erased the other authority's snapshot set. Of the two
+  options the finding offered — restricting by-ID replacement to explicit
+  IDs, or folding authority into the derived-ID hash — **option A was
+  chosen**: `internal/ingest/derive.go`'s `workingSection` now checks,
+  only for a member without an explicit ID, whether its derived-ID slot is
+  already held by a current version at a strictly higher authority
+  (`derivedSlotHeldAbove`, via `graph.CurrentVersionFor`: refuses exactly
+  when `!it.Authority.AtLeast(cur.Authority)`); if so, that member is
+  diagnosed `ErrMalformedDirective`/`ReasonBoundaryConflict` (R13's
+  item-level diagnostic pairing, §7) and **the whole Working section is
+  refused as a unit — every member of that section is dropped, not only
+  the colliding one** (the same whole-section refusal §24/R20.4 already
+  records for a same-ID boundary conflict; a Working section is either
+  written entirely or not at all). The rest of the *event* still applies
+  (other sections/items commit normally), so this is a section-level
+  refusal, not an event abort, and never `ErrInvalidAuthorityPromotion`.
+  Because the check only refuses a *lower*-authority write, a same-or-higher
+  authority still supersedes a lower authority's member by derived ID in
+  the ordinary snapshot-replacement path: SYSTEM writing a line USER
+  already holds under the same derived-ID slot supersedes USER's version,
+  it does not conflict. Explicit-ID members are unaffected by this check
+  (they still go through only the ordinary boundary-conflict check). Test:
+  `TestWorking_DerivedIDAcrossAuthorities_DUR15`
+  (`internal/ingest/working_test.go`) — asserts both halves: a USER
+  Working section colliding with an existing SYSTEM line is refused whole
+  (zero items, the rest of the event's other sections still apply, the
+  SYSTEM snapshot is undisturbed), and a later SYSTEM line superseding an
+  existing USER-authority derived-ID slot leaves the SYSTEM version
+  current.
 - **DUR-1.6: `MaxRelationships` now bounds the replacement and duplicate
   paths too (refines §13, D17).** The limit was checked before a
   `DERIVED_FROM` edge (`internal/ingest/directives.go`'s `linkDerived`)
