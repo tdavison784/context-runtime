@@ -165,16 +165,16 @@ func (t *transaction) nextRows(qs []query, after store.Cursor, n int) ([]store.C
 
 // scanLookup reads the queries' merged rows from after in batches, loading
 // items until want visible verified items are found or the rows run out.
-// Visible items failing verification are recorded in Unverified and
-// skipped. found reports whether want items were found; Next is the last
-// returned item.
-func (t *transaction) scanLookup(viewer domain.Principal, want int, after store.Cursor, qs ...query) (store.Lookup, bool, error) {
-	out := store.Lookup{Items: []domain.ContextItem{}, Next: after}
+// Visible items failing verification are recorded in Unverified, with
+// their positions in unverifiedAt, and skipped. found reports whether want
+// items were found; Next is the last returned item.
+func (t *transaction) scanLookup(viewer domain.Principal, want int, after store.Cursor, qs ...query) (out store.Lookup, found bool, unverifiedAt []store.Cursor, err error) {
+	out = store.Lookup{Items: []domain.ContextItem{}, Next: after}
 	cursor := after
 	for {
 		batch, exhausted, err := t.nextRows(qs, cursor, lookupBatch)
 		if err != nil {
-			return store.Lookup{}, false, err
+			return store.Lookup{}, false, nil, err
 		}
 		for _, c := range batch {
 			cursor = c
@@ -183,20 +183,21 @@ func (t *transaction) scanLookup(viewer domain.Principal, want int, after store.
 			switch {
 			case errors.Is(err, domain.ErrIntegrity):
 				out.Unverified = append(out.Unverified, c.ID)
+				unverifiedAt = append(unverifiedAt, c)
 				continue
 			case err != nil:
-				return store.Lookup{}, false, integrityIfMissing(err, "indexed item")
+				return store.Lookup{}, false, nil, integrityIfMissing(err, "indexed item")
 			case !it.Access.Permits(viewer):
 				continue
 			}
 			out.Items = append(out.Items, it)
 			if len(out.Items) == want {
-				return out, true, nil
+				return out, true, unverifiedAt, nil
 			}
 			out.Next = c
 		}
 		if exhausted {
-			return out, false, nil
+			return out, false, unverifiedAt, nil
 		}
 	}
 }
@@ -224,7 +225,7 @@ func (t *transaction) BlobReferrer(f store.BlobReferrerFilter) (store.Lookup, er
 	// The referrer must permit the viewer and contain Within, i.e. carry
 	// only owner constraints Within carries (Within.Within(referrer)).
 	within := domain.Principal{SessionID: f.Within.SessionID, WorkflowID: f.Within.WorkflowID, TaskID: f.Within.TaskID, AgentID: f.Within.AgentID, Authority: f.Viewer.Authority}
-	l, _, err := t.scanLookup(f.Viewer, 1, store.Cursor{}, blobReferrerQueries(t.session, f.BlobHash, ownerCombos(f.Viewer, within))...)
+	l, _, _, err := t.scanLookup(f.Viewer, 1, store.Cursor{}, blobReferrerQueries(t.session, f.BlobHash, ownerCombos(f.Viewer, within))...)
 	l.Next = store.Cursor{}
 	return l, err
 }
@@ -246,7 +247,7 @@ func (t *transaction) CanonicalCandidates(f store.CanonicalFilter) (store.Lookup
 	if !f.Access.Permits(f.Viewer) {
 		return store.Lookup{Items: []domain.ContextItem{}}, nil
 	}
-	l, over, err := t.scanLookup(f.Viewer, f.Limit+1, store.Cursor{}, canonicalQuery(t.session, f))
+	l, over, _, err := t.scanLookup(f.Viewer, f.Limit+1, store.Cursor{}, canonicalQuery(t.session, f))
 	if over {
 		return store.Lookup{}, store.ErrLimitExceeded
 	}
@@ -276,7 +277,7 @@ func (t *transaction) CurrentWorking(f store.WorkingFilter) (store.Lookup, error
 	if !f.Access.Permits(f.Viewer) {
 		return store.Lookup{Items: []domain.ContextItem{}}, nil
 	}
-	l, over, err := t.scanLookup(f.Viewer, f.Limit+1, store.Cursor{}, workingQuery(t.session, f))
+	l, over, _, err := t.scanLookup(f.Viewer, f.Limit+1, store.Cursor{}, workingQuery(t.session, f))
 	if over {
 		return store.Lookup{}, store.ErrLimitExceeded
 	}
@@ -301,13 +302,21 @@ func (t *transaction) SourceItems(f store.SourceFilter) (store.Lookup, error) {
 	if err := f.Validate(); err != nil {
 		return store.Lookup{}, err
 	}
-	l, more, err := t.scanLookup(f.Viewer, f.Page.Limit+1, f.Page.After, sourceItemsQueries(t.session, f.LocatorKey, ownerCombos(f.Viewer))...)
+	l, more, unverifiedAt, err := t.scanLookup(f.Viewer, f.Page.Limit+1, f.Page.After, sourceItemsQueries(t.session, f.LocatorKey, ownerCombos(f.Viewer))...)
 	if err != nil {
 		return store.Lookup{}, err
 	}
 	if more { // the extra item only proves more remain
 		l.Items = l.Items[:f.Page.Limit]
 		l.More = true
+		// Unverified rows past Next belong to the next page, which reads
+		// from Next again; report each on one page only (DUR-3.1).
+		l.Unverified = nil
+		for _, c := range unverifiedAt {
+			if !after(c, l.Next) {
+				l.Unverified = append(l.Unverified, c.ID)
+			}
+		}
 	}
 	return l, nil
 }
@@ -356,4 +365,9 @@ func (t *transaction) VisibleReferences(f store.VisibleReferenceFilter) ([]domai
 			return out, false, next, nil
 		}
 	}
+}
+
+// after reports whether a is strictly after b in (Seq, ID) order.
+func after(a, b store.Cursor) bool {
+	return a.Seq > b.Seq || a.Seq == b.Seq && a.ID > b.ID
 }
