@@ -1,6 +1,13 @@
 package obligation
 
-import "github.com/tdavison784/context-runtime/internal/domain"
+import (
+	"context"
+	"testing"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
+)
 
 const testSession = "s1"
 
@@ -29,3 +36,58 @@ func mustSubjectKey(t domain.TargetSpec) string {
 	}
 	return k
 }
+
+// Seeding helpers. Principals and items use storetest's "wf"/"task"/"agent"
+// owners.
+
+func actorOf(a domain.Authority) domain.Principal { return storetest.NewPrincipal(testSession, a) }
+
+func mustUpdate(t *testing.T, st store.Store, fn func(tx store.Tx) error) {
+	t.Helper()
+	if err := st.Update(context.Background(), testSession, fn); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedPinned stores a current Pinned directive of the given authority.
+func seedPinned(t *testing.T, st store.Store, id, dirID string, a domain.Authority, text string) domain.ContextItem {
+	t.Helper()
+	var it domain.ContextItem
+	mustUpdate(t, st, func(tx store.Tx) error {
+		it = storetest.NewDirective(testSession, id, dirID, tx.NextSeq(), text)
+		it.Authority = a
+		if err := tx.InsertItem(it); err != nil {
+			return err
+		}
+		return tx.SetCurrentVersion(it.ID)
+	})
+	return it
+}
+
+func seedTask(t *testing.T, st store.Store, taskID string) {
+	t.Helper()
+	mustUpdate(t, st, func(tx store.Tx) error {
+		ev := storetest.NewLifecycleEvent(testSession, "task-"+taskID, tx.NextSeq(), domain.TargetTask, taskID)
+		_, err := tx.PutTask(storetest.NewTask(testSession, taskID), 0, ev)
+		return err
+	})
+}
+
+// seedResource registers a resource directly through the facet; the
+// registration service lands with its result kind (W1 request).
+func seedResource(t *testing.T, st store.Store, resourceID string, reporter domain.Principal) {
+	t.Helper()
+	mustUpdate(t, st, func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		return sem.InsertResourceBinding(domain.ResourceBinding{
+			SemanticMeta: domain.SemanticMeta{ID: "rb-" + resourceID, SessionID: testSession, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+			ResourceID:   resourceID, Owner: reporter, Reporter: reporter,
+			Access: domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: testSession},
+		})
+	})
+}
+
+func taskBoundary() domain.AccessBoundary { return storetest.DirectiveBoundary(testSession) }
