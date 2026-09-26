@@ -2258,8 +2258,11 @@ fixed.
   memory with the session's matching items, not with the event (a
   resource bound moved from time to memory, D17's concern either way).
   `itemcache.go`'s `itemCache` is now a genuine LRU, capped at 1024
-  entries and 16 MiB of item text (roughly two maximum-size spans') —
-  an item over the byte cap is never cached at all; `scanLookup` now
+  entries and a baseline 16 MiB of item text. The byte cap grows to
+  twice the largest transcript read in the transaction, so a configured
+  `MaxSpanBytes` above 16 MiB does not disable transcript caching;
+  non-transcript items cannot raise it, and an item over the current cap
+  is never cached. `scanLookup` now
   calls the internal `loadItem(id, cache=false)` instead of `Item`, so
   paging past many matches neither grows the cache nor evicts the one
   transcript derived-linking actually re-reads. **SPEC-4.4: `InsertRelationship`
@@ -2294,7 +2297,12 @@ fixed.
   cache's own entry/byte footprint, exposed via `itemCacheFootprint`,
   never exceeds its caps at any stage), `TestItemCacheEntryCap_SPEC41`,
   `TestItemCacheLRU` (eviction order, oversize-item exclusion, and byte
-  accounting) — all `internal/store/sqlite/itemcache_test.go`;
+  accounting), `TestLookupScanDoesNotFillItemCache_SPEC41` (lookup pages
+  do not fill or evict the point-read cache) — all
+  `internal/store/sqlite/itemcache_test.go`;
+  `TestLargeTranscriptStaysCached_SPEC41`
+  (`internal/store/sqlite/scaling_test.go`, a 17 MiB transcript is decoded
+  once across eight derived links, with a 34 MiB byte cap);
   `TestRolledBackMethodClearsItemCache`
   (`internal/store/sqlite/itemcache_test.go`) locks the savepoint-rollback
   cache clear above, previously asserted only in prose.
