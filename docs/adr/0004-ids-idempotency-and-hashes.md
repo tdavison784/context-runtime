@@ -3,6 +3,25 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
+## Amended in Phase 2 (ADR 19, 2026-09-26)
+
+`store.ReadTx.CurrentDirective(taskID, directiveID, boundary)`,
+`CurrentDirectives(taskID, directiveID)`, and `Tx.SetCurrentDirective(...)`,
+which this ADR's Decision and Review sections describe below, were
+replaced in Phase 2 by typed, namespaced equivalents that also distinguish
+a parsed directive from keyed agent state (M6/R6; ADR 19 §17):
+`store.CurrentVersion(domain.CurrentKey{SessionID, TaskID, Access,
+Namespace, ID})`, `store.CurrentVersions(taskID, ns, id)`, and
+`store.SetCurrentVersion(itemID)`. The untyped methods were marked
+`Deprecated`, then deleted once every caller in `internal/graph` switched
+(`p2/store` commit `55761b8`). This is a rename plus an added namespace
+parameter, not a change to the boundary-keyed identity or
+visible-boundary-reuse decisions this ADR records below — those decisions
+apply unchanged to the typed replacements. The Decision and Review text
+below is left as written, describing Phase 1's original mechanism; read
+`CurrentDirective(s)`/`SetCurrentDirective` there as the typed methods'
+Phase 1 predecessor.
+
 ## Context
 
 FR-ING-006 requires a caller-supplied EventID to be an idempotency key:
