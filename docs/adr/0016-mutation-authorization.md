@@ -69,19 +69,36 @@ performs a Resolve in V1.
   ever granting access to it. After access, the actor is restricted by
   kind: SYSTEM/HARNESS/USER may supersede as before (subject to the
   boundary-equality and authority-ordering checks below); an AGENT actor
-  may supersede **only** a keyed agent write with the identical key
-  (FR-TOOL-002): both items must be AGENT authority **and** share the same
-  `"agent.<key>"` `DirectiveID` — not merely "both AGENT," which would let
-  one keyed write supersede an unrelated one. A TOOL or RETRIEVED_CONTENT
-  actor can never create a SUPERSEDES edge, full stop. Boundaries must
-  still be **equal**, not `Within` (narrowing would hide the original from
-  principals who could see it before); superseding authority ≥ superseded;
-  actor's authority ≥ superseding item's own authority.
+  may supersede **only** a keyed agent write with the identical key **in
+  the same task** (round 1, AUTH-1.6): both items must be AGENT authority,
+  share the same `"agent.<key>"` `DirectiveID`, **and** share `TaskID` — not
+  merely the same key, which (since FR-TOOL-002 keys are per task) would
+  let an AGENT actor in task T2 supersede task T1's `agent.status` item. A
+  TOOL or RETRIEVED_CONTENT actor can never create a SUPERSEDES edge, full
+  stop. Boundaries must still be **equal**, not `Within` (narrowing would
+  hide the original from principals who could see it before); superseding
+  authority ≥ superseded; actor's authority ≥ superseding item's own
+  authority.
 - FR-DIR-007's amendment (SDD v0.6) is implemented by the same equal-
   boundary rule `AuthorizeSupersession` already enforces: "same authority in
   the same task" is replaced by "same authority and access boundary,"
   because a task-wide Working item must not silently suppress an
   agent-restricted Working item that happens to share a task.
+- **Working-snapshot selection is by recorded `Section`, not `Kind` (round
+  1, SPEC-1.1, SDD v0.7).** `SupersedeSnapshot` selects every current item
+  whose `Section == domain.SectionWorking`, in the given task, with the
+  same authority and boundary as the new snapshot — whatever `Kind` those
+  items were given. Selecting by `Kind` instead (the pre-round-1 behavior)
+  had two failure modes reproduced by the reviewer: FR-DIR-003 permits a
+  Working item with `kind=conversation`, so a kind-based selector could
+  leave an old `conversation`-kind Working item current forever (never
+  superseded because it doesn't look like the selector's expected kind);
+  and a selector that instead swept broadly by task/authority/boundary
+  alone could supersede an unrelated `task_state` item that merely shares
+  those three fields but was never a Working snapshot. `Section` is
+  immutable provenance recorded at creation (ADR 4), so neither failure mode
+  is reachable: the selector's candidate set is exactly "items a Working
+  section created," independent of what kind they were declared with.
 - `GoalStatus` transitions only OPEN→RESOLVED (`ItemChange.Apply`);
   reopening requires an authorized replacement creating a new OPEN item.
   Residency changes never touch `GoalStatus`.
@@ -106,6 +123,76 @@ performs a Resolve in V1.
   motivate *why* freshness matters are ADR 8's territory (Phase 3); this
   ADR only fixes the authorization-adjacent mechanism — the transition
   cannot commit against a revision the evaluator didn't actually see.
+- **`ObligationTransition.Action` must equal `domain.TransitionAction(From,
+  To)` (round 1, AUTH-1.4).** The transition table (`ValidObligationTransition`)
+  said *which* `(From, To)` pairs exist; nothing previously bound a stored
+  transition to *which lifecycle action authorized it*. `TransitionAction`
+  is the map: any transition into WAIVED is `ActionWaiveObligation`; into
+  BLOCKED is `ActionBlockObligation`; out of BLOCKED (back to UNRESOLVED) is
+  `ActionUnblockObligation`; everything else (UNRESOLVED↔SATISFIED) is
+  `ActionAssertObligation`. `ObligationTransition.Validate` now also
+  requires: the actor's `SessionID` equal the transition's `SessionID`; the
+  actor `CanHoldLifecycleAuthority()` (SYSTEM/HARNESS/USER — AGENT/TOOL/
+  RETRIEVED_CONTENT can never drive a transition, matching §9); and a
+  `Matcher`-attributed transition have `Action == ActionAssertObligation` —
+  a matcher can never be recorded as having blocked, unblocked, or waived,
+  regardless of what a caller passes in `Action`. Before this, a mutation
+  correctly authorized as `ActionAssertObligation` (e.g. under a matcher
+  grant scoped only to that action, per this ADR's matcher-grant
+  restriction) could still be *stored* as a WAIVED transition with a
+  different, unchecked `Action` value or none at all — `AuthorizeMutation`
+  never sees `To`, so nothing connected "what was authorized" to "what got
+  written." Binding `Action` to the table closes that gap at the record
+  level, where `AuthorizeMutation` cannot reach.
+- **`LifecycleEvent.Validate` requires `Actor.SessionID == SessionID`
+  (round 1, AUTH-1.7).** `EventRecord` and `MutationGrant` already enforced
+  this; `LifecycleEvent` — the append-only audit record every other
+  mutation in this ADR writes — did not, so an audit entry could misattribute
+  an action to a principal from another session. Matches the same rule now
+  on `ObligationTransition.Actor` above.
+- **`internal/graph.LinkDerived` requires actor authority ≥ the derived
+  item's authority (round 1, AUTH-1.1, graph-worker's fix).** Before this,
+  `LinkDerived` checked only access and `CheckDerivedBoundary`, never the
+  actor's authority against the item it was attaching provenance to — any
+  AGENT, TOOL, or RETRIEVED_CONTENT actor that could merely *see* a SYSTEM
+  or HARNESS item could attach `DERIVED_FROM` edges and `Coverage` to it at
+  will, rewriting that item's provenance after the fact. This is FR-REL-006's
+  "source authority cannot be laundered through derivation" applied to
+  provenance attachment specifically, not just supersession: ADR 6 makes a
+  covered item's continued eligibility a dispatch-time recheck, so a
+  low-authority actor attaching a short-TTL or TURN-scoped source to a
+  higher-authority item is a way to *later* force that higher-authority
+  item's representation out of context — suppressing higher-authority
+  content, which §9 forbids. The fix costs nothing for the only specified
+  callers (FR-TOOL-002/003 only ever link an agent's own new item): require
+  `actor.Authority.AtLeast(derived.Authority)`, and never TOOL or
+  RETRIEVED_CONTENT.
+- **`internal/graph.ReplaceDirective`'s first-version path requires the same
+  actor rule as supersession (round 1, AUTH-1.5, graph-worker's fix).** When
+  no current version exists yet for a directive ID, the prior code checked
+  only access before setting the pointer — a RETRIEVED_CONTENT or TOOL
+  actor could file the *first* version of a directive, including one
+  claiming SYSTEM authority. The fix applies `AuthorizeSupersession`'s
+  actor rules (SYSTEM/HARNESS/USER, or AGENT restricted to its own
+  `agent.<key>` item) plus `actor.Authority.AtLeast(newItem.Authority)` on
+  this path too, so "there was nothing to supersede yet" is never a way
+  around the authority check that would otherwise apply.
+- **Missing and inaccessible now yield the identical bare `ErrNotFound`
+  everywhere in `internal/graph` (round 1, AUTH-1.3, graph-worker's fix).**
+  `errors.Is` already treated them alike, but `err.Error()` did not: a
+  missing item's error text passed the store's wrapped message through
+  (e.g. `"item nothere: not found"`), while an inaccessible item's text was
+  bare `"not found"` — and since Phase 1's semantic-write tools surface
+  errors as text to the model (FR-TOOL-002/003: "an unknown or inaccessible
+  ID is a tool error"), the message itself was the leak, not just the
+  sentinel. Worse, an operation loading two IDs (e.g. `Supersede(new, old)`)
+  named whichever ID it happened to check first in its error, so which ID
+  came back in the message could reveal that the *other* one exists. The
+  fix routes every graph-layer existence/access check through one helper
+  that (a) checks access before loading the next ID, so ordering never
+  leaks which of several IDs exists, and (b) normalizes any not-found from
+  the store to bare `domain.ErrNotFound`, with no item ID or store-specific
+  text attached.
 
 ## SDD amendment (applied in v0.6)
 
@@ -121,6 +208,15 @@ FR-DIR-007 is applied as amended: Working-section supersession now reads
 "supersedes every current Working item of the same authority and access
 boundary in the same task," matching `AuthorizeSupersession`'s equal-
 boundary rule rather than conflicting with it.
+
+## SDD amendment (applied in v0.7)
+
+Round-1 finding SPEC-1.1 (Working-snapshot selection erasing unrelated
+state or leaving a wrong-kind Working item current forever) is resolved by
+amending FR-DIR-007: "supersedes every current Working-**section** item
+(identified by its recorded directive section, whatever its kind)" replaces
+kind-based selection. FR-DIR-004 is amended to name the recorded directive
+section as parser output (commit `4329e29`).
 
 ## Alternatives considered
 
@@ -164,6 +260,27 @@ boundary rule rather than conflicting with it.
   transaction from committing the mutation without its audit record; atomic
   methods make the two inseparable at the store layer instead of trusting
   every caller to pair them.
+- **Selecting Working-snapshot candidates by `Kind` plus a fixed kind list
+  (e.g. treating `task_state` and `conversation` as "the Working kinds").**
+  Rejected (SPEC-1.1): FR-DIR-003 explicitly allows a Working item to
+  declare any `kind=` value, so a fixed list is either incomplete (misses a
+  legitimately-declared kind, leaving it perpetually current) or overbroad
+  (matches an unrelated item that merely shares a common kind like
+  `task_state`). Recording `Section` at creation and selecting by it is the
+  only approach that doesn't require guessing the kind space in advance.
+- **Requiring only `actor.Authority.AtLeast(derived.Authority)` for
+  `LinkDerived` without also barring TOOL/RETRIEVED_CONTENT explicitly.**
+  Rejected: `AtLeast` alone would let a TOOL actor attach provenance to
+  another TOOL item (equal rank), which is still "tool output" attaching
+  itself as another tool item's basis — the same category of laundering
+  FR-ING-005/§9 forbid for supersession. Barring TOOL/RETRIEVED_CONTENT
+  outright, as `AuthorizeSupersession` already does, keeps the two
+  provenance-mutating operations under one consistent actor rule.
+- **Leaving graph-layer error text as-is, relying on `errors.Is` alone.**
+  Rejected (AUTH-1.3): FR-TOOL-002/003 make an unknown-or-inaccessible-ID
+  error a *tool result*, i.e. text the model reads directly — `errors.Is`
+  equivalence doesn't stop a distinguishable message string from leaking
+  which of two IDs exists.
 
 ## Consequences / compatibility impact
 
@@ -179,8 +296,25 @@ boundary rule rather than conflicting with it.
   and CAS signatures are breaking changes to the Phase 1 store interface; no
   production data exists yet, so this is a clean signature change, not a
   migration.
-- The FR-TOOL-003/FR-DIR-007 amendments are applied; no further SDD change
-  is pending for this ADR's scope.
+- The FR-TOOL-003/FR-DIR-007/FR-DIR-004 amendments are applied; no further
+  SDD change is pending for this ADR's scope.
+- `Section` is now load-bearing for correctness (Working-snapshot
+  selection), not just descriptive metadata; any future ingestion code that
+  constructs a Working-section item without setting `Section` silently
+  breaks FR-DIR-007, with no structural check catching the omission beyond
+  `Validate`'s "non-empty Section requires a DirectiveID" rule (which does
+  not itself require Working items to set `Section`).
+- `ObligationTransition.Action` binding, `LifecycleEvent`'s session check,
+  and the AGENT same-task rule are all breaking changes to record shapes
+  already used by `internal/store/storetest`'s conformance suite and
+  `internal/graph`; every existing test fixture that constructs these
+  records must be updated to supply a valid `Action`/session/`TaskID`, not
+  just new tests added.
+- Normalizing graph-layer errors to bare `ErrNotFound` means any caller
+  that was inspecting graph-layer error *text* (not just `errors.Is`) for
+  diagnostics loses that detail; this is intentional (the detail was the
+  leak) but is a user-visible behavior change for any Phase 1 tooling that
+  logged the richer message.
 
 ## Tests that lock the behavior
 
@@ -252,6 +386,48 @@ boundary rule rather than conflicting with it.
   core at the domain-function level, but the full multi-actor trace across
   Resolve/CompleteTask/Block/Waive remains a Phase 3 integration gap.
 
+### Round 1 additions (findings AUTH-1.1, 1.3, 1.4, 1.5, 1.6; SPEC-1.1)
+
+As of this update, `internal/domain`'s new record-shape rules
+(`ObligationTransition.Action`, the AGENT same-task rule, `LifecycleEvent`
+session check) are merged in `internal/domain`, but `internal/domain`'s own
+test suite does not yet build against them (`domain-tests-worker`'s fix is
+in flight: existing `obligation_test.go` fixtures predate the `Action`
+field and currently fail `TestObligationTransitionValidate`). The
+`internal/graph` fixes (AUTH-1.1, 1.3, 1.5; SPEC-1.1's `SupersedeSnapshot`
+selector) and their tests are `graph-worker`'s in-flight fix; `internal/graph`
+does not currently compile against the new `store.ReadTx.CurrentDirective`
+signature. Required once landed:
+
+- `internal/domain/obligation_test.go`: `ObligationTransition.Validate`
+  rejecting a transition whose `Action` disagrees with
+  `TransitionAction(From, To)`; a matcher-attributed transition with
+  `Action != ActionAssertObligation` rejected; an actor from another
+  session rejected; an AGENT/TOOL/RETRIEVED_CONTENT actor rejected
+  regardless of `Action`/`Matcher`. `TestValidObligationTransitionMatrix`
+  and friends above need updating to supply a valid `Action` per case, not
+  just new cases added.
+- `internal/domain/authz_test.go` or `records_test.go`: the AGENT-same-task
+  regression for `AuthorizeSupersession` (equal key, equal boundary,
+  *different* `TaskID` → `ErrInvalidAuthorityPromotion`); `LifecycleEvent
+  .Validate` rejecting a cross-session actor.
+- `internal/graph/graph_test.go`: `LinkDerived` rejecting an AGENT/TOOL/
+  RETRIEVED_CONTENT actor whose authority is below the derived item's (the
+  exact AUTH-1.1 reproduction: a SYSTEM instruction must not accept a TOOL
+  item as `DERIVED_FROM` source under a low-authority actor);
+  `ReplaceDirective`'s first-version path rejecting a RETRIEVED_CONTENT/TOOL
+  actor and an actor below the new item's authority (AUTH-1.5); a
+  same-string-comparison test asserting `Provenance`/`LinkDerived`/
+  `Supersede` return byte-identical error text for a missing ID and an
+  inaccessible one, on both stores (AUTH-1.3); `SupersedeSnapshot` with a
+  `kind=conversation` Working item (must still be superseded) and an
+  unrelated `task_state` item sharing task/authority/boundary (must NOT be
+  superseded) — the exact SPEC-1.1 reproduction cases.
+- `internal/store/storetest`: once `CurrentDirective`/`SetCurrentDirective`
+  callers adopt the boundary parameter (blocking `internal/graph` and
+  `internal/store/storetest` compilation as of this update), a case for the
+  boundary-keyed directive pointer (ADR 4 covers the decision).
+
 ## Open questions
 
 - Whether `granteeMatches`'s exact-ID matching is expressive enough once
@@ -292,3 +468,32 @@ integration coverage in `internal/graph/graph_test.go`
 (`TestSupersede_AuthorizationRules`, `TestSupersedeSnapshot_FRDIR007`) that
 exercises the same rules through the actual `Supersede`/
 `SupersedeSnapshot` operations, not only the isolated domain functions.
+
+**Round 1 review** (PR #2; SPEC — Codex GPT-6, `spec-pr-comment-round1.md`;
+AUTH — Claude Opus, `auth-review-round1.md`; TEST — Claude Sonnet,
+`test-review-round1.md`). SPEC-1.1 (HIGH): `SupersedeSnapshot` selected
+Working candidates by `Kind`, which FR-DIR-003's `kind=conversation` escape
+hatch and unrelated `task_state` items both broke; fixed by recording
+`Section` and selecting by it (SDD v0.7). AUTH-1.1 (HIGH): `LinkDerived`
+never checked actor authority against the derived item, letting a
+low-authority actor rewrite a SYSTEM item's provenance; fixed by requiring
+`actor.Authority.AtLeast(derived.Authority)` and barring TOOL/
+RETRIEVED_CONTENT. AUTH-1.3 (MEDIUM): missing-vs-inaccessible error text
+differed across `internal/graph`, leaking existence through tool-visible
+error strings, not just `errors.Is`; fixed by normalizing to bare
+`ErrNotFound` and checking access before loading the next ID. AUTH-1.4
+(MEDIUM): the obligation-transition table encoded no link between a stored
+transition and the lifecycle action that was supposed to have authorized
+it; fixed by `ObligationTransition.Action`/`TransitionAction` plus actor/
+session/matcher-scope checks in `Validate`. AUTH-1.5 (LOW):
+`ReplaceDirective`'s first-version path skipped the actor rule entirely;
+fixed by applying `AuthorizeSupersession`'s actor rules there too. AUTH-1.6
+(LOW): the AGENT keyed-supersession exception ignored task, letting a
+cross-task agent key collision through; fixed by requiring equal `TaskID`.
+AUTH-1.7 (LOW): `LifecycleEvent.Validate` didn't require the actor's
+session match the event's; fixed to match `EventRecord`/`MutationGrant`.
+TEST-1.1 (MEDIUM, tracked for `internal/graph`, not this ADR directly):
+flagged `ErrDirectiveMismatch`/`ErrSnapshotTaskMismatch` as untested; the
+required-test list above includes the graph-side cases once landed.
+Findings 1, 2, 4, N2-N4 from earlier passes were re-verified FIXED and are
+unchanged by this round.
