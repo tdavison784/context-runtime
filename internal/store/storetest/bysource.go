@@ -77,3 +77,94 @@ func assertKeys(t *testing.T, what string, got []domain.ObligationVersion, want 
 	}
 	assertEqual(t, what, keys, want)
 }
+
+// testRetireObligationVersion checks the atomic retirement write (D13,
+// FR-OBL-006): the version becomes noncurrent with RetiredSeq equal to its
+// audit event's sequence number, status, evidence, and transitions are
+// preserved, and a failed retirement writes neither record.
+func testRetireObligationVersion(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertObligationVersion(NewObligation(sessA, "o", 1, tx.NextSeq(), "p1")))
+		_, err := tx.AppendObligationTransition(NewTransition(sessA, "tr", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied), 1)
+		return err
+	})
+	retireEvent := func(tx store.Tx, id string) domain.LifecycleEvent {
+		return NewLifecycleEvent(sessA, id, tx.NextSeq(), domain.TargetObligation, "o")
+	}
+	cases := []struct {
+		name  string
+		call  func(tx store.Tx) error
+		want  error
+		after func(tx store.Tx)
+	}{
+		{"stale revision", func(tx store.Tx) error {
+			_, err := tx.RetireObligationVersion("o", 1, 1, retireEvent(tx, "e1"))
+			return err
+		}, domain.ErrVersionConflict, nil},
+		{"missing version", func(tx store.Tx) error {
+			_, err := tx.RetireObligationVersion("o", 2, 2, retireEvent(tx, "e1"))
+			return err
+		}, domain.ErrNotFound, nil},
+		{"event for another target", func(tx store.Tx) error {
+			ev := retireEvent(tx, "e1")
+			ev.TargetID = "other"
+			_, err := tx.RetireObligationVersion("o", 1, 2, ev)
+			return err
+		}, domain.ErrInvalidRecord, nil},
+		{"event targets an item", func(tx store.Tx) error {
+			ev := retireEvent(tx, "e1")
+			ev.TargetKind = domain.TargetItem
+			_, err := tx.RetireObligationVersion("o", 1, 2, ev)
+			return err
+		}, domain.ErrInvalidRecord, nil},
+		{"unallocated sequence", func(tx store.Tx) error {
+			ev := NewLifecycleEvent(sessA, "e1", 1000, domain.TargetObligation, "o")
+			_, err := tx.RetireObligationVersion("o", 1, 2, ev)
+			return err
+		}, domain.ErrInvalidRecord, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := s.Update(ctx, sessA, func(tx store.Tx) error {
+				wantErr(t, c.call(tx), c.want)
+				o, err := tx.Obligation("o")
+				noErr(t, err)
+				evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetObligation})
+				noErr(t, err)
+				if !o.Current || o.Revision != 2 || len(evs) != 0 {
+					t.Errorf("failed retirement left a trace: %+v, %d events", o, len(evs))
+				}
+				return errRollback
+			})
+			wantErr(t, err, errRollback)
+		})
+	}
+	var event domain.LifecycleEvent
+	update(t, s, sessA, func(tx store.Tx) error {
+		event = retireEvent(tx, "retire-o")
+		got, err := tx.RetireObligationVersion("o", 1, 2, event)
+		noErr(t, err)
+		if got.Current || got.RetiredSeq != event.Seq || got.Revision != 3 {
+			t.Errorf("retired = %+v", got)
+		}
+		_, err = tx.RetireObligationVersion("o", 1, 3, retireEvent(tx, "again"))
+		wantErr(t, err, domain.ErrInvalidTransition)
+		return nil
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		o, err := tx.Obligation("o")
+		noErr(t, err)
+		if o.Current || o.RetiredSeq != event.Seq || o.Status != domain.ObligationSatisfied || len(o.EvidenceIDs) != 1 {
+			t.Errorf("retired obligation = %+v, want noncurrent with status and evidence kept", o)
+		}
+		trs, err := tx.ObligationTransitions("o")
+		noErr(t, err)
+		if len(trs) != 1 {
+			t.Errorf("transitions = %d, want 1", len(trs))
+		}
+		evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetObligation, TargetID: "o"})
+		noErr(t, err)
+		assertEqual(t, "audit", evs, []domain.LifecycleEvent{event})
+		return nil
+	})
+}

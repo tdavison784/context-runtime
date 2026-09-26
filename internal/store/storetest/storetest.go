@@ -91,6 +91,7 @@ var suite = []testCase{
 	{"ObligationVersions", testObligationVersions},
 	{"ObligationClaim", testObligationClaim},
 	{"ObligationsBySource", testObligationsBySource},
+	{"RetireObligationVersion", testRetireObligationVersion},
 	{"ObligationTransitions", testObligationTransitions},
 	{"MatcherTransition", testMatcherTransition},
 	{"Grants", testGrants},

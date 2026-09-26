@@ -255,6 +255,42 @@ func (t *transaction) InsertObligationVersion(v domain.ObligationVersion) error 
 	}
 	return t.put("obligation", v.ObligationID, int(v.Version), v, false)
 }
+func (t *transaction) RetireObligationVersion(obligationID string, version, expected uint64, event domain.LifecycleEvent) (domain.ObligationVersion, error) {
+	var old domain.ObligationVersion
+	if err := t.get("obligation", obligationID, int(version), &old); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	if old.Revision != expected {
+		return domain.ObligationVersion{}, domain.ErrVersionConflict
+	}
+	if !old.Current {
+		return domain.ObligationVersion{}, fmt.Errorf("%w: obligation %s/%d is already retired", domain.ErrInvalidTransition, obligationID, version)
+	}
+	if event.TargetKind != domain.TargetObligation || event.TargetID != obligationID {
+		return domain.ObligationVersion{}, fmt.Errorf("%w: lifecycle target mismatch", domain.ErrInvalidRecord)
+	}
+	if err := event.Validate(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	if err := t.checkSession(event.SessionID); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	if err := t.checkSeq(event.Seq); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	v := old.Clone()
+	v.Current, v.RetiredSeq, v.Revision = false, event.Seq, expected+1
+	if err := v.Validate(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	err := t.atomic(func() error {
+		if err := t.put("obligation", obligationID, int(version), v, true); err != nil {
+			return err
+		}
+		return t.AppendLifecycleEvent(event)
+	})
+	return v, err
+}
 func (t *transaction) UpdateObligationVersion(v domain.ObligationVersion, expected uint64) (domain.ObligationVersion, error) {
 	var old domain.ObligationVersion
 	err := t.get("obligation", v.ObligationID, int(v.Version), &old)

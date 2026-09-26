@@ -332,6 +332,36 @@ func (t *tx) UpdateObligationVersion(o domain.ObligationVersion, expectedRevisio
 	return next, nil
 }
 
+func (t *tx) RetireObligationVersion(obligationID string, version, expectedRevision uint64, event domain.LifecycleEvent) (domain.ObligationVersion, error) {
+	if err := t.check(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	key := obligationKey{obligationID, version}
+	cur, ok := t.obligations.peek(key)
+	if !ok {
+		return domain.ObligationVersion{}, notFound("obligation", fmt.Sprintf("%s/%d", obligationID, version))
+	}
+	if cur.Revision != expectedRevision {
+		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: revision %d, expected %d: %w",
+			obligationID, version, cur.Revision, expectedRevision, domain.ErrVersionConflict)
+	}
+	if !cur.Current {
+		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d is already retired: %w", obligationID, version, domain.ErrInvalidTransition)
+	}
+	if err := t.checkTargetEvent(event, domain.TargetObligation, obligationID); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	next := cur.Clone()
+	next.Current, next.RetiredSeq, next.Revision = false, event.Seq, expectedRevision+1
+	if err := next.Validate(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	t.obligations.put(key, next)
+	t.lifecycle.put(event.ID, event)
+	t.markSequenced()
+	return next.Clone(), nil
+}
+
 // sameObligation compares versions treating nil and empty evidence alike.
 func sameObligation(a, b domain.ObligationVersion) bool {
 	if len(a.EvidenceIDs) == 0 && len(b.EvidenceIDs) == 0 {

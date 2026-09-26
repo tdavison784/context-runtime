@@ -288,6 +288,16 @@ type Tx interface {
 	// AppendObligationTransition; a differing Status fails with
 	// domain.ErrInvalidTransition.
 	UpdateObligationVersion(o domain.ObligationVersion, expectedRevision uint64) (domain.ObligationVersion, error)
+	// RetireObligationVersion marks a current obligation version noncurrent
+	// and appends its audit event atomically (D13, FR-OBL-006). The stored
+	// Revision must equal expectedRevision (domain.ErrVersionConflict
+	// otherwise); the event must target the obligation (TargetObligation,
+	// TargetID == obligationID) with a Seq allocated in this transaction,
+	// which becomes the version's RetiredSeq (domain.ErrInvalidRecord
+	// otherwise). A version that is already retired fails with
+	// domain.ErrInvalidTransition. Status, evidence, and transitions are
+	// kept. It returns the updated version.
+	RetireObligationVersion(obligationID string, version, expectedRevision uint64, event domain.LifecycleEvent) (domain.ObligationVersion, error)
 	// AppendObligationTransition records a transition and applies it to the
 	// version atomically. The version's Revision must equal
 	// expectedRevision (domain.ErrVersionConflict otherwise), so a matcher
