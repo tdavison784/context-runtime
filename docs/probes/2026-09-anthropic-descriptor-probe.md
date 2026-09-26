@@ -150,7 +150,7 @@ post-edit reasoning itself on every profile rather than rely on the provider che
 | Edit kind | opus-5-5 | sonnet-5 | Verdict |
 |---|---|---|---|
 | APPEND (baseline) | 200, `[]` | 200, `[]` | SAFE |
-| APPEND_SYSTEM: `{"role":"system"}` message appended after the tool_result turn | 200, `[]`, in=695 | 200, `[]`, in=729 | SAFE on both. Sonnet 5 accepted it although the skill docs list it as unsupported there; that it acts with system authority is not verified |
+| APPEND_SYSTEM: `{"role":"system"}` message appended after the tool_result turn | 200, `[]`, in=695 | 200, `[]`, in=729 | Reasoning and cache stay valid on both. Sonnet 5 accepted it although the skill docs list it as unsupported there. **System authority is not verified**, so the descriptor never uses it (ruling 4) |
 | MOVE_CACHE_MARKERS: `cache_control` added to `u0` | 200, `[]` | 200, `[]` | SAFE |
 | ADD_DEFERRED_TOOL: extra `defer_loading: true` tool, no tool search tool | 200, `[]`, in=771 (+93) | 200, `[]`, in=805 | SAFE, but the deferred definition was **billed** (+93 tokens) without a tool search tool |
 | DROP_LEADING_REASONING: remove `a1`'s thinking, keep `a3`'s (history `H3`) | 200, `[]` | 200, `[]` (only `a5` had thinking after `a1`; Sonnet 5 runs no check, so uninformative) | SAFE on opus-5-5 (later block still verified). The removed reasoning was visible to the model (R5), so this is a deliberate loss of older reasoning |
@@ -320,7 +320,7 @@ Anthropic offers three native context features. Docs: `build-with-claude/compact
 | Path | Observed | FR-MAT-005 fit |
 |---|---|---|
 | On-demand: adopt `[assistant{compaction block}, user(restoration + question)]` | 200, in=762, answer obeys the restored rule (values also in hex) | **Checkpoint protocol.** The compaction call generates no task actions, and the runtime chooses what goes after the block |
-| On-demand: adopt `[block, user(question), {"role":"system"}(restoration)]` | 200, in=762, rule obeyed | Restoration can use system authority (APPEND_SYSTEM) |
+| On-demand: adopt `[block, user(question), {"role":"system"}(restoration)]` | 200, in=762, rule obeyed | Accepted and obeyed, but the user-text restoration above was obeyed equally, so this does **not** show that system authority is carried. System placement is UNVERIFIED and not used (ruling 4) |
 | Threshold with `pause_after_compaction: true`, then `[assistant{block}, user(restoration + question)]` with the edit still configured | 200, in=919, rule obeyed | **Pause protocol.** The pausing response held only the summary (no task action), and restoration happened before the next inference |
 | Threshold without pause | not exercised (another $0.22) | Summary and continuation in one response: the runtime cannot restore in between, so under FR-MAT-005 this is "automatic in-request compaction" and stays disabled |
 
@@ -362,7 +362,8 @@ provider-bound opaque state for replay (FR-PROV-005): store `content` + `signatu
 
 Behavior differs by **model**, **account enforcement date** and **request setting**, so the
 profile key must include all three:
-`anthropic/messages-beta/<model>/binding=<error|drop_block|unset>/account=<enforced|legacy>`.
+`anthropic/messages-beta/<model>/binding=<error|drop_block>/account=<enforced|legacy>` (`unset`
+is never sent, per ruling 1).
 Recommendation: the adapter always sends `thinking-binding-controls-2026-08-01` and an
 explicit `prefix_mismatch_behavior`: `error` under REQUIRE, `drop_block` under ALLOW_RESET.
 Then the account date no longer changes behavior, and `input_transformations` is always
@@ -387,7 +388,7 @@ Capabilities{
         MaxBreakpoints:   4,                       // D
         TTLs:             {"5m", "1h"},            // O usage split ephemeral_5m/1h; expiry D
         Automatic:        true,                    // O top-level cache_control + lookback read
-        AppendSystemSafe: true,                    // O (C3 step 4 read 1049)
+        AppendSystemSafe: false,                   // ruling 4: never used; O: read preserved (C3 step 4 read 1049)
         RefusalPersists:  false,                   // O one pair: refused write not readable
     },
     Pricing: Pricing{In: 4.00, Write5m: 5.00, Write1h: 8.00, Read: 0.20, Out: 20.00}, // D, USD/MTok
@@ -402,7 +403,7 @@ Capabilities{
     },
     Edits: map[EditKind]EditSafety{
         APPEND:                 SAFE,     // O (R1)
-        APPEND_SYSTEM:          SAFE,     // O thinking valid + cache read (R1 table, C3)
+        APPEND_SYSTEM:          REJECTED, // ruling 4 policy: never performed; O: provider accepts, thinking and cache stay valid, authority UNVERIFIED
         ADD_DEFERRED_TOOL:      SAFE,     // O thinking valid; deferred definition billed without tool search
         MOVE_CACHE_MARKERS:     SAFE,     // O thinking valid; D cache-neutral
         DROP_LEADING_REASONING: SAFE,     // O later blocks still verify; removed reasoning leaves context (R5)
@@ -415,15 +416,15 @@ Capabilities{
     CompactionProtocol:     "checkpoint: on-demand compact-2026-09-04; pause: compact_20260112 + pause_after_compaction", // O
     CompactionMinimumTrigger: 50_000, // O threshold (400 below); on-demand has none (O at 828 tokens)
     MandatoryPreservation: PreservationRules{
-        RestoreAfterBlock:     "user text or appended role=system message", // O (K2)
+        RestoreAfterBlock:     "user text (system placement UNVERIFIED, ruling 4)", // O user text obeyed (K2)
         KeptTurnsThinkingValid: true,  // O on-demand, system/tools unchanged (D condition)
         ThresholdReinsertedThinking: "strip or drop_block", // D
         SummaryIntegrity:      "on-demand signed (compaction_content_mismatch); threshold unsigned+editable", // O
         LosesMedia:            true,  // D images/documents/URLs in the summarized range
         CostInIterations:      true,  // O top-level usage is 0 on a compaction response
     },
-    ContextEditing:        true,  // O clear_thinking applied; server-side edits are not history edits
-    MidConversationSystem: true,  // O accepted, thinking-safe, cache-safe
+    ContextEditing:        false, // ruling 5 (unverified); O: clear_thinking applied without invalidating thinking, clear_tool_uses did not apply
+    MidConversationSystem: false, // ruling 4; O: accepted, thinking-safe, cache-safe, authority UNVERIFIED
     NativeMemory:          false, // A: memory_20250818 is a client-executed tool (D), not provider memory; not probed
 }
 ```
@@ -443,16 +444,17 @@ Same as Opus 5.5 except:
     Edits[REWRITE]: SAFE,                 // O with post-edit reasoning stripped (RW1, RW2)
     // replaying post-edit reasoning is accepted with STALE reasoning and never reported (R4):
     // the adapter must strip it itself; the provider offers no safety net here.
-    MidConversationSystem: true, // O accepted (200, cache-safe), though the skill docs say unsupported; system authority not verified -> treat as UNVERIFIED
-    CompactionProtocol: "checkpoint (on-demand)",   // O K1 only; adoption/restore/threshold not run on this model (A: same as Opus)
-    ContextEditing: true,                            // O models API capability only; not exercised
+    Edits[APPEND_SYSTEM]: REJECTED,       // ruling 4 policy: never performed; O accepted (200, cache-safe)
+    MidConversationSystem: false,         // ruling 4; O accepted although the skill docs say unsupported; authority UNVERIFIED
+    CompactionProtocol: "checkpoint (on-demand)",   // O K1 only; adoption/restore not run on this model (A: same as Opus); threshold deferred to Phase 5 (ruling 3)
+    ContextEditing: false,                // ruling 5 (unverified); models API lists support, not exercised
 ```
 
 ### Consequences for the runtime
 
 1. **T08 is satisfiable natively on Anthropic**: on-demand compaction is a standalone,
    ledgerable call with no task actions. Its block can be persisted; restoration goes after it
-   (user text or appended system message), then a separately prepared inference. Threshold
+   as user text (system placement is unverified, ruling 4), then a separately prepared inference. Threshold
    compaction is acceptable only with `pause_after_compaction: true`. Without pause it is
    automatic in-request compaction and stays disabled (FR-MAT-005).
 2. **T12 is representable**: an open tool round without its reasoning is structurally valid
@@ -494,8 +496,9 @@ Same as Opus 5.5 except:
 
 ## Commander rulings (2026-09-26)
 
-These rulings resolve the open questions above. Where they conflict with the draft
-`Capabilities` values, the rulings take precedence.
+These rulings resolve the open questions above. The draft `Capabilities` blocks have been
+corrected to match them (PR #4 review, SEC-1.4): policy values are fail-closed, and the observed
+facts are kept in the comments.
 
 1. **Reasoning-binding control is always explicit.** The descriptor sets the
    `thinking-binding-controls-2026-08-01` beta and `prefix_mismatch_behavior` explicitly on
