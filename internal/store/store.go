@@ -86,8 +86,9 @@ type Store interface {
 	// write other than blobs, conversations, calls, call attempts, and
 	// TargetCall lifecycle events) must also write at least one record carrying a
 	// sequence number allocated in it (an item, relationship, event record,
-	// obligation version or transition, grant, or non-TargetCall lifecycle
-	// event); otherwise the commit fails with domain.ErrInvalidRecord. The
+	// ingestion receipt, obligation version or transition, grant, or
+	// non-TargetCall lifecycle event); otherwise the commit fails with
+	// domain.ErrInvalidRecord. The
 	// call ledger's preview-staleness check depends on every semantic
 	// change being visible in the sequence (FR-CALL-001). Blobs are exempt
 	// because they are content-addressed and inert until a sequenced record
@@ -137,6 +138,25 @@ type LifecycleFilter struct {
 	TargetKind domain.TargetKind
 	TargetID   string
 	MinSeq     uint64
+}
+
+// DiagnosticFilter selects persisted diagnostics (D16). Viewer is required:
+// a read returns only records whose source access boundary permits it
+// (domain.DiagnosticRecord.VisibleTo), so IDs, ranges, counts, and reasons
+// of spans the viewer cannot see never leave the store. An empty
+// OccurrenceID selects every event. Results are ordered by the event's
+// receipt Seq, then SpanIndex, then Index.
+type DiagnosticFilter struct {
+	Viewer       domain.Principal
+	OccurrenceID string
+}
+
+// CommandFilter selects recorded lifecycle commands (D1) the way
+// DiagnosticFilter selects diagnostics: only records whose source span
+// boundary permits Viewer, ordered by receipt Seq, then Ordinal.
+type CommandFilter struct {
+	Viewer       domain.Principal
+	OccurrenceID string
 }
 
 // CallFilter selects call records. Results are ordered by PreparedSeq
@@ -209,6 +229,23 @@ type ReadTx interface {
 	// caller retiring bound obligations never misses one.
 	ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error)
 	ObligationTransitions(obligationID string) ([]domain.ObligationTransition, error)
+	// Receipt returns the immutable receipt of an accepted event by its
+	// occurrence ID (D14): the original item values, diagnostics, commands,
+	// links, and execution versions exactly as InsertIngestion stored them,
+	// even after later lifecycle changes. A caller-keyed event's occurrence
+	// is domain.CallerOccurrenceID(session, EventID), so ingestion looks an
+	// EventID up before allocating any sequence number. The receipt is the
+	// submitting principal's (its PayloadHash covers the principal); callers
+	// compare the request before returning it and never expose it to
+	// another principal.
+	Receipt(occurrenceID string) (domain.IngestReceipt, error)
+	// Envelope returns the replayable request stored with a receipt.
+	Envelope(occurrenceID string) (domain.EventEnvelope, error)
+	// Diagnostics returns the persisted diagnostics f selects (D16). A
+	// viewer that fails validation is domain.ErrInvalidRecord.
+	Diagnostics(f DiagnosticFilter) ([]domain.DiagnosticRecord, error)
+	// LifecycleCommands returns the recorded commands f selects (D1).
+	LifecycleCommands(f CommandFilter) ([]domain.LifecycleCommandRecord, error)
 	Grant(id string) (domain.MutationGrant, error)
 	// Grants returns every grant in the session ordered by ID.
 	Grants() ([]domain.MutationGrant, error)
@@ -241,6 +278,20 @@ type Tx interface {
 	// existed=true without writing; with a different request it fails with
 	// domain.ErrEventIDConflict.
 	InsertEvent(e domain.EventRecord) (stored domain.EventRecord, existed bool, err error)
+
+	// InsertIngestion stores an accepted event's replayable envelope and
+	// immutable receipt, with the receipt's item snapshots, diagnostic
+	// records, and lifecycle command records, in one indivisible write
+	// (D14, D16, D1). Both must validate, name this session, and agree on
+	// occurrence, EventID, principal, and payload hash; receipt.Seq must be
+	// allocated in this transaction; every receipt item must be stored in
+	// this session, with its Seq allocated in this transaction and its
+	// stored value equal to the snapshot; every link target and resolved
+	// command target must be a stored item (domain.ErrInvalidRecord
+	// otherwise). Reusing an occurrence fails with domain.ErrEventIDConflict
+	// when the payload hash differs and domain.ErrImmutable otherwise. It
+	// is a sequenced semantic write.
+	InsertIngestion(env domain.EventEnvelope, receipt domain.IngestReceipt) error
 
 	// InsertItem stores a new immutable item. Its Version must be 1 and its
 	// Seq must be allocated in this transaction. Every image or document part
@@ -329,8 +380,9 @@ type Tx interface {
 	// reserved for the call ledger (internal/invocation), and a TargetCall
 	// event's Seq is never shared with a semantic record: at commit, a
 	// sequence number used by a TargetCall event and by an item,
-	// relationship, event record, obligation version or transition, grant,
-	// or non-TargetCall lifecycle event fails with domain.ErrInvalidRecord,
+	// relationship, event record, ingestion receipt, obligation version or
+	// transition, grant, or non-TargetCall lifecycle event fails with
+	// domain.ErrInvalidRecord,
 	// so a semantic write cannot hide behind a ledger sequence number
 	// (FR-CALL-001). Ledger records (calls, attempts) may share it.
 	AppendLifecycleEvent(e domain.LifecycleEvent) error

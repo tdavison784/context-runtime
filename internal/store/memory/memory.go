@@ -82,6 +82,8 @@ type state struct {
 	convs        map[string]domain.Conversation
 	calls        map[string]domain.CallRecord
 	attempts     map[attemptKey]domain.CallAttempt
+	receipts     map[string]domain.IngestReceipt // by occurrence ID
+	envelopes    map[string]domain.EventEnvelope // by occurrence ID
 }
 
 func newState() *state {
@@ -105,6 +107,8 @@ func newState() *state {
 		convs:        map[string]domain.Conversation{},
 		calls:        map[string]domain.CallRecord{},
 		attempts:     map[attemptKey]domain.CallAttempt{},
+		receipts:     map[string]domain.IngestReceipt{},
+		envelopes:    map[string]domain.EventEnvelope{},
 	}
 }
 

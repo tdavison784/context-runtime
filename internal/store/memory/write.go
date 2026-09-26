@@ -32,7 +32,8 @@ var _ store.Tx = (*tx)(nil)
 func (t *tx) commit(st *state) bool {
 	wrote := t.items.dirty() || t.rels.dirty() || t.events.dirty() || t.blobs.dirty() ||
 		t.directives.dirty() || t.obligations.dirty() || t.transitions.dirty() || t.grants.dirty() ||
-		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty()
+		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty() ||
+		t.receipts.dirty() || t.envelopes.dirty()
 	t.items.commit()
 	t.rels.commit()
 	t.supersedes.commit()
@@ -52,6 +53,8 @@ func (t *tx) commit(st *state) bool {
 	t.convs.commit()
 	t.calls.commit()
 	t.attempts.commit()
+	t.receipts.commit()
+	t.envelopes.commit()
 	st.lastSeq = t.lastSeq
 	return wrote
 }
@@ -757,6 +760,9 @@ func (t *tx) checkLedgerSeqs() error {
 	for _, g := range t.grants.over {
 		seqs = append(seqs, g.IssuedSeq)
 	}
+	for _, r := range t.receipts.over {
+		seqs = append(seqs, r.Seq)
+	}
 	for _, e := range t.lifecycle.over {
 		if e.TargetKind != domain.TargetCall {
 			seqs = append(seqs, e.Seq)
@@ -767,5 +773,48 @@ func (t *tx) checkLedgerSeqs() error {
 			return invalid("sequence %d is used by both a TargetCall event and a semantic record", seq)
 		}
 	}
+	return nil
+}
+
+func (t *tx) InsertIngestion(env domain.EventEnvelope, r domain.IngestReceipt) error {
+	if err := t.check(); err != nil {
+		return err
+	}
+	if err := store.ValidateIngestion(t.sessionID, env, r); err != nil {
+		return err
+	}
+	if old, ok := t.receipts.peek(r.OccurrenceID); ok {
+		if old.PayloadHash != r.PayloadHash {
+			return fmt.Errorf("occurrence %s: %w", r.OccurrenceID, domain.ErrEventIDConflict)
+		}
+		return fmt.Errorf("receipt %s: %w", r.OccurrenceID, domain.ErrImmutable)
+	}
+	if err := t.fresh("receipt "+r.OccurrenceID, r.Seq); err != nil {
+		return err
+	}
+	for _, snap := range r.Items {
+		stored, ok := t.items.peek(snap.ID)
+		if !ok || !t.Allocated(snap.Seq) || !store.ReceiptItemMatches(stored, snap) {
+			return invalid("receipt %s: item %s is not the item this transaction stored", r.OccurrenceID, snap.ID)
+		}
+	}
+	for _, links := range [][]domain.IngestLink{r.Duplicates, r.Replacements} {
+		for _, l := range links {
+			if !t.items.has(l.TargetID) {
+				return invalid("receipt %s: link target %s is not stored", r.OccurrenceID, l.TargetID)
+			}
+		}
+	}
+	for _, c := range r.Lifecycle {
+		if c.Resolution != domain.TargetResolved {
+			continue
+		}
+		if it, ok := t.items.peek(c.ResolvedItemID); !ok || c.ResolvedVersion > it.Version {
+			return invalid("receipt %s: resolved command target is not stored", r.OccurrenceID)
+		}
+	}
+	t.receipts.put(r.OccurrenceID, r)
+	t.envelopes.put(env.OccurrenceID, env)
+	t.markSequenced()
 	return nil
 }

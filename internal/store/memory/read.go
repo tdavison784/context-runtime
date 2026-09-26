@@ -40,6 +40,8 @@ type readTx struct {
 	convs        table[string, domain.Conversation]
 	calls        table[string, domain.CallRecord]
 	attempts     table[attemptKey, domain.CallAttempt]
+	receipts     table[string, domain.IngestReceipt]
+	envelopes    table[string, domain.EventEnvelope]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -67,6 +69,8 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		convs:        newTable(st.convs, writable, same[domain.Conversation]),
 		calls:        newTable(st.calls, writable, domain.CallRecord.Clone),
 		attempts:     newTable(st.attempts, writable, same[domain.CallAttempt]),
+		receipts:     newTable(st.receipts, writable, domain.IngestReceipt.Clone),
+		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
 	}
 }
 
@@ -441,5 +445,78 @@ func currentDirectives(r store.ReadTx, taskID, directiveID string) ([]string, er
 		out = append(out, ids...)
 	}
 	slices.Sort(out)
+	return out, nil
+}
+
+func (r *readTx) Receipt(occurrenceID string) (domain.IngestReceipt, error) {
+	if err := r.check(); err != nil {
+		return domain.IngestReceipt{}, err
+	}
+	v, ok := r.receipts.get(occurrenceID)
+	if !ok {
+		return domain.IngestReceipt{}, notFound("receipt", occurrenceID)
+	}
+	return v, nil
+}
+
+func (r *readTx) Envelope(occurrenceID string) (domain.EventEnvelope, error) {
+	if err := r.check(); err != nil {
+		return domain.EventEnvelope{}, err
+	}
+	v, ok := r.envelopes.get(occurrenceID)
+	if !ok {
+		return domain.EventEnvelope{}, notFound("envelope", occurrenceID)
+	}
+	return v, nil
+}
+
+// visibleReceipts returns the receipts an occurrence filter selects, ordered
+// by Seq, after validating the viewer.
+func (r *readTx) visibleReceipts(viewer domain.Principal, occurrenceID string) ([]domain.IngestReceipt, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if err := viewer.Validate(); err != nil {
+		return nil, err
+	}
+	var out []domain.IngestReceipt
+	for occ, rec := range r.receipts.all() {
+		if occurrenceID == "" || occ == occurrenceID {
+			out = append(out, rec)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.IngestReceipt) int { return cmp.Compare(a.Seq, b.Seq) })
+	return out, nil
+}
+
+func (r *readTx) Diagnostics(f store.DiagnosticFilter) ([]domain.DiagnosticRecord, error) {
+	recs, err := r.visibleReceipts(f.Viewer, f.OccurrenceID)
+	if err != nil {
+		return nil, err
+	}
+	out := []domain.DiagnosticRecord{}
+	for _, rec := range recs {
+		for _, d := range rec.Diagnostics {
+			if d.VisibleTo(f.Viewer) {
+				out = append(out, d)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *readTx) LifecycleCommands(f store.CommandFilter) ([]domain.LifecycleCommandRecord, error) {
+	recs, err := r.visibleReceipts(f.Viewer, f.OccurrenceID)
+	if err != nil {
+		return nil, err
+	}
+	out := []domain.LifecycleCommandRecord{}
+	for _, rec := range recs {
+		for _, c := range rec.Lifecycle {
+			if c.Access.Permits(f.Viewer) {
+				out = append(out, c)
+			}
+		}
+	}
 	return out, nil
 }
