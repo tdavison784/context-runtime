@@ -21,27 +21,55 @@ func (i RegisterResourceIntent) Validate() error {
 	return semanticBoundary(i.Reporter.SessionID, i.Access)
 }
 
+// ResourcePathContent reports canonical resource-relative content at the
+// resulting authoritative revision. Missing entries do not assert content.
+type ResourcePathContent struct{ Path, ContentHash string }
+
+func (c ResourcePathContent) Validate() error {
+	p, err := cleanResourcePath(c.Path, false)
+	if err != nil || p != c.Path || !ValidHash(c.ContentHash) {
+		return invalid("resource path content: canonical path and content hash required")
+	}
+	return nil
+}
+
+func (c ResourcePathContent) Clone() ResourcePathContent { return c }
+
 type ReportResourceChangeIntent struct {
 	RequestID, ResourceID                                                           string
 	ExpectedRevision, ExpectedAuthoritativeRevision, ResultingAuthoritativeRevision uint64
 	WorkspaceFingerprint                                                            string
 	Resynchronization, AllPaths                                                     bool
-	ChangedPaths                                                                    []string `canonical:"set"`
+	ChangedPaths                                                                    []string              `canonical:"set"`
+	PathContents                                                                    []ResourcePathContent `canonical:"set"`
 }
 
 func (i ReportResourceChangeIntent) Clone() ReportResourceChangeIntent {
 	i.ChangedPaths = slices.Clone(i.ChangedPaths)
+	i.PathContents = slices.Clone(i.PathContents)
 	return i
 }
 func (i ReportResourceChangeIntent) Validate() error {
 	if !semanticID(i.RequestID) || !semanticID(i.ResourceID) || i.ResultingAuthoritativeRevision <= i.ExpectedAuthoritativeRevision || !ValidHash(i.WorkspaceFingerprint) || i.AllPaths && len(i.ChangedPaths) > 0 {
 		return invalid("resource report: invalid identity/revision/coverage")
 	}
+	paths := make(map[string]bool, len(i.ChangedPaths))
 	for _, p := range i.ChangedPaths {
 		c, err := cleanResourcePath(p, false)
-		if err != nil || c != p {
+		if err != nil || c != p || paths[p] {
 			return invalid("resource report: noncanonical path")
 		}
+		paths[p] = true
+	}
+	contents := make(map[string]bool, len(i.PathContents))
+	for _, c := range i.PathContents {
+		if err := c.Validate(); err != nil {
+			return err
+		}
+		if contents[c.Path] || !i.AllPaths && !i.Resynchronization && !paths[c.Path] {
+			return invalid("resource report: duplicate or uncovered path content")
+		}
+		contents[c.Path] = true
 	}
 	return nil
 }

@@ -389,7 +389,12 @@ func (t *transaction) InsertGrant(v domain.MutationGrant) error {
 	if v.RevokedSeq != 0 {
 		return fmt.Errorf("%w: new grant cannot be revoked", domain.ErrInvalidRecord)
 	}
-	return t.put("grant", v.ID, 0, v, false)
+	return t.atomic(func() error {
+		if err := t.put("grant", v.ID, 0, v, false); err != nil {
+			return err
+		}
+		return t.indexGrant(v)
+	})
 }
 func (t *transaction) RevokeGrant(id string, event domain.LifecycleEvent) (domain.MutationGrant, error) {
 	v, err := t.Grant(id)
