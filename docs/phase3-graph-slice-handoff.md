@@ -13,6 +13,24 @@ Priority worker contracts (independently cherry-pickable onto the seed):
   enforce this at commit. Projection origin equals the linked result's origin.
   The schema manifest contains the updated enforcement requirements.
 
+W7 contract additions:
+
+- `73e4026`: ResolveLifecycleCommand returns LifecycleAuthorization with an
+  empty GrantID. It resolves candidates and kind/state mismatches without
+  reading grants or predicting a sequence. Execution authorizes at its actual
+  allocated sequence.
+- `436facb`: domain.NewSemanticEventEnvelope owns v3 validation, effective limits
+  and immutable blob snapshots; delete the temporary ingest implementation.
+- `330a077`: domain.OutcomeEventID(OutcomeBinding) returns (string, error), using
+  the registered context-runtime/ingest/outcome-event-id/v1 canonical domain.
+- `917a379`: Event.Operations payload RequestID must be empty. Ingest derives
+  OperationRequestID(session, occurrence, opIndex, ordinal) after acceptance;
+  ValidateResolved requires the derived ID and resolved references.
+- `6594958`: graph.DeclareCreation(tx, item, CreationAcceptance) is the shared
+  declaration writer. CreationAcceptance supplies PolicyVersion,
+  AcceptedAttributes, ObligationDeclarationHash and SupportIDs. Stored item
+  defaults are authoritative. Insert the item, declare it, then call SameDirective.
+
 Graph integration changes:
 
 - SameDirective compares persisted creation declarations under the canonical
@@ -36,6 +54,9 @@ Graph integration changes:
   source/lease/nested dependencies. Projection dependency coverage must have
   LEASE_DEPENDENCY purpose. LinkDerived now writes normalized PROVENANCE only;
   legacy range/frontier metadata cannot authorize new semantic coverage.
+- Every persisted coverage member ID equals member.Key(), scoped by its parent
+  CoverageID. Direct-source and projection dependency regression tests reproduce
+  rejection of the former graph-generated IDs before the fix.
 
 Domain vet/race and focused graph behavioral tests pass. Repository compilation
 and vet pass. Full repository race tests remain red during integration: W2's
@@ -65,3 +86,10 @@ This list excludes this handoff document's own final commit.
 - `4de4268` fix(graph): retain original projection leases in derived coverage (P3-6/30)
 - `f14ef05` fix(graph): route derivation writes through normalized provenance (P3-6)
 - `53c8a97` fix(graph): authorize delegated source replacement at edge sequence (P3-1/4/11)
+- `1f0ca5f` docs(graph): record worker contract hashes and graph integration handoff (P3-41 W5/6)
+- `73e4026` feat(graph): resolve lifecycle commands without mutation authorization (P3-1/35 W7-a)
+- `436facb` feat(domain): own v3 event envelope blob snapshots (P3-40 W7-b)
+- `330a077` feat(domain): register canonical bound outcome event IDs (P3-34 W7-c)
+- `917a379` fix(domain): forbid caller request IDs in submitted operation payloads (P3-2/34 W7-d)
+- `6594958` feat(graph): centralize immutable creation declaration acceptance (P3-4/25 W7-e)
+- `41444e6` fix(graph): use canonical coverage member keys as IDs (P3-6 W5)

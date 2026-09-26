@@ -20,6 +20,15 @@ type coverageLinkBackend struct {
 
 func (t *coverageLinkTx) SemanticTransaction() (store.SemanticTx, error) { return t.backend, nil }
 func (b *coverageLinkBackend) InsertCoverage(c domain.CoverageRecord, members []domain.CoverageMember) error {
+	for _, member := range members {
+		key, err := member.Key()
+		if err != nil {
+			return err
+		}
+		if member.ID != key {
+			return domain.ErrIntegrity
+		}
+	}
 	b.inserts++
 	b.coverage, b.members = c.Clone(), members
 	return c.Validate()
