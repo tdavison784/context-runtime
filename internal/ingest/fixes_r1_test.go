@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -198,5 +199,55 @@ func TestRecordsNeverRevealHiddenVersions_SEC22(t *testing.T) {
 			}
 			return err
 		})
+	})
+}
+
+// countingStore counts write transactions.
+type countingStore struct {
+	store.Store
+	updates *int
+}
+
+func (s countingStore) Update(ctx context.Context, sessionID string, fn func(store.Tx) error) error {
+	*s.updates++
+	return s.Store.Update(ctx, sessionID, fn)
+}
+
+// TestOverLimitNewEventsStayOutOfWriteTx_SEC21: F3 still replays a known
+// EventID whatever the limits, but a NEW event over the configured limits
+// is rejected by size alone, before its payload is copied or hashed and
+// without ever entering the session write transaction; an input over the
+// hard, non-configurable ceiling is rejected before anything else, even as
+// a retry.
+func TestOverLimitNewEventsStayOutOfWriteTx_SEC21(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		known := userEvent("known", strings.Repeat("k", 2048), false)
+		f.mustIngest(user, known)
+		updates := 0
+		f.s = countingStore{f.s, &updates}
+		f.in.Limits = domain.Limits{MaxSpanBytes: 1024, MaxEventBytes: 1024, MaxBlobBytes: 1024}
+		big := domain.InputPart{Type: domain.PartImage, MediaType: "image/png", Data: make([]byte, 4096)}
+		for name, e := range map[string]domain.Event{
+			"anonymous":   {Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(), Parts: []domain.InputPart{big}}}},
+			"new EventID": {EventID: "new", Kind: domain.EventUser, Spans: []domain.Span{{Authority: domain.AuthorityUser, Access: taskAccess(), Parts: []domain.InputPart{big}}}},
+		} {
+			if _, err := f.ingest(user, e); !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Errorf("%s: err = %v, want a limit rejection", name, err)
+			}
+		}
+		if updates != 0 {
+			t.Errorf("over-limit new events entered %d write transactions, want 0", updates)
+		}
+		if _, err := f.ingest(user, known); err != nil {
+			t.Errorf("known EventID retry over the limits: %v (F3)", err)
+		}
+
+		defer func(v uint64) { hardMaxEventBytes = v }(hardMaxEventBytes)
+		hardMaxEventBytes = 1024
+		updates = 0
+		if _, err := f.ingest(user, known); !errors.Is(err, domain.ErrInvalidRecord) || updates != 0 {
+			t.Errorf("over the hard ceiling: err = %v, updates %d; want rejection before any transaction", err, updates)
+		}
 	})
 }
