@@ -119,16 +119,11 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 		}
 	}
 	if v.Type == domain.RelSupersedes {
+		if err := t.loadSupersession(); err != nil {
+			return err
+		}
 		cycle, err := domain.WouldCreateCycle(v.FromID, v.ToID, func(id string) ([]string, error) {
-			rs, err := t.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: id})
-			if err != nil {
-				return nil, err
-			}
-			out := make([]string, 0, len(rs))
-			for _, r := range rs {
-				out = append(out, r.ToID)
-			}
-			return out, nil
+			return t.supersession[id], nil
 		})
 		if err != nil {
 			return err
@@ -142,7 +137,40 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 		b, _ := json.Marshal(v.Coverage.ItemIDs)
 		meta.coverageItemIDs = string(b)
 	}
-	return t.put("relationship", v.ID, 0, meta, v, false)
+	if err := t.put("relationship", v.ID, 0, meta, v, false); err != nil {
+		return err
+	}
+	if v.Type == domain.RelSupersedes {
+		t.supersession[v.FromID] = append(t.supersession[v.FromID], v.ToID)
+	}
+	return nil
+}
+
+// The graph is loaded once per transaction. Cycle walks then use the
+// transaction's own edges without issuing a SQL query for every visited node.
+func (t *transaction) loadSupersession() error {
+	if t.supersessionLoaded {
+		return nil
+	}
+	rows, err := t.conn.QueryContext(t.ctx, "SELECT from_id,to_id FROM records WHERE session_id=? AND kind='relationship' AND state=?", t.session, string(domain.RelSupersedes))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	graph := make(map[string][]string)
+	for rows.Next() {
+		var from, to string
+		if err := rows.Scan(&from, &to); err != nil {
+			return err
+		}
+		graph[from] = append(graph[from], to)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	t.supersession = graph
+	t.supersessionLoaded = true
+	return nil
 }
 func (t *transaction) SetCurrentDirective(taskID, directiveID, itemID string) error {
 	v, err := t.Item(itemID)
@@ -446,6 +474,9 @@ func (t *transaction) PutConversation(v domain.Conversation, expected uint64) (d
 func (t *transaction) InsertCall(v domain.CallRecord) error {
 	if err := v.Validate(); err != nil {
 		return err
+	}
+	if v.State != domain.CallPrepared || v.Attempts != 0 {
+		return domain.ErrInvalidTransition
 	}
 	if err := t.checkSession(v.SessionID); err != nil {
 		return err

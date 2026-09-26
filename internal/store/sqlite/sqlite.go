@@ -253,12 +253,14 @@ func (s *Store) View(ctx context.Context, session string, fn func(store.ReadTx) 
 }
 
 type transaction struct {
-	conn      *sql.Conn
-	ctx       context.Context
-	session   string
-	last      uint64
-	allocated map[uint64]bool
-	writable  bool
+	conn               *sql.Conn
+	ctx                context.Context
+	session            string
+	last               uint64
+	allocated          map[uint64]bool
+	writable           bool
+	supersession       map[string][]string
+	supersessionLoaded bool
 }
 
 var _ store.Tx = (*transaction)(nil)
