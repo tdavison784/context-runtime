@@ -17,9 +17,9 @@ type lifecycleCall struct {
 }
 
 // fakeLifecycle stands in for W3's lifecycle service to test ingest's
-// command routing only: it applies the FR-DIR-005 effect with CAS and
-// returns a frozen result. It performs no authorization of its own unless
-// deny is set.
+// command routing only: it authorizes at the actual sequence the way the
+// Phase 2 preview did, applies the FR-DIR-005 effect with CAS and returns a
+// frozen result. deny forces a refusal. It is never gate evidence.
 type fakeLifecycle struct {
 	calls *[]lifecycleCall
 	deny  error
@@ -44,6 +44,21 @@ func (l fakeLifecycle) apply(tx store.Tx, a domain.LifecycleAction, actor domain
 	if err != nil {
 		return LifecycleOutcome{}, err
 	}
+	// Authorize like the Phase 2 preview, but at the actual sequence, so a
+	// routed command never gains authority the real service would deny.
+	grants, err := tx.Grants()
+	if err != nil {
+		return LifecycleOutcome{}, err
+	}
+	action := domain.ActionResolve
+	if a == domain.LifecycleUnpin {
+		action = domain.ActionUnpin
+	}
+	auth, err := domain.AuthorizeMutation(domain.MutationRequest{Actor: actor, Action: action, Grants: grants, Seq: seq,
+		Targets: []domain.MutationTarget{{ID: before.ID, Authority: before.Authority, Access: before.Access}}})
+	if err != nil {
+		return LifecycleOutcome{}, err
+	}
 	audit := "life_" + in.RequestID
 	after, err := tx.UpdateItem(in.ItemID, in.ExpectedVersion, ch, domain.LifecycleEvent{
 		ID: audit, SessionID: actor.SessionID, Seq: seq, TargetKind: domain.TargetItem, TargetID: in.ItemID, Action: string(a), Actor: actor})
@@ -54,7 +69,7 @@ func (l fakeLifecycle) apply(tx store.Tx, a domain.LifecycleAction, actor domain
 		return domain.ObservedItemState{Source: domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash}, Version: it.Version,
 			Currentness: domain.ItemCurrent, GoalStatus: it.GoalStatus, Generation: it.Generation, Residency: it.Residency, Authority: it.Authority, Expiry: domain.ExpiryLive}
 	}
-	return LifecycleOutcome{MutationReceiptID: "mut_" + in.RequestID, Result: domain.ItemMutationResult{
+	return LifecycleOutcome{MutationReceiptID: "mut_" + in.RequestID, GrantID: auth.GrantIDs[before.ID], Result: domain.ItemMutationResult{
 		ItemID: in.ItemID, BeforeVersion: before.Version, AfterVersion: after.Version, Before: observe(before), After: observe(after), AuditID: audit}}, nil
 }
 
@@ -150,9 +165,9 @@ func TestCommandsV2_DetailRedaction(t *testing.T) {
 	})
 }
 
-// TestCommandsV2_AbortsAtomically (P3-35, R7): an unauthorized command, or
-// an execution the lifecycle service refuses at its actual sequence,
-// aborts the whole event with no command record; a resolvable command with
+// TestCommandsV2_AbortsAtomically (P3-35, R7): an unauthorized command,
+// which the lifecycle executor refuses at its actual sequence, aborts the
+// whole event with no command record; a resolvable command with
 // no lifecycle executor fails closed. Unresolvable commands need no
 // executor and are recorded as not executed.
 func TestCommandsV2_AbortsAtomically(t *testing.T) {
@@ -176,15 +191,17 @@ func TestCommandsV2_AbortsAtomically(t *testing.T) {
 			_, err := f.ingest(user, userEvent("deny", "## Remember\n- n\n## Resolve [G]\n", true))
 			return err
 		})
-		if len(calls) != 0 {
-			t.Fatalf("an unauthorized command reached the executor")
+		// Resolution reads no grants; the executor denies at the actual
+		// sequence and the whole event rolls back (P3-1).
+		if len(calls) != 1 {
+			t.Fatalf("executor calls = %d", len(calls))
 		}
 		f.in.Lifecycle = fakeLifecycle{calls: &calls, deny: domain.ErrInvalidAuthorityPromotion}
 		f.requireAtomic(domain.ErrInvalidAuthorityPromotion, func() error {
 			_, err := f.ingest(sys, sysEvent("late-deny", "## Remember\n- n\n## Resolve [G]\n"))
 			return err
 		})
-		if len(calls) != 1 || !errors.Is(f.in.Lifecycle.(fakeLifecycle).deny, domain.ErrInvalidAuthorityPromotion) {
+		if len(calls) != 2 || !errors.Is(f.in.Lifecycle.(fakeLifecycle).deny, domain.ErrInvalidAuthorityPromotion) {
 			t.Fatalf("executor calls = %d", len(calls))
 		}
 	})

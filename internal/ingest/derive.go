@@ -322,8 +322,7 @@ func (r *run) derivedSlotHeldAbove(actor domain.Principal, it domain.ContextItem
 }
 
 // lifecycle records one parsed Resolve/Unpin at its position in event
-// order (D1, R7, R14). The target is resolved and authorized for the
-// span's source actor. Missing and inaccessible targets are the same
+// order (D1, R7, R14). The target is resolved for the span's source actor. Missing and inaccessible targets are the same
 // NOT_FOUND diagnostic, several are AMBIGUOUS, and a target of the wrong
 // kind or state is MISMATCH (naming the target); none of these abort. An
 // unauthorized command aborts the event (R7).
@@ -361,7 +360,14 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 		diag = &domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range, ParserVersion: directive.ParserVersion}
 	}
 	actorOwn := domain.AccessBoundary{Scope: detail.Scope, SessionID: c.actor.SessionID, WorkflowID: c.actor.WorkflowID, TaskID: c.actor.TaskID, AgentID: c.actor.AgentID}
-	auth, err := graph.AuthorizeLifecycleCommand(r.tx, r.p, r.p.TaskID, cmd)
+	// Phase 3 resolves without reading grants or predicting a sequence; the
+	// lifecycle executor authorizes at the actual allocated sequence (P3-1,
+	// W1 73e4026). Frozen v2 keeps the Phase 2 read-only preview (D1, R7).
+	resolve := graph.ResolveLifecycleCommand
+	if r.pol == nil {
+		resolve = graph.AuthorizeLifecycleCommand
+	}
+	auth, err := resolve(r.tx, r.p, r.p.TaskID, cmd)
 	var outcome domain.CommandOutcome
 	switch {
 	case err == nil:
