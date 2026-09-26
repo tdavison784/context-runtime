@@ -20,8 +20,8 @@
 // allocated by NextSeq in the same transaction; otherwise the write fails
 // with domain.ErrInvalidRecord. This keeps commit order and audit order equal.
 //
-// Compare-and-swap rule: every Update*/Put* method takes the expected current
-// Version or Revision (0 to create). On success the store itself writes
+// Compare-and-swap rule: every Update*/Put* method except PutCallAttempt
+// takes the expected current Version or Revision (0 to create). On success the store itself writes
 // expected+1, ignoring the Version/Revision value in the argument, and
 // returns the stored record; a mismatch fails with domain.ErrVersionConflict.
 //
@@ -178,21 +178,30 @@ type Tx interface {
 	// domain.ErrInvalidTransition.
 	UpdateObligationVersion(o domain.ObligationVersion, expectedRevision uint64) (domain.ObligationVersion, error)
 	// AppendObligationTransition records a transition and applies it to the
-	// version atomically: From must equal the version's current status, the
-	// version must be current, and the version's Status becomes To, its
-	// EvidenceIDs become the transition's evidence (for SATISFIED) or empty,
-	// and its Revision increments. It returns the updated version.
-	AppendObligationTransition(t domain.ObligationTransition) (domain.ObligationVersion, error)
+	// version atomically. The version's Revision must equal
+	// expectedRevision (domain.ErrVersionConflict otherwise), so a matcher
+	// that evaluated evidence against an earlier revision cannot apply its
+	// result after the obligation changed in between (FR-OBL-005, INV-16).
+	// From must equal the version's current status and the version must be
+	// current. The version's Status becomes To, its EvidenceIDs become the
+	// transition's evidence (for SATISFIED) or empty, and its Revision
+	// increments. It returns the updated version.
+	AppendObligationTransition(t domain.ObligationTransition, expectedRevision uint64) (domain.ObligationVersion, error)
 
 	// InsertGrant stores a grant. Callers must first check
 	// domain.AuthorizeGrantIssuance against the grant's targets.
 	InsertGrant(g domain.MutationGrant) error
-	// RevokeGrant sets RevokedSeq on a grant that is not already revoked.
-	RevokeGrant(id string, seq uint64) error
+	// RevokeGrant sets RevokedSeq (event.Seq) on a grant that is not already
+	// revoked and appends the audit event atomically; the event must target
+	// the grant (TargetGrant) with a Seq allocated in this transaction.
+	// Callers must first check domain.AuthorizeGrantRevocation.
+	RevokeGrant(id string, event domain.LifecycleEvent) (domain.MutationGrant, error)
 
 	// PutTask creates a task (expectedVersion 0) or replaces it under
-	// compare-and-swap on Version.
-	PutTask(t domain.TaskState, expectedVersion uint64) (domain.TaskState, error)
+	// compare-and-swap on Version. A change of Status (and task creation)
+	// requires event, a TargetTask audit event with a Seq allocated in this
+	// transaction, appended atomically; otherwise event must be nil.
+	PutTask(t domain.TaskState, expectedVersion uint64, event *domain.LifecycleEvent) (domain.TaskState, error)
 
 	// AppendLifecycleEvent appends an audit event. TargetCall events are
 	// reserved for the call ledger (internal/invocation).
@@ -208,10 +217,24 @@ type Tx interface {
 	// UpdateCall replaces a call record under compare-and-swap on Revision.
 	// The state change must satisfy domain.ValidCallTransition (or leave the
 	// state unchanged), frozen proposal fields cannot change, and the
-	// one-reserving-call rule of InsertCall holds.
+	// one-reserving-call rule of InsertCall holds. Leaving SENT or UNKNOWN
+	// requires attempt number c.Attempts to be stored already in the
+	// matching closed state, so no transition can outrun its evidence:
+	//
+	//	-> COMPLETED  attempt COMPLETED with OutcomeHash == c.OutcomeHash
+	//	-> FAILED     attempt FAILED with OutcomeHash == c.OutcomeHash
+	//	-> PREPARED   (retry, from SENT only) attempt FAILED and Retryable
+	//	-> UNKNOWN    attempt UNKNOWN
+	//	-> ABANDONED  attempt ABANDONED
+	//
+	// PREPARED -> SENT requires attempt c.Attempts stored as SENT.
+	// Violations fail with domain.ErrInvalidTransition.
 	UpdateCall(c domain.CallRecord, expectedRevision uint64) (domain.CallRecord, error)
-	// PutCallAttempt inserts or updates an attempt keyed by (call, attempt).
-	// Attempts are numbered densely from 1. Once an attempt has an
-	// OutcomeHash, its state and OutcomeHash are immutable.
+	// PutCallAttempt inserts a new attempt (numbered densely from 1, state
+	// SENT, only while its call is PREPARED) or moves an existing attempt
+	// along domain.ValidAttemptTransition. It is the one unversioned write:
+	// the attempt transition table serializes it instead. Closed attempts
+	// (COMPLETED, FAILED, ABANDONED) are immutable, and only State,
+	// OutcomeHash, Retryable, FinishedSeq, and FinishedAt may change.
 	PutCallAttempt(a domain.CallAttempt) error
 }

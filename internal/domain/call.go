@@ -310,6 +310,36 @@ func (c CallRecord) Validate() error {
 		if c.OutcomeHash != c.Outcome.OutcomeHash() {
 			return invalid("call %s: outcome hash does not match outcome", c.CallID)
 		}
+		if c.Outcome.State != c.State || c.Outcome.Attempt != c.Attempts {
+			return invalid("call %s: final outcome disagrees with call state or attempt", c.CallID)
+		}
+	} else if c.OutcomeHash != "" {
+		return invalid("call %s: outcome hash without outcome", c.CallID)
+	}
+	// Terminal states carry exactly the evidence that ended them: a
+	// completion or known failure has its final outcome; a cancellation
+	// (FAILED before any attempt) and an abandonment have a reason and no
+	// outcome.
+	switch c.State {
+	case CallCompleted:
+		if c.Outcome == nil {
+			return invalid("call %s: completed call requires its outcome", c.CallID)
+		}
+	case CallFailed:
+		if c.Outcome == nil && c.Reason == "" {
+			return invalid("call %s: failed call requires an outcome or a cancellation reason", c.CallID)
+		}
+		if c.Outcome == nil && c.Attempts != 0 {
+			return invalid("call %s: only an unsent call can fail without an outcome", c.CallID)
+		}
+	case CallAbandoned:
+		if c.Outcome != nil || c.Reason == "" {
+			return invalid("call %s: abandoned call requires a reason and no outcome", c.CallID)
+		}
+	default:
+		if c.Outcome != nil {
+			return invalid("call %s: non-terminal call cannot carry a final outcome", c.CallID)
+		}
 	}
 	if c.State.Terminal() != (c.FinishedSeq != 0) {
 		return invalid("call %s: finished sequence disagrees with state", c.CallID)
@@ -338,6 +368,7 @@ type CallAttempt struct {
 	Attempt           int // starts at 1
 	State             AttemptState
 	OutcomeHash       string // set when the attempt closes with an outcome
+	Retryable         bool   // a FAILED attempt the retry policy may retry
 	ProviderRequestID string
 	SentSeq           uint64
 	FinishedSeq       uint64
@@ -345,15 +376,49 @@ type CallAttempt struct {
 	FinishedAt        time.Time
 }
 
-// Validate checks structural rules.
+// Validate checks structural rules and state consistency: an open attempt
+// (SENT, or UNKNOWN before reconciliation) has no finish or outcome; a
+// COMPLETED or FAILED attempt has both; an ABANDONED attempt is finished
+// without an outcome; only a FAILED attempt can be retryable.
 func (a CallAttempt) Validate() error {
 	if a.CallID == "" || a.SessionID == "" || a.Attempt < 1 || a.SentSeq == 0 {
 		return invalid("call attempt: call, session, attempt number, and sent sequence are required")
 	}
+	finished, hasOutcome := a.FinishedSeq != 0, a.OutcomeHash != ""
+	if hasOutcome && !ValidHash(a.OutcomeHash) {
+		return invalid("call attempt %s/%d: malformed outcome hash", a.CallID, a.Attempt)
+	}
+	if a.Retryable && a.State != AttemptFailed {
+		return invalid("call attempt %s/%d: only a failed attempt can be retryable", a.CallID, a.Attempt)
+	}
 	switch a.State {
-	case AttemptSent, AttemptCompleted, AttemptFailed, AttemptUnknown, AttemptAbandoned:
+	case AttemptSent, AttemptUnknown:
+		if finished || hasOutcome {
+			return invalid("call attempt %s/%d: open attempt cannot be finished", a.CallID, a.Attempt)
+		}
+	case AttemptCompleted, AttemptFailed:
+		if !finished || !hasOutcome {
+			return invalid("call attempt %s/%d: closed attempt requires finish sequence and outcome", a.CallID, a.Attempt)
+		}
+	case AttemptAbandoned:
+		if !finished || hasOutcome {
+			return invalid("call attempt %s/%d: abandoned attempt is finished without an outcome", a.CallID, a.Attempt)
+		}
 	default:
 		return invalid("call attempt %s/%d: invalid state %q", a.CallID, a.Attempt, a.State)
 	}
 	return nil
+}
+
+// ValidAttemptTransition reports whether an attempt may move from -> to:
+// SENT closes as COMPLETED, FAILED, or UNKNOWN; UNKNOWN is reconciled to
+// COMPLETED or FAILED, or ABANDONED. Closed attempts are immutable.
+func ValidAttemptTransition(from, to AttemptState) bool {
+	switch from {
+	case AttemptSent:
+		return to == AttemptCompleted || to == AttemptFailed || to == AttemptUnknown
+	case AttemptUnknown:
+		return to == AttemptCompleted || to == AttemptFailed || to == AttemptAbandoned
+	}
+	return false
 }
