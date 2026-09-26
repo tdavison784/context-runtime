@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"testing"
@@ -144,4 +145,43 @@ func workingItems(r domain.IngestReceipt) int {
 		}
 	}
 	return n
+}
+
+// TestWorking_DerivedIDAcrossAuthorities_DUR15 is DUR-1.5 (ruling option
+// A): identical Working text under two authorities shares a derived ID. A
+// same-or-higher authority supersedes by ID; a lower authority's section is
+// refused R13-style with a diagnostic while the rest of its event applies;
+// explicit IDs keep by-ID replacement, so a lower-authority explicit
+// restatement still aborts.
+func TestWorking_DerivedIDAcrossAuthorities_DUR15(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		sys := principal(domain.AuthoritySystem)
+		f.mustIngest(sys, userEvent("u0", "hi", false))
+		f.mustIngest(sys, sysEvent("s1", "## Working\n- a\n- b\n"))
+
+		r := f.mustIngest(sys, userEvent("u1", "## Working\n- a\n- c\n## Remember\n- kept\n", true))
+		if !hasDiag(r, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict) || workingItems(r) != 0 {
+			t.Errorf("lower-authority Working: items %d diags %+v", workingItems(r), r.Diagnostics)
+		}
+		if _, ok := byDirective(r, domain.DerivedDirectiveID("remember", domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: "kept"}}))); !ok {
+			t.Errorf("the rest of the event was not applied")
+		}
+		if got := f.currentWorking(); !slices.Equal(got, []string{"a", "b"}) {
+			t.Errorf("SYSTEM snapshot disturbed: %v", got)
+		}
+
+		// A higher authority supersedes the lower one's identical line.
+		f.mustIngest(sys, userEvent("u2", "## Working\n- x\n- y\n", true))
+		f.mustIngest(sys, sysEvent("s2", "## Working\n- x\n"))
+		if got := f.currentWorking(); !slices.Equal(got, []string{"y", "x"}) {
+			t.Errorf("after SYSTEM restates x: current %v, want [y x]", got)
+		}
+
+		// Explicit IDs keep by-ID replacement: a lower-authority explicit
+		// restatement of a SYSTEM member aborts.
+		f.mustIngest(sys, sysEvent("s3", "## Working\n- [status] green\n"))
+		if _, err := f.ingest(sys, userEvent("u3", "## Working\n- [status] red\n", true)); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Errorf("explicit lower-authority restatement: err = %v", err)
+		}
+	})
 }
