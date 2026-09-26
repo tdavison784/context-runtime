@@ -72,6 +72,27 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 			_, err := r.SubjectStatesByResource("repo", page)
 			return err
 		}},
+		{"ProofDependencies", []string{"session_id", "f_proof_id"}, func(r store.SemanticReader) error { _, err := r.ProofDependencies("p", page); return err }},
+		{"TransitionsByVersion", []string{"session_id", "f_obligation_id", "f_version"}, func(r store.SemanticReader) error {
+			_, err := r.TransitionsByVersion(domain.ObligationRef{SessionID: "s", ObligationID: "o", Version: 1}, page)
+			return err
+		}},
+		{"ObligationsByTaskOwner", []string{"session_id", "f_access_task_id"}, func(r store.SemanticReader) error {
+			_, err := r.ObligationsByTaskOwner("task", page)
+			return err
+		}},
+		{"CurrentBoundObligationsBySubject", []string{"session_id", "f_target_subject_key"}, func(r store.SemanticReader) error {
+			_, err := r.CurrentBoundObligationsBySubject("sub", page)
+			return err
+		}},
+		{"CurrentProofsByDependency(path)", []string{"session_id", "resource_id"}, func(r store.SemanticReader) error {
+			_, err := r.CurrentProofsByDependency("repo", "k", page)
+			return err
+		}},
+		{"CurrentProofsByDependency(all)", []string{"session_id", "resource_id"}, func(r store.SemanticReader) error {
+			_, err := r.CurrentProofsByDependency("repo", "", page)
+			return err
+		}},
 	}
 	for _, rd := range reads {
 		var q string
@@ -109,6 +130,7 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 		{[]string{"session_id", "f_id"}, "SELECT id FROM rec_resource_binding WHERE session_id=? AND f_id=?"},
 		{[]string{"session_id", "f_resource_id", "f_request_id"}, "SELECT id FROM rec_resource_update WHERE session_id=? AND f_resource_id=? AND f_request_id=?"},
 		{[]string{"session_id", "f_state_semantic_meta_id"}, "SELECT id FROM rec_subject_state WHERE session_id=? AND f_state_semantic_meta_id=?"},
+		{[]string{"session_id", "f_declaration_semantic_meta_id"}, "SELECT id FROM rec_obligation_declaration WHERE session_id=? AND f_declaration_semantic_meta_id=?"},
 		{[]string{"session_id", "f_type", "f_to_id"}, "SELECT 1 FROM rec_relationship WHERE session_id=? AND f_type=? AND f_to_id=? LIMIT 1"},
 		{[]string{"session_id", "f_type", "f_from_id"}, "SELECT 1 FROM rec_relationship WHERE session_id=? AND f_type=? AND f_from_id=? LIMIT 1"},
 	} {
