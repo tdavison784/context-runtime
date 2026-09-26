@@ -262,6 +262,10 @@ func (r *run) workingSection(c unitCtx, si int) error {
 	if err != nil {
 		return err
 	}
+	for range res.Unverified {
+		r.unitDiags = append(r.unitDiags, scopedDiag{domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: domain.ItemUnverified,
+			Reason: domain.ReasonUnverifiedItem, Range: sec.Range}, c.transcript.Access})
+	}
 	for i, ii := range sec.ItemIndexes {
 		r.written[c.res.Items[ii].Range] = members[i].Access
 	}
