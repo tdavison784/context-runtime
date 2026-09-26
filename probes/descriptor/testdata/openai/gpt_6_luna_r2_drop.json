@@ -1,0 +1,152 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_r2_drop",
+  "request": {
+    "input": [
+      {
+        "content_length": 145,
+        "role": "user"
+      },
+      {
+        "name": "lookup",
+        "type": "function_call"
+      },
+      {
+        "type": "function_call_output"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-luna",
+    "reasoning": {
+      "effort": "medium"
+    },
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790427287,
+    "created_at": 1790427286,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "9ca7d13da50300df140bda43ef48a99bf923cc29bc5f59ae0ddaad5ac84b358c"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 160,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1548,
+          "sha256": "f574e7588200c14d45aa69f18c4091472936e07d0b43558b9d27db1d20e8a160"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "d45004457703282497717cc6624234291c1e6079a3410db577b2fe77b562df63"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1272,
+          "sha256": "309a67db93c89fc2f52f4eecb573086bade71896d2696aba9f9bc1c45bc9a8d3"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "3f68a343c267887e3400ef70e237a7278bb0aa1c5187310be6c284b868e66c02"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "I called lookup with code A, but the remainder is 13 (odd), so the required code was B.",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "1178f3aba23df74a7577ebe8615f35449569d97bd7b089406338f0cce0635b78"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 71,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 139,
+      "output_tokens_details": {
+        "reasoning_tokens": 110
+      },
+      "total_tokens": 210
+    },
+    "user": "[redacted]"
+  }
+}

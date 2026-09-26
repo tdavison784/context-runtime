@@ -1,0 +1,17 @@
+{
+  "endpoint": "/responses",
+  "error": "POST \"https://api.openai.com/v1/responses\": 400 Bad Request {\n    \"message\": \"Invalid value: '24h'. Supported values are: '30m'.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": \"prompt_cache_options.ttl\",\n    \"code\": \"invalid_value\"\n  }",
+  "name": "gpt_6_astra_c4_ttl_24h",
+  "request": {
+    "input": {
+      "kind": "string",
+      "length": 9
+    },
+    "max_output_tokens": 32,
+    "model": "gpt-6-astra",
+    "prompt_cache_options": {
+      "ttl": "24h"
+    },
+    "store": false
+  }
+}
