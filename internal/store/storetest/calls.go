@@ -333,6 +333,19 @@ func testCallEvidence(t *testing.T, s store.Store) {
 		wantErr(t, errOf(tx.UpdateCall(completed, c.Revision)), domain.ErrInvalidTransition)
 		step(t, tx, c, domain.CallAbandoned)
 		return nil
+	}) // A completed attempt justifies only the outcome it recorded.
+	update(t, s, sessA, func(tx store.Tx) error {
+		c := walk(t, tx, "h", "conv3", domain.CallSent)
+		completed := Finish(c, domain.CallCompleted, tx.NextSeq())
+		recorded := *completed.Outcome
+		recorded.Response = []byte("a different response")
+		recorded.ResponseHash = domain.HashBytes(recorded.Response)
+		noErr(t, tx.PutCallAttempt(CloseAttempt(latestAttempt(t, tx, c), domain.AttemptCompleted, recorded.OutcomeHash(), completed.FinishedSeq)))
+		wantErr(t, errOf(tx.UpdateCall(completed, c.Revision)), domain.ErrInvalidTransition)
+		completed.Outcome, completed.OutcomeHash = &recorded, recorded.OutcomeHash()
+		_, err := tx.UpdateCall(completed, c.Revision)
+		noErr(t, err)
+		return nil
 	})
 }
 
