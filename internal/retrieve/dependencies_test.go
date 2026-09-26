@@ -142,3 +142,42 @@ func TestProjectionRejectsCyclicAndOverBudgetCoverage(t *testing.T) {
 		t.Fatalf("over-budget coverage = %v", err)
 	}
 }
+
+func TestDerivedRepresentationRetainsProjectionLeaseAndNestedCoverage(t *testing.T) {
+	d := dependencyFixture(t)
+	projected := storetest.NewItem("s", d.Projection.ItemID, 6, "copied history")
+	projected.Role, projected.Kind, projected.Authority = domain.RoleProjection, domain.KindToolResult, domain.AuthorityTool
+	projected.Scope, projected.Access = domain.ScopeAgent, d.Projection.Access
+	projected.Source = &domain.SourceRef{Kind: domain.SourceItem, Locator: d.Projection.Source.ItemID, ContentHash: d.Projection.Source.ContentHash}
+	derived := storetest.NewItem("s", "derived", 7, "summary")
+	derived.Scope, derived.Access = domain.ScopeAgent, d.Projection.Access
+	root := domain.CoverageRecord{SemanticMeta: domain.SemanticMeta{ID: "representation", SessionID: "s", Seq: 8, SchemaVersion: domain.SemanticSchemaV1},
+		Purpose: domain.CoverageRepresentation, Access: derived.Access, MemberCount: 3}
+	projectedRef := domain.ItemContentRef{ItemID: projected.ID, ContentHash: projected.ContentHash}
+	originalRef := d.Projection.Source
+	members := []domain.CoverageMember{
+		{SemanticMeta: domain.SemanticMeta{ID: "projected-member", SessionID: "s", Seq: 8, SchemaVersion: domain.SemanticSchemaV1}, CoverageID: root.ID, Source: &projectedRef},
+		{SemanticMeta: domain.SemanticMeta{ID: "lease-member", SessionID: "s", Seq: 8, SchemaVersion: domain.SemanticSchemaV1}, CoverageID: root.ID, Source: &originalRef, LeaseID: d.Projection.LeaseID},
+		{SemanticMeta: domain.SemanticMeta{ID: "nested-member", SessionID: "s", Seq: 8, SchemaVersion: domain.SemanticSchemaV1}, CoverageID: root.ID, NestedCoverageID: d.Projection.DependencyCoverageID},
+	}
+	slices.SortFunc(members, func(a, b domain.CoverageMember) int { x, _ := a.Key(); y, _ := b.Key(); return cmp.Compare(x, y) })
+	root.Signature, _ = domain.CoverageSignature(root, members)
+	d.Coverages[root.ID], d.Members[root.ID] = root, members
+	d.Sources[projected.ID] = projected
+	d.Projections = map[string]domain.ProjectionRecord{projected.ID: d.Projection}
+	d.Derived, d.RootCoverageID, d.SnapshotSeq = derived, root.ID, 8
+	d.Link = storetest.NewRelationship("s", "derived-link", domain.RelDerivedFrom, derived.ID, projected.ID, 8)
+	d.Link.CoverageID = root.ID
+	if err := CheckRepresentationDependencies(d); err != nil {
+		t.Fatalf("complete inherited coverage = %v", err)
+	}
+	d.Conversation.LogicalCalls = 2
+	if err := CheckRepresentationDependencies(d); !errors.Is(err, domain.ErrLeaseExpired) {
+		t.Fatalf("expired inherited lease = %v", err)
+	}
+	d.Conversation.LogicalCalls = 0
+	delete(d.Projections, projected.ID)
+	if err := CheckRepresentationDependencies(d); !errors.Is(err, domain.ErrIncompleteCoverage) {
+		t.Fatalf("missing projection companion = %v", err)
+	}
+}
