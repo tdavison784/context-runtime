@@ -649,8 +649,10 @@ is `internal/ingest`'s own code, not caller data).
 
 §7/8, FR-PER-002/003, ADR 3.
 
-Phase 2's `IngestResult`/receipt types are internal until the public
-service signature is settled: R3 keeps them in `internal/ingest` (or
+Phase 2's `domain.IngestReceipt` (the type this decision originally called
+`IngestResult`; no `IngestResult` type exists — SPEC-2.2) is internal
+until the public service signature is settled: R3 keeps it in
+`internal/ingest` (or
 `internal/domain`), *not* aliased from the root package — the root package
 aliases only `Event`/`Span` input types (SDD §8's `Ingest(...)
 ([]ContextItem, error)` signature change to return items plus
@@ -1555,8 +1557,8 @@ each with its own fix and test.
   dotted IDs like `agent.status`, so a prefix reservation would
   retroactively make an otherwise-legal directive ID illegal; a typed
   namespace field is additive instead.
-- **M8/R3:** exporting the rich Phase 2 `IngestResult` as a root-package
-  alias now (the review's original phrasing, "if the public API will
+- **M8/R3:** exporting the rich Phase 2 `domain.IngestReceipt` as a
+  root-package alias now (the review's original phrasing, "if the public API will
   return items plus diagnostics/commands") was narrowed by R3 to
   explicitly not do so until the SDD §8 signature itself changes in
   Phase 5 — an early alias would let Phase 2's internal shape leak into the
@@ -1707,7 +1709,7 @@ for the whole section.
   arbitrary/unsupported explicit relationship field is rejected wholesale;
   relationship-shaped JSON inside tool text produces no edge.
 - **§19 (API shape):** static/import-boundary check — the root package
-  aliases only `Event`/`Span`, not `IngestResult`; `internal/store/storetest`
+  aliases only `Event`/`Span`, not `domain.IngestReceipt`; `internal/store/storetest`
   — an upgrade/restart parity fixture for a pre-Phase-2 record read after
   the new migrations land.
 - **§20 (round 2 rulings, R9-R15):** `internal/graph`/`internal/store` —
@@ -1872,13 +1874,18 @@ Five open questions, all resolved by commander ruling:
   obligation claim X" stays with ADR 8 / Phase 3; it is not this ADR's or
   Phase 2's decision to make.
 - **SDD §8 `Runtime.Ingest` signature amendment (§19, deferred to Phase 5
-  by R3) — resolved, drafted in a later round.** The amendment will be
-  added to this ADR as an explicit **unapplied** proposal — a "Required SDD
-  amendment" subsection, not "applied" — once `p2-ingest`'s `IngestResult`
-  shape has actually stabilized against the landed contract/parser/store/
-  graph work; drafting it now, before that shape exists, would risk
-  proposing a signature Phase 2's own implementation then contradicts. Not
-  yet drafted as of this ADR revision.
+  by R3) — resolved: the disposition is decided, the drafting is
+  deliberately deferred (SPEC-2.2: "drafted in a later round" read as
+  already done, which contradicted the sentence beneath it — reworded).**
+  The amendment will be added to this ADR as an explicit **unapplied**
+  proposal — a "Required SDD amendment" subsection, not "applied" — once
+  `p2-ingest`'s `domain.IngestReceipt` shape has actually stabilized
+  against the landed contract/parser/store/graph work; drafting it now,
+  before that shape exists, would risk proposing a signature Phase 2's own
+  implementation then contradicts. **Not yet drafted as of this ADR
+  revision — that absence is the resolution, not a gap in it:** the open
+  question was *whether* to draft it now or later, and the ruling was
+  later, once Phase 5 actually implements `Runtime.Ingest`.
 - **`graph.Supersede`'s per-event audit-ID collision (§7, Consequences) —
   resolved.** `p2-graph` versions the audit identity (rather than
   restructuring D11's planned edge set to guarantee at most one retirement
@@ -1950,7 +1957,7 @@ commander rulings R1-R8 (`phase2-amendments.md`) overriding eight of them,
 followed by seven further rounds of worker questions and rulings (R9-R21)
 as recorded above.
 
-**(SPEC-1.4, 2026-09-27) Phase 2 code landed** across `internal/domain`,
+**(SPEC-1.4, 2026-09-26) Phase 2 code landed** across `internal/domain`,
 `internal/policy`, `internal/directive`, `internal/store` (memory and
 SQLite), `internal/graph`, and `internal/ingest`, and the decision groups
 above were re-verified and corrected against it in place (each correction
@@ -1963,7 +1970,7 @@ F1-F6, every named DUR/SEC/SPEC/TEST finding, and the SPEC-1.10/SPEC-1.11
 rulings are all landed and recorded above with grep-verified test
 citations, not intended designs.
 
-**(2026-09-27) Final reconciliation pass complete.** Every statement in
+**(2026-09-26) Final reconciliation pass complete.** Every statement in
 this ADR was checked against the code at the merged integration head, not
 assumed from a commit message or an earlier draft; three genuine drift
 points were caught and fixed in the process — F1's access-filtered lookup
@@ -1974,7 +1981,7 @@ convention (§13/§28); and SPEC-1.11's fix, R21's fix, and R20's fix had
 all landed since this ADR's previous revision described them as pending.
 This ADR is ready for the commander to move from Proposed to Accepted at
 Phase 2 exit, pending only the open questions recorded above (§ Open
-questions). **(2026-09-27) The SDD §11/§15 amendment SPEC-1.13 flagged is
+questions). **(2026-09-26) The SDD §11/§15 amendment SPEC-1.13 flagged is
 applied:** by commander ruling, SDD §11 item 2 now names "ADR 19." and
 §15 lists it as item 19 ("Directive parsing and ingestion (grammar
 deviations, parse units, ingestion pipeline, receipts, dedup/replacement/
