@@ -365,6 +365,11 @@ func AuthorizeSupersession(actor Principal, superseding, superseded ContextItem)
 	if !superseding.Access.Permits(actor) || !superseded.Access.Permits(actor) {
 		return ErrNotFound
 	}
+	if superseding.Namespace == NamespaceObservation || superseded.Namespace == NamespaceObservation {
+		if actor.Authority != AuthoritySystem && actor.Authority != AuthorityHarness || superseding.Namespace != NamespaceObservation || superseded.Namespace != NamespaceObservation || superseding.Authority != AuthorityTool || superseded.Authority != AuthorityTool || superseding.DirectiveID != superseded.DirectiveID || superseding.TaskID != superseded.TaskID {
+			return ErrInvalidAuthorityPromotion
+		}
+	}
 	switch actor.Authority {
 	case AuthoritySystem, AuthorityHarness, AuthorityUser:
 	case AuthorityAgent:

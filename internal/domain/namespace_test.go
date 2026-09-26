@@ -62,3 +62,20 @@ func TestExplicitNamespaceOverridesLegacyShape(t *testing.T) {
 		t.Fatal("unknown namespace downgraded to legacy")
 	}
 }
+
+func TestObservationSupersessionRequiresTrustedRuleActor(t *testing.T) {
+	access := AccessBoundary{Scope: ScopeTask, SessionID: "s", TaskID: "t"}
+	old := ContextItem{ID: "old", SessionID: "s", TaskID: "t", Authority: AuthorityTool, Access: access, Namespace: NamespaceObservation, DirectiveID: "sub_" + HashBytes(nil)[7:]}
+	newItem := old
+	newItem.ID = "new"
+	for _, authority := range []Authority{AuthorityTool, AuthorityAgent, AuthorityUser} {
+		p := Principal{SessionID: "s", TaskID: "t", Authority: authority}
+		if AuthorizeSupersession(p, newItem, old) == nil {
+			t.Fatal("untrusted observation supersession", authority)
+		}
+	}
+	p := Principal{SessionID: "s", TaskID: "t", Authority: AuthorityHarness}
+	if err := AuthorizeSupersession(p, newItem, old); err != nil {
+		t.Fatal(err)
+	}
+}
