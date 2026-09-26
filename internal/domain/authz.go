@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // Action is a lifecycle mutation subject to the common authorization matrix
@@ -240,27 +241,76 @@ func findGrant(r MutationRequest, t MutationTarget) (string, bool) {
 }
 
 // AuthorizeGrantIssuance checks that g's issuer may issue it for targets,
-// which must be exactly the records named by g.TargetIDs (FR-AUTH-002). The
-// issuer must access every target (ErrNotFound otherwise, so issuance cannot
-// probe for existence) and hold authority at least each target's. Revocation
-// requires the same check against the revoking principal.
+// which must be exactly the records named by g.TargetIDs, each once
+// (FR-AUTH-002). Callers load targets from the store in the issuing
+// transaction. The issuer must access every target (ErrNotFound otherwise,
+// checked before authority so issuance cannot probe for existence) and hold
+// authority at least each target's.
 func AuthorizeGrantIssuance(g MutationGrant, targets []MutationTarget) error {
 	if err := g.Validate(); err != nil {
 		return err
 	}
-	if len(targets) != len(g.TargetIDs) {
+	if err := sameTargetSet(g, targets); err != nil {
+		return err
+	}
+	return authorizeOver(g.Issuer, targets)
+}
+
+// AuthorizeGrantRevocation checks that actor may revoke g: actor must be
+// SYSTEM, HARNESS, or USER in the grant's session, access every target, and
+// hold authority at least each target's (FR-AUTH-002). targets must be
+// exactly the records g names.
+func AuthorizeGrantRevocation(actor Principal, g MutationGrant, targets []MutationTarget) error {
+	if err := actor.Validate(); err != nil {
+		return err
+	}
+	if actor.SessionID != g.SessionID {
+		return ErrNotFound
+	}
+	if err := sameTargetSet(g, targets); err != nil {
+		return err
+	}
+	if !actor.Authority.CanHoldLifecycleAuthority() {
+		for _, t := range targets {
+			if !t.Access.Permits(actor) {
+				return ErrNotFound
+			}
+		}
+		return ErrInvalidAuthorityPromotion
+	}
+	return authorizeOver(actor, targets)
+}
+
+func sameTargetSet(g MutationGrant, targets []MutationTarget) error {
+	named := map[string]bool{}
+	for _, id := range g.TargetIDs {
+		if named[id] {
+			return invalid("grant %s: duplicate target %s", g.ID, id)
+		}
+		named[id] = true
+	}
+	if len(targets) != len(named) {
 		return invalid("grant %s: targets do not match target IDs", g.ID)
 	}
+	seen := map[string]bool{}
 	for _, t := range targets {
-		if !slices.Contains(g.TargetIDs, t.ID) {
-			return invalid("grant %s: target %s is not named by the grant", g.ID, t.ID)
+		if !named[t.ID] || seen[t.ID] {
+			return invalid("grant %s: targets do not match target IDs", g.ID)
 		}
-		if !t.Access.Permits(g.Issuer) {
+		seen[t.ID] = true
+	}
+	return nil
+}
+
+// authorizeOver checks access to every target before any authority check.
+func authorizeOver(p Principal, targets []MutationTarget) error {
+	for _, t := range targets {
+		if !t.Access.Permits(p) {
 			return ErrNotFound
 		}
 	}
 	for _, t := range targets {
-		if !g.Issuer.Authority.AtLeast(t.Authority) {
+		if !p.Authority.AtLeast(t.Authority) {
 			return ErrInvalidAuthorityPromotion
 		}
 	}
@@ -278,23 +328,27 @@ func AuthorizeGrantIssuance(g MutationGrant, targets []MutationTarget) error {
 // TOOL and RETRIEVED_CONTENT actors never create SUPERSEDES edges: tool
 // output cannot suppress state (section 9). Deterministic observation rules
 // (FR-REL-007) run under a trusted SYSTEM or HARNESS principal. An AGENT
-// actor may supersede only AGENT items, which covers keyed agent writes
-// (FR-TOOL-002).
+// actor may supersede only a keyed agent write with the same key
+// (FR-TOOL-002): both items AGENT authority with the same "agent." directive
+// ID. Access is checked before anything else, so an inaccessible endpoint
+// always yields ErrNotFound and never reveals its authority.
 func AuthorizeSupersession(actor Principal, superseding, superseded ContextItem) error {
 	if err := actor.Validate(); err != nil {
 		return err
 	}
+	if !superseding.Access.Permits(actor) || !superseded.Access.Permits(actor) {
+		return ErrNotFound
+	}
 	switch actor.Authority {
 	case AuthoritySystem, AuthorityHarness, AuthorityUser:
 	case AuthorityAgent:
-		if superseding.Authority != AuthorityAgent || superseded.Authority != AuthorityAgent {
+		if superseding.Authority != AuthorityAgent || superseded.Authority != AuthorityAgent ||
+			!strings.HasPrefix(superseding.DirectiveID, AgentKeyID("")) ||
+			superseding.DirectiveID != superseded.DirectiveID {
 			return ErrInvalidAuthorityPromotion
 		}
 	default:
 		return ErrInvalidAuthorityPromotion
-	}
-	if !superseding.Access.Permits(actor) || !superseded.Access.Permits(actor) {
-		return ErrNotFound
 	}
 	if superseding.SessionID != superseded.SessionID || superseding.Access != superseded.Access {
 		return ErrInvalidAuthorityPromotion
