@@ -75,6 +75,9 @@ func sanitizeValue(key string, v any) any {
 }
 
 func sanitizeString(key, s string) string {
+	if isDigest(s) {
+		return s // already sanitized; keeps Sanitize idempotent
+	}
 	if looksSecret(s) {
 		return "<redacted-secret>"
 	}
@@ -99,6 +102,11 @@ func Digest(s string, keep int) string {
 		prefix = prefix[:keep]
 	}
 	return fmt.Sprintf("%s…[len=%d sha256=%s]", prefix, len(s), hex.EncodeToString(sum[:8]))
+}
+
+func isDigest(s string) bool {
+	i := strings.LastIndex(s, "…[len=")
+	return i >= 0 && strings.HasSuffix(s, "]") && strings.Contains(s[i:], " sha256=")
 }
 
 func looksSecret(s string) bool {

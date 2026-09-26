@@ -50,3 +50,21 @@ func TestSanitizeEmptyBody(t *testing.T) {
 		t.Fatalf("got %q, %v", out, err)
 	}
 }
+
+func TestSanitizeIsIdempotent(t *testing.T) {
+	body := `{"signature":"` + strings.Repeat("Qk", 200) + `","text":"` + strings.Repeat("x", 2000) + `"}`
+	once, err := Sanitize([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	twice, err := Sanitize(once)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(once) != string(twice) {
+		t.Fatalf("second pass changed output:\n%s\n%s", once, twice)
+	}
+	if !strings.Contains(string(once), "len=400") {
+		t.Fatalf("signature length not preserved: %s", once)
+	}
+}
