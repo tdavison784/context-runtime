@@ -239,9 +239,10 @@ echo isn't returned), and `status: "incomplete"` here is due to `max_output_toke
 to compaction. Verdict for K2: automatic/inline compaction happens **inline with inference** in one
 round trip — it is not a separate checkpoint/pause operation the runtime must complete before the
 next model call, unlike the manual `/responses/compact` endpoint (K1a), which *is* a distinct
-operation. The runtime can therefore use the manual endpoint as the FR-MAT-005 checkpoint
-primitive, but should not rely on the automatic `context_management` path to provide a
-pause-before-continue boundary — it decides and applies inline.
+operation. The manual endpoint therefore has the *shape* of a CHECKPOINT protocol (it is a
+distinct operation), but it cannot satisfy FR-MAT-005 until a restoration placement is proven
+(RULING 2, RULING 4); the automatic `context_management` path offers no pause-before-continue
+boundary at all — it decides and applies inline.
 
 **K2 — mandatory-restoration message after compaction: accepted; effectiveness not demonstrated
 (no control; the marker was already present in the echoed plaintext).**
