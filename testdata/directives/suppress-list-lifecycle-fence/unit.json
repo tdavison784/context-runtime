@@ -1,0 +1,12 @@
+{
+  "description": "A fenced lifecycle target is never a command, and the fence drops every target of the section (SPEC-1.1, R17).",
+  "requirements": [
+    "FR-DIR-006",
+    "D5",
+    "R17",
+    "SPEC-1.1"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}

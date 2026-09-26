@@ -1,0 +1,107 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_2ee8b8b7e1db410b787e7cf41952d5ef",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Pinned\n- a \u003c!--\n- [evil3] commented\n  --\u003e\n"
+        }
+      ],
+      "content_hash": "sha256:0fb794ae641210ca5c93b05db721155818805d2763a8ede94cc0d1ee794c4529"
+    },
+    {
+      "ref": "event#1",
+      "id": "itm_4e297dbf888fd2d3937343a196a11548",
+      "kind": "instruction",
+      "generation": "DURABLE",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "HIGH",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Pinned\n- a \u003c!--\n- [evil3] commented\n  --\u003e\n"
+        }
+      ],
+      "content_hash": "sha256:b096fb615e5252b4d967c348637b15914ff9cd6a59b5f11815e70b9ee285e4df",
+      "source_ranges": [
+        {
+          "transcript": "event#0",
+          "part": 0,
+          "range": [
+            0,
+            45
+          ],
+          "slices": [
+            [
+              0,
+              45
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "type": "DERIVED_FROM",
+      "from": "event#1",
+      "to": "event#0",
+      "authority": "SYSTEM",
+      "coverage": [
+        "event#0"
+      ]
+    }
+  ],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "PINNED",
+      "range": [
+        19,
+        44
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "html_comment",
+      "section": "PINNED",
+      "range": [
+        19,
+        38
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

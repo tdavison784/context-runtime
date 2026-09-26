@@ -1,0 +1,59 @@
+{
+  "seq": 4,
+  "items": [
+    {
+      "ref": "event#0",
+      "id": "itm_2adfa97d2481cf85f4b7ea75c76619df",
+      "role": "TRANSCRIPT",
+      "kind": "conversation",
+      "generation": "WORKING",
+      "authority": "SYSTEM",
+      "scope": "SESSION",
+      "access": {
+        "scope": "SESSION",
+        "task_id": "T"
+      },
+      "residency": "RESIDENT",
+      "retention": "NORMAL",
+      "created_turn": 1,
+      "has_turn_id": true,
+      "parts": [
+        {
+          "text": "## Unpin\n- [a]\n```\n- [evil]\n```\n"
+        }
+      ],
+      "content_hash": "sha256:b93d7369df6d0e18a8350b9049c6ba1481808d973edc0dd61c09eed036086cf1"
+    }
+  ],
+  "relationships": [],
+  "obligations": [],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "span": 0,
+      "part": 0,
+      "index": 0,
+      "code": "ErrMalformedDirective",
+      "reason": "invalid_syntax",
+      "section": "UNPIN",
+      "range": [
+        15,
+        31
+      ],
+      "access_scope": "TASK"
+    },
+    {
+      "span": 0,
+      "part": 0,
+      "index": 1,
+      "code": "ErrMalformedDirective",
+      "reason": "fenced_code",
+      "section": "UNPIN",
+      "range": [
+        15,
+        18
+      ],
+      "access_scope": "TASK"
+    }
+  ]
+}

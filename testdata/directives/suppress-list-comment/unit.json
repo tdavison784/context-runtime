@@ -1,0 +1,12 @@
+{
+  "description": "A bullet inside a comment opened after an earlier bullet never starts an item, and poisons the list (SPEC-1.1).",
+  "requirements": [
+    "FR-DIR-006",
+    "D5",
+    "R17",
+    "SPEC-1.1"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false,
+  "no_directives": true
+}
