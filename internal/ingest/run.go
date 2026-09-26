@@ -50,6 +50,7 @@ type run struct {
 	opResults        []domain.OperationResult   // in operation order (P3-34)
 	mutationReceipts []string                   // typed operations' receipts, in order
 	created          map[string]Created         // operation alias -> what it created
+	unitOp           uint64                     // operation (or span) index being ingested
 }
 
 func isNotFound(err error) bool { return errors.Is(err, domain.ErrNotFound) }
@@ -87,6 +88,7 @@ func (r *run) apply() (domain.IngestReceipt, error) {
 	}
 	if r.e.Operations == nil {
 		for si := range r.e.Spans {
+			r.unitOp = uint64(si)
 			if err := r.ingestSpan(si); err != nil {
 				return domain.IngestReceipt{}, err
 			}
@@ -110,6 +112,7 @@ func (r *run) operation(oi int, op domain.SemanticOperation) error {
 		return r.typedOperation(oi, op)
 	}
 	si, from := op.Span.Index, len(r.items)
+	r.unitOp = uint64(oi)
 	if err := r.ingestSpan(si); err != nil {
 		return err
 	}
@@ -294,6 +297,9 @@ func (r *run) transcript(si int, span domain.Span) (domain.ContextItem, error) {
 // commit writes the replayable envelope and the immutable receipt, with its
 // diagnostic and lifecycle-command records, in one store write (D14, D16).
 func (r *run) commit() (domain.IngestReceipt, error) {
+	if err := r.settleItems(); err != nil {
+		return domain.IngestReceipt{}, err
+	}
 	rc := domain.IngestReceipt{
 		SessionID:     r.p.SessionID,
 		OccurrenceID:  r.occurrence,
@@ -335,6 +341,27 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 		return domain.IngestReceipt{}, err
 	}
 	return rc.Clone(), nil
+}
+
+// settleItems refreshes the receipt's snapshot of every item this event
+// created that a later step of the same event changed, such as a goal it
+// declared and then resolved (P3-35): the receipt records each item as the
+// event left it, which is what the store holds when the receipt commits.
+// Only executed mutations can change an item after its creation.
+func (r *run) settleItems() error {
+	if len(r.mutationReceipts) == 0 {
+		return nil
+	}
+	for i, it := range r.items {
+		stored, err := r.tx.Item(it.ID)
+		if err != nil {
+			return err
+		}
+		if stored.Version != it.Version {
+			r.items[i] = stored.Clone()
+		}
+	}
+	return nil
 }
 
 // blob stores supplied image/document bytes, or authorizes a reference to

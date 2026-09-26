@@ -47,6 +47,10 @@ type Ingester struct {
 	// Operations executes typed operations by kind (P3-34). A kind with no
 	// handler fails closed with domain.ErrUnsupportedSchema.
 	Operations map[domain.SemanticOperationKind]OperationHandler
+	// Lifecycle executes Resolve/Unpin commands parsed from new events
+	// under a Phase 3 policy (P3-35); a resolved command with no executor
+	// fails closed.
+	Lifecycle LifecycleExecutor
 }
 
 // DefaultLookupLimit is the default bound on one indexed lookup.

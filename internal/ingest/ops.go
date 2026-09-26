@@ -26,6 +26,23 @@ type OperationOutcome struct {
 	Created           Created
 }
 
+// LifecycleExecutor executes a parsed Resolve or Unpin of a new Phase 3
+// event (P3-35) inside the ingestion transaction: the lifecycle service
+// implements it. It authorizes actor at seq, which ingest has allocated,
+// applies the change with CAS on intent.ExpectedVersion, writes its audit
+// and mutation receipt, and returns the frozen result.
+type LifecycleExecutor interface {
+	Resolve(tx store.Tx, actor domain.Principal, intent domain.ResolveIntent, seq uint64) (LifecycleOutcome, error)
+	Unpin(tx store.Tx, actor domain.Principal, intent domain.UnpinIntent, seq uint64) (LifecycleOutcome, error)
+}
+
+// LifecycleOutcome is an executed command's committed receipt, the grant
+// that authorized it if any, and its frozen item result.
+type LifecycleOutcome struct {
+	MutationReceiptID, GrantID string
+	Result                     domain.ItemMutationResult
+}
+
 // ItemVersion is an exact item occurrence at a version.
 type ItemVersion struct {
 	ID      string

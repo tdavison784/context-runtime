@@ -322,12 +322,18 @@ func (r *run) derivedSlotHeldAbove(actor domain.Principal, it domain.ContextItem
 }
 
 // lifecycle records one parsed Resolve/Unpin at its position in event
-// order (D1, R7, R14). The target is resolved and authorized read-only for
-// the span's source actor; nothing is executed, and the record says
-// PARSED_NOT_EXECUTED. Missing and inaccessible targets are the same
+// order (D1, R7, R14). The target is resolved and authorized for the
+// span's source actor. Missing and inaccessible targets are the same
 // NOT_FOUND diagnostic, several are AMBIGUOUS, and a target of the wrong
-// kind or state is MISMATCH (naming the target); none of these abort. An unauthorized command
-// aborts the event (R7).
+// kind or state is MISMATCH (naming the target); none of these abort. An
+// unauthorized command aborts the event (R7).
+//
+// Under a Phase 3 policy the command is new and executes (P3-35): a
+// resolved command runs through the lifecycle executor at its own
+// allocated sequence, with CAS on the resolved version, and its
+// lifecycle-command/v2 record carries the outcome and result under the
+// detail boundary (C-2). A refusal at the actual sequence aborts the event.
+// Without a policy the record is frozen v1 PARSED_NOT_EXECUTED (D1).
 func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 	ordinal := len(r.commands)
 	rec := domain.LifecycleCommandRecord{
@@ -350,31 +356,90 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 	// else a missing target reads exactly like one they cannot see.
 	rec.Access = c.transcript.Access
 	detail := c.transcript.Access
-	diag := func(code domain.DiagnosticCode, reason domain.DiagnosticReason) {
-		r.unitDiags = append(r.unitDiags, scopedDiag{domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range}, detail})
+	var diag *domain.Diagnostic
+	setDiag := func(code domain.DiagnosticCode, reason domain.DiagnosticReason) {
+		diag = &domain.Diagnostic{SpanIndex: c.si, PartIndex: c.pi, Code: code, Reason: reason, Section: string(cmd.Action), Range: cmd.Range, ParserVersion: directive.ParserVersion}
 	}
 	actorOwn := domain.AccessBoundary{Scope: detail.Scope, SessionID: c.actor.SessionID, WorkflowID: c.actor.WorkflowID, TaskID: c.actor.TaskID, AgentID: c.actor.AgentID}
 	auth, err := graph.AuthorizeLifecycleCommand(r.tx, r.p, r.p.TaskID, cmd)
+	var outcome domain.CommandOutcome
 	switch {
 	case err == nil:
 		detail = r.causeAccess(detail, []domain.AccessBoundary{auth.TargetAccess})
 		rec.Resolution, rec.ResolvedItemID, rec.ResolvedVersion = domain.TargetResolved, auth.ResolvedItemID, auth.TargetVersion
+		outcome = domain.CommandOutcomeExecuted
 	case isNotFound(err):
 		detail = r.causeAccess(detail, []domain.AccessBoundary{actorOwn})
 		rec.Resolution = domain.TargetNotFound
-		diag(domain.DiagnosticNotFound, domain.ReasonUnknownTarget)
+		setDiag(domain.DiagnosticNotFound, domain.ReasonUnknownTarget)
+		outcome = domain.CommandOutcomeNotFound
 	case errors.Is(err, graph.ErrAmbiguousDirective):
 		detail = r.causeAccess(detail, auth.CandidateAccess)
 		rec.Resolution = domain.TargetAmbiguous
-		diag(domain.ErrAmbiguousDirective, domain.ReasonAmbiguousTarget)
+		setDiag(domain.ErrAmbiguousDirective, domain.ReasonAmbiguousTarget)
+		outcome = domain.CommandOutcomeAmbiguous
 	case errors.Is(err, graph.ErrLifecycleTargetMismatch):
 		detail = r.causeAccess(detail, []domain.AccessBoundary{auth.TargetAccess})
 		rec.Resolution, rec.ResolvedItemID, rec.ResolvedVersion = domain.TargetMismatch, auth.ResolvedItemID, auth.TargetVersion
-		diag(domain.DiagnosticNotFound, domain.ReasonTargetMismatch)
+		setDiag(domain.DiagnosticNotFound, domain.ReasonTargetMismatch)
+		outcome = domain.CommandOutcomeMismatch
 	default:
 		return err
 	}
 	rec.DetailAccess = detail
+	if diag != nil {
+		r.unitDiags = append(r.unitDiags, scopedDiag{*diag, detail})
+	}
+	if r.g.Semantic != nil {
+		if err := r.executeCommand(&rec, outcome, diag); err != nil {
+			return err
+		}
+	}
 	r.commands = append(r.commands, rec)
+	return nil
+}
+
+// executeCommand makes rec a lifecycle-command/v2 record (P3-35): a
+// resolved command executes through the lifecycle executor as its source
+// actor at a freshly allocated sequence; any other outcome is recorded as
+// not executed with its diagnostic. Everything added is target-dependent
+// and governed by rec.DetailAccess.
+func (r *run) executeCommand(rec *domain.LifecycleCommandRecord, outcome domain.CommandOutcome, diag *domain.Diagnostic) error {
+	rec.SchemaVersion = domain.LifecycleCommandSchemaV2
+	if outcome != domain.CommandOutcomeExecuted {
+		rec.Status = domain.CommandNotExecuted
+		rec.Execution = &domain.CommandExecutionDetail{Outcome: outcome}
+		if diag != nil {
+			rec.Execution.Diagnostics = []domain.Diagnostic{*diag}
+		}
+		return nil
+	}
+	if r.g.Lifecycle == nil {
+		return domain.ErrUnsupportedSchema
+	}
+	req, err := domain.OperationRequestID(r.p.SessionID, r.occurrence, r.unitOp, uint64(rec.Ordinal)+1)
+	if err != nil {
+		return err
+	}
+	intent := domain.ItemMutationIntent{RequestID: req, ItemID: rec.ResolvedItemID, ExpectedVersion: rec.ResolvedVersion}
+	var out LifecycleOutcome
+	switch rec.Action {
+	case domain.LifecycleResolve:
+		out, err = r.g.Lifecycle.Resolve(r.tx, rec.Actor, intent, r.tx.NextSeq())
+	case domain.LifecycleUnpin:
+		out, err = r.g.Lifecycle.Unpin(r.tx, rec.Actor, intent, r.tx.NextSeq())
+	default:
+		return domain.ErrInvalidRecord
+	}
+	if err != nil {
+		return err
+	}
+	res := out.Result.Clone()
+	rec.Status = domain.CommandExecuted
+	rec.Execution = &domain.CommandExecutionDetail{Outcome: domain.CommandOutcomeExecuted, MutationReceiptID: out.MutationReceiptID, GrantID: out.GrantID, Result: &res}
+	if err := rec.Validate(); err != nil {
+		return err
+	}
+	r.mutationReceipts = append(r.mutationReceipts, out.MutationReceiptID)
 	return nil
 }
