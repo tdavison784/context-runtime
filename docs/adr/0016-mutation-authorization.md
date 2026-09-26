@@ -184,40 +184,73 @@ boundary rule rather than conflicting with it.
 
 ## Tests that lock the behavior
 
-- `internal/domain/authz_test.go`: `AuthorizeMutation` all-or-nothing;
-  direct-authority success/failure per level; grant success, expired/
-  revoked grant, under-authority issuer, and now an issuer lacking access to
-  the target (must fail even with sufficient authority rank).
-- `internal/domain/authz_test.go`: `AuthorizeGrantIssuance` — issuer access
-  and authority required per target; duplicate IDs in `TargetIDs` rejected;
-  a supplied `targets` list with a repeated ID or a missing ID rejected
-  (the `TargetIDs [A,B]`/`targets [A,A]` case from finding N3).
-- `internal/domain/authz_test.go`: `AuthorizeGrantRevocation` — a
-  non-SYSTEM/HARNESS/USER actor fails; an actor lacking access to any target
-  fails `ErrNotFound` even with sufficient authority; a different-session
-  actor fails; the same exact-target-set check as issuance applies.
-- `internal/domain/authz_test.go`: `MutationGrant.Validate` rejects a
-  matcher grantee for any action other than `ActionAssertObligation`.
-- `internal/domain/authz_test.go`: `AuthorizeSupersession` — an inaccessible
-  endpoint yields `ErrNotFound` regardless of actor or endpoint authority
-  kind (the access-ordering regression from finding N4, asserted for both an
-  inaccessible AGENT item and an inaccessible USER item, confirming neither
-  disclosure path exists); equal-boundary success for SYSTEM/HARNESS/USER;
-  AGENT-AGENT success only with matching `"agent.<key>"` `DirectiveID`s, and
-  failure when the keys differ even though both items are AGENT; TOOL/
-  RETRIEVED_CONTENT actor always fails regardless of boundary or authority
-  match.
-- `internal/domain/obligation_test.go`: `ValidObligationTransition`
-  exhaustive; WAIVED terminal; `AppendObligationTransition` CAS — a stale
+- `internal/domain/authz_test.go`: `TestAuthorizeMutation_AllOrNothing`,
+  `TestAuthorizeMutation_DirectAuthoritySucceeds`,
+  `TestAuthorizeMutation_GrantExpiry`,
+  `TestAuthorizeMutation_GrantNotYetIssuedIgnored`,
+  `TestAuthorizeMutation_IssuerWithoutTargetAccessIgnoresGrant` and
+  `TestAuthorizeMutation_IssuerWithTargetAccessSucceeds` (an issuer lacking
+  access to the target fails even with sufficient authority rank);
+  `TestAuthorizeMutation_InaccessibleTargetReturnsNotFoundBeforeAuthority`.
+- `internal/domain/authz_test.go`: `TestAuthorizeGrantIssuance` (issuer
+  access/authority per target; duplicate IDs in `TargetIDs` and a
+  `targets` list with a repeated or missing ID rejected — the exact
+  `TargetIDs[A,B]`/`targets[A,A]` case from finding N3) and
+  `TestAuthorizeGrantRevocation` (non-SYSTEM/HARNESS/USER actor fails; an
+  actor lacking access fails `ErrNotFound` even with sufficient authority; a
+  different-session actor fails; the same exact-target-set check as
+  issuance applies).
+- `internal/domain/authz_test.go`: `TestMutationGrantValidate` includes the
+  matcher-action restriction (a matcher grantee rejected for any action
+  other than `ActionAssertObligation`).
+- `internal/domain/authz_test.go`: the full `TestAuthorizeSupersession_*`
+  family —
+  `AccessCheckedBeforeAuthority` and `InaccessibleEndpointNotFound` (the
+  access-ordering regression from finding N4: `ErrNotFound` regardless of
+  actor or endpoint authority kind); `DifferentAccessBoundariesFail`
+  (equality, not `Within`); `AgentSupersedingAgentOK`,
+  `AgentDifferentKeyFails`, `AgentNonKeyedDirectiveIDFails`,
+  `AgentSupersedingUserFails` (the same-key restriction); `ToolActorNever
+  Supersedes`, `RetrievedContentActorNeverSupersedes`,
+  `ToolActorFailsRegardlessOfItemAuthority`;
+  `SupersedingBelowSupersededAuthorityFails`,
+  `ActorBelowSupersedingAuthorityFails`; `DifferentSessionsFail`,
+  `InvalidActorPropagates`.
+- **Integration-level, not just unit-level:** `internal/graph/graph_test.go`
+  exercises the same rules through the actual `Supersede`/`SupersedeSnapshot`
+  operations, not just `domain.AuthorizeSupersession` in isolation —
+  `TestSupersede_AuthorizationRules` (subtests
+  `AgentCannotSupersedeUser`, `AgentSupersedesAgentAllowed`,
+  `AgentCannotSupersedeDifferentKeyAgentItem`,
+  `AgentActorInaccessibleItemIsNotFoundNotPromotionError`);
+  `TestSupersede_CycleRejected`; `TestReplaceDirective_T02` (trace T02,
+  directive replacement) and `TestReplaceDirective_KeyedAgentWriteChain_T17`;
+  `TestSupersedeSnapshot_FRDIR007` is trace T18 exactly — a task-wide
+  Working item does *not* supersede an agent-restricted item sharing the
+  task, confirming the amended FR-DIR-007 end-to-end — plus
+  `TestSupersedeSnapshot_MultipleOldItems`.
+- `internal/domain/obligation_test.go`: `TestValidObligationTransitionMatrix`,
+  `TestValidObligationTransition_WaivedIsTerminal`,
+  `TestValidObligationTransition_InvalidStatusesRejected`.
+- `internal/store/storetest` (`storetest.Run`): `TestConformance
+  /ObligationTransitions` (`testObligationTransitions`) is the exact ABA
+  regression test for finding N2 — a transition proposed against a stale
   `expectedRevision` fails `ErrVersionConflict` even when `From` still
-  matches the version's current status (the ABA regression from finding N2).
-- `internal/store/storetest`: `UpdateItem` fails without a matching
-  `TargetItem`/`TargetID` event allocated in the same transaction;
-  `AppendObligationTransition` returns the updated version with `Status`/
-  `EvidenceIDs` set from the transition, not a separately written value;
-  `RevokeGrant` fails without its `TargetGrant` audit event.
-- Traces T02, T06, and T18 (Working snapshots) are the Phase 3 integration
-  fixtures once directive replacement and CompleteTask exist end-to-end.
+  matches the version's current status; `TestConformance/UpdateItem` checks
+  the atomic audit-event requirement; `TestConformance/Grants`
+  (`testGrants`) checks `RevokeGrant`'s atomic `TargetGrant` audit event
+  and rejects a revocation whose event targets the wrong grant or record
+  kind. `internal/store/sqlite/durability_test.go
+  :TestObligationTransitionCAS` and `:TestAuditedGrantAndTaskMutations`
+  reconfirm both against the SQLite typed-column write path.
+- Trace T06 (all lifecycle paths enforce the same authorization) has no
+  dedicated fixture yet — it needs the semantic-state/tools layer (goals,
+  CompleteTask) that Phase 3 builds; `TestAuthorizeMutation_T06_*` in
+  `authz_test.go` (`UserCannotActOnSystemGoal`,
+  `HarnessCannotAssertWithoutGrant`,
+  `SystemGrantedMatcherLetsHarnessAssert`) already cover its authorization
+  core at the domain-function level, but the full multi-actor trace across
+  Resolve/CompleteTask/Block/Waive remains a Phase 3 integration gap.
 
 ## Open questions
 
@@ -251,3 +284,11 @@ just "both AGENT" (N4, tightening finding 2's original fix);
 `AppendObligationTransition` now takes `expectedRevision` under CAS,
 closing the ABA race the first pass's atomic-but-unversioned transition
 still allowed (N2).
+
+Verified against the integrated `phase-1-foundation` codebase (tip
+`ddbb53e`): every fix above has a passing unit test in
+`internal/domain/authz_test.go`/`obligation_test.go`, plus real
+integration coverage in `internal/graph/graph_test.go`
+(`TestSupersede_AuthorizationRules`, `TestSupersedeSnapshot_FRDIR007`) that
+exercises the same rules through the actual `Supersede`/
+`SupersedeSnapshot` operations, not only the isolated domain functions.
