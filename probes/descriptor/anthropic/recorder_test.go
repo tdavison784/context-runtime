@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
+
+	"github.com/anthropics/anthropic-sdk-go"
 )
 
 func TestCostSplitsCacheWriteTTLs(t *testing.T) {
@@ -13,5 +16,15 @@ func TestCostSplitsCacheWriteTTLs(t *testing.T) {
 	}
 	if got := cost("unknown-model", usageSum{Input: 1_000_000}); got != 10 {
 		t.Fatalf("unknown model should price as the most expensive tier, got %v", got)
+	}
+}
+
+func TestDescribeBlockCountsCharacters(t *testing.T) {
+	var b anthropic.BetaContentBlockUnion
+	if err := json.Unmarshal([]byte(`{"type":"compaction","content":"41 × 17 − 3","signature":"sig"}`), &b); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := describeBlock(b), "compaction(content=11 encrypted=0 sig=3)"; got != want {
+		t.Fatalf("describeBlock = %q, want %q", got, want)
 	}
 }

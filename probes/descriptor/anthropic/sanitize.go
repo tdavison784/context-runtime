@@ -111,5 +111,5 @@ func isDigest(s string) bool {
 
 func looksSecret(s string) bool {
 	l := strings.ToLower(s)
-	return strings.Contains(l, "sk-ant-") || strings.Contains(l, "x-api-key") || strings.HasPrefix(l, "bearer ")
+	return strings.Contains(l, "sk-ant-") || strings.Contains(l, "x-api-key") || strings.Contains(l, "bearer ")
 }

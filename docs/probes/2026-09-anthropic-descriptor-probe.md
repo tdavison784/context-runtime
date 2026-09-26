@@ -150,7 +150,7 @@ post-edit reasoning itself on every profile rather than rely on the provider che
 | Edit kind | opus-5-5 | sonnet-5 | Verdict |
 |---|---|---|---|
 | APPEND (baseline) | 200, `[]` | 200, `[]` | SAFE |
-| APPEND_SYSTEM: `{"role":"system"}` message appended after the tool_result turn | 200, `[]`, in=695 | 200, `[]`, in=729 | SAFE on both. Sonnet 5 accepted it although the skill docs list it as unsupported there; that it acts with system authority is not verified |
+| APPEND_SYSTEM: `{"role":"system"}` message appended after the tool_result turn | 200, `[]`, in=695 | 200, `[]`, in=729 | Reasoning and cache stay valid on both. Sonnet 5 accepted it although the skill docs list it as unsupported there. **System authority is not verified**, so the descriptor never uses it (ruling 4) |
 | MOVE_CACHE_MARKERS: `cache_control` added to `u0` | 200, `[]` | 200, `[]` | SAFE |
 | ADD_DEFERRED_TOOL: extra `defer_loading: true` tool, no tool search tool | 200, `[]`, in=771 (+93) | 200, `[]`, in=805 | SAFE, but the deferred definition was **billed** (+93 tokens) without a tool search tool |
 | DROP_LEADING_REASONING: remove `a1`'s thinking, keep `a3`'s (history `H3`) | 200, `[]` | 200, `[]` (only `a5` had thinking after `a1`; Sonnet 5 runs no check, so uninformative) | SAFE on opus-5-5 (later block still verified). The removed reasoning was visible to the model (R5), so this is a deliberate loss of older reasoning |
@@ -292,7 +292,8 @@ Anthropic offers three native context features. Docs: `build-with-claude/compact
 
 - 200, `stop_reason: "compaction"`, `content` = exactly one block
   `{"type": "compaction", "content": "<readable summary>", "signature": "<opaque>"}`
-  (opus-5-5: 647-char summary, 1,736-char signature; sonnet-5: 533 / 636). No thinking, text
+  (opus-5-5: 643-character summary, 1,736-character signature; sonnet-5: 531 / 636, counted
+  from the fixtures; the run log's `content=` figures are UTF-8 bytes). No thinking, text
   or tool_use blocks.
 - Usage: top-level `input_tokens: 0`, `output_tokens: 0`; the cost is only in
   `usage.iterations: [{"type": "compaction", "input_tokens": 828, "output_tokens": 294, ...}]`.
@@ -311,7 +312,7 @@ Anthropic offers three native context features. Docs: `build-with-claude/compact
   be at least 50000`. **Minimum trigger = 50,000 input tokens** (OBSERVED; docs default 150,000).
 - A 51,924-token request with `trigger: 50000`, `pause_after_compaction: true` and custom
   instructions -> 200, `stop_reason: "compaction"`, one block `{"type": "compaction",
-  "content": "<942-char summary>"}` with **no signature and no `encrypted_content`**;
+  "content": "<933-character summary>"}` with **no signature and no `encrypted_content`**;
   `iterations: [{"type": "compaction", "input_tokens": 51924, "output_tokens": 602}]`, top-level
   zeros. Cost $0.22.
 
@@ -320,7 +321,7 @@ Anthropic offers three native context features. Docs: `build-with-claude/compact
 | Path | Observed | FR-MAT-005 fit |
 |---|---|---|
 | On-demand: adopt `[assistant{compaction block}, user(restoration + question)]` | 200, in=762, answer obeys the restored rule (values also in hex) | **Checkpoint protocol.** The compaction call generates no task actions, and the runtime chooses what goes after the block |
-| On-demand: adopt `[block, user(question), {"role":"system"}(restoration)]` | 200, in=762, rule obeyed | Restoration can use system authority (APPEND_SYSTEM) |
+| On-demand: adopt `[block, user(question), {"role":"system"}(restoration)]` | 200, in=762, rule obeyed | Accepted and obeyed, but the user-text restoration above was obeyed equally, so this does **not** show that system authority is carried. System placement is UNVERIFIED and not used (ruling 4) |
 | Threshold with `pause_after_compaction: true`, then `[assistant{block}, user(restoration + question)]` with the edit still configured | 200, in=919, rule obeyed | **Pause protocol.** The pausing response held only the summary (no task action), and restoration happened before the next inference |
 | Threshold without pause | not exercised (another $0.22) | Summary and continuation in one response: the runtime cannot restore in between, so under FR-MAT-005 this is "automatic in-request compaction" and stays disabled |
 
@@ -360,99 +361,113 @@ provider-bound opaque state for replay (FR-PROV-005): store `content` + `signatu
 
 ### Profile identity (FR-CAP-001)
 
-Behavior differs by **model**, **account enforcement date** and **request setting**, so the
-profile key must include all three:
-`anthropic/messages-beta/<model>/binding=<error|drop_block|unset>/account=<enforced|legacy>`.
-Recommendation: the adapter always sends `thinking-binding-controls-2026-08-01` and an
-explicit `prefix_mismatch_behavior`: `error` under REQUIRE, `drop_block` under ALLOW_RESET.
-Then the account date no longer changes behavior, and `input_transformations` is always
-present, so drops are observable (FR-PROV-006). The two unsafe states (legacy + unset;
-Sonnet 5) are never used for replay after an edit.
+Behavior differs by **model**, **account enforcement date** and **request setting**. Ruling 1
+makes the adapter always send `thinking-binding-controls-2026-08-01` and an explicit
+`prefix_mismatch_behavior`: `error` under REQUIRE, `drop_block` under ALLOW_RESET. The field
+unset is never sent, so enforcement no longer depends on account age, and
+`input_transformations` is always present, which makes drops observable (FR-PROV-006). The two
+settings are two profiles; they differ only in `Reasoning.PostEditReplay`.
 
-Legend: **O** = OBSERVED in this probe, **D** = DOCUMENTED (docs read 2026-09-26),
-**A** = ASSUMED.
+Drafts below follow `docs/probes/descriptor-vocabulary.md` (SPEC-1.1): SDD §7 field names
+verbatim, one evidence label per field (`OBSERVED`, `DOCUMENTED`, `DOCUMENTED-PENDING`,
+`ASSUMED`), `RULING <n>` for values set by the commander rulings at the end of this document,
+and fail-closed values wherever a proof is missing. Fixture names are relative to
+`probes/descriptor/testdata/anthropic/`. Docs "read 2026-09-26" were fetched live (pricing,
+compaction pages) or read in the claude-api skill reference that cites them (prompt caching).
 
-### Draft `Capabilities` - claude-opus-5-5 (profile `binding=error|drop_block`)
+### Draft `Capabilities` - claude-opus-5-5
 
 ```go
 Capabilities{
-    Provider: "anthropic", Model: "claude-opus-5-5",
-    Version: "messages-beta/sdk-go-v1.75.0/probe-2026-09-26",
-    ContextWindow: 1_000_000,                      // O (models API)
-    MaxOutput:     128_000,                        // O (models API)
-    Counter: "anthropic.count_tokens/claude-opus-5-5", // O exact: error 0 on 4 requests; network call, verification only
+    Provider: "anthropic",                          // OBSERVED: all fixtures
+    Model:    "claude-opus-5-5",                    // OBSERVED: models_list.json
+    Version:  "messages-beta/v1-messages/legacy-pre-2026-08-31/thinking-binding-controls-2026-08-01+prefix_mismatch_behavior=error/claude-opus-5-5",
+    //        OBSERVED on a legacy account; the explicit field is documented to govern on enforced accounts too (RULING 1).
+    //        drop_block profile: identical Version with prefix_mismatch_behavior=drop_block.
+    ContextWindow: 1_000_000,                       // OBSERVED: models_list.json max_input_tokens
+    MaxOutput:     128_000,                         // OBSERVED: models_list.json max_tokens
+    Counter: "anthropic.count_tokens/claude-opus-5-5", // OBSERVED: count/* rows in observations.md, delta 0 on 4 requests; network call, verification only (FR-PROV-004)
     Caching: CachingRules{
-        PrefixOrder:      "tools>system>messages", // D; O that any earlier byte change -> read 0 (C3)
-        MinimumTokens:    512,                     // O bracket 512-517; D for Opus 5 (5.5 not listed)
-        MaxBreakpoints:   4,                       // D
-        TTLs:             {"5m", "1h"},            // O usage split ephemeral_5m/1h; expiry D
-        Automatic:        true,                    // O top-level cache_control + lookback read
-        AppendSystemSafe: true,                    // O (C3 step 4 read 1049)
-        RefusalPersists:  false,                   // O one pair: refused write not readable
+        PrefixSemantics: "exact-prefix tools>system>messages", // OBSERVED: C3-3-edit-early read 0 after a 1-char edit; render order DOCUMENTED (prompt-caching page, read 2026-09-26)
+        Breakpoints:     4,                          // DOCUMENTED: https://platform.claude.com/docs/en/build-with-claude/prompt-caching, read 2026-09-26
+        MinimumLength:   [2]int{512, 517},           // OBSERVED: C1 bisection, largest uncached prefix 511, smallest cached write 517
+        TTLs:            []string{"5m", "1h"},       // OBSERVED: usage.cache_creation.ephemeral_5m/1h split (C1-prefix-512-ttl1h); expiry DOCUMENTED only (RULING 6)
+        Automatic:       true,                       // OBSERVED: C3-2-append read 1025 via top-level cache_control
     },
-    Pricing: Pricing{In: 4.00, Write5m: 5.00, Write1h: 8.00, Read: 0.20, Out: 20.00}, // D, USD/MTok
+    Pricing: Pricing{                               // DOCUMENTED: https://platform.claude.com/docs/en/about-claude/pricing, read 2026-09-26, USD/MTok
+        UncachedInput: 4.00,
+        CacheWrite:    map[string]float64{"5m": 5.00, "1h": 8.00}, // 1.25x / 2x
+        CacheRead:     0.20,                         // 0.05x on Opus 5.5
+        Output:        20.00,
+    },
     Reasoning: ReasoningRules{
-        ReplayRequired:      false, // O: stripping accepted, even in an open round (R2)
-        PriorTurnsRetained:  true,  // O: earlier-turn thinking billed, not stripped (R5)
-        BoundToPriorHistory: true,  // O: messages + system + tools (R4)
-        BoundToModel:        true,  // O: model_binding_mismatch on switch to sonnet-5
-        OpaqueFields:        "signature authoritative; thinking text display-only", // O (R3)
-        DropsReported:       true,  // O only with the binding-controls header
-        CanDisableThinking:  false, // D (400 at every effort); not probed
+        ReplayRequired:      false,     // OBSERVED: R2-drop-reasoning accepted inside an open tool round
+        BoundToPriorHistory: true,      // OBSERVED: R4-rewrite-u0-error 400, R4-rewrite-{system,tools}-dropblock thinking_dropped
+        BoundToModel:        true,      // OBSERVED: model-switch-to-claude-sonnet-5 thinking_dropped/model_binding_mismatch
+        DropsReported:       true,      // OBSERVED: input_transformations present ([] or entries) on every response with the header
+        PostEditReplay:      REJECTED,  // OBSERVED: R4-rewrite-u0-error; drop_block profile: LOSSY (R4-rewrite-u0-dropblock)
     },
     Edits: map[EditKind]EditSafety{
-        APPEND:                 SAFE,     // O (R1)
-        APPEND_SYSTEM:          SAFE,     // O thinking valid + cache read (R1 table, C3)
-        ADD_DEFERRED_TOOL:      SAFE,     // O thinking valid; deferred definition billed without tool search
-        MOVE_CACHE_MARKERS:     SAFE,     // O thinking valid; D cache-neutral
-        DROP_LEADING_REASONING: SAFE,     // O later blocks still verify; removed reasoning leaves context (R5)
-        DROP_ALL_REASONING:     LOSSY,    // O accepted and unreported; a reset by construction (R2)
-        REWRITE:                SAFE,     // O with post-edit reasoning stripped (RW1, RW2)
-        // replaying post-edit reasoning: REJECTED with binding=error, LOSSY with drop_block (R4)
+        APPEND:                 SAFE,     // OBSERVED: R1-replay-unchanged-header, []
+        APPEND_SYSTEM:          REJECTED, // OBSERVED accepted with thinking and cache intact (edit-APPEND_SYSTEM-dropblock, C3-4); never performed: RULING 4
+        ADD_DEFERRED_TOOL:      SAFE,     // OBSERVED: edit-ADD_DEFERRED_TOOL-dropblock, []; the deferred definition is billed (+93) without tool search
+        MOVE_CACHE_MARKERS:     SAFE,     // OBSERVED: edit-MOVE_CACHE_MARKERS-dropblock, []
+        DROP_LEADING_REASONING: SAFE,     // OBSERVED: edit-DROP_LEADING_REASONING-dropblock, [] (later block still verified)
+        DROP_ALL_REASONING:     LOSSY,    // OBSERVED: R2-drop-reasoning accepted, nothing reported; ALLOW_RESET only
+        REWRITE:                SAFE,     // OBSERVED: rewrite__*__RW1, RW2 under prefix_mismatch_behavior=error, []
     },
-    NativeCompaction:       true, // O on-demand and threshold
-    CompactionInstructions: true, // O (instructions honoured)
-    CompactionProtocol:     "checkpoint: on-demand compact-2026-09-04; pause: compact_20260112 + pause_after_compaction", // O
-    CompactionMinimumTrigger: 50_000, // O threshold (400 below); on-demand has none (O at 828 tokens)
+    NativeCompaction:       true,                   // OBSERVED: K1-on-demand-summarize, T2-threshold-pause
+    CompactionInstructions: false,                  // ASSUMED: instructions accepted and followed (K1, T2), but no run without them to show they changed the summary
+    CompactionProtocol: []CompactionProtocol{CHECKPOINT, PAUSE}, // OBSERVED: K1 (standalone, stop_reason compaction, only the block); T2 (pause_after_compaction). Unpaused threshold not sanctioned: RULING 3
+    CompactionMinimumTrigger: 50_000,               // OBSERVED: T1-threshold-trigger-1000 400 "must be at least 50000" (PAUSE); CHECKPOINT has no minimum (K1 at 828 tokens)
     MandatoryPreservation: PreservationRules{
-        RestoreAfterBlock:     "user text or appended role=system message", // O (K2)
-        KeptTurnsThinkingValid: true,  // O on-demand, system/tools unchanged (D condition)
-        ThresholdReinsertedThinking: "strip or drop_block", // D
-        SummaryIntegrity:      "on-demand signed (compaction_content_mismatch); threshold unsigned+editable", // O
-        LosesMedia:            true,  // D images/documents/URLs in the summarized range
-        CostInIterations:      true,  // O top-level usage is 0 on a compaction response
+        RestorationPlacement: []string{"user"},     // OBSERVED: K2-adopt-restore-user and T3 obeyed a hex rule absent from the compacted input (H2's own answer was decimal only). System placement not listed: RULING 4
+        ReturnedBlocks:       "on-demand: one compaction block {content, signature}; threshold: one compaction block {content}, no signature", // OBSERVED: K1, T2
+        RetainedFields:       "no input item verbatim: the block replaces every summarized message", // OBSERVED: K1 content has exactly one block
+        SummaryInspectable:   true,                 // OBSERVED: K1/T2 content is plain text
+        SummaryIntegrity:     "signed (on-demand); unsigned (threshold)", // OBSERVED: K3-tamper-summary 400 compaction_content_mismatch; T4-threshold-block-edited accepted and obeyed
+        KeptReasoningValid:   true,                 // OBSERVED: K-kept-turns-thinking-dropblock [] (on-demand; system/tools unchanged). Threshold: DOCUMENTED strip or drop_block
     },
-    ContextEditing:        true,  // O clear_thinking applied; server-side edits are not history edits
-    MidConversationSystem: true,  // O accepted, thinking-safe, cache-safe
-    NativeMemory:          false, // A: memory_20250818 is a client-executed tool (D), not provider memory; not probed
+    ContextEditing:        false,                   // OBSERVED clear_thinking applied without invalidating thinking (CE2), clear_tool_uses not applied (CE1): RULING 5
+    MidConversationSystem: false,                   // OBSERVED accepted, thinking- and cache-safe; authority not proven: RULING 4
+    NativeMemory:          false,                   // ASSUMED: not probed; memory_20250818 is a client-executed tool (DOCUMENTED)
 }
 ```
 
 ### Draft `Capabilities` - claude-sonnet-5
 
-Same as Opus 5.5 except:
+Same as claude-opus-5-5 except:
 
 ```go
-    Model: "claude-sonnet-5",
-    Counter: "anthropic.count_tokens/claude-sonnet-5",  // O exact (4 requests)
-    Caching.MinimumTokens: 1024,                        // O bracket 1023-1029; D 1024
-    Pricing: Pricing{In: 2.00, Write5m: 2.50, Write1h: 4.00, Read: 0.20, Out: 10.00}, // D
-    Reasoning.BoundToPriorHistory: false, // O: no conversation check even with binding=error (R4)
-    Reasoning.BoundToModel:        true,  // A: the model check is documented as universal; only opus->sonnet was probed
-    Reasoning.CanDisableThinking:  true,  // D ({type: "disabled"} accepted); not probed
-    Edits[REWRITE]: SAFE,                 // O with post-edit reasoning stripped (RW1, RW2)
-    // replaying post-edit reasoning is accepted with STALE reasoning and never reported (R4):
-    // the adapter must strip it itself; the provider offers no safety net here.
-    MidConversationSystem: true, // O accepted (200, cache-safe), though the skill docs say unsupported; system authority not verified -> treat as UNVERIFIED
-    CompactionProtocol: "checkpoint (on-demand)",   // O K1 only; adoption/restore/threshold not run on this model (A: same as Opus)
-    ContextEditing: true,                            // O models API capability only; not exercised
+    Model:   "claude-sonnet-5",                     // OBSERVED: models_list.json
+    Version: "messages-beta/v1-messages/legacy-pre-2026-08-31/thinking-binding-controls-2026-08-01+prefix_mismatch_behavior=error/claude-sonnet-5", // OBSERVED
+    Counter: "anthropic.count_tokens/claude-sonnet-5", // OBSERVED: delta 0 on 4 requests
+    Caching.MinimumLength: [2]int{1023, 1029},      // OBSERVED: C1 bisection, largest uncached 1022, smallest cached write 1029
+    Caching.TTLs:          []string{"5m", "1h"},    // OBSERVED: C1-prefix-1008-ttl1h ephemeral_1h 1051
+    Pricing: Pricing{UncachedInput: 2.00, CacheWrite: map[string]float64{"5m": 2.50, "1h": 4.00}, CacheRead: 0.20, Output: 10.00}, // DOCUMENTED: pricing page, read 2026-09-26
+    Reasoning.BoundToPriorHistory: false,           // OBSERVED: R4-rewrite-u0-error accepted, [] (no conversation check)
+    Reasoning.BoundToModel:        false,           // ASSUMED: only Opus 5.5 blocks replayed to Sonnet 5 were probed, not the reverse
+    Reasoning.DropsReported:       true,            // OBSERVED: the model-binding drop was reported on a Sonnet 5 request; it runs no prefix check to report
+    Reasoning.PostEditReplay:      STALE,           // OBSERVED: R4-rewrite-u0-{error,dropblock} accepted with stale thinking still billed; the adapter must strip
+    Edits[REWRITE]: SAFE,                           // OBSERVED: rewrite__claude-sonnet-5__RW1, RW2
+    CompactionProtocol: []CompactionProtocol{CHECKPOINT}, // OBSERVED: K1 only; threshold PAUSE deferred to Phase 5: RULING 3
+    CompactionMinimumTrigger: 0,                    // OBSERVED: CHECKPOINT only (K1 at 832 tokens)
+    MandatoryPreservation: PreservationRules{
+        RestorationPlacement: nil,                  // ASSUMED: adoption and restoration not run on this model
+        ReturnedBlocks:       "one compaction block {content, signature}", // OBSERVED: K1
+        RetainedFields:       "no input item verbatim", // OBSERVED: K1
+        SummaryInspectable:   true,                 // OBSERVED: K1
+        SummaryIntegrity:     "signed",             // ASSUMED: signature present (636 chars) but tamper not probed; replay verbatim
+        KeptReasoningValid:   false,                // ASSUMED: not probed; the model runs no prefix check anyway
+    },
 ```
+
 
 ### Consequences for the runtime
 
 1. **T08 is satisfiable natively on Anthropic**: on-demand compaction is a standalone,
    ledgerable call with no task actions. Its block can be persisted; restoration goes after it
-   (user text or appended system message), then a separately prepared inference. Threshold
+   as user text (system placement is unverified, ruling 4), then a separately prepared inference. Threshold
    compaction is acceptable only with `pause_after_compaction: true`. Without pause it is
    automatic in-request compaction and stays disabled (FR-MAT-005).
 2. **T12 is representable**: an open tool round without its reasoning is structurally valid
@@ -494,8 +509,9 @@ Same as Opus 5.5 except:
 
 ## Commander rulings (2026-09-26)
 
-These rulings resolve the open questions above. Where they conflict with the draft
-`Capabilities` values, the rulings take precedence.
+These rulings resolve the open questions above. The draft `Capabilities` blocks have been
+corrected to match them (PR #4 review, SEC-1.4): policy values are fail-closed, and the observed
+facts are kept in the comments.
 
 1. **Reasoning-binding control is always explicit.** The descriptor sets the
    `thinking-binding-controls-2026-08-01` beta and `prefix_mismatch_behavior` explicitly on

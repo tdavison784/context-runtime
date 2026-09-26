@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )
@@ -197,7 +198,7 @@ func cost(model string, u usageSum) float64 {
 func describeBlock(b anthropic.BetaContentBlockUnion) string {
 	switch v := b.AsAny().(type) {
 	case anthropic.BetaThinkingBlock:
-		return fmt.Sprintf("thinking(text=%d sig=%d)", len(v.Thinking), len(v.Signature))
+		return fmt.Sprintf("thinking(text=%d sig=%d)", utf8.RuneCountInString(v.Thinking), len(v.Signature))
 	case anthropic.BetaRedactedThinkingBlock:
 		return fmt.Sprintf("redacted_thinking(data=%d)", len(v.Data))
 	case anthropic.BetaTextBlock:
@@ -205,7 +206,8 @@ func describeBlock(b anthropic.BetaContentBlockUnion) string {
 	case anthropic.BetaToolUseBlock:
 		return fmt.Sprintf("tool_use(%s %v)", v.Name, v.Input)
 	case anthropic.BetaCompactionBlock:
-		return fmt.Sprintf("compaction(content=%d encrypted=%d sig=%d)", len(v.Content), len(v.EncryptedContent), len(v.Signature))
+		// Characters, not bytes: summaries contain multi-byte symbols (SPEC-1.4).
+		return fmt.Sprintf("compaction(content=%d encrypted=%d sig=%d)", utf8.RuneCountInString(v.Content), len(v.EncryptedContent), len(v.Signature))
 	default:
 		return b.Type
 	}

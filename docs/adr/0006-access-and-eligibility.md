@@ -59,7 +59,7 @@ affects inherited content.
   | WORKFLOW | the workflow's active-owner state |
   | AGENT | the agent's active-owner state |
   | SESSION | no additional owner check (session-level content has no narrower active-owner state) |
-  | any scope | an unexpired TTL, or an explicit retrieval lease (FR-RET-006) covering the item |
+  | any scope | an unexpired TTL, or an explicit retrieval lease (FR-RET-006) covering the item. A TTL is counted in turns of the item's originating task and is treated as expired when the originating task is terminal or is not the dispatching task's turn source (see the TTL decision below) |
 
   This table is recorded now (Phase 1) even though the eligibility engine
   (active task/turn tracking, lease issuance) is Phase 3/4 work
@@ -228,6 +228,16 @@ affects inherited content.
   **Decision:** V1 TTL is measured in turns only: `TTLTurns` counts turns of
   the item's originating task (`TaskState.Turn`); no sequence-based expiry
   in V1.
+  **Amendment (PR #4 review, SEC-1.3):** a TTL is only defined when the item
+  names its originating task. `TTLTurns` therefore requires a non-empty
+  `TaskID`; `ContextItem.Validate` rejects a TTL without one with
+  `ErrInvalidRecord` (`internal/domain/item.go`). When expiry cannot be
+  decided from the originating task, ambiguity resolves to **expired**
+  (ineligible; fail closed): this covers an originating task that is
+  terminal (its `Turn` no longer advances) and a dispatching task that is
+  not the item's turn source. Access is unaffected. An expired item stays
+  readable through the API and archive retrieval, and only an explicit
+  retrieval lease (FR-RET-006) can re-admit it to a plan.
 
 ## Review
 
