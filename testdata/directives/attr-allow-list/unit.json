@@ -1,0 +1,10 @@
+{
+  "description": "Per-section allow-list: kind on Pinned/Working/Remember/Ephemeral, scope everywhere, ttl on Working/Remember/References/Ephemeral, obligation on Pinned; disallowed attributes are diagnosed and ignored.",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

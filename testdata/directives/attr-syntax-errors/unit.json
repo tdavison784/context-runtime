@@ -1,0 +1,11 @@
+{
+  "description": "Attribute syntax errors make the heading or item non-executable; valid siblings survive (D7).",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1",
+    "D7"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

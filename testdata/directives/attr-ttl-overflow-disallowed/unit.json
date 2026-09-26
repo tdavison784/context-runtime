@@ -1,0 +1,10 @@
+{
+  "description": "A ttl on a section that disallows it is ignored as disallowed, whatever its value.",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

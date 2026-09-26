@@ -1,0 +1,10 @@
+{
+  "description": "SYSTEM units may request WORKFLOW/SESSION scope; access is still intersected by ingestion.",
+  "requirements": [
+    "FR-DIR-006",
+    "D12",
+    "R1"
+  ],
+  "authority": "SYSTEM",
+  "directive_capable": false
+}
