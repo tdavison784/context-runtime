@@ -74,6 +74,14 @@ func (s *applySemantic) RetrievalResult(id string) (domain.RetrievalResult, erro
 	}
 	return domain.RetrievalResult{}, domain.ErrNotFound
 }
+func (s *applySemantic) RetrievalEvent(id string) (domain.RetrievalEvent, error) {
+	for _, event := range s.events {
+		if event.ID == id {
+			return event, nil
+		}
+	}
+	return domain.RetrievalEvent{}, domain.ErrNotFound
+}
 func (s *applySemantic) RetrievalLease(id string) (domain.RetrievalLease, error) {
 	for _, lease := range s.leases {
 		if lease.ID == id {
