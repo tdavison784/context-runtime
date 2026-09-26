@@ -88,7 +88,7 @@
         19,
         44
       ],
-      "access_scope": "TASK"
+      "access_scope": "SESSION"
     },
     {
       "span": 0,
@@ -101,7 +101,7 @@
         19,
         38
       ],
-      "access_scope": "TASK"
+      "access_scope": "SESSION"
     }
   ]
 }
