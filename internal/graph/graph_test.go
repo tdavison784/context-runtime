@@ -971,7 +971,6 @@ func TestLinkDerived_And_Provenance_HappyPath(t *testing.T) {
 	var derivedID, s1ID, s2ID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		derived := taskItem(sess, "derived", tx.NextSeq(), domain.AuthorityAgent)
-		derived.EventID = "evt-link" // LinkDerived only runs in the creating event (AUTH-2.4)
 		s1 := taskItem(sess, "src1", tx.NextSeq(), domain.AuthorityUser)
 		s2 := taskItem(sess, "src2", tx.NextSeq(), domain.AuthorityUser)
 		derivedID, s1ID, s2ID = derived.ID, s1.ID, s2.ID
@@ -1143,7 +1142,6 @@ func TestLinkDerived_ActorAuthorityRequired(t *testing.T) {
 
 			err := s.Update(ctx, sess, func(tx store.Tx) error {
 				derived := taskItem(sess, "derived", tx.NextSeq(), tc.derivedAuthority)
-				derived.EventID = "evt"
 				src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser)
 				mustInsert(t, tx, derived, src)
 				_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, "evt")
@@ -1156,25 +1154,66 @@ func TestLinkDerived_ActorAuthorityRequired(t *testing.T) {
 	}
 }
 
-// TestLinkDerived_MustBeCreationEvent is AUTH-2.4: LinkDerived may only run
-// in the transaction/event that created the derived item.
+// TestLinkDerived_MustBeCreationEvent is AUTH-2.4, tightened by AUTH-3.1:
+// LinkDerived may only run in the transaction that inserted the derived
+// item, checked via tx.Allocated(derived.Seq) rather than a caller-supplied
+// EventID string (which anyone who can access the item can read and
+// replay).
 func TestLinkDerived_MustBeCreationEvent(t *testing.T) {
-	t.Run("DifferentEventRejected", func(t *testing.T) {
+	t.Run("SameTransactionAllowed", func(t *testing.T) {
 		s := memory.New()
 		defer s.Close()
-		const sess = "sess-auth24-diff-event"
+		const sess = "sess-auth31-same-tx"
 		actor := principal(sess, domain.AuthorityAgent)
 
-		var derivedID string
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			derived := taskItem(sess, "note", tx.NextSeq(), domain.AuthorityAgent)
+			src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser)
+			mustInsert(t, tx, derived, src)
+			_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, "evt-created-note")
+			return err
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	// This is the AUTH-3.1 regression itself: the later transaction reads
+	// the item's own EventID and passes it straight to LinkDerived, which
+	// is exactly what the old string comparison could not tell apart from
+	// "the transaction that created it".
+	t.Run("LaterTransactionRejectedEvenWithMatchingEventID", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		const sess = "sess-auth31-later-tx"
+		actor := principal(sess, domain.AuthorityAgent)
+
+		var derivedID, srcID string
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
 			derived := taskItem(sess, "note", tx.NextSeq(), domain.AuthorityAgent)
 			derived.EventID = "evt-created-note"
 			src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser)
-			derivedID = derived.ID
-			mustInsert(t, tx, derived, src)
-			// A later, different event tries to attach provenance
-			// post-hoc.
-			_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, "evt-later-and-different")
+			derivedID, srcID = derived.ID, src.ID
+			return tx.InsertItem(derived)
+		})
+		if err != nil {
+			t.Fatalf("setup derived: %v", err)
+		}
+		err = s.Update(ctx, sess, func(tx store.Tx) error {
+			return tx.InsertItem(taskItem(sess, srcID, tx.NextSeq(), domain.AuthorityUser))
+		})
+		if err != nil {
+			t.Fatalf("setup src: %v", err)
+		}
+
+		err = s.Update(ctx, sess, func(tx store.Tx) error {
+			derived, err := tx.Item(derivedID)
+			if err != nil {
+				return err
+			}
+			// A later, different transaction reads the item's own
+			// EventID off the record and replays it verbatim.
+			_, err = LinkDerived(tx, actor, derivedID, []string{srcID}, nil, derived.EventID)
 			return err
 		})
 		if !errors.Is(err, ErrDerivedLinkNotAtCreation) {
@@ -1195,25 +1234,6 @@ func TestLinkDerived_MustBeCreationEvent(t *testing.T) {
 			t.Fatalf("view: %v", err)
 		}
 	})
-
-	t.Run("SameEventAllowed", func(t *testing.T) {
-		s := memory.New()
-		defer s.Close()
-		const sess, eventID = "sess-auth24-same-event", "evt-created-note"
-		actor := principal(sess, domain.AuthorityAgent)
-
-		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			derived := taskItem(sess, "note", tx.NextSeq(), domain.AuthorityAgent)
-			derived.EventID = eventID
-			src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser)
-			mustInsert(t, tx, derived, src)
-			_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, eventID)
-			return err
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
 }
 
 // -- derived boundary rejection and all-or-nothing writes ------------------
@@ -1229,7 +1249,6 @@ func TestLinkDerived_BoundaryRejection(t *testing.T) {
 		src := taskItem(sess, "src", tx.NextSeq(), domain.AuthorityUser) // TASK-scoped
 		derived := storetest.NewItem(sess, "derived", tx.NextSeq(), "summary")
 		derived.Authority = domain.AuthorityAgent // passes the actor-authority gate (AUTH-1.1); SESSION scope still trips the boundary check
-		derived.EventID = "evt"                   // passes the same-event gate (AUTH-2.4)
 		derivedID = derived.ID
 		mustInsert(t, tx, src, derived)
 		_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, nil, "evt")
@@ -1263,7 +1282,6 @@ func TestLinkDerived_CoverageMismatchWritesNothing(t *testing.T) {
 	var derivedID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		derived := taskItem(sess, "derived-cm", tx.NextSeq(), domain.AuthorityAgent)
-		derived.EventID = "evt"
 		src := taskItem(sess, "src-cm", tx.NextSeq(), domain.AuthorityUser)
 		derivedID = derived.ID
 		mustInsert(t, tx, derived, src)
@@ -1302,7 +1320,6 @@ func TestLinkDerived_InaccessibleSourceWritesNothing(t *testing.T) {
 	var derivedID, visibleID, hiddenID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		derived := taskItem(sess, "note", tx.NextSeq(), domain.AuthorityAgent)
-		derived.EventID = "evt-note"
 		visible := taskItem(sess, "x9", tx.NextSeq(), domain.AuthorityTool)
 		hidden := agentScopedItem(sess, "other-session-item", tx.NextSeq(), "agent-b")
 		derivedID, visibleID, hiddenID = derived.ID, visible.ID, hidden.ID
@@ -1343,10 +1360,13 @@ func TestLinkDerived_AllOrNothing(t *testing.T) {
 	const sess, eventID = "sess-allornothing", "evt-link"
 	actor := principal(sess, domain.AuthorityAgent)
 
+	// AUTH-3.1 requires LinkDerived to run in the same transaction that
+	// inserted derived, so the decoy that forces a mid-loop failure must
+	// be inserted in that same transaction too (after derived exists, to
+	// satisfy the dangling-relationship check), not pre-committed earlier.
 	var derivedID, s1ID, s2ID string
 	err := s.Update(ctx, sess, func(tx store.Tx) error {
 		derived := taskItem(sess, "derived2", tx.NextSeq(), domain.AuthorityAgent)
-		derived.EventID = eventID
 		s1 := taskItem(sess, "s1", tx.NextSeq(), domain.AuthorityUser)
 		s2 := taskItem(sess, "s2", tx.NextSeq(), domain.AuthorityUser)
 		derivedID, s1ID, s2ID = derived.ID, s1.ID, s2.ID
@@ -1362,13 +1382,10 @@ func TestLinkDerived_AllOrNothing(t *testing.T) {
 			Authority: domain.AuthorityAgent,
 			EventID:   "decoy",
 		}
-		return tx.InsertRelationship(decoy)
-	})
-	if err != nil {
-		t.Fatalf("setup: %v", err)
-	}
+		if err := tx.InsertRelationship(decoy); err != nil {
+			return err
+		}
 
-	err = s.Update(ctx, sess, func(tx store.Tx) error {
 		_, err := LinkDerived(tx, actor, derivedID, []string{s1ID, s2ID}, nil, eventID)
 		return err
 	})
@@ -1377,6 +1394,12 @@ func TestLinkDerived_AllOrNothing(t *testing.T) {
 	}
 
 	err = s.View(ctx, sess, func(tx store.ReadTx) error {
+		// The whole transaction — including derived, s1, s2, and the
+		// decoy, not only the s1 edge LinkDerived's own loop wrote before
+		// failing — must be rolled back atomically.
+		if _, err := tx.Item(derivedID); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("Item(derived) err = %v, want ErrNotFound (whole transaction must have rolled back)", err)
+		}
 		rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDerivedFrom, FromID: derivedID, ToID: s1ID})
 		if err != nil {
 			return err
@@ -1747,6 +1770,120 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 			t.Fatalf("err = %v, want nil (the stale item must not block the directive)", err)
 		}
 	})
+}
+
+// -- AUTH-3.2: stale directive pointers -------------------------------------
+
+// TestResolveLifecycleTarget_StaleDirectivePointerNotReturned is AUTH-3.2:
+// SupersedeSnapshot (like a direct Supersede) retires an item without
+// touching the directive-pointer map, so tx.CurrentDirective(s) can still
+// name an item that is no longer current. ResolveLifecycleTarget must never
+// hand back a superseded version.
+func TestResolveLifecycleTarget_StaleDirectivePointerNotReturned(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess, taskID, dirID = "sess-auth32-resolve", "task", "working-1"
+	actor := principal(sess, domain.AuthorityUser)
+	boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: taskID}
+
+	var w1ID string
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		w1 := workingItem(sess, "w1", tx.NextSeq(), domain.AuthorityUser)
+		w1.DirectiveID = dirID
+		w1ID = w1.ID
+		mustInsert(t, tx, w1)
+		_, err := ReplaceDirective(tx, actor, taskID, dirID, w1.ID, "evt-w1")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("setup w1: %v", err)
+	}
+
+	// Retire w1 via a Working snapshot, which never touches the directive
+	// map at all.
+	err = s.Update(ctx, sess, func(tx store.Tx) error {
+		w2 := workingItem(sess, "w2", tx.NextSeq(), domain.AuthorityUser)
+		mustInsert(t, tx, w2)
+		_, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("supersede w1: %v", err)
+	}
+
+	err = s.View(ctx, sess, func(tx store.ReadTx) error {
+		if ok, err := IsCurrent(tx, w1ID); err != nil || ok {
+			t.Fatalf("IsCurrent(w1) = %v, %v; want false, nil (test setup invariant)", ok, err)
+		}
+		// The pointer is now stale: it still names w1.
+		stale, err := tx.CurrentDirective(taskID, dirID, boundary)
+		if err != nil || stale != w1ID {
+			t.Fatalf("CurrentDirective = %q, %v; want stale pointer to %q (test setup invariant)", stale, err, w1ID)
+		}
+		_, err = ResolveLifecycleTarget(tx, actor, taskID, dirID)
+		return err
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound (a stale pointer must never resolve)", err)
+	}
+}
+
+// TestReplaceDirective_StalePointerDoesNotBlockNewBoundary is the other
+// half of AUTH-3.2: a stale, but still nominally "visible", directive
+// pointer to a superseded item must not make rejectVisibleBoundaryConflict
+// reject a legitimate first-version write at a different boundary.
+func TestReplaceDirective_StalePointerDoesNotBlockNewBoundary(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess, taskID, dirID = "sess-auth32-replace", "task", "shared-x"
+	actor := principal(sess, domain.AuthorityUser)
+
+	var w1ID string
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		w1 := taskItem(sess, "w1", tx.NextSeq(), domain.AuthorityUser)
+		w1.DirectiveID = dirID
+		w1ID = w1.ID
+		mustInsert(t, tx, w1)
+		_, err := ReplaceDirective(tx, actor, taskID, dirID, w1.ID, "evt-w1")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("setup w1: %v", err)
+	}
+
+	// Retire w1 directly (not through the directive map), leaving a stale
+	// pointer at w1's own, actor-visible boundary.
+	err = s.Update(ctx, sess, func(tx store.Tx) error {
+		replacement := taskItem(sess, "w1-replacement", tx.NextSeq(), domain.AuthorityUser)
+		mustInsert(t, tx, replacement)
+		_, err := Supersede(tx, actor, replacement.ID, w1ID, "evt-retire", "")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("retire w1: %v", err)
+	}
+
+	// A different, but equally visible, boundary now files a first
+	// version of the same directive ID. Before AUTH-3.2, the stale
+	// pointer to w1 would have wrongly been treated as a live conflict.
+	err = s.Update(ctx, sess, func(tx store.Tx) error {
+		turnScoped := taskItem(sess, "turn-version", tx.NextSeq(), domain.AuthorityUser)
+		turnScoped.DirectiveID = dirID
+		turnScoped.Scope = domain.ScopeTurn
+		turnScoped.Access = domain.AccessBoundary{Scope: domain.ScopeTurn, SessionID: sess, TaskID: turnScoped.TaskID}
+		mustInsert(t, tx, turnScoped)
+		prev, err := ReplaceDirective(tx, actor, taskID, dirID, turnScoped.ID, "evt-turn")
+		if err != nil {
+			return err
+		}
+		if prev != "" {
+			t.Errorf("prev = %q, want empty (a first version at this boundary)", prev)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("err = %v, want nil (a stale pointer must not block a legitimate write)", err)
+	}
 }
 
 // -- deep chain -------------------------------------------------------------
