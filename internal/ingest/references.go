@@ -104,7 +104,10 @@ func (r *run) referenceItemID(c unitCtx, ref domain.ContextItem) error {
 	case err != nil:
 		return err
 	}
-	_, err = r.linkReference(c.actor, ref, target)
+	stop, err := r.linkReference(c.actor, ref, target)
+	if err == nil && stop {
+		r.truncatedLinks(c.si, c.pi, ref.SourceRanges[0].Range, ref.Access)
+	}
 	return err
 }
 
