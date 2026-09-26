@@ -61,7 +61,7 @@ const (
 
 func (c TransitionCause) Valid() bool {
 	switch c {
-	case CauseAssertion, CauseMatcher, CauseBlock, CauseUnblock, CauseWaive, CauseResourceInvalidation, CauseProofRejected, CauseProofRefresh, CauseLegacyReconciliation, CauseSourceReplacement:
+	case CauseRevalidation, CauseUpgradeReconciliation, CauseAssertion, CauseMatcher, CauseBlock, CauseUnblock, CauseWaive, CauseResourceInvalidation, CauseProofRejected, CauseProofRefresh, CauseLegacyReconciliation, CauseSourceReplacement:
 		return true
 	}
 	return false

@@ -141,13 +141,19 @@ func (o ObligationVersion) Validate() error {
 
 // ObligationTransition is the append-only record of one status change.
 type ObligationTransition struct {
-	ID           string
-	SessionID    string
-	ObligationID string
-	Version      uint64
-	Seq          uint64
-	From         ObligationStatus
-	To           ObligationStatus
+	Cause                                           TransitionCause
+	AssertionMode                                   AssertionMode
+	ProofID, PriorProofID, CauseRecordID, RequestID string
+	OriginAuthorizationRef                          *OriginAuthorizationRef
+	ReasonCode                                      ObligationReasonCode
+	Rationale                                       string
+	ID                                              string
+	SessionID                                       string
+	ObligationID                                    string
+	Version                                         uint64
+	Seq                                             uint64
+	From                                            ObligationStatus
+	To                                              ObligationStatus
 	// Action is the authorized lifecycle action that produced the
 	// transition; it must be the one TransitionAction(From, To) requires,
 	// so a mutation authorized as one action cannot be stored as another.
@@ -162,6 +168,10 @@ type ObligationTransition struct {
 
 // Clone returns a deep copy.
 func (t ObligationTransition) Clone() ObligationTransition {
+	if t.OriginAuthorizationRef != nil {
+		v := *t.OriginAuthorizationRef
+		t.OriginAuthorizationRef = &v
+	}
 	t.EvidenceIDs = slices.Clone(t.EvidenceIDs)
 	t.Fingerprints = slices.Clone(t.Fingerprints)
 	if t.Matcher != nil {
@@ -194,6 +204,9 @@ func TransitionAction(from, to ObligationStatus) (Action, bool) {
 // session: AGENT, TOOL, and RETRIEVED_CONTENT never change obligation
 // status, and a matcher runs under a trusted principal (FR-OBL-002).
 func (t ObligationTransition) Validate() error {
+	if err := t.validateSemanticTransition(); err != nil {
+		return err
+	}
 	if t.ID == "" || t.SessionID == "" || t.ObligationID == "" || t.Version == 0 || t.Seq == 0 {
 		return invalid("obligation transition: ID, session, obligation, version, and sequence are required")
 	}
