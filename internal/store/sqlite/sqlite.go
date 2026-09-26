@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -263,6 +264,11 @@ func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) er
 	if tx.semanticWrite && !tx.semanticSeqRecord {
 		return domain.ErrInvalidRecord
 	}
+	for seq := range tx.ledgerSeqs {
+		if tx.semanticSeqs[seq] {
+			return fmt.Errorf("%w: sequence %d is shared by a TargetCall event and a semantic record", domain.ErrInvalidRecord, seq)
+		}
+	}
 	commitCtx := context.WithoutCancel(ctx)
 	if _, err = c.ExecContext(commitCtx, "UPDATE sessions SET last_seq=?,committed=CASE WHEN ? THEN 1 ELSE committed END WHERE session_id=?", tx.last, tx.wrote, session); err != nil {
 		return err
@@ -333,6 +339,8 @@ type transaction struct {
 	semanticWrite      bool
 	semanticSeqRecord  bool
 	wrote              bool
+	ledgerSeqs         map[uint64]bool
+	semanticSeqs       map[uint64]bool
 }
 
 var _ store.Tx = (*transaction)(nil)
@@ -357,6 +365,7 @@ func (t *transaction) checkSeq(seq uint64) error {
 // error and continues the outer Update.
 func (t *transaction) atomic(fn func() error) error {
 	wasWrite, wasSeq, wasWrote := t.semanticWrite, t.semanticSeqRecord, t.wrote
+	wasLedger, wasSemanticSeqs := maps.Clone(t.ledgerSeqs), maps.Clone(t.semanticSeqs)
 	if _, err := t.conn.ExecContext(t.ctx, "SAVEPOINT store_method"); err != nil {
 		return err
 	}
@@ -364,11 +373,13 @@ func (t *transaction) atomic(fn func() error) error {
 		_, _ = t.conn.ExecContext(t.ctx, "ROLLBACK TO SAVEPOINT store_method")
 		_, _ = t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
 		t.semanticWrite, t.semanticSeqRecord, t.wrote = wasWrite, wasSeq, wasWrote
+		t.ledgerSeqs, t.semanticSeqs = wasLedger, wasSemanticSeqs
 		return err
 	}
 	_, err := t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
 	if err != nil {
 		t.semanticWrite, t.semanticSeqRecord, t.wrote = wasWrite, wasSeq, wasWrote
+		t.ledgerSeqs, t.semanticSeqs = wasLedger, wasSemanticSeqs
 	}
 	return err
 }
@@ -395,6 +406,7 @@ func (t *transaction) put(kind, id string, sub int, value any, replace bool) err
 			return domain.ErrNotFound
 		}
 		t.wrote = true
+		t.noteSequence(value)
 		if kind != "conversation" && kind != "call" && kind != "attempt" {
 			t.semanticWrite = true
 		}
@@ -412,8 +424,47 @@ func (t *transaction) put(kind, id string, sub int, value any, replace bool) err
 	}
 	if err == nil {
 		t.wrote = true
+		t.noteSequence(value)
 	}
 	return err
+}
+
+// noteSequence records only sequence-bearing semantic records and TargetCall
+// audit events written in this transaction. Call and attempt fields may share
+// a TargetCall sequence and are intentionally omitted.
+func (t *transaction) noteSequence(value any) {
+	semantic := func(seq uint64) {
+		if !t.allocated[seq] {
+			return
+		}
+		if t.semanticSeqs == nil {
+			t.semanticSeqs = make(map[uint64]bool)
+		}
+		t.semanticSeqs[seq] = true
+	}
+	switch v := value.(type) {
+	case domain.ContextItem:
+		semantic(v.Seq)
+	case domain.Relationship:
+		semantic(v.Seq)
+	case domain.EventRecord:
+		semantic(v.Seq)
+	case domain.ObligationVersion:
+		semantic(v.CreatedSeq)
+	case domain.ObligationTransition:
+		semantic(v.Seq)
+	case domain.MutationGrant:
+		semantic(v.IssuedSeq)
+	case domain.LifecycleEvent:
+		if v.TargetKind == domain.TargetCall {
+			if t.ledgerSeqs == nil {
+				t.ledgerSeqs = make(map[uint64]bool)
+			}
+			t.ledgerSeqs[v.Seq] = true
+		} else {
+			semantic(v.Seq)
+		}
+	}
 }
 func (t *transaction) get(kind, id string, sub int, out any) error {
 	s, err := schemaFor(kind)

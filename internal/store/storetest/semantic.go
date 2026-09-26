@@ -86,6 +86,12 @@ func testItemInsertRules(t *testing.T, s store.Store) {
 		{"goal without status", func(it *domain.ContextItem) { it.Kind = domain.KindGoal }, domain.ErrInvalidRecord},
 		{"invalid section", func(it *domain.ContextItem) { it.Section, it.DirectiveID = "TODO", "x" }, domain.ErrInvalidRecord},
 		{"section without directive ID", func(it *domain.ContextItem) { it.Section = domain.SectionWorking }, domain.ErrInvalidRecord},
+		{"section on an AGENT item", func(it *domain.ContextItem) {
+			it.Section, it.DirectiveID, it.Authority = domain.SectionWorking, "agent.k", domain.AuthorityAgent
+		}, domain.ErrInvalidRecord},
+		{"section on a TOOL item", func(it *domain.ContextItem) {
+			it.Section, it.DirectiveID, it.Authority = domain.SectionPinned, "d", domain.AuthorityTool
+		}, domain.ErrInvalidRecord},
 		{"reused ID", func(it *domain.ContextItem) { it.ID = "i1" }, domain.ErrImmutable},
 		{"reused ID, identical content", func(it *domain.ContextItem) { *it = NewItem(sessA, "i1", it.Seq, "one") }, domain.ErrImmutable},
 	}
@@ -804,10 +810,19 @@ func testDirectiveBoundaries(t *testing.T, s store.Store) {
 		for _, it := range []domain.ContextItem{shared, private, private2} {
 			noErr(t, tx.InsertItem(it))
 		}
+		ids, err := tx.CurrentDirectives("task", "dir")
+		if err != nil || len(ids) != 0 {
+			t.Errorf("CurrentDirectives before any is set = %v, %v; want empty and nil", ids, err)
+		}
 		noErr(t, tx.SetCurrentDirective("task", "dir", "shared"))
 		noErr(t, tx.SetCurrentDirective("task", "dir", "private"))
 		// Replacing the agent-only version leaves the task-wide one alone.
 		noErr(t, tx.SetCurrentDirective("task", "dir", "private2"))
+		ids, err = tx.CurrentDirectives("task", "dir")
+		noErr(t, err)
+		if want := []string{"private2", "shared"}; !slices.Equal(ids, want) {
+			t.Errorf("CurrentDirectives inside Update = %v, want %v", ids, want)
+		}
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
@@ -819,6 +834,18 @@ func testDirectiveBoundaries(t *testing.T, s store.Store) {
 			noErr(t, err)
 			if got != tc.want {
 				t.Errorf("CurrentDirective(%+v) = %q, want %q", tc.boundary, got, tc.want)
+			}
+		}
+		// CurrentDirectives lists the current version in every boundary,
+		// ordered by item ID, and nothing for other tasks or IDs.
+		for _, tc := range []struct {
+			task, dir string
+			want      []string
+		}{{"task", "dir", []string{"private2", "shared"}}, {"task2", "dir", nil}, {"task", "other", nil}} {
+			ids, err := tx.CurrentDirectives(tc.task, tc.dir)
+			noErr(t, err)
+			if !slices.Equal(ids, tc.want) {
+				t.Errorf("CurrentDirectives(%s, %s) = %v, want %v", tc.task, tc.dir, ids, tc.want)
 			}
 		}
 		// Every boundary field is part of the key.
@@ -838,4 +865,40 @@ func testDirectiveBoundaries(t *testing.T, s store.Store) {
 		}
 		return nil
 	})
+}
+
+// testCurrentDirectivesOrder checks that CurrentDirectives orders by item
+// ID regardless of insertion order: six boundaries are set in reverse
+// item-ID order, so neither insertion order nor hash order can pass.
+func testCurrentDirectivesOrder(t *testing.T, s store.Store) {
+	const n = 6
+	var want []string
+	update(t, s, sessA, func(tx store.Tx) error {
+		for i := n - 1; i >= 0; i-- {
+			it := NewDirective(sessA, fmt.Sprintf("v%d", i), "dir", tx.NextSeq(), fmt.Sprintf("version %d", i))
+			it.AgentID = fmt.Sprintf("agent-%d", i)
+			it.Access.AgentID = it.AgentID
+			noErr(t, tx.InsertItem(it))
+			noErr(t, tx.SetCurrentDirective("task", "dir", it.ID))
+		}
+		for i := range n {
+			want = append(want, fmt.Sprintf("v%d", i))
+		}
+		got, err := tx.CurrentDirectives("task", "dir")
+		noErr(t, err)
+		if !slices.Equal(got, want) {
+			t.Errorf("CurrentDirectives inside Update = %v, want %v", got, want)
+		}
+		return nil
+	})
+	for range 3 {
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			got, err := tx.CurrentDirectives("task", "dir")
+			noErr(t, err)
+			if !slices.Equal(got, want) {
+				t.Errorf("CurrentDirectives = %v, want %v", got, want)
+			}
+			return nil
+		})
+	}
 }

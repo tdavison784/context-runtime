@@ -251,6 +251,11 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 			tr.Actor.SessionID = sessB
 			return tr
 		}, domain.ErrInvalidRecord},
+		{"matcher without its grant", func(seq uint64) domain.ObligationTransition {
+			tr := NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationSatisfied)
+			tr.Matcher = &domain.MatcherRef{Name: "m", Version: "1"}
+			return tr
+		}, domain.ErrInvalidRecord},
 		{"matcher on a block", func(seq uint64) domain.ObligationTransition {
 			tr := NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
 			tr.Matcher = &domain.MatcherRef{Name: "m", Version: "1"}
@@ -600,6 +605,34 @@ func testConversations(t *testing.T, s store.Store) {
 		}
 		_, err = tx.Conversation("c2")
 		wantErr(t, err, domain.ErrNotFound)
+		return nil
+	})
+}
+
+// testMatcherTransition checks that a matcher's satisfaction is stored
+// with the grant it acted under (AUTH-2.3); whether the grant is in force
+// is the caller's check.
+func testMatcherTransition(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		return tx.InsertObligationVersion(NewObligation(sessA, "o", 1, tx.NextSeq(), "src"))
+	})
+	var tr domain.ObligationTransition
+	update(t, s, sessA, func(tx store.Tx) error {
+		tr = NewTransition(sessA, "t", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied)
+		tr.Matcher = &domain.MatcherRef{Name: "tests_pass", Version: "1"}
+		wantErr(t, errOf(tx.AppendObligationTransition(tr, 1)), domain.ErrInvalidRecord)
+		tr.GrantID = "g1"
+		got, err := tx.AppendObligationTransition(tr, 1)
+		noErr(t, err)
+		if got.Status != domain.ObligationSatisfied || !slices.Equal(got.EvidenceIDs, tr.EvidenceIDs) {
+			t.Errorf("obligation after matcher transition = %+v", got)
+		}
+		return nil
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		got, err := tx.ObligationTransitions("o")
+		noErr(t, err)
+		assertEqual(t, "matcher transition", got, []domain.ObligationTransition{tr})
 		return nil
 	})
 }

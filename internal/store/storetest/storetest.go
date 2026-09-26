@@ -80,10 +80,12 @@ var suite = []testCase{
 	{"Blobs", testBlobs},
 	{"DirectiveReplacement", testDirectiveReplacement},
 	{"DirectiveBoundaries", testDirectiveBoundaries},
+	{"CurrentDirectivesOrder", testCurrentDirectivesOrder},
 
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
 	{"ObligationTransitions", testObligationTransitions},
+	{"MatcherTransition", testMatcherTransition},
 	{"Grants", testGrants},
 	{"Tasks", testTasks},
 	{"LifecycleEvents", testLifecycleEvents},
@@ -97,6 +99,7 @@ var suite = []testCase{
 	{"SemanticWriteRule", testSemanticWriteRule},
 	{"Sessions", testSessions},
 	{"Cancellation", testCancellation},
+	{"LedgerSeqIsolation", testLedgerSeqIsolation},
 	{"CallAttempts", testCallAttempts},
 }
 
@@ -133,6 +136,9 @@ func noErr(t *testing.T, err error) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// errOf2 returns the error of a three-result call.
+func errOf2[T, U any](_ T, _ U, err error) error { return err }
 
 // errOf returns the error of a two-result call.
 func errOf[T any](_ T, err error) error { return err }
