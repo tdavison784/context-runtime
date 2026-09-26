@@ -70,6 +70,9 @@ func populate(tx store.Tx, sess string) error {
 		func() error { return tx.InsertItem(NewItem(sess, "i1", s[1], "one")) },
 		func() error { return tx.InsertItem(NewDirective(sess, "i2", "dir", s[2], "two")) },
 		func() error {
+			return errOf(tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sess, "l0", s[10], "i1")))
+		},
+		func() error {
 			return tx.InsertRelationship(NewRelationship(sess, "r1", domain.RelSupersedes, "i2", "i1", s[3]))
 		},
 		func() error { return tx.SetCurrentDirective("task", "dir", "i2") },
@@ -271,8 +274,13 @@ func testReadOwnWrites(t *testing.T, s store.Store) {
 		noErr(t, err)
 		evs, err := tx.LifecycleEvents(store.LifecycleFilter{})
 		noErr(t, err)
-		if len(evs) != 1 {
-			t.Errorf("LifecycleEvents = %d, want 1", len(evs))
+		if len(evs) != 2 {
+			t.Errorf("LifecycleEvents = %d, want 2", len(evs))
+		}
+		it, err := tx.Item("i1")
+		noErr(t, err)
+		if it.Version != 2 {
+			t.Errorf("item i1 Version = %d, want 2", it.Version)
 		}
 		_, err = tx.Conversation("c1")
 		noErr(t, err)
@@ -466,7 +474,7 @@ func testForeignSessionRecords(t *testing.T, s store.Store) {
 			"InsertObligation":   tx.InsertObligationVersion(NewObligation(sessA, "ox", 1, n, "i1")),
 			"AppendTransition": errOf(tx.AppendObligationTransition(NewTransition(sessA, "tx", "o1", 1, n,
 				domain.ObligationBlocked, domain.ObligationUnresolved))),
-			"UpdateItem":           errOf(tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "ly", n, "i1"))),
+			"UpdateItem":           errOf(tx.UpdateItem("i1", 2, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "ly", n, "i1"))),
 			"InsertGrant":          tx.InsertGrant(NewGrant(sessA, "gx", n, "i1")),
 			"PutTask":              errOf(tx.PutTask(NewTask(sessA, "tx"), 0)),
 			"AppendLifecycleEvent": tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "lx", n, domain.TargetItem, "i1")),
