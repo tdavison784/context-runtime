@@ -2234,34 +2234,70 @@ fixed.
   each of the four tables. Test: `TestRetireLookupsUseIndex`
   (`internal/store/sqlite/access_lookups_test.go`, via the named
   `retireLookupSQL` builder the plan guard runs).
-- **SPEC-3.1 item 2: one large event is no longer quadratic in SQLite
-  (refines §5/§7, D8/D10).** Every derived item's `graph.LinkDerived`
-  loaded and fully decoded its span's growing transcript item again, and
-  `InsertRelationship` did the same to check both endpoints exist — for
-  `n` derived items from one transcript, that is `O(n)` reloads of a
-  transcript whose own size is also growing, i.e. quadratic. Two changes:
-  `InsertRelationship` now checks an endpoint's existence with a
-  primary-key probe (`SELECT 1 FROM rec_item WHERE session_id=? AND id=?
-  AND subkey=0`), never a full decode; and each `*transaction` keeps an
-  `itemCache` of items it has already decoded and verified this
-  transaction (`Item` returns a clone from the cache when present,
-  populates it otherwise), so a transcript is decoded once per
-  transaction rather than once per derived item — `UpdateItem` deletes its
-  entry (**SPEC-4.5: corrected from "refreshes" — `write.go:100`, the next
-  read decodes the updated row instead**), and a rolled-back store-method
-  savepoint clears the whole cache, so a cached value is never stale
-  relative to what the
-  transaction itself has written. Store-level item bytes loaded, 500 vs.
-  4000 derived items from one transcript: x65.5 before, x8.0 after (linear
-  in item count, not transcript size too); end-to-end SQLite ingest of one
-  event, 500 vs. 4000 Pinned items: x32 before (0.40s/12.8s), x9.1 after
-  (0.12s/1.06s). Tests: `TestDerivedLinksLoadTranscriptOnce`
+- **SPEC-3.1 item 2: one large event is no longer quadratic in SQLite,
+  and the fix's own two follow-on gaps are closed (refines §5/§7, D8/D10;
+  this bullet is the final, converged behavior — SPEC-4.1/SPEC-4.4 changed
+  it twice more since the paragraph below was first written).** Every
+  derived item's `graph.LinkDerived` loaded and fully decoded its span's
+  growing transcript item again, and `InsertRelationship` did the same to
+  check both endpoints exist — for `n` derived items from one transcript,
+  that is `O(n)` reloads of a transcript whose own size is also growing,
+  i.e. quadratic. The fix: each `*transaction` keeps an `itemCache` of
+  items it has already decoded and verified this transaction (`Item`
+  returns a clone from the cache when present, populates it otherwise), so
+  a transcript is decoded once per transaction rather than once per
+  derived item — `UpdateItem` deletes its entry (`write.go:100`, the next
+  read decodes the updated row), and a rolled-back store-method savepoint
+  clears the whole cache, so a cached value is never stale relative to
+  what the transaction itself has written.
+  **SPEC-4.1 (D17): the cache is now bounded, not unbounded.** A first
+  version cached every item `Item()` ever decoded for the life of the
+  transaction with no limit — `scanLookup` called `Item()` for every
+  indexed row it paged through, including rows the viewer can't see, so
+  one transaction paging thousands of large sourced items grew ingest
+  memory with the session's matching items, not with the event (a
+  resource bound moved from time to memory, D17's concern either way).
+  `itemcache.go`'s `itemCache` is now a genuine LRU, capped at 1024
+  entries and 16 MiB of item text (roughly two maximum-size spans') —
+  an item over the byte cap is never cached at all; `scanLookup` now
+  calls the internal `loadItem(id, cache=false)` instead of `Item`, so
+  paging past many matches neither grows the cache nor evicts the one
+  transcript derived-linking actually re-reads. **SPEC-4.4: `InsertRelationship`
+  verifies both endpoints again, not only that they exist.** SPEC-3.1
+  item 2's own first fix replaced the endpoint check with an
+  existence-only primary-key probe to avoid a full decode — but that
+  silently dropped the pre-existing guarantee that linking a corrupted
+  legacy item (e.g. migration 0001's `�`-repaired text) fails
+  `ErrIntegrity` rather than linking it. `InsertRelationship` now loads
+  each endpoint through `loadItem(id, cache=true)` (`domain.ErrNotFound`
+  becomes `ErrDanglingRelationship` as before; a verification failure is
+  `ErrIntegrity`), so both endpoints are decoded and hashed at most once
+  per transaction while cached rather than once per edge — the same cache
+  that already keeps the transcript hot, so this restores the integrity
+  guarantee without reopening the quadratic cost SPEC-3.1 item 2 fixed.
+  `store.go`'s `InsertRelationship` contract now states the integrity
+  requirement explicitly. Store-level item bytes loaded, 500 vs.
+  4000 derived items from one transcript: x65.5 before caching, x8.0 with
+  the (then-unbounded) cache (linear in item count, not transcript size
+  too); end-to-end SQLite ingest of one event, 500 vs. 4000 Pinned items:
+  x32 before, x9.1 with the unbounded cache, x10.5-x10.8 with the current
+  bounded cache plus restored endpoint verification (still linear, not the
+  original x32). Tests: `TestDerivedLinksLoadTranscriptOnce`
   (`internal/store/sqlite/scaling_test.go`, the store-level bytes-loaded
   check); `TestOneLargeEventScalesLinearly`
   (`internal/store/sqlite/event_scaling_test.go`, **SPEC-4.2: previously
   uncited** — the same property end to end through `Ingester.Ingest`,
   asserting about x8 for 4000 items vs. 500, not the roughly x32 a
-  per-item transcript reload costs).
+  per-item transcript reload costs); `TestItemCacheBounded_SPEC41`
+  (one transaction pages `SourceItems` over 48 sourced items of 512 KiB
+  each — 24 MiB total, above the byte cap — then reads each directly; the
+  cache's own entry/byte footprint, exposed via `itemCacheFootprint`,
+  never exceeds its caps at any stage), `TestItemCacheEntryCap_SPEC41`,
+  `TestItemCacheLRU` (eviction order, oversize-item exclusion, and byte
+  accounting) — all `internal/store/sqlite/itemcache_test.go`;
+  `TestRolledBackMethodClearsItemCache`
+  (`internal/store/sqlite/itemcache_test.go`) locks the savepoint-rollback
+  cache clear above, previously asserted only in prose.
 - **SPEC-3.1 item 3: the memory ordered-index commit is now proportional
   to the change, not the key's existing size (refines DUR-2.1 above,
   which this supersedes).** `orderedIndex.commit` previously rebuilt each
