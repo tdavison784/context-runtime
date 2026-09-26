@@ -68,7 +68,7 @@ func AppendDenial(tx store.Tx, actor domain.Principal, intent AdmissionIntent, c
 	if err != nil {
 		return err
 	}
-	if err := validateToolOrigin(sem, intent.Origin, execution.MaxPageSize, execution.MaxTransactionWork); err != nil {
+	if err := validateToolOrigin(tx, sem, intent.Origin, execution.MaxPageSize, execution.MaxTransactionWork); err != nil {
 		return err
 	}
 	code, _ := FixedRetrievalError(cause)

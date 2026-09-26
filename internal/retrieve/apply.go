@@ -72,7 +72,7 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	if err != nil {
 		return out, err
 	}
-	if err = validateToolOrigin(sem, intent.Origin, execution.MaxPageSize, execution.MaxTransactionWork); err != nil {
+	if err = validateToolOrigin(tx, sem, intent.Origin, execution.MaxPageSize, execution.MaxTransactionWork); err != nil {
 		return out, err
 	}
 	got, err := readGet(tx, actor, intent.Rehydrate.ItemID)

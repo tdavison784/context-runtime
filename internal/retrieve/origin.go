@@ -7,9 +7,14 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
+type callReader interface {
+	Call(callID string) (domain.CallRecord, error)
+}
+
 // validateToolOrigin accepts only a tool call recorded alongside its
-// producing assistant output in the authenticated logical exchange (P3-20).
-func validateToolOrigin(r store.MembershipReader, origin domain.RetrievalOrigin, pageSize, maxWork int) error {
+// producing assistant output in the authenticated logical exchange, whose
+// inference call completed for the exact holder (P3-24/30).
+func validateToolOrigin(calls callReader, r store.MembershipReader, origin domain.RetrievalOrigin, pageSize, maxWork int) error {
 	if err := origin.Validate(); err != nil {
 		return err
 	}
@@ -29,6 +34,20 @@ func validateToolOrigin(r store.MembershipReader, origin domain.RetrievalOrigin,
 	}
 	if exchange.Validate() != nil || exchange.ID != inv.ExchangeID || exchange.Principal != origin.Holder ||
 		exchange.ConversationID != origin.ConversationID || exchange.TurnID != origin.TurnID || exchange.State != domain.ExchangeExecuting {
+		return domain.ErrInvalidAuthorityPromotion
+	}
+	call, err := calls.Call(inv.CallID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.ErrInvalidAuthorityPromotion
+	}
+	if err != nil {
+		return err
+	}
+	if call.Validate() != nil {
+		return domain.ErrIntegrity
+	}
+	if call.SessionID != origin.Holder.SessionID || call.CallID != inv.CallID || call.ConversationID != origin.ConversationID ||
+		call.Principal != origin.Holder || call.Operation != domain.OperationInference || call.State != domain.CallCompleted {
 		return domain.ErrInvalidAuthorityPromotion
 	}
 	var outputRef, toolRef domain.ItemContentRef

@@ -79,11 +79,11 @@ func TestW5RegisteredToolCallAuthenticatesRetrievalOrigin(t *testing.T) {
 		inv := domain.ToolInvocation{SessionID: "s", ConversationID: x.ConversationID, CallID: call.CallID,
 			ToolCallID: member.ToolCallID, ExchangeID: x.ID, TurnID: x.TurnID, Principal: p}
 		origin := domain.RetrievalOrigin{Holder: p, ConversationID: x.ConversationID, TurnID: x.TurnID, Invocation: &inv}
-		if err := validateToolOrigin(sem, origin, 8, 16); err != nil {
+		if err := validateToolOrigin(tx, sem, origin, 8, 16); err != nil {
 			t.Fatalf("W5 registered origin rejected: %v", err)
 		}
 		inv.ToolCallID = "unrelated"
-		if err := validateToolOrigin(sem, origin, 8, 16); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+		if err := validateToolOrigin(tx, sem, origin, 8, 16); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 			t.Fatalf("unregistered invocation admitted: %v", err)
 		}
 		return nil
