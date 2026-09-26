@@ -1035,7 +1035,9 @@ func TestLinkDerived_And_Provenance_HappyPath(t *testing.T) {
 		derivedID, s1ID, s2ID = derived.ID, s1.ID, s2.ID
 		mustInsert(t, tx, derived, s1, s2)
 
-		cov := &domain.Coverage{ConversationID: "conv", FromSeq: 1, ToSeq: 2}
+		// Legacy range/frontier metadata cannot authorize new coverage
+		// (P3-6); an explicit item set must equal the linked sources.
+		cov := &domain.Coverage{ItemIDs: []string{s2.ID, s1.ID}}
 		rels, err := LinkDerived(tx, actor, derived.ID, []string{s2.ID, s1.ID}, cov, "evt-link")
 		if err != nil {
 			return err
@@ -1043,16 +1045,33 @@ func TestLinkDerived_And_Provenance_HappyPath(t *testing.T) {
 		if len(rels) != 2 {
 			t.Errorf("LinkDerived returned %d relationships, want 2", len(rels))
 		}
-		// Coverage.ItemIDs must be populated, sorted, and deduplicated from
-		// the sources actually linked, regardless of the order given.
-		wantIDs := []string{s1.ID, s2.ID}
+		// Both edges reference ONE normalized PROVENANCE coverage record
+		// whose members are the sources actually linked, sorted and
+		// deduplicated regardless of the order given (P3-6).
 		for _, r := range rels {
-			if r.Coverage == nil {
-				t.Fatalf("relationship %s has no coverage", r.ID)
+			if r.Coverage != nil || r.CoverageID == "" || r.CoverageID != rels[0].CoverageID {
+				t.Fatalf("relationship %s: coverage %+v / %q, want one shared normalized record", r.ID, r.Coverage, r.CoverageID)
 			}
-			if !slices.Equal(r.Coverage.ItemIDs, wantIDs) {
-				t.Errorf("Coverage.ItemIDs = %v, want %v", r.Coverage.ItemIDs, wantIDs)
+		}
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		if c, err := r.Coverage(rels[0].CoverageID); err != nil || c.Purpose != domain.CoverageProvenance {
+			t.Errorf("Coverage(%s) = %+v, %v; want PROVENANCE", rels[0].CoverageID, c, err)
+		}
+		members, err := r.CoverageMembers(rels[0].CoverageID, store.Page{Limit: 10})
+		if err != nil {
+			return err
+		}
+		var gotIDs []string
+		for _, m := range members.Records {
+			if m.Source != nil {
+				gotIDs = append(gotIDs, m.Source.ItemID)
 			}
+		}
+		if wantIDs := []string{s1.ID, s2.ID}; members.More || !slices.Equal(gotIDs, wantIDs) {
+			t.Errorf("coverage members = %v (more %v), want %v", gotIDs, members.More, wantIDs)
 		}
 		return nil
 	})
