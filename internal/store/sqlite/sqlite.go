@@ -337,19 +337,17 @@ func (s *Store) Sessions(ctx context.Context) ([]string, error) {
 }
 
 type transaction struct {
-	conn               *sql.Conn
-	ctx                context.Context
-	session            string
-	last               uint64
-	allocated          map[uint64]bool
-	writable           bool
-	supersession       map[string][]string
-	supersessionLoaded bool
-	semanticWrite      bool
-	semanticSeqRecord  bool
-	wrote              bool
-	ledgerSeqs         map[uint64]bool
-	semanticSeqs       map[uint64]bool
+	conn              *sql.Conn
+	ctx               context.Context
+	session           string
+	last              uint64
+	allocated         map[uint64]bool
+	writable          bool
+	semanticWrite     bool
+	semanticSeqRecord bool
+	wrote             bool
+	ledgerSeqs        map[uint64]bool
+	semanticSeqs      map[uint64]bool
 }
 
 var _ store.TxBase = (*transaction)(nil)
