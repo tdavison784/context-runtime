@@ -51,6 +51,30 @@ var suite = []testCase{
 	{"EmptySession", testEmptySession},
 	{"CloseIdempotent", testCloseIdempotent},
 	{"ItemRoundTrip", testItemRoundTrip},
+
+	// Transactions.
+	{"NextSeqDense", testNextSeqDense},
+	{"SessionsSeqIndependent", testSessionsSeqIndependent},
+	{"RollbackOnError", testRollbackOnError},
+	{"RollbackOnStoreError", testRollbackOnStoreError},
+	{"FailedWriteLeavesNoTrace", testFailedWriteLeavesNoTrace},
+	{"ReadOwnWrites", testReadOwnWrites},
+	{"ViewIsolation", testViewIsolation},
+	{"ConcurrentUpdatesDense", testConcurrentUpdatesDense},
+	{"SessionIsolation", testSessionIsolation},
+	{"ForeignSessionRecords", testForeignSessionRecords},
+
+	// Semantic state.
+	{"ItemRichRoundTrip", testItemRichRoundTrip},
+	{"ItemInsertRules", testItemInsertRules},
+	{"ItemsFilterOrder", testItemsFilterOrder},
+	{"UpdateItem", testUpdateItem},
+	{"GoalLifecycle", testGoalLifecycle},
+	{"Relationships", testRelationships},
+	{"SupersessionAcyclic", testSupersessionAcyclic},
+	{"Events", testEvents},
+	{"Blobs", testBlobs},
+	{"DirectiveReplacement", testDirectiveReplacement},
 }
 
 var ctx = context.Background()
