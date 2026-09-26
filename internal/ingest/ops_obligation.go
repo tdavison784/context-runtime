@@ -10,8 +10,7 @@ import (
 // W4 family runs the obligation service's transaction method as the
 // operation's source actor at its allocated sequence; the service writes and
 // replays its own mutation receipt, which ingest names by the family's
-// canonical receipt ID. REGISTER_RESOURCE has no service method yet and
-// stays fail-closed.
+// canonical receipt ID.
 
 // obligationOp is one W4 operation kind: its receipt family, the service
 // call, and what it creates for later aliases.
@@ -33,6 +32,9 @@ var obligationOps = map[domain.SemanticOperationKind]obligationOp{
 	}, nil},
 	domain.OperationReevaluate: {domain.MutationObligationReevaluate, func(s *obligation.Service, tx store.Tx, a domain.Principal, op domain.SemanticOperation, seq uint64) (domain.MutationResult, error) {
 		return s.ReevaluateTx(tx, a, *op.Reevaluate, seq)
+	}, nil},
+	domain.OperationRegisterResource: {domain.MutationResourceRegister, func(s *obligation.Service, tx store.Tx, a domain.Principal, op domain.SemanticOperation, seq uint64) (domain.MutationResult, error) {
+		return s.RegisterResourceTx(tx, a, *op.RegisterResource, seq)
 	}, nil},
 	domain.OperationReportResource: {domain.MutationResourceReport, func(s *obligation.Service, tx store.Tx, a domain.Principal, op domain.SemanticOperation, seq uint64) (domain.MutationResult, error) {
 		return s.ReportResourceChangeTx(tx, a, *op.ReportResource, seq)
