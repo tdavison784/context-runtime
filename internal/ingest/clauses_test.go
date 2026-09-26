@@ -2,11 +2,15 @@ package ingest
 
 import (
 	"errors"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
+	"github.com/tdavison784/context-runtime/internal/store/memory"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite"
 )
 
 // Tests for ADR 19 clauses SPEC-1.10 found unlocked. Each asserts the
@@ -90,4 +94,62 @@ func TestToolCallIDCreatesNoEdge(t *testing.T) {
 			t.Fatalf("ToolCallID created %d relationships", got.rels-base.rels)
 		}
 	})
+}
+
+// TestTruncationPersistedAndReplayed (ADR 19 D16/D17, SPEC-1.10): a span
+// with more than 256 diagnostics keeps exactly 256 plus one
+// DiagnosticsTruncated marker in the receipt and in the persisted records,
+// and a retry, including one after an SQLite reopen, returns the same.
+func TestTruncationPersistedAndReplayed(t *testing.T) {
+	text := strings.Repeat("> ## Goal\n", 300)
+	check := func(t *testing.T, s store.Store, want domain.IngestReceipt) {
+		t.Helper()
+		f := newFixture(t, s)
+		r := f.mustIngest(principal(domain.AuthoritySystem), sysEvent("many", text))
+		if !reflect.DeepEqual(r, want) {
+			t.Fatal("replayed receipt differs")
+		}
+		f.view(func(tx store.ReadTx) error {
+			recs, err := tx.Diagnostics(store.DiagnosticFilter{Viewer: principal(domain.AuthoritySystem)})
+			if err != nil {
+				return err
+			}
+			if len(recs) != 257 || recs[256].Code != domain.DiagnosticsTruncated {
+				t.Fatalf("persisted diagnostics = %d, last %+v", len(recs), recs[len(recs)-1])
+			}
+			return nil
+		})
+	}
+	path := filepath.Join(t.TempDir(), "trunc.db")
+	for _, name := range []string{"memory", "sqlite"} {
+		t.Run(name, func(t *testing.T) {
+			open := func() store.Store {
+				if name == "memory" {
+					return memory.New()
+				}
+				s, err := sqlite.Open(ctx, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return s
+			}
+			s := open()
+			r := newFixture(t, s).mustIngest(principal(domain.AuthoritySystem), sysEvent("many", text))
+			if len(r.Diagnostics) != 257 || r.Diagnostics[256].Code != domain.DiagnosticsTruncated {
+				t.Fatalf("receipt diagnostics = %d", len(r.Diagnostics))
+			}
+			for i, d := range r.Diagnostics[:256] {
+				if d.Code != domain.DirectiveNotParsed || d.Index != i {
+					t.Fatalf("diagnostic %d = %+v", i, d)
+				}
+			}
+			check(t, s, r)
+			if name == "sqlite" {
+				s.Close()
+				s = open()
+				check(t, s, r)
+			}
+			s.Close()
+		})
+	}
 }
