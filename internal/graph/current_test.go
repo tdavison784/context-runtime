@@ -56,6 +56,7 @@ func fileGoal(t *testing.T, tx store.Tx, actor domain.Principal, id, dirID, text
 	g := storetest.NewGoal(actor.SessionID, id, tx.NextSeq(), text)
 	g.DirectiveID = dirID
 	g.Section = domain.SectionGoal
+	g.Namespace = domain.NamespaceDirective
 	g.Scope = domain.ScopeTask
 	g.Access = storetest.DirectiveBoundary(actor.SessionID)
 	mustInsert(t, tx, g)

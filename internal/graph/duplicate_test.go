@@ -16,6 +16,7 @@ func goalLike(sess, id, dirID string, seq uint64, text string) domain.ContextIte
 	g := storetest.NewGoal(sess, id, seq, text)
 	g.DirectiveID = dirID
 	g.Section = domain.SectionGoal
+	g.Namespace = domain.NamespaceDirective
 	g.Scope = domain.ScopeTask
 	g.Access = storetest.DirectiveBoundary(sess)
 	return g

@@ -89,6 +89,7 @@ func workingItem(sess, id string, seq uint64, authority domain.Authority) domain
 	it.Kind = domain.KindTaskState
 	it.Section = domain.SectionWorking
 	it.DirectiveID = "wd-" + id // Section != SectionNone requires a directive ID
+	it.Namespace = domain.NamespaceDirective
 	return it
 }
 
@@ -119,6 +120,7 @@ func agentScopedWorkingItem(sess, id string, seq uint64, authority domain.Author
 	it.Authority = authority
 	it.Section = domain.SectionWorking
 	it.DirectiveID = "wd-" + id
+	it.Namespace = domain.NamespaceDirective
 	return it
 }
 
@@ -127,6 +129,24 @@ func mustInsert(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
 	for _, it := range items {
 		if err := tx.InsertItem(it); err != nil {
 			t.Fatalf("InsertItem(%s): %v", it.ID, err)
+		}
+	}
+}
+
+// testDeclarationPolicy is the creation-declaration policy version fixtures
+// declare under, so declarations made by different helpers compare equal.
+const testDeclarationPolicy = "graph-test/1"
+
+// mustCreate inserts each keyed semantic item and declares its creation in
+// the same transaction, as ingest and tools must before any duplicate or
+// snapshot comparison (P3-4). Declaring outside the creating transaction is
+// rejected by DeclareCreation, so callers cannot use this for prior state.
+func mustCreate(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
+	t.Helper()
+	for _, it := range items {
+		mustInsert(t, tx, it)
+		if _, err := DeclareCreation(tx, it, CreationAcceptance{PolicyVersion: testDeclarationPolicy}); err != nil {
+			t.Fatalf("DeclareCreation(%s): %v", it.ID, err)
 		}
 	}
 }

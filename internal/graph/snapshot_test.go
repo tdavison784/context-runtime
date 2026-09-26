@@ -76,7 +76,7 @@ func snapshot(t *testing.T, s store.Store, actor domain.Principal, eventID strin
 		var ids []string
 		for _, m := range members {
 			it := m(tx.NextSeq())
-			mustInsert(t, tx, it)
+			mustCreate(t, tx, it)
 			ids = append(ids, it.ID)
 		}
 		var err error
