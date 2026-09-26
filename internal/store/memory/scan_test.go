@@ -49,6 +49,23 @@ func TestKeyedReadsDoNotScan(t *testing.T) {
 		if inner.directives.scanned != 0 || inner.obligations.scanned != 0 {
 			t.Errorf("scanned %d pointers and %d obligations, want 0", inner.directives.scanned, inner.obligations.scanned)
 		}
+		// Graph reads per item (SPEC-1.3, SPEC-2.1): relationships by type
+		// and endpoint, and items by task, read their indexes only.
+		inner.rels.scanned, inner.items.scanned = 0, 0
+		for _, f := range []store.RelationshipFilter{
+			{Type: domain.RelSupersedes, ToID: "d7"},
+			{Type: domain.RelDuplicateOf, FromID: "d7"},
+		} {
+			if _, err := stx.Relationships(f); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := stx.Items(store.ItemFilter{TaskID: "task"}); err != nil {
+			t.Fatal(err)
+		}
+		if inner.rels.scanned != 0 || inner.items.scanned != 0 {
+			t.Errorf("scanned %d relationships and %d items, want 0", inner.rels.scanned, inner.items.scanned)
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
