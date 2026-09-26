@@ -225,7 +225,9 @@ func TestGateT07_ProofsExpireWithSubject(t *testing.T) {
 		"private evidence cannot publish task-wide proof",
 		"invalidation fan-out beyond one page, limit rollback",
 	} {
-		t.Run(step, func(t *testing.T) { pending(t, depW4+"; "+depW2) })
+		t.Run(step, func(t *testing.T) {
+			pending(t, "W4 RegisterResourceTx (resource registration) + "+depW3Life+" grant issuance for matcher grants; "+depW2)
+		})
 	}
 }
 

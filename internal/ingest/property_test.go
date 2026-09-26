@@ -13,9 +13,8 @@ import (
 
 // Generated-history properties over ingestion (gate: INV-04/06/08/09 and
 // atomicity). Histories mix authorities, agents, directives, lifecycle
-// commands, replacements, restatements and rejected events. The lifecycle
-// executor is the routing fake until W3's service replaces it; the
-// invariants checked here are the ingest/graph half.
+// commands, replacements, restatements and rejected events, through W3's
+// real lifecycle service.
 
 type genStep struct {
 	p domain.Principal
@@ -73,10 +72,14 @@ func genHistory(seed uint64, n int) []genStep {
 func newPropertyFixture(t *testing.T) *fixture {
 	ms := memory.New()
 	t.Cleanup(func() { ms.Close() })
+	// Without the Phase 3 facet every event is rejected and the invariants
+	// would hold vacuously.
+	if !hasSemantic(ms) {
+		t.Skip("GATE-PENDING: needs " + depW2)
+	}
 	f := newFixture(t, ms)
 	pol := testPolicy()
 	f.in.Semantic = &pol
-	f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
 	return f
 }
 
