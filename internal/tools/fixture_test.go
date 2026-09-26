@@ -61,7 +61,7 @@ func seedAgentInvocation(t *testing.T, s store.Store, agent string) domain.ToolI
 		if err != nil {
 			return err
 		}
-		x, err := membership.RegisterExchange(tx, actor, domain.RegisterExchangeIntent{RequestID: "exchange" + suffix, Principal: p, TurnID: task.TurnID, Turn: task.Turn})
+		x, err := membership.RegisterExchange(tx, actor, domain.RegisterExchangeIntent{RequestID: "exchange" + suffix, Principal: p, TurnID: task.TurnID, Turn: task.Turn}, tx.NextSeq())
 		if err != nil {
 			return err
 		}
@@ -95,11 +95,11 @@ func seedAgentInvocation(t *testing.T, s store.Store, agent string) domain.ToolI
 			return err
 		}
 		member := domain.RegisterExchangeMemberIntent{RequestID: "output" + suffix, ExchangeID: i.ExchangeID, ExpectedRevision: 1, Position: 1, Role: domain.MemberOutput, Source: storetest.ContentRef(output), CallID: i.CallID}
-		if _, err := membership.RegisterExchangeMember(tx, actor, member); err != nil {
+		if _, err := membership.RegisterExchangeMember(tx, actor, member, tx.NextSeq()); err != nil {
 			return err
 		}
 		member.RequestID, member.ExpectedRevision, member.Position, member.Role, member.ToolCallID = "tool"+suffix, 2, 2, domain.MemberToolCall, i.ToolCallID
-		_, err = membership.RegisterExchangeMember(tx, actor, member)
+		_, err = membership.RegisterExchangeMember(tx, actor, member, tx.NextSeq())
 		return err
 	})
 	return i
@@ -122,7 +122,7 @@ func addToolCall(t *testing.T, s store.Store, i domain.ToolInvocation, toolCallI
 		}
 		actor := i.Principal
 		actor.Authority = domain.AuthorityHarness
-		_, err = membership.RegisterExchangeMember(tx, actor, domain.RegisterExchangeMemberIntent{RequestID: "call-" + i.CallID + "-" + toolCallID, ExchangeID: x.ID, ExpectedRevision: x.Revision, Position: uint64(len(members.Records)) + 1, Role: domain.MemberToolCall, Source: members.Records[0].Source, CallID: i.CallID, ToolCallID: toolCallID})
+		_, err = membership.RegisterExchangeMember(tx, actor, domain.RegisterExchangeMemberIntent{RequestID: "call-" + i.CallID + "-" + toolCallID, ExchangeID: x.ID, ExpectedRevision: x.Revision, Position: uint64(len(members.Records)) + 1, Role: domain.MemberToolCall, Source: members.Records[0].Source, CallID: i.CallID, ToolCallID: toolCallID}, tx.NextSeq())
 		return err
 	})
 	i.ToolCallID = toolCallID

@@ -11,7 +11,7 @@ func TestMembershipControlledReadHidesOtherOwners(t *testing.T) {
 	s, service, actor, intent := membershipTestStore(t)
 	var id string
 	update(t, s, "s", func(tx store.Tx) error {
-		result, err := service.RegisterExchange(tx, actor, intent)
+		result, err := service.RegisterExchange(tx, actor, intent, tx.NextSeq())
 		if err != nil {
 			return err
 		}

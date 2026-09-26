@@ -59,7 +59,7 @@ func registerMembershipRound(tx store.Tx, service *MembershipService, actor doma
 	sem, _ := store.Semantic(tx)
 	state, _ := sem.ConversationMembership(domain.ConversationIDFor(intent.Principal.TaskID, intent.Principal.AgentID))
 	intent.RequestID, intent.ExpectedMembershipRevision = "register-"+n, state.Revision
-	registered, err := service.RegisterExchange(tx, actor, intent)
+	registered, err := service.RegisterExchange(tx, actor, intent, tx.NextSeq())
 	if err != nil {
 		return r, err
 	}
@@ -73,11 +73,11 @@ func registerMembershipRound(tx store.Tx, service *MembershipService, actor doma
 		return r, err
 	}
 	m := domain.RegisterExchangeMemberIntent{RequestID: "output-" + n, ExchangeID: r.x.ID, ExpectedRevision: 1, Position: 1, Role: domain.MemberOutput, Source: storetest.ContentRef(r.output), CallID: r.producing.CallID}
-	if _, err = service.RegisterExchangeMember(tx, actor, m); err != nil {
+	if _, err = service.RegisterExchangeMember(tx, actor, m, tx.NextSeq()); err != nil {
 		return r, err
 	}
 	m.RequestID, m.ExpectedRevision, m.Position, m.Role, m.ToolCallID = "tool-"+n, 2, 2, domain.MemberToolCall, "tool"
-	if _, err = service.RegisterExchangeMember(tx, actor, m); err != nil {
+	if _, err = service.RegisterExchangeMember(tx, actor, m, tx.NextSeq()); err != nil {
 		return r, err
 	}
 	if withResult {
@@ -85,7 +85,7 @@ func registerMembershipRound(tx store.Tx, service *MembershipService, actor doma
 			return r, err
 		}
 		m.RequestID, m.Position, m.Role, m.Source = "result-"+n, 3, domain.MemberToolResult, storetest.ContentRef(r.toolResult)
-		if _, err = service.RegisterExchangeMember(tx, actor, m); err != nil {
+		if _, err = service.RegisterExchangeMember(tx, actor, m, tx.NextSeq()); err != nil {
 			return r, err
 		}
 	}
@@ -111,7 +111,7 @@ func consumeMembershipRound(tx store.Tx, service *MembershipService, actor domai
 		return call, domain.AdmissionManifest{}, err
 	}
 	state, _ := sem.ConversationMembership(r.x.ConversationID)
-	admitted, err := service.AdmitExchange(tx, actor, domain.AdmitExchangeIntent{RequestID: "admit-" + callID, ExchangeID: r.x.ID, CoverageID: coverage.ID, CallID: callID, Purpose: domain.AdmissionGenerationInput, ExpectedMembershipRevision: state.Revision})
+	admitted, err := service.AdmitExchange(tx, actor, domain.AdmitExchangeIntent{RequestID: "admit-" + callID, ExchangeID: r.x.ID, CoverageID: coverage.ID, CallID: callID, Purpose: domain.AdmissionGenerationInput, ExpectedMembershipRevision: state.Revision}, tx.NextSeq())
 	if err != nil {
 		return call, domain.AdmissionManifest{}, err
 	}
@@ -120,6 +120,6 @@ func consumeMembershipRound(tx store.Tx, service *MembershipService, actor domai
 		return call, manifest, err
 	}
 	x, _ := sem.LogicalExchange(r.x.ID)
-	_, err = service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack-" + callID, ExchangeID: x.ID, ManifestID: manifest.ID, ConsumingCallID: callID, ExpectedRevision: x.Revision})
+	_, err = service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack-" + callID, ExchangeID: x.ID, ManifestID: manifest.ID, ConsumingCallID: callID, ExpectedRevision: x.Revision}, tx.NextSeq())
 	return call, manifest, err
 }

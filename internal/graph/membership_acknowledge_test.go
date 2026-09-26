@@ -43,8 +43,8 @@ func TestMembershipAcknowledgmentClosesConsumedRoundsInOrder(t *testing.T) {
 		}
 		ackID = ack.ID
 		before := tx.LastSeq()
-		replay, err := service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack-producing-2", ExchangeID: x.ID, ManifestID: manifest.ID, ConsumingCallID: "producing-2", ExpectedRevision: r1.x.Revision})
-		if err != nil || !reflect.DeepEqual(replay.IDs, []string{ackID}) || tx.LastSeq() != before {
+		replay, err := service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack-producing-2", ExchangeID: x.ID, ManifestID: manifest.ID, ConsumingCallID: "producing-2", ExpectedRevision: r1.x.Revision}, tx.NextSeq())
+		if err != nil || !reflect.DeepEqual(replay.IDs, []string{ackID}) || tx.LastSeq() != before+1 {
 			t.Fatalf("replay: %+v, %v", replay, err)
 		}
 		// The checkpoint issuing round X2 is excluded from the closed prefix.
@@ -89,7 +89,7 @@ func TestMembershipAcknowledgmentRequiresCompleteRoundAndLaterInference(t *testi
 			if err != nil {
 				return err
 			}
-			if _, err = service.RegisterExchangeMember(tx, actor, domain.RegisterExchangeMemberIntent{RequestID: "late", ExchangeID: r.x.ID, ExpectedRevision: r.x.Revision, Position: 3, Role: domain.MemberToolResult, Source: storetest.ContentRef(result), CallID: r.producing.CallID, ToolCallID: "tool"}); err != nil {
+			if _, err = service.RegisterExchangeMember(tx, actor, domain.RegisterExchangeMemberIntent{RequestID: "late", ExchangeID: r.x.ID, ExpectedRevision: r.x.Revision, Position: 3, Role: domain.MemberToolResult, Source: storetest.ContentRef(result), CallID: r.producing.CallID, ToolCallID: "tool"}, tx.NextSeq()); err != nil {
 				return err
 			}
 			r.toolResult = result
@@ -107,7 +107,7 @@ func TestMembershipAcknowledgmentRequiresCompleteRoundAndLaterInference(t *testi
 			if err != nil {
 				return err
 			}
-			_, err = service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack", ExchangeID: r.x.ID, ManifestID: manifest.ID, ConsumingCallID: "other", ExpectedRevision: r.x.Revision})
+			_, err = service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack", ExchangeID: r.x.ID, ManifestID: manifest.ID, ConsumingCallID: "other", ExpectedRevision: r.x.Revision}, tx.NextSeq())
 			return err
 		}},
 		{"stale revision", domain.ErrVersionConflict, func(tx store.Tx, service *MembershipService, actor domain.Principal, registration domain.RegisterExchangeIntent) error {
@@ -127,7 +127,7 @@ func TestMembershipAcknowledgmentRequiresCompleteRoundAndLaterInference(t *testi
 			if err != nil {
 				return err
 			}
-			_, err = service.AcknowledgeExchange(tx, registration.Principal, domain.AcknowledgeExchangeIntent{RequestID: "ack", ExchangeID: r.x.ID, ManifestID: manifest.ID, ConsumingCallID: "consume", ExpectedRevision: r.x.Revision})
+			_, err = service.AcknowledgeExchange(tx, registration.Principal, domain.AcknowledgeExchangeIntent{RequestID: "ack", ExchangeID: r.x.ID, ManifestID: manifest.ID, ConsumingCallID: "consume", ExpectedRevision: r.x.Revision}, tx.NextSeq())
 			return err
 		}},
 	} {
@@ -150,7 +150,7 @@ func admitWith(tx store.Tx, service *MembershipService, actor domain.Principal, 
 		return domain.AdmissionManifest{}, err
 	}
 	state, _ := sem.ConversationMembership(r.x.ConversationID)
-	admitted, err := service.AdmitExchange(tx, actor, domain.AdmitExchangeIntent{RequestID: "admit-" + callID, ExchangeID: r.x.ID, CoverageID: coverage.ID, CallID: callID, Purpose: domain.AdmissionGenerationInput, ExpectedMembershipRevision: state.Revision})
+	admitted, err := service.AdmitExchange(tx, actor, domain.AdmitExchangeIntent{RequestID: "admit-" + callID, ExchangeID: r.x.ID, CoverageID: coverage.ID, CallID: callID, Purpose: domain.AdmissionGenerationInput, ExpectedMembershipRevision: state.Revision}, tx.NextSeq())
 	if err != nil {
 		return domain.AdmissionManifest{}, err
 	}
@@ -162,6 +162,6 @@ func acknowledgeWith(tx store.Tx, service *MembershipService, actor domain.Princ
 	if err != nil {
 		return err
 	}
-	_, err = service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack", ExchangeID: r.x.ID, ManifestID: manifest.ID, ConsumingCallID: callID, ExpectedRevision: r.x.Revision})
+	_, err = service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack", ExchangeID: r.x.ID, ManifestID: manifest.ID, ConsumingCallID: callID, ExpectedRevision: r.x.Revision}, tx.NextSeq())
 	return err
 }

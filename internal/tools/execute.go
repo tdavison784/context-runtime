@@ -173,7 +173,7 @@ func (s *Service) associateResult(tx store.Tx, dispatcher domain.Principal, i do
 		RequestID: toolID("toolresult-member", invocationID), ExchangeID: x.ID, ExpectedRevision: x.Revision,
 		Position: state.nextPosition, Role: domain.MemberToolResult, Source: domain.ItemContentRef{ItemID: item.ID, ContentHash: item.ContentHash},
 		CallID: i.CallID, ToolCallID: i.ToolCallID,
-	})
+	}, tx.NextSeq())
 	return err
 }
 

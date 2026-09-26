@@ -26,7 +26,7 @@ func nextRound(t *testing.T, st store.Store, prev domain.ToolInvocation, n strin
 		actor.Authority = domain.AuthorityHarness
 		task, _ := tx.Task(p.TaskID)
 		state, _ := sem.ConversationMembership(prev.ConversationID)
-		x, err := membership.RegisterExchange(tx, actor, domain.RegisterExchangeIntent{RequestID: "exchange-" + n, Principal: p, TurnID: task.TurnID, Turn: task.Turn, ExpectedMembershipRevision: state.Revision})
+		x, err := membership.RegisterExchange(tx, actor, domain.RegisterExchangeIntent{RequestID: "exchange-" + n, Principal: p, TurnID: task.TurnID, Turn: task.Turn, ExpectedMembershipRevision: state.Revision}, tx.NextSeq())
 		if err != nil {
 			return err
 		}
@@ -72,14 +72,14 @@ func nextRound(t *testing.T, st store.Store, prev domain.ToolInvocation, n strin
 			return err
 		}
 		state, _ = sem.ConversationMembership(prev.ConversationID)
-		admitted, err := membership.AdmitExchange(tx, actor, domain.AdmitExchangeIntent{RequestID: "admit-" + n, ExchangeID: prev.ExchangeID, CoverageID: coverage.ID, CallID: i.CallID, Purpose: domain.AdmissionGenerationInput, ExpectedMembershipRevision: state.Revision})
+		admitted, err := membership.AdmitExchange(tx, actor, domain.AdmitExchangeIntent{RequestID: "admit-" + n, ExchangeID: prev.ExchangeID, CoverageID: coverage.ID, CallID: i.CallID, Purpose: domain.AdmissionGenerationInput, ExpectedMembershipRevision: state.Revision}, tx.NextSeq())
 		if err != nil {
 			return err
 		}
 		manifestID = admitted.IDs[0]
 		if ack {
 			px, _ := sem.LogicalExchange(prev.ExchangeID)
-			if _, err = membership.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack-" + n, ExchangeID: px.ID, ManifestID: manifestID, ConsumingCallID: i.CallID, ExpectedRevision: px.Revision}); err != nil {
+			if _, err = membership.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack-" + n, ExchangeID: px.ID, ManifestID: manifestID, ConsumingCallID: i.CallID, ExpectedRevision: px.Revision}, tx.NextSeq()); err != nil {
 				return err
 			}
 		}
@@ -90,11 +90,11 @@ func nextRound(t *testing.T, st store.Store, prev domain.ToolInvocation, n strin
 			return err
 		}
 		member := domain.RegisterExchangeMemberIntent{RequestID: "output-" + n, ExchangeID: i.ExchangeID, ExpectedRevision: 1, Position: 1, Role: domain.MemberOutput, Source: storetest.ContentRef(output), CallID: i.CallID}
-		if _, err = membership.RegisterExchangeMember(tx, actor, member); err != nil {
+		if _, err = membership.RegisterExchangeMember(tx, actor, member, tx.NextSeq()); err != nil {
 			return err
 		}
 		member.RequestID, member.ExpectedRevision, member.Position, member.Role, member.ToolCallID = "call-"+n, 2, 2, domain.MemberToolCall, i.ToolCallID
-		_, err = membership.RegisterExchangeMember(tx, actor, member)
+		_, err = membership.RegisterExchangeMember(tx, actor, member, tx.NextSeq())
 		return err
 	})
 	return i, manifestID

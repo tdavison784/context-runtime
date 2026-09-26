@@ -9,12 +9,15 @@ import (
 // manifest of the later completed inference that consumed it, and advances
 // the contiguous closed frontier in the same write. Rounds close in order, so
 // a gap never becomes a prefix; cancellation is never closure (P3-7).
-func (s *MembershipService) AcknowledgeExchange(tx store.Tx, actor domain.Principal, intent domain.AcknowledgeExchangeIntent) (result domain.RecordResult, err error) {
+func (s *MembershipService) AcknowledgeExchange(tx store.Tx, actor domain.Principal, intent domain.AcknowledgeExchangeIntent, seq uint64) (result domain.RecordResult, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
 		}
 	}()
+	if err = checkOperationSeq(tx, seq); err != nil {
+		return result, err
+	}
 	sem, receipt, replay, err := prepareMembershipReceipt(tx, actor, intent.RequestID, "AcknowledgeExchange", intent, s.policy)
 	if err != nil {
 		return result, err
@@ -29,7 +32,6 @@ func (s *MembershipService) AcknowledgeExchange(tx store.Tx, actor domain.Princi
 	if s.policy.MaxTransactionWork <= 12 {
 		return result, domain.ErrResourceLimit
 	}
-	seq := tx.NextSeq()
 	x, err := readControlledExchange(sem, tx.SessionID(), actor, intent.ExchangeID)
 	if err != nil {
 		return result, err

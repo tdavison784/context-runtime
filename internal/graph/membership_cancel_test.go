@@ -12,7 +12,7 @@ func TestMembershipCancellationReplaysAndNeverBecomesCoverage(t *testing.T) {
 	s, service, actor, registration := membershipTestStore(t)
 	var intent domain.CancelExchangeIntent
 	update(t, s, "s", func(tx store.Tx) error {
-		result, err := service.RegisterExchange(tx, actor, registration)
+		result, err := service.RegisterExchange(tx, actor, registration, tx.NextSeq())
 		if err != nil {
 			return err
 		}
@@ -26,13 +26,13 @@ func TestMembershipCancellationReplaysAndNeverBecomesCoverage(t *testing.T) {
 	var original domain.RecordResult
 	update(t, s, "s", func(tx store.Tx) error {
 		var err error
-		original, err = service.CancelExchange(tx, actor, intent)
+		original, err = service.CancelExchange(tx, actor, intent, tx.NextSeq())
 		return err
 	})
 	update(t, s, "s", func(tx store.Tx) error {
 		before := tx.LastSeq()
-		got, err := service.CancelExchange(tx, actor, intent)
-		if err != nil || !reflect.DeepEqual(got, original) || tx.LastSeq() != before {
+		got, err := service.CancelExchange(tx, actor, intent, tx.NextSeq())
+		if err != nil || !reflect.DeepEqual(got, original) || tx.LastSeq() != before+1 {
 			t.Fatalf("replay: %+v, %v", got, err)
 		}
 		sem, _ := store.Semantic(tx)

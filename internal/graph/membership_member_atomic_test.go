@@ -14,7 +14,7 @@ func TestMembershipOutputRegistrationPoisonsEveryPartialWrite(t *testing.T) {
 		s, service, actor, registration := membershipTestStore(t)
 		var intent domain.RegisterExchangeMemberIntent
 		update(t, s, "s", func(tx store.Tx) error {
-			registered, err := service.RegisterExchange(tx, actor, registration)
+			registered, err := service.RegisterExchange(tx, actor, registration, tx.NextSeq())
 			if err != nil {
 				return err
 			}
@@ -32,7 +32,7 @@ func TestMembershipOutputRegistrationPoisonsEveryPartialWrite(t *testing.T) {
 				return err
 			}
 			fault := &membershipFaultWriter{SemanticTx: sem, failAt: failAt}
-			if _, err = service.RegisterExchangeMember(membershipFaultTx{tx, fault}, actor, intent); !errors.Is(err, errMembershipWrite) {
+			if _, err = service.RegisterExchangeMember(membershipFaultTx{tx, fault}, actor, intent, tx.NextSeq()); !errors.Is(err, errMembershipWrite) {
 				t.Fatalf("write %d: %v", failAt, err)
 			}
 			return nil
@@ -60,7 +60,7 @@ func TestMembershipOutputRegistrationPoisonsEveryPartialWrite(t *testing.T) {
 			if _, err := sem.MutationReceipt(domain.MutationMembership, intent.RequestID); !errors.Is(err, domain.ErrNotFound) {
 				t.Fatal("receipt survived", err)
 			}
-			_, err = service.RegisterExchangeMember(tx, actor, intent)
+			_, err = service.RegisterExchangeMember(tx, actor, intent, tx.NextSeq())
 			return err
 		})
 	}

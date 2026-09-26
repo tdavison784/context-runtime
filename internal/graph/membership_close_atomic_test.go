@@ -44,7 +44,7 @@ func TestMembershipAdmissionAndAcknowledgmentPoisonEveryPartialWrite(t *testing.
 				if !ack {
 					return nil
 				}
-				admitted, err := service.AdmitExchange(tx, actor, admit)
+				admitted, err := service.AdmitExchange(tx, actor, admit, tx.NextSeq())
 				acknowledge = domain.AcknowledgeExchangeIntent{RequestID: "ack", ExchangeID: r.x.ID, ConsumingCallID: "consume", ExpectedRevision: r.x.Revision}
 				if err == nil {
 					acknowledge.ManifestID = admitted.IDs[0]
@@ -53,10 +53,10 @@ func TestMembershipAdmissionAndAcknowledgmentPoisonEveryPartialWrite(t *testing.
 			})
 			run := func(tx store.Tx) error {
 				if ack {
-					_, err := service.AcknowledgeExchange(tx, actor, acknowledge)
+					_, err := service.AcknowledgeExchange(tx, actor, acknowledge, tx.NextSeq())
 					return err
 				}
-				_, err := service.AdmitExchange(tx, actor, admit)
+				_, err := service.AdmitExchange(tx, actor, admit, tx.NextSeq())
 				return err
 			}
 			var before uint64

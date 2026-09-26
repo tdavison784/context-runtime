@@ -8,12 +8,15 @@ import (
 // AdmitExchange freezes what the recipient actually received for one consumed
 // exchange (P3-7). GENERATION_INPUT names the completed inference that consumed
 // it; the manifest is not a claim that a provider request was transmitted.
-func (s *MembershipService) AdmitExchange(tx store.Tx, actor domain.Principal, intent domain.AdmitExchangeIntent) (result domain.RecordResult, err error) {
+func (s *MembershipService) AdmitExchange(tx store.Tx, actor domain.Principal, intent domain.AdmitExchangeIntent, seq uint64) (result domain.RecordResult, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
 		}
 	}()
+	if err = checkOperationSeq(tx, seq); err != nil {
+		return result, err
+	}
 	sem, receipt, replay, err := prepareMembershipReceipt(tx, actor, intent.RequestID, "AdmitExchange", intent, s.policy)
 	if err != nil {
 		return result, err
@@ -31,7 +34,6 @@ func (s *MembershipService) AdmitExchange(tx store.Tx, actor domain.Principal, i
 	if s.policy.MaxTransactionWork <= 10 {
 		return result, domain.ErrResourceLimit
 	}
-	seq := tx.NextSeq()
 	x, err := readControlledExchange(sem, tx.SessionID(), actor, intent.ExchangeID)
 	if err != nil {
 		return result, err

@@ -7,12 +7,15 @@ import (
 
 // CancelExchange records a trusted terminal outcome without claiming receipt
 // by an inference. It cannot advance ClosedFrontier or relabel the old turn.
-func (s *MembershipService) CancelExchange(tx store.Tx, actor domain.Principal, intent domain.CancelExchangeIntent) (result domain.RecordResult, err error) {
+func (s *MembershipService) CancelExchange(tx store.Tx, actor domain.Principal, intent domain.CancelExchangeIntent, seq uint64) (result domain.RecordResult, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
 		}
 	}()
+	if err = checkOperationSeq(tx, seq); err != nil {
+		return result, err
+	}
 	sem, receipt, replay, err := prepareMembershipReceipt(tx, actor, intent.RequestID, "CancelExchange", intent, s.policy)
 	if err != nil {
 		return result, err
@@ -26,7 +29,6 @@ func (s *MembershipService) CancelExchange(tx store.Tx, actor domain.Principal, 
 	if s.policy.MaxTransactionWork < 7 {
 		return result, domain.ErrResourceLimit
 	}
-	seq := tx.NextSeq()
 	x, err := readControlledExchange(sem, tx.SessionID(), actor, intent.ExchangeID)
 	if err != nil {
 		return result, err

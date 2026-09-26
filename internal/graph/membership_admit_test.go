@@ -47,7 +47,7 @@ func TestMembershipAdmissionRequiresConsumingInferenceAndRecipientCoverage(t *te
 		before := state(tx)
 		intent.ExpectedMembershipRevision = before.Revision
 		var err error
-		if original, err = service.AdmitExchange(tx, actor, intent); err != nil {
+		if original, err = service.AdmitExchange(tx, actor, intent, tx.NextSeq()); err != nil {
 			return err
 		}
 		m, err := sem(tx).AdmissionManifest(original.IDs[0])
@@ -59,8 +59,8 @@ func TestMembershipAdmissionRequiresConsumingInferenceAndRecipientCoverage(t *te
 			t.Fatalf("manifest: %+v", m)
 		}
 		seq := tx.LastSeq()
-		replay, err := service.AdmitExchange(tx, actor, intent)
-		if err != nil || !reflect.DeepEqual(replay, original) || tx.LastSeq() != seq {
+		replay, err := service.AdmitExchange(tx, actor, intent, tx.NextSeq())
+		if err != nil || !reflect.DeepEqual(replay, original) || tx.LastSeq() != seq+1 {
 			t.Fatalf("replay: %+v, %v", replay, err)
 		}
 		return nil
@@ -88,7 +88,7 @@ func TestMembershipAdmissionRequiresConsumingInferenceAndRecipientCoverage(t *te
 				i, a := intent, actor
 				i.RequestID, i.ExpectedMembershipRevision = "admit-"+strings.ReplaceAll(tc.name, " ", "-"), state(tx).Revision
 				tc.change(&i, &a)
-				_, err := service.AdmitExchange(tx, a, i)
+				_, err := service.AdmitExchange(tx, a, i, tx.NextSeq())
 				return err
 			})
 		})
