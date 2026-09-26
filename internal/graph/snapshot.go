@@ -88,15 +88,23 @@ type snapshotPartition struct {
 // in source order, and duplicate links follow. Callers run it inside
 // store.Store.Update and abort the event on any error. An empty section
 // does nothing.
-func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, taskID, eventID string) (SnapshotResult, error) {
+func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, taskID, eventID string) (result SnapshotResult, err error) {
+	defer poisonGraphError(tx, &err)
 	if len(newIDs) == 0 {
 		return SnapshotResult{}, nil
+	}
+	if len(newIDs) > maxSnapshotMembers {
+		return SnapshotResult{}, store.ErrLimitExceeded
 	}
 	if err := actor.Validate(); err != nil {
 		return SnapshotResult{}, err
 	}
 
 	members, err := loadSnapshotMembers(tx, actor, newIDs, taskID)
+	if err != nil {
+		return SnapshotResult{}, err
+	}
+	sem, err := store.Semantic(tx)
 	if err != nil {
 		return SnapshotResult{}, err
 	}
@@ -108,8 +116,15 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	// Plan: retire[oldID] = successor, one entry per retired item.
 	retire := map[string]domain.ContextItem{}
 	retired := map[string]domain.ContextItem{}
+	expectedPrior := map[string]string{}
 	var filed, dupes, dupeOf []domain.ContextItem
+	declarations := make([]domain.SnapshotDeclaration, 0, len(parts))
 	for _, p := range parts {
+		declaration, err := planSnapshotDeclaration(tx, sem, p.members, eventID)
+		if err != nil {
+			return SnapshotResult{}, err
+		}
+		declarations = append(declarations, declaration)
 		dupSnapshot, err := isDuplicateSnapshot(tx, p)
 		if err != nil {
 			return SnapshotResult{}, err
@@ -120,6 +135,12 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 			continue
 		}
 		for _, n := range p.members {
+			key, _ := n.CurrentKey()
+			prior, err := tx.CurrentVersion(key)
+			if err != nil && !errors.Is(err, domain.ErrNotFound) {
+				return SnapshotResult{}, err
+			}
+			expectedPrior[n.ID] = prior
 			prevID, err := currentVersionAt(tx, taskID, domain.NamespaceDirective, n.DirectiveID, n.Access)
 			switch {
 			case errors.Is(err, domain.ErrNotFound):
@@ -156,25 +177,30 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 		olds = append(olds, old)
 	}
 	slices.SortFunc(olds, bySeqID)
+	plans := make([]supersessionPlan, 0, len(olds))
 	for _, old := range olds {
-		if err := domain.AuthorizeSupersession(actor, retire[old.ID], old); err != nil {
+		plan, err := planSupersession(tx, actor, retire[old.ID].ID, old.ID, eventID, "")
+		if err != nil {
 			return SnapshotResult{}, err
 		}
-		if _, err := planObligationRetirement(tx, actor, old.ID); err != nil {
-			return SnapshotResult{}, err
-		}
+		plans = append(plans, plan)
 	}
 
 	res := SnapshotResult{Unverified: unverified}
-	for _, old := range olds {
-		rel, err := Supersede(tx, actor, retire[old.ID].ID, old.ID, eventID, "")
+	for _, declaration := range declarations {
+		if err := sem.InsertSnapshotDeclaration(declaration); err != nil {
+			return SnapshotResult{}, err
+		}
+	}
+	for _, plan := range plans {
+		rel, err := applySupersession(tx, plan)
 		if err != nil {
 			return SnapshotResult{}, err
 		}
 		res.Supersedes = append(res.Supersedes, rel)
 	}
 	for _, n := range filed {
-		if err := tx.SetCurrentVersion(n.ID); err != nil {
+		if err := sem.SetCurrentVersion(n.ID, expectedPrior[n.ID]); err != nil {
 			return SnapshotResult{}, err
 		}
 	}
@@ -206,8 +232,11 @@ func loadSnapshotMembers(tx store.Tx, actor domain.Principal, newIDs []string, t
 		if it.TaskID != taskID {
 			return nil, ErrSnapshotTaskMismatch
 		}
-		if it.Section != domain.SectionWorking {
+		if it.Section != domain.SectionWorking || it.Namespace != domain.NamespaceDirective {
 			return nil, ErrSnapshotNotWorking
+		}
+		if err := it.ValidateSemantic(); err != nil {
+			return nil, err
 		}
 		if !tx.Allocated(it.Seq) {
 			return nil, ErrSnapshotNotAtCreation

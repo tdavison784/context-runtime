@@ -9,7 +9,8 @@ import (
 // FileObservationState files only an already-created, validated TOOL task_state.
 // W4 separately proves terminal completeness, resource applicability, run order,
 // and watermark CAS in this same transaction. It cannot be called by model text.
-func FileObservationState(tx store.Tx, actor domain.Principal, newItemID, subjectKey, expectedPriorID string) error {
+func FileObservationState(tx store.Tx, actor domain.Principal, newItemID, subjectKey, expectedPriorID string) (err error) {
+	defer poisonGraphError(tx, &err)
 	if err := actor.Validate(); err != nil {
 		return err
 	}
