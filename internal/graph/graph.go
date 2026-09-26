@@ -101,11 +101,7 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 	switch actor.Authority {
 	case domain.AuthoritySystem, domain.AuthorityHarness, domain.AuthorityUser:
 	case domain.AuthorityAgent:
-		ns, _ := newItem.DirectiveNamespace()
-		if newItem.Authority != domain.AuthorityAgent || ns != domain.NamespaceAgentKey ||
-			!strings.HasPrefix(newItem.DirectiveID, domain.AgentKeyID("")) {
-			return domain.ErrInvalidAuthorityPromotion
-		}
+		return domain.AuthorizeAgentKeyWrite(actor, newItem)
 	default:
 		return domain.ErrInvalidAuthorityPromotion
 	}
