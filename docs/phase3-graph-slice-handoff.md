@@ -132,3 +132,11 @@ TestD13_{ReplacementRetiresBoundObligations,
 SnapshotIDReplacementRetiresObligations,
 UnauthorizedIndirectRetirementAbortsReplacement} fail. Their memory variants
 pass. TestOneLargeEventScalesLinearly moved to W7 (ingest producer path).
+
+The full race run (`go test -race ./...`) also fails in `internal/ingest`.
+Ingest sets no explicit Namespace and never calls graph.DeclareCreation, so
+keyed writes are rejected with `invalid record` (P3-3/4). The package also
+exceeds the default 10-minute timeout under -race, because each SQLite Open
+costs about 4.5s. This is the pending W7 producer integration and is not a
+graph regression. The SQLite TestOneLargeEventScalesLinearly failure has the
+same producer cause and is owned by W7.
