@@ -22,7 +22,14 @@ func (p *coreParser) extract() {
 		for len(lines) > 0 && blank(p.lineBytes(lines[len(lines)-1])) {
 			lines = lines[:len(lines)-1]
 		}
+		lifecycle := h.section == "Resolve" || h.section == "Unpin"
 		if len(lines) > 0 && bulletPrefix(p.lineBytes(lines[0])) > 0 {
+			if h.id != "" && lifecycle {
+				// D7: a heading target and target list together are ambiguous;
+				// the whole section creates no command.
+				p.reject(si, "mixed lifecycle forms", h.byteRange)
+				continue
+			}
 			if h.id != "" {
 				p.malformed(h.section, "heading ID on list section", h.byteRange)
 			}
@@ -142,6 +149,10 @@ func (p *coreParser) listItem(si int, lines []sourceLine) {
 		}
 	}
 	attrs := append([]rawAttribute(nil), h.attrs...)
+	if len(b) > 0 && b[0] == '{' && (h.section == "Resolve" || h.section == "Unpin") {
+		p.reject(si, "lifecycle attributes", item.byteRange)
+		return
+	}
 	if len(b) > 0 && b[0] == '{' {
 		end := bytes.IndexByte(b, '}')
 		if end < 0 {

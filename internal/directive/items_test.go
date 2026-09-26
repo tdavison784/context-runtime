@@ -150,6 +150,43 @@ func TestTTLRepresentationLimit(t *testing.T) {
 		t.Fatal(r.Err)
 	}
 }
+func TestLifecycleForms(t *testing.T) {
+	cases := []struct {
+		input   string
+		targets []string
+	}{
+		{"## Resolve [g]", []string{"g"}},
+		{"## Resolve [g]\n\n  \t\n", []string{"g"}},
+		{"## Unpin\n- [a]\n- [b]  \n\n- [c]", []string{"a", "b", "c"}},
+		{"## Unpin [a]\n- [b]", nil},                           // mixed forms
+		{"## Resolve\n", nil},                                  // missing ID
+		{"## Resolve [g]\nbecause done", nil},                  // trailing text
+		{"## Resolve [g] scope=TASK", nil},                     // attributes
+		{"## Unpin\n- [a] {scope=TASK}", nil},                  // item attributes
+		{"## Unpin\n- [a] text\n- [b]", []string{"b"}},         // per-item isolation
+		{"## Unpin\n- [a]\n  continued\n- [b]", []string{"b"}}, // continuation is text
+		{"## Unpin\n- a\n- [b]", []string{"b"}},                // missing brackets
+		{"## Unpin\n- [a]\nprose\n- [b]", []string{"a", "b"}},
+		{"## Unpin\n- [" + strings.Repeat("x", 81) + "]", nil},
+	}
+	for _, tt := range cases {
+		r := Parse([]byte(tt.input), Options{Authority: domain.AuthorityHarness})
+		var got []string
+		for _, c := range r.Lifecycle {
+			got = append(got, c.TargetID)
+		}
+		if r.Err != nil || len(r.Items) != 0 || !reflect.DeepEqual(got, tt.targets) {
+			t.Fatalf("%q: %q %+v", tt.input, got, r)
+		}
+		malformed := false
+		for _, d := range r.Diagnostics {
+			malformed = malformed || d.Code == domain.ErrMalformedDirective
+		}
+		if malformed != (len(tt.targets) == 0 || strings.Contains(tt.input, "text") || strings.Contains(tt.input, "prose") || strings.Contains(tt.input, "continued") || strings.Contains(tt.input, "- a")) {
+			t.Fatalf("%q: %+v", tt.input, r.Diagnostics)
+		}
+	}
+}
 func TestMalformedItemsAndLifecycle(t *testing.T) {
 	for _, input := range []string{"## Resolve [g]\ntext", "## Resolve\n- [g] text", "## Unpin\n- no ID", "## Working\n- [id]text", "## Working\n- {kind=task_state text", "## Working\n- {kind=task_state}text", "## Working\n- {kind=+x} text", "## Working\n- {} text", "## Working\n- { kind=task_state} text", "## Working\n- {kind=task_state  ttl=2} text"} {
 		p := parsedCore(input)
