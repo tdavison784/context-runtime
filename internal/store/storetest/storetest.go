@@ -90,6 +90,7 @@ var suite = []testCase{
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
 	{"ObligationClaim", testObligationClaim},
+	{"ObligationsBySource", testObligationsBySource},
 	{"ObligationTransitions", testObligationTransitions},
 	{"MatcherTransition", testMatcherTransition},
 	{"Grants", testGrants},

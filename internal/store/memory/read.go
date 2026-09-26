@@ -285,6 +285,29 @@ func (r *readTx) Obligations(taskID string) ([]domain.ObligationVersion, error) 
 	return out, nil
 }
 
+func (r *readTx) ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		return nil, invalid("obligations by source: limit must be positive")
+	}
+	out := []domain.ObligationVersion{}
+	for _, o := range r.obligations.all() {
+		if o.SourceItemID != sourceItemID {
+			continue
+		}
+		if len(out) == limit {
+			return nil, store.ErrLimitExceeded
+		}
+		out = append(out, o.Clone())
+	}
+	slices.SortFunc(out, func(a, b domain.ObligationVersion) int {
+		return cmp.Or(cmp.Compare(a.ObligationID, b.ObligationID), cmp.Compare(a.Version, b.Version))
+	})
+	return out, nil
+}
+
 func (r *readTx) ObligationTransitions(obligationID string) ([]domain.ObligationTransition, error) {
 	if err := r.check(); err != nil {
 		return nil, err

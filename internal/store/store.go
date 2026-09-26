@@ -64,9 +64,14 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
+
+// ErrLimitExceeded reports that a bounded read matched more records than
+// its limit. Bounded reads never return a truncated result.
+var ErrLimitExceeded = errors.New("store: result exceeds limit")
 
 // Store is a transactional, session-partitioned store.
 type Store interface {
@@ -196,6 +201,13 @@ type ReadTx interface {
 	// Obligations returns the latest version of every obligation in a task,
 	// ordered by ObligationID; an empty task ID returns all tasks.
 	Obligations(taskID string) ([]domain.ObligationVersion, error)
+	// ObligationsBySource returns every obligation version (current or
+	// retired) whose SourceItemID is sourceItemID, ordered by ObligationID
+	// then Version (D13, R9). It is bounded: limit must be positive
+	// (domain.ErrInvalidRecord otherwise), and more than limit matches fail
+	// with ErrLimitExceeded rather than returning a partial answer, so a
+	// caller retiring bound obligations never misses one.
+	ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error)
 	ObligationTransitions(obligationID string) ([]domain.ObligationTransition, error)
 	Grant(id string) (domain.MutationGrant, error)
 	// Grants returns every grant in the session ordered by ID.

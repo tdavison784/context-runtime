@@ -195,6 +195,29 @@ func (t *transaction) ObligationVersions(id string) ([]domain.ObligationVersion,
 	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
 	return out, nil
 }
+func (t *transaction) ObligationsBySource(sourceItemID string, limit int) ([]domain.ObligationVersion, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("%w: obligations by source: limit must be positive", domain.ErrInvalidRecord)
+	}
+	s := schemas["obligation"]
+	rows, err := t.conn.QueryContext(t.ctx, s.selectSQL+" WHERE session_id=? AND f_source_item_id=? ORDER BY id, subkey LIMIT ?", t.session, sourceItemID, limit+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.ObligationVersion{}
+	for rows.Next() {
+		if len(out) == limit {
+			return nil, store.ErrLimitExceeded
+		}
+		v, err := s.scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("obligation: %w", err)
+		}
+		out = append(out, v.Interface().(domain.ObligationVersion))
+	}
+	return out, rows.Err()
+}
 func (t *transaction) Obligations(taskID string) ([]domain.ObligationVersion, error) {
 	records, err := listRecords[domain.ObligationVersion](t, "obligation")
 	if err != nil {
