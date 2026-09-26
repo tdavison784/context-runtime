@@ -69,6 +69,9 @@ var suite = []testCase{
 
 	// Semantic state.
 	{"ItemRichRoundTrip", testItemRichRoundTrip},
+	{"ItemLosslessText", testItemLosslessText},
+	{"ByteExactStringLists", testByteExactStringLists},
+	{"ItemProvenance", testItemProvenance},
 	{"ItemInsertRules", testItemInsertRules},
 	{"ItemBlobIntegrity", testItemBlobIntegrity},
 	{"ItemsFilterOrder", testItemsFilterOrder},
@@ -82,9 +85,21 @@ var suite = []testCase{
 	{"DirectiveReplacement", testDirectiveReplacement},
 	{"DirectiveBoundaries", testDirectiveBoundaries},
 	{"CurrentDirectivesOrder", testCurrentDirectivesOrder},
+	{"CurrentNamespaces", testCurrentNamespaces},
+
+	// Ingestion records.
+	{"IngestionRoundTrip", testIngestionRoundTrip},
+	{"ReceiptKeepsOriginalItems", testReceiptKeepsOriginalItems},
+	{"IngestionInsertRules", testIngestionInsertRules},
+	{"AnonymousIngestions", testAnonymousIngestions},
+	{"DiagnosticsAccess", testDiagnosticsAccess},
+	{"IngestionDeepCopies", testIngestionDeepCopies},
 
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
+	{"ObligationClaim", testObligationClaim},
+	{"ObligationsBySource", testObligationsBySource},
+	{"RetireObligationVersion", testRetireObligationVersion},
 	{"ObligationTransitions", testObligationTransitions},
 	{"MatcherTransition", testMatcherTransition},
 	{"Grants", testGrants},
