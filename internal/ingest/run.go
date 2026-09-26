@@ -125,16 +125,10 @@ func (r *run) advanceTask() error {
 	return nil
 }
 
-// newItem fills the fields every item of this event shares and allocates
-// its ID and sequence number in creation order (M3). It validates the item,
-// including D18 turn ownership, and inserts it.
-func (r *run) newItem(it domain.ContextItem) (domain.ContextItem, error) {
-	if len(r.items) >= r.limits.MaxEventItems {
-		return domain.ContextItem{}, errLimit("MaxEventItems")
-	}
-	it.ID = domain.DerivedItemID(r.p.SessionID, r.itemKey(), len(r.items))
+// fill sets the fields every item of this event shares, so a prospective
+// item can be compared (deduplication) before it is written.
+func (r *run) fill(it domain.ContextItem) domain.ContextItem {
 	it.EventID = r.e.EventID
-	it.Seq = r.tx.NextSeq()
 	it.SessionID = r.p.SessionID
 	it.WorkflowID = r.p.WorkflowID
 	it.TaskID = r.p.TaskID
@@ -147,6 +141,18 @@ func (r *run) newItem(it domain.ContextItem) (domain.ContextItem, error) {
 	it.SemanticBytes = domain.SemanticBytes(it.Parts)
 	it.CreatedAt = r.now
 	it.Version = 1
+	return it
+}
+
+// newItem allocates a filled item's ID and sequence number in creation
+// order (M3), validates it, including D18 turn ownership, and inserts it.
+func (r *run) newItem(it domain.ContextItem) (domain.ContextItem, error) {
+	if len(r.items) >= r.limits.MaxEventItems {
+		return domain.ContextItem{}, errLimit("MaxEventItems")
+	}
+	it = r.fill(it)
+	it.ID = domain.DerivedItemID(r.p.SessionID, r.itemKey(), len(r.items))
+	it.Seq = r.tx.NextSeq()
 	if err := it.Validate(); err != nil {
 		return domain.ContextItem{}, err
 	}
