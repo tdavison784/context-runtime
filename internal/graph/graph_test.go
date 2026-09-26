@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -194,18 +195,59 @@ func TestSupersede_AuthorizationRules(t *testing.T) {
 	})
 
 	t.Run("AgentSupersedesAgentAllowed", func(t *testing.T) {
+		// An AGENT actor may supersede only a keyed agent write with the
+		// same key (FR-TOOL-002): both items AGENT authority, both carrying
+		// the identical "agent.<key>" directive ID.
 		s := memory.New()
 		defer s.Close()
 		const sess = "sess-authz-1b"
+		dirID := domain.AgentKeyID("status")
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			oldItem := taskItem(sess, "old", tx.NextSeq(), domain.AuthorityAgent)
-			newItem := taskItem(sess, "new", tx.NextSeq(), domain.AuthorityAgent)
+			oldItem := agentDirective(sess, "old", dirID, tx.NextSeq())
+			newItem := agentDirective(sess, "new", dirID, tx.NextSeq())
 			mustInsert(t, tx, oldItem, newItem)
 			_, err := Supersede(tx, principal(sess, domain.AuthorityAgent), newItem.ID, oldItem.ID, "evt", "")
 			return err
 		})
 		if err != nil {
-			t.Fatalf("AGENT superseding AGENT: unexpected error %v", err)
+			t.Fatalf("AGENT superseding AGENT with the same key: unexpected error %v", err)
+		}
+	})
+
+	t.Run("AgentCannotSupersedeDifferentKeyAgentItem", func(t *testing.T) {
+		s := memory.New()
+		defer s.Close()
+		const sess = "sess-authz-1c"
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			oldItem := agentDirective(sess, "old", domain.AgentKeyID("status"), tx.NextSeq())
+			newItem := agentDirective(sess, "new", domain.AgentKeyID("other-key"), tx.NextSeq())
+			mustInsert(t, tx, oldItem, newItem)
+			_, err := Supersede(tx, principal(sess, domain.AuthorityAgent), newItem.ID, oldItem.ID, "evt", "")
+			return err
+		})
+		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Fatalf("err = %v, want ErrInvalidAuthorityPromotion", err)
+		}
+	})
+
+	t.Run("AgentActorInaccessibleItemIsNotFoundNotPromotionError", func(t *testing.T) {
+		// Access is checked before the authority/key rule (contract v3): an
+		// AGENT actor superseding a USER item it cannot even see must get
+		// ErrNotFound, never ErrInvalidAuthorityPromotion, so an
+		// inaccessible endpoint never reveals its authority.
+		s := memory.New()
+		defer s.Close()
+		const sess = "sess-authz-1d"
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			hidden := agentScopedItem(sess, "hidden-user-item", tx.NextSeq(), "agent-b")
+			hidden.Authority = domain.AuthorityUser
+			newItem := agentDirective(sess, "new", domain.AgentKeyID("status"), tx.NextSeq())
+			mustInsert(t, tx, hidden, newItem)
+			_, err := Supersede(tx, principalWithAgent(sess, domain.AuthorityAgent, "agent-a"), newItem.ID, hidden.ID, "evt", "")
+			return err
+		})
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
 		}
 	})
 
@@ -499,12 +541,23 @@ func TestLinkDerived_And_Provenance_HappyPath(t *testing.T) {
 		mustInsert(t, tx, derived, s1, s2)
 
 		cov := &domain.Coverage{ConversationID: "conv", FromSeq: 1, ToSeq: 2}
-		rels, err := LinkDerived(tx, actor, derived.ID, []string{s1.ID, s2.ID}, cov, "evt-link")
+		rels, err := LinkDerived(tx, actor, derived.ID, []string{s2.ID, s1.ID}, cov, "evt-link")
 		if err != nil {
 			return err
 		}
 		if len(rels) != 2 {
 			t.Errorf("LinkDerived returned %d relationships, want 2", len(rels))
+		}
+		// Coverage.ItemIDs must be populated, sorted, and deduplicated from
+		// the sources actually linked, regardless of the order given.
+		wantIDs := []string{s1.ID, s2.ID}
+		for _, r := range rels {
+			if r.Coverage == nil {
+				t.Fatalf("relationship %s has no coverage", r.ID)
+			}
+			if !slices.Equal(r.Coverage.ItemIDs, wantIDs) {
+				t.Errorf("Coverage.ItemIDs = %v, want %v", r.Coverage.ItemIDs, wantIDs)
+			}
 		}
 		return nil
 	})
@@ -655,6 +708,44 @@ func TestLinkDerived_BoundaryRejection(t *testing.T) {
 		}
 		if len(rels) != 0 {
 			t.Errorf("relationships from %s = %d, want 0 (nothing should have been written)", derivedID, len(rels))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+}
+
+func TestLinkDerived_CoverageMismatchWritesNothing(t *testing.T) {
+	s := memory.New()
+	defer s.Close()
+	const sess = "sess-coverage-mismatch"
+	actor := principal(sess, domain.AuthorityAgent)
+
+	var derivedID string
+	err := s.Update(ctx, sess, func(tx store.Tx) error {
+		derived := taskItem(sess, "derived-cm", tx.NextSeq(), domain.AuthorityAgent)
+		src := taskItem(sess, "src-cm", tx.NextSeq(), domain.AuthorityUser)
+		derivedID = derived.ID
+		mustInsert(t, tx, derived, src)
+
+		// The coverage names an item that isn't among the sources being
+		// linked, so it disagrees with the real source set.
+		cov := &domain.Coverage{ItemIDs: []string{"someone-else-entirely"}}
+		_, err := LinkDerived(tx, actor, derived.ID, []string{src.ID}, cov, "evt")
+		return err
+	})
+	if !errors.Is(err, ErrCoverageMismatch) {
+		t.Fatalf("err = %v, want ErrCoverageMismatch", err)
+	}
+
+	err = s.View(ctx, sess, func(tx store.ReadTx) error {
+		rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDerivedFrom, FromID: derivedID})
+		if err != nil {
+			return err
+		}
+		if len(rels) != 0 {
+			t.Errorf("relationships from %s = %d, want 0", derivedID, len(rels))
 		}
 		return nil
 	})
