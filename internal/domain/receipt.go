@@ -186,6 +186,9 @@ func (r IngestReceipt) Clone() IngestReceipt {
 	r.Items = items
 	r.Diagnostics = slices.Clone(r.Diagnostics)
 	r.Lifecycle = slices.Clone(r.Lifecycle)
+	for i := range r.Lifecycle {
+		r.Lifecycle[i] = r.Lifecycle[i].Clone()
+	}
 	r.Duplicates = slices.Clone(r.Duplicates)
 	r.Replacements = slices.Clone(r.Replacements)
 	return r
