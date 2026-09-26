@@ -10,6 +10,7 @@ Each example is a directory:
 |---|---|
 | `input.md` | Raw bytes of the first parse unit. Nothing is normalized: CR, CRLF, BOMs and invalid UTF-8 are deliberate (`.gitattributes` marks them `-text`). |
 | `unit.json` | Trusted unit metadata: `description`, `requirements`, `authority`, `directive_capable`, optional `span_index`/`part_index`, `no_directives` (asserted independently of the golden), and `more_units` for multi-unit (M1) examples. |
+| `expected-ingest.json` | Golden ingestion outcome of the example's event on both stores (after a turn-opening setup event): items with kind, generation, authority, scope, access boundary, retention, residency, goal status, TTL, parts and source ranges; the relationships and obligations the event created; lifecycle command records; diagnostic records; duplicate and replacement links; or the rejection class. Item IDs appear once; references use `event#i` / `setup#i`. |
 | `expected.json` | Golden parse of each unit: `sections`, `items` (IDs, derived IDs, typed attributes, `text` or `text_hex`, `range`, `text_ranges`), `lifecycle` commands, and `diagnostics` (code, reason, section, range; never content). `error` is `invalid_record` or `representation_limit` when the unit is rejected. All ranges are half-open byte offsets into the unit's own file. |
 
 The golden test is `TestCanonicalDirectiveExamples` in `internal/directive`.
@@ -22,9 +23,15 @@ example, whatever the golden says:
 - lifecycle commands are valid;
 - `policy.ForDirective` accepts every item.
 
+`TestCanonicalExamplesThroughIngest` in `internal/ingest` ingests every
+example on the memory and SQLite stores, requires byte-identical output, and
+checks retry identity, event-authority bounds and the `no_directives`
+assertion independently of the golden.
+
 Regenerate goldens with:
 
     go test ./internal/directive -run TestCanonicalDirectiveExamples -update
+    go test ./internal/ingest -run TestCanonicalExamplesThroughIngest -update
 
 and review every changed golden by hand. `-update` records behavior; it does
 not validate it.
