@@ -96,7 +96,7 @@ affects inherited content.
      is transmitted ... so the IDs must be complete; a range alone cannot
      show which items lost eligibility"). A `FromSeq`/`ToSeq` range is
      insufficient on its own because a range cannot be diffed against which
-     specific items later lost eligibility.
+     specific items later lost eligibility. An opaque reasoning block/item covers every item rendered before it in the request, including system/instructions and tool definitions.
   2. Before every dispatch, the materialization strategy rechecks each
      covered item's access (`AccessBoundary.Permits`) and context
      eligibility (turn/task/TTL, per this ADR's eligibility table) — or an
@@ -260,3 +260,13 @@ Test citations verified against the integrated `phase-1-foundation`
 codebase (tip `ddbb53e`): every citation above is a real, passing test;
 none of this ADR's originally "Required" test placeholders remained
 genuinely missing except the Phase 4/5 planner-side fixtures noted above.
+
+Phase 1 acceptance amendment (PR #4 review round 2, SEC-2.2): rule 1 now
+states what an opaque reasoning block/item covers: every item rendered
+before it in the request, including system/instructions and tool
+definitions. The descriptor probes found that reasoning is replayed as
+stale when earlier content changes (`Reasoning.PostEditReplay: STALE` on
+profiles without a provider-side check). So the pre-dispatch recheck and
+the adapter's post-edit strip rely on this coverage definition. A coverage
+that records only the reasoning's own round would pass rule 1 as it was
+worded before and still replay stale reasoning.
