@@ -164,7 +164,7 @@ func snapshotPhase2(t *testing.T, s store.Store) phase2Golden {
 		if g.Grants, err = tx.Grants(); err != nil {
 			return err
 		}
-		if g.Task, err = tx.Task("T"); err != nil {
+		if g.Task, err = tx.Task("T"); err != nil && !isNotFound(err) {
 			return err
 		}
 		if g.Relationships, err = tx.Relationships(store.RelationshipFilter{}); err != nil {
