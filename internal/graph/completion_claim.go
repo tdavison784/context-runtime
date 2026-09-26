@@ -11,7 +11,8 @@ func CompletionClaimText(goalItemID string) string {
 
 // LinkCompletionClaimReference is the narrowly scoped creation-time evidence
 // exception. Ordinary LinkReference remains restricted to KindReference (P3-26).
-func LinkCompletionClaimReference(tx store.Tx, actor domain.Principal, claimID, goalID, eventID string, seq uint64) (domain.Relationship, error) {
+func LinkCompletionClaimReference(tx store.Tx, actor domain.Principal, claimID, goalID, eventID string, seq uint64) (result domain.Relationship, err error) {
+	defer poisonGraphError(tx, &err)
 	if err := actor.Validate(); err != nil {
 		return domain.Relationship{}, err
 	}

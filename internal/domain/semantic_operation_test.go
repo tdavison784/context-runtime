@@ -4,7 +4,7 @@ import "testing"
 
 func TestOperationIsClosedAndDeepCloned(t *testing.T) {
 	i := 0
-	o := SemanticOperation{Kind: OperationObservation, Observation: &ObservationIntent{RequestID: "r", RunID: "run", ExecutionID: "exec", EvidenceSpanIndex: &i, Outcome: OutcomeTimeout, Completeness: ObservationPartial}}
+	o := SemanticOperation{Kind: OperationObservation, Observation: &ObservationIntent{RunID: "run", ExecutionID: "exec", EvidenceSpanIndex: &i, Outcome: OutcomeTimeout, Completeness: ObservationPartial}}
 	if err := o.Validate(); err != nil {
 		t.Fatal(err)
 	}

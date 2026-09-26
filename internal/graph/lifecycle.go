@@ -44,33 +44,11 @@ type LifecycleAuthorization struct {
 	GrantID string
 }
 
-// AuthorizeLifecycleCommand resolves and authorizes a parsed Resolve or
-// Unpin command for the SOURCE actor of the span that carried it (D1, D15,
-// R7) without executing it. caller is the authenticated ingestion
-// principal; the command's Authority is its span's authority. It never
-// writes, so it takes a store.ReadTx; run it inside the ingestion
-// transaction so it sees the state at the command's position in event
-// order.
-//
-//   - The source actor is domain.SourceActor(caller, cmd.Authority): a
-//     span that outranks its caller fails with
-//     domain.ErrInvalidAuthorityPromotion.
-//   - The target is resolved with ResolveLifecycleTarget as the source
-//     actor (DIRECTIVE namespace only, R6). Unknown and inaccessible
-//     targets both fail with the identical bare domain.ErrNotFound;
-//     several accessible current versions fail with ErrAmbiguousDirective.
-//     Callers report these as diagnostics; they do not abort the event.
-//   - The target must be of the action's kind and state
-//     (ErrLifecycleTargetMismatch), which is also a diagnostic, not an
-//     abort (R14). With that error only, the result still names the
-//     resolved target and its version.
-//   - The action is authorized with domain.AuthorizeMutation for the
-//     source actor, against the session's grants, at the next sequence
-//     number. Failure is domain.ErrInvalidAuthorityPromotion, which aborts
-//     the event (R7, FR-AUTH-001). The stronger caller's authority is never
-//     consulted, so a USER span carried by a SYSTEM caller cannot borrow
-//     SYSTEM authority (confused deputy).
-func AuthorizeLifecycleCommand(tx store.ReadTx, caller domain.Principal, taskID string, cmd domain.LifecycleCommand) (LifecycleAuthorization, error) {
+// ResolveLifecycleCommand resolves source context, candidates and kind/state
+// mismatch without inspecting grants, allocating a sequence or authorizing a
+// mutation. GrantID is always empty. Lifecycle services must authorize and CAS
+// at the actual allocated sequence; this result confers no capability (W7-a).
+func ResolveLifecycleCommand(tx store.ReadTx, caller domain.Principal, taskID string, cmd domain.LifecycleCommand) (LifecycleAuthorization, error) {
 	if err := cmd.Validate(); err != nil {
 		return LifecycleAuthorization{}, err
 	}
@@ -103,20 +81,61 @@ func AuthorizeLifecycleCommand(tx store.ReadTx, caller domain.Principal, taskID 
 	// A mismatch names the resolved target (it is visible to the source
 	// actor), so the caller can record it (R14).
 	mismatch := LifecycleAuthorization{Command: cmd, ResolvedItemID: target.ID, SourceActor: actor, TargetVersion: target.Version, TargetAccess: target.Access}
-	var action domain.Action
 	switch cmd.Action {
 	case domain.LifecycleResolve:
 		if target.Kind != domain.KindGoal || target.GoalStatus == nil || *target.GoalStatus != domain.GoalOpen {
 			return mismatch, ErrLifecycleTargetMismatch
 		}
-		action = domain.ActionResolve
 	case domain.LifecycleUnpin:
 		if target.Generation != domain.GenerationPinned {
 			return mismatch, ErrLifecycleTargetMismatch
 		}
-		action = domain.ActionUnpin
 	default:
 		return LifecycleAuthorization{}, domain.ErrInvalidRecord
+	}
+
+	return mismatch, nil
+}
+
+// AuthorizeLifecycleCommand resolves and authorizes a parsed Resolve or
+// Unpin command for the SOURCE actor of the span that carried it (D1, D15,
+// R7) without executing it. caller is the authenticated ingestion
+// principal; the command's Authority is its span's authority. It never
+// writes, so it takes a store.ReadTx; run it inside the ingestion
+// transaction so it sees the state at the command's position in event
+// order.
+//
+//   - The source actor is domain.SourceActor(caller, cmd.Authority): a
+//     span that outranks its caller fails with
+//     domain.ErrInvalidAuthorityPromotion.
+//   - The target is resolved with ResolveLifecycleTarget as the source
+//     actor (DIRECTIVE namespace only, R6). Unknown and inaccessible
+//     targets both fail with the identical bare domain.ErrNotFound;
+//     several accessible current versions fail with ErrAmbiguousDirective.
+//     Callers report these as diagnostics; they do not abort the event.
+//   - The target must be of the action's kind and state
+//     (ErrLifecycleTargetMismatch), which is also a diagnostic, not an
+//     abort (R14). With that error only, the result still names the
+//     resolved target and its version.
+//   - The action is authorized with domain.AuthorizeMutation for the
+//     source actor, against the session's grants, at the next sequence
+//     number. Failure is domain.ErrInvalidAuthorityPromotion, which aborts
+//     the event (R7, FR-AUTH-001). The stronger caller's authority is never
+//     consulted, so a USER span carried by a SYSTEM caller cannot borrow
+//     SYSTEM authority (confused deputy).
+func AuthorizeLifecycleCommand(tx store.ReadTx, caller domain.Principal, taskID string, cmd domain.LifecycleCommand) (LifecycleAuthorization, error) {
+	resolved, err := ResolveLifecycleCommand(tx, caller, taskID, cmd)
+	if err != nil {
+		return resolved, err
+	}
+	target, err := loadAccessible(tx, resolved.SourceActor, resolved.ResolvedItemID)
+	if err != nil {
+		return LifecycleAuthorization{}, err
+	}
+	actor := resolved.SourceActor
+	action := domain.ActionResolve
+	if cmd.Action == domain.LifecycleUnpin {
+		action = domain.ActionUnpin
 	}
 
 	grants, err := tx.Grants()

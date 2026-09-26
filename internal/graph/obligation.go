@@ -10,6 +10,7 @@ import (
 type obligationRetirement struct {
 	version domain.ObligationVersion
 	grantID string
+	seq     uint64 // allocated once; authorization and retirement use this exact seq
 }
 
 // maxBoundObligations bounds the obligation versions one source may carry
@@ -25,7 +26,7 @@ const maxBoundObligations = 256
 // authority at least its source authority, or an in-force replace_directive
 // grant naming it. It writes nothing, so a denial fails the replacement
 // before anything is written.
-func planObligationRetirement(tx store.ReadTx, actor domain.Principal, oldID string) ([]obligationRetirement, error) {
+func planObligationRetirement(tx store.Tx, actor domain.Principal, oldID string) ([]obligationRetirement, error) {
 	versions, err := tx.ObligationsBySource(oldID, maxBoundObligations)
 	if err != nil {
 		return nil, err
@@ -40,23 +41,15 @@ func planObligationRetirement(tx store.ReadTx, actor domain.Principal, oldID str
 		return nil, nil
 	}
 
-	grants, err := tx.Grants()
-	if err != nil {
-		return nil, err
-	}
 	plan := make([]obligationRetirement, 0, len(bound))
 	for _, v := range bound {
-		auth, err := domain.AuthorizeMutation(domain.MutationRequest{
-			Actor:   actor,
-			Action:  domain.ActionReplaceDirective,
-			Targets: []domain.MutationTarget{{ID: v.ObligationID, Authority: v.SourceAuthority, Access: v.Access}},
-			Grants:  grants,
-			Seq:     tx.LastSeq() + 1,
-		})
+		seq := tx.NextSeq()
+		target := domain.ObligationGrantTarget(tx.SessionID(), v.ObligationID, v.Version)
+		auth, err := AuthorizeAtSequence(tx, actor, domain.ActionReplaceDirective, []domain.GrantTarget{target}, nil, seq, maxBoundObligations)
 		if err != nil {
 			return nil, err
 		}
-		plan = append(plan, obligationRetirement{version: v, grantID: auth.GrantIDs[v.ObligationID]})
+		plan = append(plan, obligationRetirement{version: v, grantID: auth.GrantIDs[target.AuthorizationKey], seq: seq})
 	}
 	return plan, nil
 }
@@ -72,7 +65,7 @@ func retireObligations(tx store.Tx, actor domain.Principal, plan []obligationRet
 		ev := domain.LifecycleEvent{
 			ID:         obligationAuditID(actor.SessionID, o.ObligationID, o.Version, "retired", eventID, newID),
 			SessionID:  actor.SessionID,
-			Seq:        tx.NextSeq(),
+			Seq:        r.seq,
 			TargetKind: domain.TargetObligation,
 			TargetID:   o.ObligationID,
 			Action:     "retired",
