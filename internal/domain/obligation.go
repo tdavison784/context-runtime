@@ -185,6 +185,10 @@ func (t ObligationTransition) Validate() error {
 	if t.Matcher != nil && t.Action != ActionAssertObligation {
 		return invalid("obligation transition %s: a matcher may only assert", t.ID)
 	}
+	// A matcher acts only under a recorded grant (FR-AUTH-002).
+	if t.Matcher != nil && t.GrantID == "" {
+		return invalid("obligation transition %s: a matcher transition requires its grant ID", t.ID)
+	}
 	if t.To == ObligationSatisfied && len(t.EvidenceIDs) == 0 && t.Matcher != nil {
 		return invalid("obligation transition %s: matcher satisfaction requires evidence", t.ID)
 	}
