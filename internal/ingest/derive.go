@@ -295,7 +295,7 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 		diag(domain.ErrAmbiguousDirective, domain.ReasonAmbiguousTarget)
 	case errors.Is(err, graph.ErrLifecycleTargetMismatch):
 		rec.Resolution, rec.ResolvedItemID, rec.ResolvedVersion = domain.TargetMismatch, auth.ResolvedItemID, auth.TargetVersion
-		diag(domain.ErrUnsupportedDirective, domain.ReasonTargetMismatch)
+		diag(domain.DiagnosticNotFound, domain.ReasonTargetMismatch)
 	default:
 		return err
 	}

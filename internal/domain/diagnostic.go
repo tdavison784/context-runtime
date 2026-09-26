@@ -124,7 +124,17 @@ func (d Diagnostic) Validate() error {
 	if d.DirectiveID != "" && !ValidDirectiveID(d.DirectiveID) {
 		return invalid("diagnostic: invalid directive ID")
 	}
+	// Each ingestion reason has exactly one code (R19, SPEC-1.6).
+	if want, ok := reasonCode[d.Reason]; ok && d.Code != want {
+		return invalid("diagnostic: reason %s requires code %s", d.Reason, want)
+	}
 	return d.Range.Validate()
+}
+
+// reasonCode pins the ingestion reasons to their only permitted codes (R19).
+var reasonCode = map[DiagnosticReason]DiagnosticCode{
+	ReasonBoundaryConflict: ErrMalformedDirective,
+	ReasonTargetMismatch:   DiagnosticNotFound,
 }
 
 // Message is the diagnostic's fixed template. It never echoes source text,
