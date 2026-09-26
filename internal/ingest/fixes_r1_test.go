@@ -137,3 +137,66 @@ func TestApplyFailureAtomic_DUR13(t *testing.T) {
 		}
 	})
 }
+
+// TestRecordsNeverRevealHiddenVersions_SEC22 completes SEC-1.3: an
+// ambiguous lifecycle record and a boundary-conflict diagnostic are caused
+// by versions the source actor sees, so they are readable only where those
+// versions are too; another agent learns nothing of a private version.
+func TestRecordsNeverRevealHiddenVersions_SEC22(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		agentA := principal(domain.AuthorityUser)
+		agentB := agentA
+		agentB.AgentID = "B"
+		f.mustIngest(agentA, userEvent("u0", "hi", false))
+
+		// Ambiguous: A's private [plan], B's task-wide [plan] (B cannot see
+		// A's), then A's Unpin sees both.
+		f.mustIngest(agentA, userEvent("a1", "## Pinned [plan] scope=AGENT\nA's private plan.\n", true))
+		f.mustIngest(agentB, userEvent("b1", "## Pinned [plan]\nB's plan.\n", true))
+		r := f.mustIngest(agentA, userEvent("a2", "## Unpin [plan]\n", true))
+		if len(r.Lifecycle) != 1 || r.Lifecycle[0].Resolution != domain.TargetAmbiguous {
+			t.Fatalf("setup: commands %+v", r.Lifecycle)
+		}
+
+		// Boundary conflict: A restates [q] task-wide while its private [q]
+		// is current.
+		f.mustIngest(agentA, userEvent("a3", "## Pinned [q] scope=AGENT\nA's private q.\n", true))
+		r = f.mustIngest(agentA, userEvent("a4", "## Pinned [q]\nTask-wide q.\n", true))
+		if !hasDiag(r, domain.ErrMalformedDirective, domain.ReasonBoundaryConflict) {
+			t.Fatalf("setup: no boundary conflict: %+v", r.Diagnostics)
+		}
+
+		f.view(func(tx store.ReadTx) error {
+			cs, err := tx.LifecycleCommands(store.CommandFilter{Viewer: agentB})
+			if err != nil {
+				return err
+			}
+			for _, c := range cs {
+				if c.Resolution == domain.TargetAmbiguous {
+					t.Errorf("agent B reads an AMBIGUOUS record caused by A's private version")
+				}
+			}
+			ds, err := tx.Diagnostics(store.DiagnosticFilter{Viewer: agentB})
+			if err != nil {
+				return err
+			}
+			for _, d := range ds {
+				if d.Code == domain.ErrAmbiguousDirective || d.Reason == domain.ReasonBoundaryConflict {
+					t.Errorf("agent B reads %s/%s revealing A's private version", d.Code, d.Reason)
+				}
+			}
+			// Agent A, who caused and can see both, still reads them.
+			ds, err = tx.Diagnostics(store.DiagnosticFilter{Viewer: agentA})
+			seen := 0
+			for _, d := range ds {
+				if d.Code == domain.ErrAmbiguousDirective || d.Reason == domain.ReasonBoundaryConflict {
+					seen++
+				}
+			}
+			if seen != 2 {
+				t.Errorf("agent A reads %d of its own ambiguity/conflict diagnostics, want 2", seen)
+			}
+			return err
+		})
+	})
+}
