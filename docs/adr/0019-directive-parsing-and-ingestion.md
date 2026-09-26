@@ -209,3 +209,232 @@ directive.
 Owner: `internal/domain` (Event/Span/part envelope, SourceRef ranges — a
 schema change), `internal/directive` (per-unit state reset), `internal/ingest`
 (transcript/derived item construction, access intersection).
+
+### 6. Directive identity: derived vs. explicit IDs (D9, D20)
+
+FR-DIR-002/006, ADR 4.
+
+D9 (agreed): `domain.DerivedDirectiveID(validatedKeyword,
+domain.ContentHash(parts))` — lowercased keyword, hyphen, full 64 lowercase
+hex digits — is the only derived-ID scheme, distinct from the opaque item
+ID of each occurrence/version. Derived IDs are published in
+diagnostics/inspection even with no other warning. D20: directive IDs are
+otherwise exact (case-sensitive); a user/system-supplied `[id]` that has the
+*shape* of a derived ID (lowercase keyword, hyphen, 64 lowercase hex) is
+rejected with `ErrMalformedDirective` and the item is dropped — not parsed
+with a fallback derived ID — so an explicit ID can never collide with, or
+be mistaken for, a derived one.
+
+Owner: `internal/directive` (shape check at parse time), `internal/domain`
+(`DerivedDirectiveID`, unchanged).
+
+### 7. Deduplication, replacement, and Working snapshots (D10, D11)
+
+FR-ING-005, FR-DIR-002/007, FR-DOM-003/005/007, FR-AUTH-001, INV-04/09;
+ADR 4/16.
+
+**D10 (amended):** deduplication runs only after source authority/access
+and scope policy are validated, and never bypasses currentness. A directive
+duplicate must match session, task, exact boundary, exact authority,
+section, directive ID, canonical content, and effective
+kind/generation/scope/retention/TTL/goal-state/obligation-declaration/
+eligibility-origin (Working items additionally use D11's snapshot identity);
+a TURN-bound item from a different turn, or a TTL item with a different
+expiry origin, is never a duplicate stand-in. A same-ID lower-authority
+write is never deduplicated against a higher-authority current item. An
+authorized same-boundary replacement uses `graph.ReplaceDirective`; a
+forbidden boundary/scope change is rejected outright, never silently
+forked. A duplicate creates only an immutable audit item and a
+`DUPLICATE_OF` edge — no `SUPERSEDES`, current-map update, obligation
+creation/reset, or inherited metadata — and every current-version consumer
+(literal lifecycle lookup, Working candidate selection) must require the
+current-map entry name that item, no incoming supersession, and no
+`DUPLICATE_OF` classification; this closes the review's reproduced hole
+where `graph.IsCurrent`'s incoming-edge-only check let a duplicate still
+resolve as current by literal ID. Canonical-candidate selection, once
+access/identity filters run, is deterministic by `(Seq, ID)`.
+
+**D11 (amended):** a Working section is one snapshot operation, partitioned
+by task/exact source authority/exact final access boundary; its semantic
+identity is its ordered member definitions and their effective metadata
+(including explicit IDs). An identical whole snapshot is a duplicate
+snapshot (no supersession); a changed snapshot creates fresh member
+versions even where some member's bytes repeat a prior member's — repeated
+bytes alone never make a changed-snapshot member a `DUPLICATE_OF` its
+predecessor, closing the reproduced `W1={a,b}→W2={a}` failure where marking
+`a` a duplicate first made `SupersedeSnapshot` unable to use it to retire
+`b`. Replacement is one planned edge set per section: every prior current
+member in the partition retires exactly once, new members of the same
+section never supersede each other, and any denied replacement aborts the
+whole event. An empty/all-invalid section retires nothing; a partially
+malformed section preserves all raw bytes/diagnostics and performs no
+replacement at all, so a parse failure can never erase an omitted member.
+Multiple Working sections in one event process in source order.
+`graph.SupersedeSnapshot`'s first-matching-new-member-as-superseder
+convention is documented as deliberate (not all-to-all);
+`graph.Supersede`'s `(session, old target, action, event)` audit-ID
+collision on two retirements of the same old target in one event, and
+same-ID pointer replacement after snapshot supersession, must both be
+closed by the planned edge set itself.
+
+Owner: `internal/graph` (D10's current predicate; D11's planned edge set
+and audit-ID fix — `p2-graph`), `internal/ingest` (authority/scope/
+eligibility validation ahead of dedup — `p2-ingest`).
+
+### 8. Attribute values, TTL bound, scope widening (D12, R1)
+
+FR-DIR-003/006, FR-ING-003, FR-REL-008, INV-05/09; ADR 6.
+
+Attribute names and values are exact case (not ASCII-case-insensitive,
+correcting the brief); only the exact scope spellings
+TURN/TASK/WORKFLOW/SESSION/AGENT and exact lowercase FR-DIR-003 kind
+spellings are recognized, under FR-DIR-006's per-section allowlist.
+Unknown/invalid/disallowed attributes are diagnosed and ignored without
+erasing a valid inherited (section-level) value. R1 sets the accepted
+`ttl` range at 1..2147483647 (`math.MaxInt32`, portable across Go int
+widths) with leading zeros allowed, parsed from ASCII decimal digits with
+checked arithmetic; a larger syntactically-valid value fails event
+validation with an explicit representation-limit error rather than being
+ignored or silently unlimited — this is a storage bound distinct from, and
+layered on top of, the syntax rule for a malformed attribute. For USER
+spans, requested WORKFLOW/SESSION widening is ignored with a diagnostic;
+final access is always the validated intersection of requested scope and
+authenticated source boundary (AGENT scope, in particular, never removes
+an existing task/workflow constraint, since `BoundaryFor(AGENT,p)` alone
+would otherwise permit the same agent in another task), and SYSTEM/HARNESS
+scope attributes likewise cannot remove source access constraints or
+bypass D10's explicit-replacement rule.
+
+Owner: `internal/policy` (attribute/scope rules), `internal/directive`
+(ttl parse + bound check, R1), `internal/domain`/`internal/store` (int32-
+bound TTL representation).
+
+### 9. Obligation declarations on Pinned items (D13)
+
+FR-AUTH-001/002, FR-OBL-001/002/004/006, trace T02/T06.
+
+A valid, nonduplicate `obligation=<claim>` on a Pinned item creates an
+UNRESOLVED obligation version bound to that exact source item, authority,
+and access constraints; the claim name is persisted separately from an
+executable `MatcherRef` — Phase 2 sets no matcher version and grants
+nothing. A name in text is not a registry lookup, code load, authorized
+assertion, or authority grant (registry/claim-pattern creation and
+evaluation are Phase 3/ADR 8, explicitly out of scope here). Obligation
+identity derives from the session/task/boundary/directive identity plus an
+explicit declaration slot, versioned on actual source replacement, never
+keyed globally by claim name. In the same transaction as any source
+directive replacement, every obligation version bound to the retired
+source is authorized, marked noncurrent with a `RetiredSeq` and audit
+record, with status/evidence history preserved; this applies equally when
+a replacement drops `obligation=` or moves the section away from Pinned. A
+replacement obligation version is created only if the new source declares
+one, and never automatically inherits proof, waiver, satisfaction, or a
+grant. A duplicate creates no new obligation version.
+
+Owner: `internal/domain` (obligation claim-name field, separate from
+`MatcherRef` — a schema addition), `internal/graph` (retirement-on-
+replacement, alongside D10/D11's replacement path — `p2-graph`).
+
+### 10. Event idempotency, receipts, and the transaction-scoped ingestion core (D14, M3)
+
+FR-ING-001/006/007, §10, FR-OBS-003, FR-CALL-003, INV-09/10, ADR 4/17.
+
+**D14:** the caller's complete request is hashed with a versioned
+`CanonicalEncoder` schema over principal, event kind/source/turn-boundary
+metadata, ordered spans (each span's authority/access/capability/source),
+ordered typed parts (media/encoding, verified byte/hash identity), and
+supported structured relationship/obligation metadata — distinctions
+parsing ignores are still hashed. Runtime-selected parser/policy versions
+are recorded execution inputs, never silently folded into the caller's
+retry fingerprint. Within the session transaction, an existing `EventID`
+and the complete request are checked before any sequence, turn, item ID,
+transition, or diagnostic is allocated; a match returns the *original*
+immutable receipt (no reparsing, no re-resolving against current state); a
+mismatch returns `ErrEventIDConflict` with no prior-result detail. The
+receipt stores the original returned item versions/values, ordered IDs,
+diagnostics, lifecycle parse results, generated IDs, and execution versions
+— not just item IDs, so a later lifecycle mutation or a policy upgrade
+cannot change what a replay of an old `EventID` returns. Events without a
+caller `EventID` get a fresh internal occurrence ID (generated once per
+`Ingest` attempt, outside any retried transaction callback) with no retry
+guarantee, but full receipt/diagnostic persistence. Caller-supplied bytes
+and an equivalent verified blob reference canonicalize identically, and
+caller-owned buffers are deep-copied before hashing/parsing.
+
+**M3:** occurrence and relationship IDs get one documented, deterministic
+order: for a stable `EventID`, `domain.DerivedItemID(session, eventID,
+index)`, with index order spans/parts in input order, transcript items
+first, then residual/directive items in source order; relationship,
+command, diagnostic, obligation, section/snapshot, and turn IDs use
+separate versioned ID domains with explicit occurrence ordinals — an
+explicit `DirectiveID` never substitutes for the immutable item ID. A
+transaction-scoped ingestion core (authenticate → idempotency check → plan
+ordered effects → validate the full plan → persist and return the
+immutable receipt) is the single implementation the outer `Ingest` wrapper
+calls, reused later by `RecordCallOutcome`; it must never re-enter
+`Store.Update`/`Store.View` (SQLite deadlocks on re-entrant transactions),
+and every semantic write goes through transaction-allocated, non-
+`TargetCall` sequence records with no partial result on failure.
+
+Owner: `internal/domain` (canonical schema, receipt/occurrence-ID types —
+schema additions), `internal/store` (receipt persistence, both backends —
+`p2-store`), `internal/ingest` (the transaction-scoped core, event
+ordering, idempotency check-before-allocate — `p2-ingest`, after
+contract/parser/store/graph land).
+
+### 11. Authority, access, and the source actor (D15)
+
+FR-ING-002/003/004, FR-AUTH-001/002, §8/9, INV-04/05/14.
+
+The trusted embedding API — never event text — constructs the principal,
+span authority/access, directive-capability flag, and event-kind/turn-
+boundary envelope; every enum value and owner requirement is validated.
+Authorization requires `principal.Authority.AtLeast(span.Authority)`
+(reusing the existing `Authority.AtLeast`, `internal/domain/enums.go:35`,
+which already encodes TOOL/RETRIEVED_CONTENT's non-domination correctly) —
+never a numeric-rank or `SortRank` comparison. A span's boundary must be a
+valid same-session boundary whose every nonempty owner constraint the
+authenticated principal satisfies (`Access.Permits`), plus any narrower
+authenticated integration grant; there is no implicit "principal boundary"
+object synthesized from all principal fields. A directive's *source actor*
+— the identity used for its own lifecycle commands and any indirect
+mutation it triggers — carries the authenticated ownership IDs with
+authority reduced to the span's authority, and only its own applicable
+grants, never the stronger ingestion-service caller; item and obligation
+authority always equal source authority. This closes the confused-deputy
+path the review flagged for D1: a SYSTEM ingestion caller legitimately
+carrying a USER span must never execute that span's `Resolve` as SYSTEM.
+SYSTEM/HARNESS spans are always parsed, USER spans only when marked,
+AGENT/TOOL/RETRIEVED_CONTENT never; marking one of the latter three
+directive-capable is an invalid event and rejects atomically (a harness
+bug, fail closed). Invalid incoming authority/access metadata rejects the
+whole event; a lookup against an existing but inaccessible target returns
+bare `ErrNotFound` with no existence detail.
+
+Owner: `internal/ingest` (principal/span validation, source-actor
+construction — the shared input to §1's lifecycle-command authorization).
+
+### 12. Diagnostics: persistence and access (D16)
+
+FR-DIR-004, FR-ING-006, FR-OBS-001, §8/9, INV-05/09; ADR 16.
+
+Diagnostics are immutable, persisted atomically with the event receipt in
+both stores, keyed by session, internal event occurrence ID, span/part
+ordinal, and a deterministic per-span ordinal (a caller `EventID` is a
+separate lookup key, since anonymous events collide on an empty one). Each
+record carries the source access boundary, structured code/severity/
+reason, section, a validated directive ID where applicable, original byte
+range, parser version, and schema version. Messages are fixed templates
+that never echo source text, malformed tokens, locators, inaccessible IDs,
+or raw store errors; a validated ID is reported only to principals
+authorized for that source span, and every diagnostic read or telemetry
+projection enforces access before disclosing IDs, ranges, counts, or
+reasons — repeating ADR 16's fix for graph-layer error text (identical
+error text for missing vs. inaccessible) at the diagnostic layer, since
+"never content" does not by itself make an ID, count, or range public.
+Ordering and the 256-plus-one truncation rule (D17) are stable and stored;
+an idempotent replay returns the receipt's original diagnostics unchanged.
+
+Owner: `internal/domain` (diagnostic record type), `internal/store`
+(schema migration, access-checked reads, both backends, restart/rollback/
+anonymous-uniqueness/replay coverage in storetest — `p2-store`).
