@@ -443,3 +443,212 @@ numbered decision above is the obvious place for them:
   mutation; running it through the same live-grant check would let a
   reporter's session-level authority be mistaken for target-specific mutation
   authority it does not have.
+
+## Required SDD amendment
+
+These are proposed replacement/additional sentences for SDD v0.10, exactly as
+the commander's FROZEN "Required normative amendments at freeze" table
+approved them (`phase3-decisions.md`); this ADR does not edit SDD.md itself —
+once the amendment lands there, this subsection is retitled "SDD amendment
+(applied in vX.Y)."
+
+- **FR-REL-001; §7.** Replace "Relationship records support DERIVED_FROM,
+  SUPERSEDES, DEPENDS_ON, REFERENCES, SATISFIES, and DUPLICATE_OF.
+  Relationship records are the only store of edges; items do not duplicate
+  them." with: "Relationship records store item-to-item DERIVED_FROM,
+  SUPERSEDES, DEPENDS_ON, REFERENCES and DUPLICATE_OF edges. SATISFIES is a
+  typed derived relation from authoritative obligation-transition and proof
+  records to an obligation version; it is not a separately persisted
+  item-to-item edge."
+- **FR-AUTH-002 / FR-OBL-002.** Add: "Positive matcher transitions require a
+  live exact-obligation-version grant. Runtime invalidation of an already
+  accepted resource-bound proof is a restricted audited consequence of the
+  recorded resource/proof change, permitted after the original grant expires
+  or is revoked; it confers no general mutation or disclosure authority."
+- **FR-OBL-005.** Add: "The current resource state is established by
+  authenticated ordered resource reporting, not by receipt of an
+  observation. Assertions explicitly distinguish authority attestation from
+  resource-bound proof. Newer applicable rejected proof and proof refresh use
+  the defined audited transitions."
+
+## Consequences / compatibility impact
+
+- **New package `internal/obligation`** owns the matcher registry, claim
+  binding, proof/applicability records, resource reporting, and the
+  invalidation transaction; it is the sole owner of P3-12 through P3-23 per
+  the binding record's work split (`phase3-decisions.md`'s "Proposed work
+  split," worker W4), merging after `internal/store`'s new record types
+  (worker W2) and after `internal/domain`/`internal/graph`'s contract changes
+  (worker W1) land. `internal/lifecycle` and `internal/tools` (workers W3,
+  W5) call this package's status/read contracts; they never duplicate
+  matcher logic or reimplement grant-target resolution.
+- **`MutationGrant.TargetIDs`/`Target` (ADR 16) is a breaking schema change**
+  for the `OBLIGATION_VERSION` case: every grant-issuance/revocation call site
+  and test fixture that constructed a bare stable-obligation-ID target must
+  be updated to the versioned `GrantTarget` shape (§1); `ITEM_OCCURRENCE`
+  targets are unaffected. `AuthorizeGrantIssuance`/`AuthorizeGrantRevocation`
+  (ADR 16) remain the required call sites; they now additionally validate the
+  discriminated target kind before the existing access/authority checks run.
+- **`FR-REL-001`'s "Relationship records are the only store of edges" is
+  false once SATISFIES becomes a derived view (§4).** Any future code that
+  queries `graph.Relationships` expecting a `SATISFIES` row will find none;
+  it must call the new `SatisfiesRelation` read instead. This is a required
+  SDD amendment (§below), not a silent behavior change left undocumented.
+- **Forward migrations only** (never editing migration 0001, ADR 3): new
+  tables/columns for `ResourceState`, `ResourceUpdate`, `WorkspaceBinding`,
+  `ObservationRecord`, `ObservationRun`, `SubjectState`, `ApplicabilityProof`,
+  the extended `ObligationVersion` fields, and the versioned `GrantTarget`
+  encoding are additive; `internal/store/memory` and `internal/store/sqlite`
+  both implement them, with `storetest.Run` conformance coverage shared
+  across backends (ADR 3/4's existing discipline).
+- **Every positive obligation transition now requires two prerequisites
+  that did not exist before Phase 3:** a live *exact-version* grant (§1) and
+  a *bound* matcher/target (§2). Any code path that previously assumed "a
+  grant on the obligation" was enough (none exists yet, since Phase 2 grants
+  nothing) must be written against the versioned check from the start.
+- Event traces T02 (replacement retires exactly the old obligation version,
+  no inherited proof/grant), T06 (all lifecycle/assertion/complete paths
+  share one authorization matrix), and T07 (proof freshness/refresh) are this
+  ADR's acceptance gate; the Phase 3 gate checklist item for domain/store
+  schema completeness and T02/T06/T07 (`phase3-decisions.md`'s "Phase 3 gate
+  checklist") is this ADR's own exit criterion, not a separate approval.
+
+## Tests that lock the behavior
+
+None of the following exist yet; each is a required test named by the
+package that will host it, per the binding record's per-decision test list
+(`phase3-decisions.md` §P3-5/12-23 "Tests" bullets, restated here grouped by
+subsystem rather than repeated verbatim per decision):
+
+- `internal/domain` (`grant_test.go`/`authz_test.go` extensions): a v1
+  obligation-version grant cannot authorize v2; a `Revision` CAS bump on a
+  still-live version does not invalidate its grant; an item-ID/versioned-key
+  string collision is rejected; exact target-set validation on issuance
+  (ADR 16's `sameTargetSet`, now covering the discriminated union); a legacy
+  stable-ID grant is inert against any Phase 3 obligation transition.
+- `internal/obligation` (matcher/claim, `matcher_test.go`): the SDD's
+  punctuation examples (`All tests must pass`, `Read <path>`) plus ASCII
+  fuzzing of the claim pattern; explicit `obligation=` precedence over
+  pattern matching; unknown/missing workspace binding leaves the matcher
+  syntactically known but non-executable; wrong suite/repository/environment/
+  subset never satisfies; FIXED_HASH vs. CURRENT_CONTENT file mode; a
+  duplicate Pinned item creates no obligation; a legacy (Phase 2) unbound
+  claim stays unbound after upgrade.
+- `internal/obligation` (transitions, `transition_test.go`): the full status
+  matrix incl. terminal WAIVED and retired-version rejection; an ABA
+  revision race across a matcher evaluation and a concurrent resource
+  change; absent/future/private evidence rejected; a matcher name cited
+  without a live grant is rejected; status/history/proof-cache rollback
+  parity on failure injection.
+- `internal/obligation` (proof/SATISFIES, `proof_test.go`): a task-wide
+  obligation resting on agent-private evidence is rejected; private evidence
+  never leaks through a receipt, cache, or the SATISFIES view; historical
+  vs. current views differ correctly after invalidate/waive/retire; a bare
+  attestation creates no fabricated edge; a dangling proof reference is
+  rejected by both stores.
+- `internal/obligation` (assertion modes, `assertion_test.go`): a bare
+  ATTESTATION; an ATTESTATION carrying citations that does *not* become
+  invalidatable; a RESOURCE_BOUND assertion that *does* invalidate on a
+  resource change; an unauthorized assertion attempt; a mode-conflicting
+  retry under the same request identity; explicit revalidation; migration of
+  an unknown legacy intent without an invented exemption.
+- `internal/obligation` (proof refresh, `refresh_test.go`): PASS→FAIL at an
+  unchanged fingerprint invalidates; a reversed-order run arrival; a partial
+  failure never invalidates unrelated valid proof; refresh attempted with an
+  expired grant; a crash between the SATISFIED→UNRESOLVED→SATISFIED pair's
+  two writes leaves neither write partially applied; BLOCKED/WAIVED behavior
+  under a rejected-proof observation.
+- `internal/obligation` (reevaluation, `reevaluate_test.go`): a forged USER
+  proof-selection path is rejected; an observation received before its
+  grant existed is later reachable by trusted reevaluation; unblock-then-
+  reevaluate; a replacement version's reevaluation requires its own new
+  grant and cannot reuse the retired version's proof; an unavailable matcher
+  version stays unresolved; deterministic observation selection under retry.
+- `internal/obligation` (resource state, `resource_test.go`): a delayed W1
+  PASS cannot establish a baseline that was never authoritatively reported;
+  a W2 report after a W1 report; an unreported gap forces UNKNOWN; an
+  authoritative resync; wrong reporter/resource rejected; a same-content
+  state recorded at a new revision; current vs. fixed file mode; restart and
+  request-identity replay.
+- `internal/obligation` (workspace/locator, `locator_test.go`): `./a.go`,
+  `a.go`, and `src/../a.go` are equivalent within one base/resource; two
+  different bases or worktrees stay distinct even with an identical relative
+  path; an uncertain alias invalidates conservatively rather than assuming
+  equality; a second task's workspace binding is unaffected by the first
+  task's declaration; a completed task's resource report is still accepted;
+  no filesystem or network access occurs during replay.
+- `internal/obligation` (typed observations, `observation_test.go`): a
+  forged PASS claim embedded in TOOL/USER/AGENT/retrieved text is inert; a
+  wrong or missing evidence span is rejected atomically, not accepted as
+  evidence-only; a changed typed field under the same request identity
+  conflicts on retry; raw environment values are never rendered as trusted
+  template content; malformed counts/completeness are rejected; an
+  evidence-boundary/session/execution mismatch is rejected.
+- `internal/obligation` (subject/run order, `subject_test.go`): a
+  `29→7→1→PASS` sequence across changing fingerprints forms one comparable
+  chain; distinct repository/directory/environment/coverage subjects never
+  replace each other's state; a `PARTIAL` result is rejected as a
+  replacement even paired with an earlier PASS; run 2 received before run 1
+  (including an identical resulting fingerprint) is handled by ordinal, not
+  receipt order; a matcher-version upgrade does not split subject identity;
+  a stale current-state item's applicability is recognized after an
+  intervening resource edit.
+- `internal/obligation` (invalidation, `invalidate_test.go`): cross-task and
+  private-proof fan-out from one resource update; a revoked grant still
+  invalidates through the restricted path without forging a live
+  authorization; path aliases and unknown-path/`ALL` reports; more than one
+  page of affected proofs; a work-limit or crash on the final page rolls
+  back the resource-state CAS and every status write together; an unrelated
+  resource's proofs are unaffected; the reporter's response discloses no
+  hidden IDs or counts; an `UNKNOWN` resource state can never retain
+  resource-derived satisfaction.
+- `internal/store/storetest` (both backends): structural/reference/CAS/
+  immutability conformance for every new record type above; SQLite restart/
+  upgrade fixtures reproducing a Phase 2 database with no obligation grants,
+  confirming nothing becomes retroactively bound or executable.
+
+## Residual risks and limits
+
+- **Accepted harness-trust limit.** An authorized but compromised resource
+  reporter may forge a run outcome; the runtime checks reporter, resource,
+  target, grant, and applicability bindings, but it does not independently
+  re-run a test suite to verify a reported result. Correctness of an
+  unreported external change remains excluded by FR-OBL-005 as already
+  written. A resource update this runtime has itself rejected (§9) must
+  never be treated by a caller as successfully reported; the harness is
+  responsible for retrying a rejected report rather than dispatching against
+  a known-unreported change.
+- This ADR adds no live provider/request correctness claim and asserts no
+  new evidence about resource-reporting reliability beyond what FR-OBL-005
+  already accepted; §9 through §13 make that acceptance's boundaries
+  precise and auditable, they do not narrow the underlying trust assumption.
+
+## Open questions
+
+### Resolved by this ADR
+
+- ADR 16 left open "whether `granteeMatches`'s exact-ID matching is
+  expressive enough once Phase 3 needs grants scoped to 'any task the
+  grantee currently owns,'" deferring it to this ADR.
+  **Decision:** V1 keeps exact-ID/exact-version grantee and target matching
+  (§1); no task-scoped or wildcard grant form is introduced. P3-11's exact-
+  target-set requirement (ADR 16's `sameTargetSet`, extended to the
+  discriminated `GrantTarget`) is the only expressiveness Phase 3 needs; a
+  broader grant form remains undesigned until a concrete requirement for one
+  exists.
+
+### Deferred
+
+- Whether the TOOL-authority derived-state rule (§11/C-6) should ever admit a
+  distinct HARNESS-authority attestation path with its own provenance
+  semantics, versus always requiring a separate explicit assertion (§5).
+  Codex's cross-check text explicitly left this open ("if higher-authority
+  status is desired, it must be a separate explicitly authorized harness
+  assertion"); V1 takes that as the whole answer and defers a dedicated
+  HARNESS-attestation type until a concrete case needs one.
+- Whether the restricted cause-based invalidation path (§13) should ever be
+  reused for a non-resource cause (e.g., an authority downgrade or a
+  session-level policy change); this ADR restricts it to resource-report-
+  triggered invalidation only, and any future cause requires its own ADR
+  amendment rather than a silent widening of `RESOURCE_INVALIDATION`'s
+  cause registry.
