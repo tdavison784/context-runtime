@@ -1222,6 +1222,160 @@ the code at this ADR's final-pass head.
   (`internal/ingest/retry_test.go` — TEST-1.2's session-scoped rich-event
   retry, alongside the existing `_RichReceipt` case).
 
+### 28. PR #5 review round 1: remaining DUR/SEC/SPEC findings (all landed, final pass)
+
+Findings not folded into F1-F6 (§26) or already-recorded rulings (§27),
+each with its own fix and test.
+
+- **DUR-1.3: the poison primitive (refines §10, D14).** `Apply`/`apply`
+  (`internal/ingest/ingest.go`) is failure-atomic: once the core has
+  started writing, any error calls `tx.Poison(err)`
+  (`store.Tx.Poison(err error)`, `store.go:263-272`) before returning, so
+  the caller's `Update` rolls back everything the transaction wrote even
+  if the caller ignores the returned error — no partial ingestion result
+  can ever commit. `store.Guard` (`internal/store/guard.go`) implements
+  it: the first `Poison` call wins, every write method of `TxBase` checks
+  the poison first and short-circuits with it, and reads/`NextSeq`/
+  `Allocated` keep working. Poisoning never poisons the `EventID` itself —
+  nothing committed, so the same `EventID` remains retryable — only the
+  in-flight transaction. `domain.ErrPoisoned` is the sentinel for
+  `Poison(nil)`. Tests: `TestApplyFailureAtomic_DUR13`
+  (`internal/ingest/fixes_r1_test.go`); store-level `TestConformance
+  /PoisonRollsBack`, `.../PoisonFirstErrorWins`, `.../PoisonBlocksEveryWrite`
+  (`internal/store/storetest/poison.go`).
+- **DUR-1.5: Working-snapshot derived-ID collisions across authorities,
+  option A (refines §7, D11/FR-DIR-007).** A Working member with a
+  *derived* ID (no explicit `[id]`) ran the same same-ID replacement path
+  as an explicit-ID member, but a derived ID carries no authority
+  (`DerivedDirectiveID(section, contentHash)`), so an identical line under
+  a different authority either aborted the whole event or partially
+  erased the other authority's snapshot set. Of the two options the
+  finding offered — restricting by-ID replacement to explicit IDs, or
+  folding authority into the derived-ID hash — **option A was chosen**:
+  `internal/ingest/derive.go`'s `workingSection` now checks, only for a
+  member without an explicit ID, whether its derived-ID slot is already
+  held by a current version at an authority the new item does not
+  dominate (`derivedSlotHeldAbove`, via `graph.CurrentVersionFor`); if so,
+  that member alone is refused with `ErrMalformedDirective`/
+  `ReasonBoundaryConflict` (R13's item-level pattern, §7), and the event
+  continues, rather than aborting with `ErrInvalidAuthorityPromotion` or
+  silently erasing part of another authority's set. Explicit-ID members
+  are unaffected. Test: `TestWorking_DerivedIDAcrossAuthorities_DUR15`
+  (`internal/ingest/working_test.go`).
+- **DUR-1.6: `MaxRelationships` now bounds the replacement and duplicate
+  paths too (refines §13, D17).** The limit was checked before a
+  `DERIVED_FROM` edge (`internal/ingest/directives.go`'s `linkDerived`)
+  but not before the `SUPERSEDES` edge a replacement writes or the
+  `DUPLICATE_OF` edge a duplicate writes, so either path could exceed the
+  event's relationship budget uncounted. `internal/ingest/directives.go`
+  now checks `r.rels >= r.limits.MaxRelationships` at every edge-writing
+  site (three call sites, plus `derive.go`'s original one), failing
+  `errLimit("MaxRelationships")` before the edge is written. Test:
+  `TestRelationshipLimitOnReplaceAndDuplicate_DUR16`
+  (`internal/ingest/fixes_r1_test.go`).
+- **DUR-1.7: deterministic failure order for a Working snapshot's
+  retirements (refines §7, D11).** When several planned retirements in one
+  snapshot write could each independently fail authorization, the order
+  they were checked in was map-iteration order — nondeterministic, so a
+  replay could fail on a different member than the original attempt.
+  `internal/graph/snapshot.go` now sorts the retirement set by `(Seq, ID)`
+  (`bySeqID`) before validating, so "when several planned retirements
+  would fail, the error is always the earliest one's" (the code's own
+  comment) — deterministic across replay. Test:
+  `TestSnapshot_DeterministicFailure_DUR17`
+  (`internal/graph/snapshot_test.go`).
+- **SEC-1.4: whole-event byte limits cover every caller-supplied string,
+  and locators are constrained to a display-safe charset (refines §13,
+  D17; new decisions, not previously recorded).** D17's original limits
+  bounded span/item/blob/diagnostic counts and total bytes, but several
+  individually-small, caller-supplied strings outside those counts —
+  `Source.Locator`, `Source.ToolCallID`, `ContentPart.MediaType`, and
+  every owner ID (session/workflow/task/agent, on both the principal and
+  each span's access boundary) — were unbounded, so an event could carry
+  an arbitrarily large amount of caller-controlled text `PayloadHash`
+  hashes and ingestion persists without ever being counted by
+  `MaxEventBytes`. **Landed:** `internal/domain/ingest.go` adds
+  `MaxLocatorBytes = 4096`, `MaxToolCallIDBytes = 256`,
+  `MaxMediaTypeBytes = 255`, and `MaxOwnerIDBytes = 256`, enforced in
+  `SourceRef.Validate`, `InputPart` validation, and
+  `validateIngestPrincipal`/span-boundary validation; every field is
+  accepted at its bound and rejected one byte over, by `Validate`,
+  `PayloadHash`, and `ValidateFor` alike (`TestEventMetadataBounds_SEC14`).
+  **Locator UTF-8/charset rule:** a locator must be valid UTF-8 with no
+  control characters (C0, DEL, C1) and no bidirectional-formatting
+  characters (`displaySafe`, `internal/domain/ingest.go`) — "so a locator
+  cannot inject line breaks, terminal escapes, or reordered text into
+  logs, diagnostics, or rendered context" (the function's own comment); a
+  non-ASCII but otherwise clean path or URL (e.g. a Unicode filename) is
+  accepted, only control and bidi-override bytes are rejected. A tool-call
+  ID must be printable ASCII with no space; a media type must be printable
+  ASCII (parameters like `; charset=utf-8` allowed). **Harness guidance
+  (binding on integrations, not enforced beyond charset validity):** a
+  harness whose natural locator representation contains a byte this rule
+  rejects — for example a URL component that legitimately needs a raw
+  control byte — must percent-encode it before constructing the `Event`;
+  the runtime validates the charset, it does not perform the encoding.
+  Test: `TestEventMetadataCharsets_SEC14`
+  (`internal/domain/sec14_test.go`, both tests). Separately landed in the
+  same area: `Limits.MaxReferenceLinks` (default 256, §13/D17) bounds the
+  REFERENCES edges one event may create; exceeding it stops adding
+  optional edges and reports `ReferenceLinksTruncated`
+  (`internal/ingest/references.go`), a new `DiagnosticCode` alongside
+  `ItemUnverified` (DUR-1.4, §26); `Diagnostic.Validate` now mechanically
+  enforces every reason-to-code pairing through a `reasonCode` map
+  (`internal/domain/diagnostic.go:145-151`:
+  `ReasonBoundaryConflict→ErrMalformedDirective`,
+  `ReasonTargetMismatch→DiagnosticNotFound`,
+  `ReasonUnverifiedItem→ItemUnverified`,
+  `ReasonReferenceLinksTruncated→ReferenceLinksTruncated`) — this
+  formalizes and mechanically locks §23's R19 code/reason pinning decision,
+  which was previously enforced only by convention at each call site. A
+  receipt now also records the `MaxReferenceLinks` value an event was
+  checked against (migration 0014, ADR 3), so a replayed old receipt
+  reports the limit that actually applied, never today's default (M8).
+  Test: `TestMaxReferenceLinks` (`internal/domain/limits_reference_test.go`).
+- **SPEC-1.1: a suppressed line never starts a directive item, even
+  mid-list (refines §4, D5/R17; distinct from — and narrower than — the
+  column-0 fence/quote case §22 already records).** A bullet on a line
+  that was itself suppressed (inside an indented fence, an HTML comment,
+  or a quote, without triggering the column-0 whole-section-malformed
+  case) could still start an item, because bullet recognition did not
+  check the line's suppression state. `internal/directive/items.go`'s
+  `startsItem` now requires `l.suppressed == ""`, so a suppressed line
+  never starts an item regardless of position; a `poison` tracker
+  separately flags the first column-0 suppressed line inside a list body
+  and, when set, drops every item the whole section produced (`p.items =
+  p.items[:first]`), per R17. Tests: `TestSuppressedListContent`
+  (`internal/directive/attacks_test.go`), `TestSuppressedListContent_Ingest`
+  (`internal/ingest/structure_test.go`); canonical goldens
+  `testdata/directives/suppress-list-{comment,fence,indented-control,
+  indented-fence,lifecycle-fence,quote}`.
+- **SPEC-1.12: R11's duplicate-semantics comparison now includes the
+  obligation declaration (refines §7/§20, D10/D13/R11).** R11 required
+  `SameDirectiveSemantics` to compare the obligation declaration "so
+  `p2-graph` and `p2-ingest` implement one comparison, not two," but the
+  comparison left it to callers, and `graph.LinkDuplicate` could link a
+  Pinned item as `DUPLICATE_OF` a canonical item whose declared obligation
+  claim actually differed. `internal/graph/duplicate.go`'s new
+  `SameDirective(tx, it, newClaim, canonical)` wraps
+  `SameDirectiveSemantics` and additionally compares the obligation claim
+  via `tx.ObligationsBySource(canonical.ID, maxDeclaredClaims)` (bounded,
+  R9/D17): an exact match requires no claim on either side, or exactly one
+  current version with the same claim. Test:
+  `TestLinkDuplicate_ComparesObligationClaim`
+  (`internal/graph/duplicate_test.go`).
+- **TEST-1.1/1.2/1.3 (test-suite gaps the first review found, not tied to
+  a fix).** TEST-1.1: `TestD10_MappedDuplicateNeverCurrent`
+  (`internal/graph/current_test.go`, alongside the existing
+  `TestD10_DuplicateDirectiveNeverCurrent`) locks that a `DUPLICATE_OF`
+  item can never become current through a stale current-map pointer,
+  independent of `TestD10_DuplicateDirectiveNeverCurrent`'s coverage.
+  TEST-1.2: `TestRetryIdentity_SessionScopedRich` (above). TEST-1.3:
+  `TestDiagnosticsCapTruncates` (`internal/ingest/retry_concurrency_test.go`,
+  comment cites "TEST-1.3, D17" directly) locks that a late limit
+  rejection is atomic and never poisons the `EventID` for a future retry,
+  and that the diagnostics cap truncates correctly under it.
+
 ## Alternatives considered
 
 - **D1:** the brief's read-only resolution without an explicit
