@@ -125,23 +125,24 @@ func checkWorkspaceContext(tx store.Tx, actor domain.Principal, c domain.Workspa
 // each binding ID is considered. More than one applicable binding is
 // ambiguous; candidates that exist but do not apply yield BINDING_AUTHORITY.
 func (s *Service) resolveWorkspace(r store.SemanticReader, source domain.ContextItem) (Workspace, error) {
+	work := s.newBudget()
 	contexts := [][3]string{{source.ID, "", ""}}
 	if source.TaskID != "" {
 		contexts = append(contexts, [3]string{"", source.TaskID, ""})
 	}
 	for _, c := range contexts {
 		latest := map[string]domain.WorkspaceBinding{}
-		err := s.eachPage(func(p store.Page) (store.Cursor, bool, error) {
+		err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
 			pg, err := r.WorkspaceBindingsByContext(c[0], c[1], c[2], p)
 			if err != nil {
-				return store.Cursor{}, false, err
+				return 0, store.Cursor{}, false, err
 			}
 			for _, b := range pg.Records {
 				if cur, ok := latest[b.ID]; !ok || b.Version > cur.Version {
 					latest[b.ID] = b
 				}
 			}
-			return pg.Next, pg.More, nil
+			return len(pg.Records), pg.Next, pg.More, nil
 		})
 		if err != nil {
 			return Workspace{}, err
@@ -166,17 +167,32 @@ func (s *Service) resolveWorkspace(r store.SemanticReader, source domain.Context
 	return Workspace{}, nil
 }
 
-// eachPage exhausts a paged read under the policy's page size and total work
-// bound. Exceeding the bound fails rather than returning a partial answer
-// (P3-39): correctness-critical fan-out never truncates.
-func (s *Service) eachPage(next func(store.Page) (store.Cursor, bool, error)) error {
+// budget is a transaction's hard bound on correctness-critical read work
+// (P3-39). Exhausting it fails the operation; required fan-out never stops
+// early with a partial answer.
+type budget struct{ left int }
+
+func (s *Service) newBudget() *budget { return &budget{left: s.policy.MaxTransactionWork} }
+
+func (b *budget) spend(n int) error {
+	if n < 0 || n > b.left {
+		b.left = 0
+		return domain.ErrResourceLimit
+	}
+	b.left -= n
+	return nil
+}
+
+// eachPage exhausts a paged read under the policy's page size, charging each
+// page and its records to b.
+func (s *Service) eachPage(b *budget, next func(store.Page) (n int, after store.Cursor, more bool, err error)) error {
 	p := store.Page{Limit: s.policy.MaxPageSize}
-	for pages := 0; ; pages++ {
-		if pages*s.policy.MaxPageSize >= s.policy.MaxTransactionWork {
-			return domain.ErrResourceLimit
-		}
-		after, more, err := next(p)
+	for {
+		n, after, more, err := next(p)
 		if err != nil {
+			return err
+		}
+		if err := b.spend(n + 1); err != nil {
 			return err
 		}
 		if !more {
