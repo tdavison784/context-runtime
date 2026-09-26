@@ -475,7 +475,20 @@ Owner: `internal/directive` (per-span/per-parse-unit limits),
 `internal/domain` (limits config type), `internal/ingest` (whole-event
 totals, graph-scan bounds).
 
-### 14. Turn advancement (D18)
+**Deferred ruling: `tx.Grants()` per obligation retirement/lifecycle
+command (SPEC-1.3, part of F1's bounded-lookup findings).** `graph
+/obligation.go`'s retirement path and `graph/lifecycle.go`'s command
+authorization both call `tx.Grants()` once per call — an unfiltered,
+whole-session read of every `MutationGrant`, not an exact-key lookup —
+before checking `domain.AuthorizeMutation`'s grant-based path. Unlike
+F1's other findings, this is ruled a deferred *performance* item, not a
+correctness or security gap: a grant can only be created by an issuer
+`AuthorizeGrantIssuance` already authorized (ADR 16), so the read
+discloses nothing a session-scoped actor couldn't already be trusted to
+see, and an unbounded grant count neither locks out a legitimate mutation
+(it still succeeds, just slower) nor leaks anything (no boundary or
+authority check is skipped). It is indexed in Phase 3, alongside that
+phase's other obligation/grant work (ADR 8), rather than in this round.
 
 Terminology (§1 of the SDD), FR-DOM-003/007, FR-AUTH-001/003, FR-ING-006,
 §10, trace T03/T10.
@@ -1063,10 +1076,14 @@ test:
   low-entropy, cross-principal-predictable IDs against its own guidance.
 
 F1 (bounded lookups, `p2-store`/`p2-graph`), F3 (retry-before-limits,
-`p2-graph`), F4 (References-by-item-ID, `p2-graph`), F5 (migration 0011's
-Go step, `p2-store`; ADR 3 records the mechanism once landed, SPEC-1.9
-below), and F6 (diagnostic/lifecycle-command record access, `p2-graph`)
-are tracked, not yet described here, pending their code landing.
+`p2-graph`), F4 (References-by-item-ID, `p2-graph`), and F6 (diagnostic/
+lifecycle-command record access, `p2-graph`) are tracked, not yet
+described here in full, pending this ADR's final reconciliation pass
+against their landed code. **F5 has landed and is recorded in ADR 3's
+Phase 2 migrations section** (SPEC-1.9): migration 0011's Go step is now
+a frozen, private copy of the locator rule with its identity folded into
+the migration's checksum, so it is no longer outside checksum protection
+and no longer depends on live domain code.
 
 ## Alternatives considered
 
