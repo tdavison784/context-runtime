@@ -120,23 +120,46 @@ preserve valid state.
   database in a state a restart can cleanly recover from (no partial
   `schema_migrations` row, no partial `rec_*` tables); see Tests, below,
   for the test that locks it.
-- **Phase 2 reality: migrations 0002-0007, checksum pinning as a test,
-  lossless leaf-list encoding (D3, R8; M1, M6, D13, D14/D16 via ADR 19).**
-  Six migrations landed on top of 0001, each for a decision this ADR's
-  "forward-only, never edited" rule already covered but Phase 2 is the
-  first phase to actually exercise: `0002_lossless_parts.sql` and
-  `0003_lossless_string_lists.sql` rewrite every row's leaf-list columns
-  from plain `encoding/json` (which silently replaced invalid UTF-8 with
-  U+FFFD) into the lossless form below; `0004_item_provenance_and_claims.sql`
-  adds item role, creation turn, source ranges (D8/D18/M1), and obligation
-  claim names (D13), with pre-0004 rows reading NULL as each field's zero
-  value rather than an invented nonzero default; `0005_current_version_namespace.sql`
-  adds the typed DIRECTIVE/AGENT_KEY namespace to the current-version key
-  (M6/R6); `0006_obligation_source_index.sql` indexes obligation versions
-  by source item so `internal/graph` can find every version bound to a
-  replaced source with a bounded query (D13/R9); `0007_ingestion_records.sql`
-  adds `rec_envelope`/`rec_receipt`/`rec_receipt_item`/`rec_diagnostic`/
-  `rec_command` for D14's immutable receipts and D16's diagnostics.
+- **Phase 2 reality: migrations 0002-0010, checksum pinning as a test,
+  lossless leaf-list encoding (D3, R8; M1, M5, M6, D10, D13, D14/D16, R19
+  via ADR 19).** Nine migrations have landed on top of 0001, each for a
+  decision this ADR's "forward-only, never edited" rule already covered but
+  Phase 2 is the first phase to actually exercise:
+  - `0002_lossless_parts.sql` and `0003_lossless_string_lists.sql` rewrite
+    every row's leaf-list columns from plain `encoding/json` (which
+    silently replaced invalid UTF-8 with U+FFFD) into the lossless form
+    below;
+  - `0004_item_provenance_and_claims.sql` adds item role, creation turn,
+    source ranges (D8/D18/M1), and obligation claim names (D13), with
+    pre-0004 rows reading NULL as each field's zero value rather than an
+    invented nonzero default;
+  - `0005_current_version_namespace.sql` adds the typed
+    DIRECTIVE/AGENT_KEY namespace to the current-version key (M6/R6; see
+    ADR 4's amendment note — the untyped `CurrentDirective`/
+    `CurrentDirectives` methods this migration originally served were
+    later deleted in favor of `CurrentVersion`/`CurrentVersions`, a
+    Go-level rename this migration is unaffected by);
+  - `0006_obligation_source_index.sql` indexes obligation versions by
+    source item so `internal/graph` can find every version bound to a
+    replaced source with a bounded query (D13/R9);
+  - `0007_ingestion_records.sql` adds `rec_envelope`/`rec_receipt`/
+    `rec_receipt_item`/`rec_diagnostic`/`rec_command` for D14's immutable
+    receipts and D16's diagnostics;
+  - `0008_unresolved_references.sql` adds `rec_reference`, keyed by an
+    occurrence-derived ID, indexed on `(session_id, locator_key,
+    rule_version, seq, id)`, so a References entry that matched no
+    ingested item at parse time survives restart for later linking (M5,
+    R2, R18; `domain.UnresolvedReference`);
+  - `0009_item_blob_index.sql` adds `item_blobs(session_id, blob_hash,
+    item_id)`, backfilled from existing rows' lossless parts, so blob-
+    reference authorization (§15/D19/R5) finds every item referencing a
+    blob without a session-wide scan (R19);
+  - `0010_item_duplicate_index.sql` normalizes pre-0004 NULL `f_role`
+    columns to `''` (the semantic-role zero value) and adds an index on
+    `(session_id, content_hash, task, section, role, authority, access
+    boundary)`, the exact tuple D10's duplicate-candidate comparison uses,
+    so it is a bounded lookup rather than a session-wide scan (R19).
+
   "Migrations are forward-only; no down migrations ship" (above) is now a
   literal test, not only documented policy: `committedMigrations`
   (`internal/store/sqlite/durability_test.go`) pins every embedded
@@ -158,10 +181,20 @@ preserve valid state.
   needs a forward migration (M8), not a decoder that silently accepts old
   and new shapes alike. Migrations 0002/0003 rewrote every row stored in
   the old plain-JSON form; a row `0001` had already corrupted (e.g. a
-  content part whose hash no longer matches its now-`�`-repaired
+  content part whose hash no longer matches its now-`\uFFFD`-repaired
   text) reads back as `domain.ErrIntegrity` after upgrade rather than a
   silently wrong value, matching M8's "no invented executable state for a
   record that predates new metadata."
+- **Indexed lookups are asserted, not just indexed (R19).**
+  `internal/store/sqlite`'s three new bounded lookups —
+  `ItemsByBlob(blobHash, limit)` (migration 0009), `DuplicateCandidates(f
+  DuplicateFilter)` (migration 0010), and matching an unresolved reference
+  by locator key (migration 0008) — are backed by a real index, not merely
+  documented as one: `assertIndexed` (`internal/store/sqlite/lookups_test.go`)
+  runs `EXPLAIN QUERY PLAN` on the exact query each method issues and fails
+  if SQLite's plan contains an unindexed `SCAN` step or no `USING` step at
+  all, so a future change that silently drops the index (rather than the
+  Go method signature) is caught the same way a schema drift is.
 
 ## Alternatives considered
 
@@ -321,13 +354,23 @@ preserve valid state.
   result. `TestUpgradeLosslessParts` and `TestUpgradeLosslessStringLists`
   are the D3/R8 upgrade path: a valid legacy row survives with its
   `ContentHash` intact, while a row `0001` had already corrupted (its hash
-  no longer matches its `�`-repaired text) reads back
+  no longer matches its `\uFFFD`-repaired text) reads back
   `domain.ErrIntegrity`, both from `Item` and from `Items` over a filter
   that includes it, rather than a silently wrong value.
   `TestUpgradeProvenanceColumns` and `TestUpgradeCurrentNamespace` are the
   equivalent parity fixtures for migrations 0004 and 0005 (M8's
   pre-existing-record handling for item role/creation-turn/source-range/
   claim-name columns, and for the typed directive/agent-key namespace).
+  `TestUpgradeItemBlobIndex` and `TestUpgradeDuplicateIndex` are the same
+  for migrations 0009 and 0010: an item with blob parts stored before 0009
+  is found by `ItemsByBlob` after upgrade, and an item with a pre-0004 NULL
+  role is returned by `DuplicateCandidates` after upgrade, once `f_role`
+  reads as `''` rather than NULL.
+- `internal/store/sqlite/lookups_test.go` (R19): `TestItemsByBlobUsesIndex`,
+  `TestDuplicateCandidatesUseIndex`, and
+  `TestUnresolvedReferencesByKeyUseIndex` are the `assertIndexed` checks
+  above, one per new lookup, each asserting the query plan against the
+  exact SQL the method issues.
 - The full `internal/store/sqlite` package runs in about 5-6s under
   `go test -race ./... -count=1` (measured on this branch), consistent with
   a real SQLite file per test rather than a mocked backend.
