@@ -33,15 +33,17 @@
     "billing": {
       "payer": "developer"
     },
-    "completed_at": 1790426960,
-    "created_at": 1790426959,
+    "completed_at": null,
+    "created_at": 1790427289,
     "error": null,
     "frequency_penalty": 0,
     "id": {
       "length": 55,
-      "sha256": "5e1538ee175c770137959fc5b150eec75ecbbe3c4af382ffd0ac18acc1affc06"
+      "sha256": "5ba853e2f564cd015b4e2de27db5a7efad9c862282ff065bb0099eb56a2e7e81"
     },
-    "incomplete_details": null,
+    "incomplete_details": {
+      "reason": "max_output_tokens"
+    },
     "instructions": null,
     "max_output_tokens": 160,
     "max_tool_calls": null,
@@ -53,33 +55,15 @@
       {
         "content": [],
         "encrypted_content": {
-          "length": 1676,
-          "sha256": "5c92f24076c2e411d1a91bea13713438df3526444b244ddc186a77404ac6c6d6"
+          "length": 1996,
+          "sha256": "c4fab89cece20adb5a611e10fe3a368756b2569ab520a5e8fe4ea8ecf70042dc"
         },
         "id": {
           "length": 53,
-          "sha256": "1335734062fe05fe74b9ec99ee584129a1f787bdc4c589d5d7a06903d64b8550"
+          "sha256": "384bd557cc769fb74d4901c62ee5b6388b627632c6c81806917cd39480d6bcee"
         },
         "summary": [],
         "type": "reasoning"
-      },
-      {
-        "content": [
-          {
-            "annotations": [],
-            "logprobs": [],
-            "text": "cobalt",
-            "type": "output_text"
-          }
-        ],
-        "id": {
-          "length": 54,
-          "sha256": "8848cdbc73a490dfddee4b88a884293c250c8fa93cdfa7be00e94f80a6ce2943"
-        },
-        "phase": "final_answer",
-        "role": "assistant",
-        "status": "completed",
-        "type": "message"
       }
     ],
     "parallel_tool_calls": true,
@@ -95,7 +79,7 @@
     },
     "safety_identifier": "[redacted]",
     "service_tier": "default",
-    "status": "completed",
+    "status": "incomplete",
     "store": false,
     "temperature": 1,
     "text": {
@@ -133,11 +117,11 @@
         "cache_write_tokens": 0,
         "cached_tokens": 0
       },
-      "output_tokens": 118,
+      "output_tokens": 160,
       "output_tokens_details": {
-        "reasoning_tokens": 110
+        "reasoning_tokens": 160
       },
-      "total_tokens": 202
+      "total_tokens": 244
     },
     "user": "[redacted]"
   }

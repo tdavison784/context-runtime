@@ -16,13 +16,13 @@
     "billing": {
       "payer": "developer"
     },
-    "completed_at": 1790426961,
-    "created_at": 1790426961,
+    "completed_at": 1790427292,
+    "created_at": 1790427291,
     "error": null,
     "frequency_penalty": 0,
     "id": {
       "length": 55,
-      "sha256": "acfdec0fff7d41da0894c049aa735da3bdb40bf38872017ab58b1af5a7f8058c"
+      "sha256": "aa8f022ad65c2607d47c18d2ba7d54fed4c2a57f136d1a11d34b6e20725765d5"
     },
     "incomplete_details": null,
     "instructions": null,
@@ -34,19 +34,6 @@
     "object": "response",
     "output": [
       {
-        "content": [],
-        "encrypted_content": {
-          "length": 1228,
-          "sha256": "62cc2b215ae5849d946f2ec65b998cc9bc970ab6311568208d7d1dcbc573de6d"
-        },
-        "id": {
-          "length": 53,
-          "sha256": "265255b23ac2fc2b07d7e0236db9e84c5be2328ee497fffbc5661aa2a814ce24"
-        },
-        "summary": [],
-        "type": "reasoning"
-      },
-      {
         "content": [
           {
             "annotations": [],
@@ -57,7 +44,7 @@
         ],
         "id": {
           "length": 54,
-          "sha256": "05268a522d3fefb722dd250d0049afb51b9e4c618096739323904e57d221d7d2"
+          "sha256": "a89f3057f819703b254b550181e97790a582b1ecce3e5c06040f206439f1f50f"
         },
         "phase": "final_answer",
         "role": "assistant",
@@ -116,11 +103,11 @@
         "cache_write_tokens": 0,
         "cached_tokens": 0
       },
-      "output_tokens": 18,
+      "output_tokens": 6,
       "output_tokens_details": {
-        "reasoning_tokens": 10
+        "reasoning_tokens": 0
       },
-      "total_tokens": 27
+      "total_tokens": 15
     },
     "user": "[redacted]"
   }

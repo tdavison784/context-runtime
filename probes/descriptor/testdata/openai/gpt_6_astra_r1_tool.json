@@ -45,13 +45,13 @@
     "billing": {
       "payer": "developer"
     },
-    "completed_at": 1790426941,
-    "created_at": 1790426939,
+    "completed_at": 1790427271,
+    "created_at": 1790427268,
     "error": null,
     "frequency_penalty": 0,
     "id": {
       "length": 55,
-      "sha256": "d89047c9bee024c26a40bf23a797503bfc92c253bd4122e65b36b80185a84eeb"
+      "sha256": "d7df68a91f0af60e7f0c63bb15ef226c5132b38ff784e8814fb82c060d9afc56"
     },
     "incomplete_details": null,
     "instructions": null,
@@ -65,12 +65,12 @@
       {
         "content": [],
         "encrypted_content": {
-          "length": 1356,
-          "sha256": "0ad327ee1bfccd89f06dcf98a66b1577ca3c99d16b07d19fc1569357b0a1d78a"
+          "length": 1336,
+          "sha256": "f78a7226d24faa7808038836d09d3d083c7a1a3e0379524ffc646d2219534006"
         },
         "id": {
           "length": 53,
-          "sha256": "e6ef53335ccba574ebec827846194196f046019cb3dbffe5b18572818861c5b0"
+          "sha256": "0cf21c8093302858565734fa819e9cb4a7d48e57a1dd4096135abc413bcecd77"
         },
         "summary": [],
         "type": "reasoning"
@@ -79,11 +79,11 @@
         "arguments": "{\"code\":\"B\"}",
         "call_id": {
           "length": 29,
-          "sha256": "0a01a234b4c58389702673f7ab90a6b82d46a0535d53bdfe4cf97069107146be"
+          "sha256": "c4f8c6d2fc51c580b81f6aba075de5d46b26a6eb43ab09f4df5cfeb866cdf4b8"
         },
         "id": {
           "length": 53,
-          "sha256": "90e0619d17b43efb98559e438943b02cb069b4ab31d64af8cfc07f9dd9d6957a"
+          "sha256": "4162440880634023c0f67c8f925364c5184e88a16cc908f8546f21b9005a42e8"
         },
         "name": "lookup",
         "status": "completed",
@@ -164,11 +164,11 @@
         "cache_write_tokens": 0,
         "cached_tokens": 0
       },
-      "output_tokens": 64,
+      "output_tokens": 58,
       "output_tokens_details": {
-        "reasoning_tokens": 45
+        "reasoning_tokens": 39
       },
-      "total_tokens": 142
+      "total_tokens": 136
     },
     "user": "[redacted]"
   }

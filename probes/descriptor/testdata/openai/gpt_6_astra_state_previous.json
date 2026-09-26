@@ -23,13 +23,13 @@
     "billing": {
       "payer": "developer"
     },
-    "completed_at": 1790426953,
-    "created_at": 1790426952,
+    "completed_at": 1790427283,
+    "created_at": 1790427282,
     "error": null,
     "frequency_penalty": 0,
     "id": {
       "length": 55,
-      "sha256": "783d537913dedb0c90c91362cb1e17b2a41ef693b27abbf03842116d7f63e6ba"
+      "sha256": "8570a3c7655bf607a406854d98b9663f22c78a719f6422d45325f0fa03e9dc46"
     },
     "incomplete_details": null,
     "instructions": null,
@@ -41,19 +41,6 @@
     "object": "response",
     "output": [
       {
-        "content": [],
-        "encrypted_content": {
-          "length": 1208,
-          "sha256": "27885b0dd3aed47e55f62588d4100be34fabdc35d8f629413e115a9e598e77af"
-        },
-        "id": {
-          "length": 53,
-          "sha256": "15a219949ed471d7a31ec67d85dd64367f9b42d4625d09c3f11b9cd1364b7481"
-        },
-        "summary": [],
-        "type": "reasoning"
-      },
-      {
         "content": [
           {
             "annotations": [],
@@ -64,7 +51,7 @@
         ],
         "id": {
           "length": 54,
-          "sha256": "4a9c6c1c27d301de29fd70af782cc000a49754113dde30bb48df93376c0f4a7b"
+          "sha256": "4c4be5d01f6613eeb2831878d4ad01b2f16aa866c17a9cd6dc8fbf92e1b119ef"
         },
         "phase": "final_answer",
         "role": "assistant",
@@ -76,7 +63,7 @@
     "presence_penalty": 0,
     "previous_response_id": {
       "length": 55,
-      "sha256": "4b42a29e3cf00f2c332a494717485b2e26a47f25717ebc4e1587f032aa5209b7"
+      "sha256": "779ebd9ac337f913b3481a45ccb6555ec865667cbd9a3b9b0cca35021afe71dd"
     },
     "prompt_cache_key": null,
     "prompt_cache_retention": "24h",
@@ -126,11 +113,11 @@
         "cache_write_tokens": 0,
         "cached_tokens": 0
       },
-      "output_tokens": 16,
+      "output_tokens": 6,
       "output_tokens_details": {
-        "reasoning_tokens": 8
+        "reasoning_tokens": 0
       },
-      "total_tokens": 41
+      "total_tokens": 31
     },
     "user": "[redacted]"
   }

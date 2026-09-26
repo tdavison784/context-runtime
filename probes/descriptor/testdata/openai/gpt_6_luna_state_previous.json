@@ -23,13 +23,13 @@
     "billing": {
       "payer": "developer"
     },
-    "completed_at": 1790426962,
-    "created_at": 1790426962,
+    "completed_at": 1790427293,
+    "created_at": 1790427292,
     "error": null,
     "frequency_penalty": 0,
     "id": {
       "length": 55,
-      "sha256": "ed6bc03ebd80bff33a1811a746823c8f8c51a0cf5db502ac5d5247560f4cfc5d"
+      "sha256": "52af186134492f6db4ec1d05cd55013316395e5b4fbd379131d4b8840fc2aea1"
     },
     "incomplete_details": null,
     "instructions": null,
@@ -43,12 +43,12 @@
       {
         "content": [],
         "encrypted_content": {
-          "length": 1228,
-          "sha256": "538e35eaf5f2ad38b0a808c944aac6b6410e0f2cdd373761889189bedd319ebe"
+          "length": 1316,
+          "sha256": "12100dab72df4d0786b7f71c6851b2ab9248642162870207a8f140c419018593"
         },
         "id": {
           "length": 53,
-          "sha256": "c791782364d4642ca5c4838cfd720baae10d013e657f5e5a20bdfc5c5160cc81"
+          "sha256": "91bc63f9a3984122f2b06a1417ef7bdb7772608c7225fc8c7ab04cd578f94986"
         },
         "summary": [],
         "type": "reasoning"
@@ -64,7 +64,7 @@
         ],
         "id": {
           "length": 54,
-          "sha256": "aefea4d582e674e55a581f92db7f70fb6f426a3cbd3f2ce352dae2959c7e5b32"
+          "sha256": "f372572da62cb832f76d823e8c127d66dd36931cb864ad92712ba8bb98b42be5"
         },
         "phase": "final_answer",
         "role": "assistant",
@@ -76,7 +76,7 @@
     "presence_penalty": 0,
     "previous_response_id": {
       "length": 55,
-      "sha256": "acfdec0fff7d41da0894c049aa735da3bdb40bf38872017ab58b1af5a7f8058c"
+      "sha256": "aa8f022ad65c2607d47c18d2ba7d54fed4c2a57f136d1a11d34b6e20725765d5"
     },
     "prompt_cache_key": null,
     "prompt_cache_retention": "24h",
@@ -121,16 +121,16 @@
     "top_p": 0.98,
     "truncation": "disabled",
     "usage": {
-      "input_tokens": 37,
+      "input_tokens": 25,
       "input_tokens_details": {
         "cache_write_tokens": 0,
         "cached_tokens": 0
       },
-      "output_tokens": 18,
+      "output_tokens": 34,
       "output_tokens_details": {
-        "reasoning_tokens": 10
+        "reasoning_tokens": 26
       },
-      "total_tokens": 55
+      "total_tokens": 59
     },
     "user": "[redacted]"
   }
