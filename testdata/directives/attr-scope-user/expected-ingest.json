@@ -289,7 +289,7 @@
         12,
         32
       ],
-      "access_scope": "TASK"
+      "access_scope": "TURN"
     },
     {
       "span": 0,
@@ -317,7 +317,7 @@
         52,
         74
       ],
-      "access_scope": "TASK"
+      "access_scope": "AGENT"
     },
     {
       "span": 0,

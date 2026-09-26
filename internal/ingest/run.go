@@ -26,17 +26,18 @@ type run struct {
 	hasTask    bool
 	openedTurn uint64
 
-	items   []domain.ContextItem
-	rels    int
-	refs    int         // unresolved references declared so far (ordinals)
-	derived map[int]int // derived items per span (MaxItemsPerSpan across parts)
+	items    []domain.ContextItem
+	rels     int
+	refs     int         // unresolved references declared so far (ordinals)
+	refLinks int         // optional REFERENCES edges written (ruling 1)
+	derived  map[int]int // derived items per span (MaxItemsPerSpan across parts)
 
 	// Per parse unit: ingestion diagnostics are reported after the
 	// parser's, and a parser notice about an item survives only if that
 	// item was written (R20.2).
-	unitDiags []domain.Diagnostic
-	written   map[domain.ByteRange]bool // ranges of parser items written
-	refused   map[int]bool              // sections ingestion refused
+	unitDiags []scopedDiag
+	written   map[domain.ByteRange]domain.AccessBoundary // parser items written, by range
+	refused   map[int]bool                               // sections ingestion refused
 	diags     diagnostics
 	commands  []domain.LifecycleCommandRecord
 	dups      []domain.IngestLink
@@ -197,10 +198,10 @@ func (r *run) ingestSpan(si int) error {
 	if err != nil {
 		return err
 	}
-	if err := r.detectDuplicate(actor, transcript); err != nil {
+	if err := r.detectDuplicate(si, 0, actor, transcript); err != nil {
 		return err
 	}
-	if err := r.linkPendingReferences(actor, transcript); err != nil {
+	if err := r.linkPendingReferences(si, actor, transcript); err != nil {
 		return err
 	}
 	return r.deriveSpan(si, span, transcript)
@@ -217,10 +218,10 @@ func (r *run) transcript(si int, span domain.Span) (domain.ContextItem, error) {
 		return domain.ContextItem{}, domain.ErrInvalidAuthorityPromotion
 	}
 	parts := make([]domain.ContentPart, 0, len(span.Parts))
-	for _, part := range span.Parts {
+	for pi, part := range span.Parts {
 		cp := part.Snapshot()
 		if part.Type != domain.PartText {
-			if err := r.blob(part, access); err != nil {
+			if err := r.blob(si, pi, part, access); err != nil {
 				return domain.ContextItem{}, err
 			}
 		}
@@ -288,9 +289,10 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 // can access already references that blob and the new item's boundary is
 // within that item's. Missing and inaccessible references fail identically
 // with the bare domain.ErrNotFound, checked before the blob is read. The
-// referrers come from the store's bounded blob index (R19); more than the
-// lookup limit rejects the event (store.ErrLimitExceeded, D17).
-func (r *run) blob(part domain.InputPart, access domain.AccessBoundary) error {
+// store answers the one question asked, the earliest verified referrer the
+// principal can access within access, filtering access inside its query
+// (F1, SEC-1.1), so no other record is ever counted or observable.
+func (r *run) blob(si, pi int, part domain.InputPart, access domain.AccessBoundary) error {
 	cp := part.Snapshot()
 	if part.Data != nil {
 		r.suppliedBlobs[cp.BlobHash] = true
@@ -299,14 +301,12 @@ func (r *run) blob(part domain.InputPart, access domain.AccessBoundary) error {
 	if r.suppliedBlobs[cp.BlobHash] {
 		return nil
 	}
-	items, err := r.tx.ItemsByBlob(cp.BlobHash, r.g.lookupLimit())
+	found, err := r.tx.BlobReferrer(store.BlobReferrerFilter{Viewer: r.p, BlobHash: cp.BlobHash, Within: access})
 	if err != nil {
 		return err
 	}
-	for _, it := range items {
-		if !it.Access.Permits(r.p) || !access.Within(it.Access) {
-			continue
-		}
+	r.reportUnverified(si, pi, domain.ByteRange{}, access, found.Unverified)
+	for _, it := range found.Items {
 		for _, q := range it.Parts {
 			if q.BlobHash == cp.BlobHash && q.BlobSize == cp.BlobSize {
 				return nil
@@ -314,4 +314,16 @@ func (r *run) blob(part domain.InputPart, access domain.AccessBoundary) error {
 		}
 	}
 	return domain.ErrNotFound
+}
+
+// reportUnverified records one content-free ItemUnverified diagnostic per
+// lookup match the store excluded because its stored content failed
+// verification (DUR-1.4). The match never decides anything and never
+// blocks the event; reading it directly still fails with ErrIntegrity. The
+// store only reports matches the viewer can access, and the record is
+// readable at access, so it discloses nothing hidden.
+func (r *run) reportUnverified(si, pi int, rng domain.ByteRange, access domain.AccessBoundary, ids []string) {
+	for range ids {
+		r.diags.add(domain.Diagnostic{SpanIndex: si, PartIndex: pi, Code: domain.ItemUnverified, Reason: domain.ReasonUnverifiedItem, Range: rng}, access)
+	}
 }
