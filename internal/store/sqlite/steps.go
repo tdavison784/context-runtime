@@ -20,6 +20,7 @@ type migrationStep struct {
 
 var migrationSteps = map[int]migrationStep{
 	11: {id: "0011/item-sources/reference-locator-v1", run: backfillItemSourcesV1},
+	26: {id: "0026/obligations/reconcile-matcher-satisfaction-v1", run: reconcileMatcherSatisfactionV1},
 }
 
 // migrationChecksum is the stored checksum of migration number: the SHA-256
