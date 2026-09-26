@@ -1,9 +1,9 @@
 package ingest
 
 import (
-	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -26,20 +26,20 @@ func TestAnonymousOccurrencesNeverAlias(t *testing.T) {
 		}
 		original := f.items()
 
-		collide := func(name string, ingest func() (domain.IngestReceipt, error)) {
+		// collide requires a collision to fail closed with exactly want (a
+		// bare public sentinel whose text names no internal ID, R20.1),
+		// writing nothing and leaving the earlier event untouched.
+		collide := func(name string, want error, ingest func() (domain.IngestReceipt, error)) {
 			before := f.snapshot()
-			r, err := ingest()
-			if err != nil {
-				// A reserved internal ID prefix is rejected up front
-				// (R20.1); anything reaching the store is a conflict.
-				if !errors.Is(err, domain.ErrImmutable) && err != domain.ErrEventIDConflict && err != domain.ErrInvalidRecord {
-					t.Errorf("%s: unexpected error %v", name, err)
-				}
-				if after := f.snapshot(); !reflect.DeepEqual(before, after) {
-					t.Errorf("%s: rejected collision wrote state", name)
-				}
-			} else if r.OccurrenceID == a1.OccurrenceID || slices.ContainsFunc(r.ItemIDs(), func(id string) bool { return slices.Contains(a1.ItemIDs(), id) }) {
-				t.Errorf("%s: aliased the anonymous event", name)
+			_, err := ingest()
+			if err != want {
+				t.Errorf("%s: err = %v, want bare %v", name, err, want)
+			}
+			if err != nil && (strings.Contains(err.Error(), "itm_") || strings.Contains(err.Error(), "evt_") || strings.Contains(err.Error(), a1.OccurrenceID)) {
+				t.Errorf("%s: error text echoes an internal ID: %q", name, err)
+			}
+			if after := f.snapshot(); !reflect.DeepEqual(before, after) {
+				t.Errorf("%s: rejected collision wrote state", name)
 			}
 			for _, it := range original {
 				var got domain.ContextItem
@@ -49,10 +49,14 @@ func TestAnonymousOccurrencesNeverAlias(t *testing.T) {
 				}
 			}
 		}
-		collide("caller EventID spelling an anonymous occurrence", func() (domain.IngestReceipt, error) {
+		// R20.1: a reserved internal ID prefix is rejected by validation,
+		// before any store access.
+		collide("caller EventID spelling an anonymous occurrence", domain.ErrInvalidRecord, func() (domain.IngestReceipt, error) {
 			return f.ingest(user, userEvent(a1.OccurrenceID, "caller text", false))
 		})
-		collide("restarted ID generator", func() (domain.IngestReceipt, error) {
+		// A repeated anonymous occurrence reaches the store: its first
+		// derived artifact collides with an immutable record.
+		collide("restarted ID generator", domain.ErrImmutable, func() (domain.IngestReceipt, error) {
 			return Ingester{IDs: &domain.SequentialIDs{}, Now: f.in.Now}.Ingest(ctx, f.s, user, userEvent("", "after restart", false))
 		})
 	})
