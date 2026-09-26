@@ -94,6 +94,12 @@ func TestContextItemValidate_FailureBranches(t *testing.T) {
 		{"invalid authority", func(it ContextItem) ContextItem { it.Authority = "bogus"; return it }, ErrInvalidRecord},
 		{"invalid scope", func(it ContextItem) ContextItem { it.Scope = "bogus"; return it }, ErrInvalidRecord},
 		{"invalid residency", func(it ContextItem) ContextItem { it.Residency = "bogus"; return it }, ErrInvalidRecord},
+		{"invalid directive section", func(it ContextItem) ContextItem { it.Section = "bogus"; return it }, ErrInvalidRecord},
+		{
+			"directive-section item without a directive ID rejected",
+			func(it ContextItem) ContextItem { it.Section = SectionWorking; it.DirectiveID = ""; return it },
+			ErrInvalidRecord,
+		},
 		{"invalid retention", func(it ContextItem) ContextItem { it.Retention = "bogus"; return it }, ErrInvalidRecord},
 		{
 			"access boundary itself invalid",
@@ -272,6 +278,36 @@ func TestContextItemValidate_PositiveTTLPasses(t *testing.T) {
 	it.TTLTurns = &ttl
 	if err := it.Validate(); err != nil {
 		t.Fatalf("valid item with positive TTL failed Validate: %v", err)
+	}
+}
+
+// TestContextItemValidate_SectionNoneWithoutDirectiveIDPasses checks the
+// default (an item not created by a directive section) is valid without a
+// DirectiveID.
+func TestContextItemValidate_SectionNoneWithoutDirectiveIDPasses(t *testing.T) {
+	it := validItem() // Section defaults to SectionNone, DirectiveID is ""
+	if it.Section != SectionNone || it.DirectiveID != "" {
+		t.Fatalf("test fixture assumption violated: Section=%q DirectiveID=%q", it.Section, it.DirectiveID)
+	}
+	if err := it.Validate(); err != nil {
+		t.Fatalf("valid non-directive item failed Validate: %v", err)
+	}
+}
+
+// TestContextItemValidate_EachSectionWithDirectiveIDPasses checks every
+// named section is valid once a DirectiveID is present.
+func TestContextItemValidate_EachSectionWithDirectiveIDPasses(t *testing.T) {
+	for _, s := range []DirectiveSection{
+		SectionGoal, SectionPinned, SectionWorking, SectionRemember, SectionReferences, SectionEphemeral,
+	} {
+		t.Run(string(s), func(t *testing.T) {
+			it := validItem()
+			it.Section = s
+			it.DirectiveID = "goal-" + strings.Repeat("a", 64)
+			if err := it.Validate(); err != nil {
+				t.Fatalf("valid %s-section item failed Validate: %v", s, err)
+			}
+		})
 	}
 }
 

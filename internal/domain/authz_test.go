@@ -891,6 +891,34 @@ func TestAuthorizeSupersession_AgentDifferentKeyFails(t *testing.T) {
 	}
 }
 
+// TestAuthorizeSupersession_AgentSameKeySameTaskOK is the positive control
+// for the v3 same-task requirement: matching key AND matching TaskID.
+func TestAuthorizeSupersession_AgentSameKeySameTaskOK(t *testing.T) {
+	superseding := keyedAgentItem("status", taskBoundary)
+	superseding.TaskID = "t1"
+	superseded := keyedAgentItem("status", taskBoundary)
+	superseded.TaskID = "t1"
+	if err := AuthorizeSupersession(agentActor(), superseding, superseded); err != nil {
+		t.Fatalf("AuthorizeSupersession() error = %v, want nil", err)
+	}
+}
+
+// TestAuthorizeSupersession_AgentSameKeyDifferentTaskFails is the v3
+// addition: a keyed agent write's own TaskID field must also match, not
+// just its key and access boundary. Two keyed items can share an access
+// boundary (for example a WORKFLOW- or SESSION-scoped boundary that doesn't
+// itself carry a task constraint) while still belonging to different tasks.
+func TestAuthorizeSupersession_AgentSameKeyDifferentTaskFails(t *testing.T) {
+	superseding := keyedAgentItem("status", taskBoundary)
+	superseding.TaskID = "t1"
+	superseded := keyedAgentItem("status", taskBoundary)
+	superseded.TaskID = "t2"
+	err := AuthorizeSupersession(agentActor(), superseding, superseded)
+	if !errors.Is(err, ErrInvalidAuthorityPromotion) {
+		t.Fatalf("AuthorizeSupersession() error = %v, want ErrInvalidAuthorityPromotion (different task)", err)
+	}
+}
+
 // TestAuthorizeSupersession_AgentNonKeyedDirectiveIDFails checks an
 // AGENT-authority item whose DirectiveID isn't a keyed agent write at all
 // (no "agent." prefix, e.g. a plain directive ID) never qualifies for the
