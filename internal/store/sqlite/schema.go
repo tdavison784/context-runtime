@@ -64,6 +64,7 @@ func makeSchemas() map[string]*recordSchema {
 		{"receipt_item", receiptItem{}, "OccurrenceID", "Ordinal"},
 		{"diagnostic", domain.DiagnosticRecord{}, "ID", ""},
 		{"command", domain.LifecycleCommandRecord{}, "ID", ""},
+		{"reference", domain.UnresolvedReference{}, "ID", ""},
 	}
 	out := make(map[string]*recordSchema, len(definitions))
 	for _, d := range definitions {
@@ -162,7 +163,7 @@ func (c recordColumn) sqlType() string {
 
 // recordTables lists every record table in creation order.
 var recordTables = []string{"item", "relationship", "event", "obligation", "obligation_transition", "grant", "task", "lifecycle", "conversation", "call", "attempt",
-	"envelope", "receipt", "receipt_item", "diagnostic", "command"}
+	"envelope", "receipt", "receipt_item", "diagnostic", "command", "reference"}
 
 // typedColumns is the column layout (name -> declared type) the Go record
 // types require of each rec_* table. Migrations are forward-only and never

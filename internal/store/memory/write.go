@@ -33,7 +33,7 @@ func (t *tx) commit(st *state) bool {
 	wrote := t.items.dirty() || t.rels.dirty() || t.events.dirty() || t.blobs.dirty() ||
 		t.directives.dirty() || t.obligations.dirty() || t.transitions.dirty() || t.grants.dirty() ||
 		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty() ||
-		t.receipts.dirty() || t.envelopes.dirty()
+		t.receipts.dirty() || t.envelopes.dirty() || t.references.dirty()
 	t.items.commit()
 	t.rels.commit()
 	t.supersedes.commit()
@@ -55,6 +55,7 @@ func (t *tx) commit(st *state) bool {
 	t.attempts.commit()
 	t.receipts.commit()
 	t.envelopes.commit()
+	t.references.commit()
 	st.lastSeq = t.lastSeq
 	return wrote
 }
@@ -763,6 +764,9 @@ func (t *tx) checkLedgerSeqs() error {
 	for _, r := range t.receipts.over {
 		seqs = append(seqs, r.Seq)
 	}
+	for _, r := range t.references.over {
+		seqs = append(seqs, r.Seq)
+	}
 	for _, e := range t.lifecycle.over {
 		if e.TargetKind != domain.TargetCall {
 			seqs = append(seqs, e.Seq)
@@ -825,6 +829,27 @@ func (t *tx) InsertIngestion(env domain.EventEnvelope, r domain.IngestReceipt) e
 	}
 	t.receipts.put(r.OccurrenceID, r)
 	t.envelopes.put(env.OccurrenceID, env)
+	t.markSequenced()
+	return nil
+}
+
+func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
+	if err := t.own(r.SessionID); err != nil {
+		return err
+	}
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if err := t.fresh("unresolved reference "+r.ID, r.Seq); err != nil {
+		return err
+	}
+	if !t.items.has(r.ItemID) {
+		return invalid("unresolved reference %s: declaring item %s is not stored", r.ID, r.ItemID)
+	}
+	if t.references.has(r.ID) {
+		return fmt.Errorf("unresolved reference %s: %w", r.ID, domain.ErrImmutable)
+	}
+	t.references.put(r.ID, r)
 	t.markSequenced()
 	return nil
 }
