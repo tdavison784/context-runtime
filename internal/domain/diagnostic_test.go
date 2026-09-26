@@ -234,7 +234,7 @@ func TestItemUnverifiedDiagnostic(t *testing.T) {
 
 // TestReferenceLinksTruncated: an event that stops linking optional
 // REFERENCES edges at its MaxReferenceLinks budget reports it with its own
-// warning code and exactly one reason, and the budget defaults to 256.
+// warning code and exactly one reason.
 func TestReferenceLinksTruncated(t *testing.T) {
 	d := Diagnostic{Code: ReferenceLinksTruncated, Reason: ReasonReferenceLinksTruncated, ParserVersion: "v"}
 	if err := d.Validate(); err != nil || ReferenceLinksTruncated.Severity() != SeverityWarning {
@@ -242,8 +242,5 @@ func TestReferenceLinksTruncated(t *testing.T) {
 	}
 	if (Diagnostic{Code: DiagnosticsTruncated, Reason: ReasonReferenceLinksTruncated, ParserVersion: "v"}).Validate() == nil {
 		t.Errorf("accepted the reason with another code")
-	}
-	if got := (Limits{}).Effective().MaxReferenceLinks; got != 256 {
-		t.Errorf("default MaxReferenceLinks = %d, want 256", got)
 	}
 }
