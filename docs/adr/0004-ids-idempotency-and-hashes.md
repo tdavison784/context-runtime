@@ -60,9 +60,11 @@ requires stable input identities for deterministic replay.
   currently held in-flight record's `ProposalHash`, not by the derived ID
   alone — the ID is a storage key; the held record's full proposal is the
   idempotency check. ADR 17 fixes the required order of checks in `Prepare`
-  (base version, then semantic staleness, then this comparison) and records
-  that `internal/invocation/prepare.go` does not yet implement either the ID
-  scheme or that order.
+  (base version, then semantic staleness, then this comparison);
+  `internal/invocation/prepare.go` now implements both the v2 ID call site
+  and that order (`domain.DerivedCallID(p.SessionID, convID, conv.Revision,
+  call.ProposalHash)`, checked only after the base-version/staleness/epoch
+  checks pass).
 - Outcome identity is per attempt. `CallOutcome.Attempt` (≥1) names the
   attempt it closes; `OutcomeHash()` covers `Attempt` plus state, response
   hash, failure reason, retryable flag, and usage (nil-vs-present
@@ -141,28 +143,40 @@ silently supersede one another under FR-DIR-002's ID-reuse rule.
 
 ## Tests that lock the behavior
 
-- `internal/domain/canonical_test.go`: `HashBytes`/`ValidHash` round-trip
-  and malformed-hash rejection; `ContentHash` changes iff any part field
-  changes.
-- `internal/domain/ids_test.go`: `DerivedItemID` determinism;
-  `DerivedCallID` v2 determinism over `(session, conversation, revision,
-  proposalHash)`, and a differing revision or proposal hash produces a
-  different ID; `DerivedDirectiveID` returns the full 64-hex hash.
-- `internal/domain/call_test.go`: `CallOutcome.Validate` rejects a
-  `Response` whose bytes don't hash to `ResponseHash`, and rejects a
-  COMPLETED outcome carrying `Retryable`/`FailureReason`; `OutcomeHash`
-  differs when only `Attempt` differs.
-- `internal/invocation` (`t10_test.go`, `property_test.go`, already
-  committed): re-`Prepare`ing an identical proposal against an unreleased
-  reservation returns the same record; a retryable failure on one attempt
-  followed by a distinct outcome on the next attempt is not a conflict. The
-  case that a changed semantic seq or base version is never treated as
-  identical even when the `ProposalHash` matches — i.e. the check-order
-  regression Codex's second pass found (ADR 17, finding N1) — is not yet
-  covered; see ADR 17's Tests section for the required addition.
-- `internal/store/storetest`: `InsertEvent` idempotency (trace T10 step 1);
-  a blob store test asserting `(sessionA, hash)` and `(sessionB, hash)` are
-  independent existence checks.
+- `internal/domain/canonical_test.go`: `TestValidHash`,
+  `TestCanonicalEncoderBytesAndStrings`, `TestHashBytes`,
+  `TestContentHashInjectivity`, `TestContentHashGolden`,
+  `TestSemanticBytes`, `TestSemanticBytesIsTokenizerFree`.
+- `internal/domain/ids_test.go`: `TestDerivedItemIDDeterministic`,
+  `TestDerivedItemIDSensitiveToEachInput`,
+  `TestDerivedItemID_RetryReproducesSameIDs`;
+  `TestDerivedCallIDDeterministic`, `TestDerivedCallIDSensitiveToEachInput`,
+  `TestDerivedCallID_SameProposalAtSameRevisionIsIdempotent` (the exact
+  idempotent-repeat property), `TestDerivedCallID_ReleasedReservationGetsANewID`
+  (the exact anti-aliasing property, Codex finding 4); `TestDerivedDirectiveIDFormat`,
+  `TestDerivedDirectiveID_LowercasesKeyword`,
+  `TestDerivedDirectiveID_StripsHashPrefixOnly`.
+- `internal/domain/call_test.go`: `TestOutcomeHashDistinguishesAttempt`,
+  `TestCallOutcomeValidate` (response-bytes-to-hash binding, per-state
+  field rules), `TestCallProposalHashSensitivity`,
+  `TestCallProposalHashStable`, `TestCallRecordValidate`,
+  `TestCallRecordValidate_TerminalEvidenceMatrix` (the persisted-
+  `ProposalHash`/`Outcome` consistency this ADR and ADR 17 both rely on).
+- `internal/invocation/ledger_test.go:TestStaleDuplicatePreview` is the
+  exact regression test for the N1 check-order gap this ADR previously
+  flagged as unfixed: it prepares a call, ingests an intervening semantic
+  event, re-`Prepare`s the identical request and asserts
+  `ErrVersionConflict` (not a silent idempotent return), then confirms a
+  genuinely current duplicate still hits the held reservation
+  (`ErrCallInFlight`). `TestPrepareIdempotentRepeat` and
+  `TestPrepareVersionChecks` cover the ordinary idempotent-repeat and
+  version-check paths. See ADR 17 for the full Prepare-ordering decision
+  this test locks.
+- `internal/store/storetest` (`storetest.Run`, run by both
+  `internal/store/memory` and `internal/store/sqlite`):
+  `TestConformance/Events` covers `InsertEvent` idempotency (trace T10 step
+  1); `TestConformance/ItemBlobIntegrity` and `.../Blobs` cover session-
+  scoped blob existence, including a blob stored only in another session.
 
 ## Open questions
 
@@ -190,3 +204,10 @@ Decision now states `ProposalHash` must be persisted and re-verifiable on
 the record; the required `Prepare` check order is now ADR 17's decision,
 cross-referenced here; the Tests section no longer overclaims coverage
 `internal/invocation`'s committed tests don't yet have.
+
+Verified against the integrated ledger fix (commit `0c8ce40` plus tests
+`36ba4a2`/`dc49396`): `internal/invocation/prepare.go` now populates
+`ProposalHash` before `InsertCall` and checks base version, semantic
+staleness, and epoch before comparing the in-flight `ProposalHash`;
+`TestStaleDuplicatePreview` locks the exact regression. Finding N1 is
+closed for this ADR's scope.
