@@ -47,6 +47,11 @@ type readTx struct {
 	duplicates   index[duplicateKey]
 	refsByKey    index[string]
 	itemsByKey   index[string]
+	blobOwners   index[blobKey]
+	canonical    liveIndex[canonicalKey]
+	working      liveIndex[workingKey]
+	sources      liveIndex[sourceKey]
+	refOwners    index[sourceKey]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -81,6 +86,11 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		duplicates:   newIndex(st.duplicates, writable),
 		refsByKey:    newIndex(st.refsByKey, writable),
 		itemsByKey:   newIndex(st.itemsByKey, writable),
+		blobOwners:   newIndex(st.blobOwners, writable),
+		canonical:    newLiveIndex(st.canonical, writable),
+		working:      newLiveIndex(st.working, writable),
+		sources:      newLiveIndex(st.sources, writable),
+		refOwners:    newIndex(st.refOwners, writable),
 	}
 }
 

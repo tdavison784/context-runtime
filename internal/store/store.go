@@ -219,6 +219,22 @@ type ReadTx interface {
 
 	Item(id string) (domain.ContextItem, error)
 	Items(f ItemFilter) ([]domain.ContextItem, error)
+	// BlobReferrer returns the one referrer blob authorization needs (see
+	// BlobReferrerFilter); an invalid filter is domain.ErrInvalidRecord.
+	BlobReferrer(f BlobReferrerFilter) (Lookup, error)
+	// CanonicalCandidates returns the live duplicate candidates f selects.
+	CanonicalCandidates(f CanonicalFilter) (Lookup, error)
+	// CurrentWorking returns the current Working snapshot f selects.
+	CurrentWorking(f WorkingFilter) (Lookup, error)
+	// SourceItems returns one page of the source items f selects.
+	SourceItems(f SourceFilter) (Lookup, error)
+	// VisibleReferences returns one page of the unresolved references f
+	// selects, whether more remain, and the cursor to continue after.
+	VisibleReferences(f VisibleReferenceFilter) (refs []domain.UnresolvedReference, more bool, next Cursor, err error)
+
+	// Deprecated: the lookups below count records the caller cannot see
+	// (SEC-1.1) and are removed once ingest uses the access-filtered ones.
+	//
 	// ItemsByBlob returns every item in the session with a part referencing
 	// the blob hash, each once, ordered by Seq then ID (R19, R5). It is
 	// bounded like ObligationsBySource: limit must be positive and a
