@@ -215,7 +215,44 @@ func TestGateT05_ResolvedGoalStaysResolved(t *testing.T) {
 			}
 		})
 	})
-	t.Run("archive keeps RESOLVED and currentness", func(t *testing.T) { pending(t, depW3Life) })
+	t.Run("archive keeps RESOLVED and currentness", func(t *testing.T) {
+		semanticStores(t, func(t *testing.T, f *fixture) {
+			sys := principal(domain.AuthoritySystem)
+			g := mustDirective(t, f.mustIngest(sys, t05Goal()), "G")
+			f.mustIngest(sys, sysEvent("t05-res", "## Resolve [G]\n"))
+			svc := f.lifecycleService()
+			state := func() domain.ContextItem {
+				var it domain.ContextItem
+				f.view(func(tx store.ReadTx) error {
+					var err error
+					it, err = tx.Item(g.ID)
+					return err
+				})
+				return it
+			}
+			resolved := state()
+			if _, err := svc.ArchiveStandalone(ctx, sys, domain.ArchiveIntent{RequestID: "arch", ItemID: g.ID, ExpectedVersion: resolved.Version}); err != nil {
+				t.Fatalf("archive: %v", err)
+			}
+			archived := state()
+			if archived.Residency != domain.ResidencyArchived || *archived.GoalStatus != domain.GoalResolved || archived.Generation != resolved.Generation ||
+				archived.Parts[0].Text != g.Parts[0].Text || archived.Authority != g.Authority || !f.isCurrent(g.ID) {
+				t.Fatalf("archived G = %+v", archived)
+			}
+			if _, err := svc.UnarchiveStandalone(ctx, sys, domain.UnarchiveIntent{RequestID: "unarch", ItemID: g.ID, ExpectedVersion: archived.Version}); err != nil {
+				t.Fatalf("unarchive: %v", err)
+			}
+			if back := state(); back.Residency != domain.ResidencyResident || *back.GoalStatus != domain.GoalResolved || !f.isCurrent(g.ID) {
+				t.Fatalf("unarchived G = %+v", back)
+			}
+			// An AGENT principal never archives (P3-37).
+			agent := principal(domain.AuthorityAgent)
+			f.requireAtomic(domain.ErrInvalidAuthorityPromotion, func() error {
+				_, err := svc.ArchiveStandalone(ctx, agent, domain.ArchiveIntent{RequestID: "arch-agent", ItemID: g.ID, ExpectedVersion: state().Version})
+				return err
+			})
+		})
+	})
 	t.Run("Get/Rehydrate never reopen or change residency", func(t *testing.T) { pending(t, depW6) })
 	t.Run("identical restatement stays resolved", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
