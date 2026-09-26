@@ -46,7 +46,11 @@ func Parse(input []byte, opts Options) Result {
 		if bodyStart < len(input) && input[bodyStart] == '\n' {
 			bodyStart++
 		}
-		result.Sections = append(result.Sections, Section{Keyword: Keyword(strings.ToUpper(s.heading.section)), Level: s.heading.level, Range: ByteRange{Start: s.heading.start, End: s.end}, HeadingRange: ByteRange{Start: s.heading.start, End: bodyStart}, BodyRange: ByteRange{Start: bodyStart, End: s.end}, DirectiveID: s.heading.id, Attributes: exportAttributes(s.heading.attrs)})
+		section := Section{Keyword: Keyword(strings.ToUpper(s.heading.section)), Level: s.heading.level, Range: ByteRange{Start: s.heading.start, End: s.end}, HeadingRange: ByteRange{Start: s.heading.start, End: bodyStart}, BodyRange: ByteRange{Start: bodyStart, End: s.end}, Malformed: s.malformed}
+		if s.heading.valid {
+			section.DirectiveID, section.Attributes = s.heading.id, exportAttributes(s.heading.attrs)
+		}
+		result.Sections = append(result.Sections, section)
 	}
 	for _, item := range p.items {
 		if item.explicit && len(item.id) > limits.MaxIDBytes {

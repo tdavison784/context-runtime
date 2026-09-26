@@ -16,6 +16,7 @@ func (p *coreParser) extract(validate attributeValidator) {
 		s := &p.sections[si]
 		h := s.heading
 		if !h.valid {
+			s.malformed = true
 			continue
 		}
 		s.heading.attrs = p.validated(h.section, h.attrs, validate)
@@ -31,13 +32,23 @@ func (p *coreParser) extract(validate attributeValidator) {
 			if h.id != "" {
 				p.malformed(h.section, "heading ID on list section", h.byteRange)
 			}
+			// Only top-level bullets start items; blank and indented lines
+			// continue the preceding item. Unindented prose is malformed
+			// content through the next bullet, never an implicit item (M4).
 			for i := 0; i < len(lines); {
 				j := i + 1
-				for j < len(lines) && bulletPrefix(p.lineBytes(lines[j])) == 0 {
+				for j < len(lines) && continuation(p.lineBytes(lines[j])) {
 					j++
 				}
 				p.listItem(si, lines[i:j], validate)
-				i = j
+				k := j
+				for k < len(lines) && bulletPrefix(p.lineBytes(lines[k])) == 0 {
+					k++
+				}
+				if k > j {
+					p.reject(si, "unexpected list prose", byteRange{lines[j].start, lines[k-1].end})
+				}
+				i = k
 			}
 		} else {
 			// A single body keeps every byte between its first and last
@@ -52,7 +63,28 @@ func (p *coreParser) extract(validate attributeValidator) {
 	}
 }
 func (p *coreParser) lineBytes(l sourceLine) []byte { return p.data[l.start:l.end] }
-func blank(b []byte) bool                           { return len(bytes.Trim(b, " \t")) == 0 }
+func continuation(b []byte) bool {
+	return bulletPrefix(b) == 0 && (blank(b) || b[0] == ' ' || b[0] == '\t')
+}
+
+// reject diagnoses content that yields no directive and marks its section
+// malformed, so ingestion can refuse partial Working snapshots (D11).
+func (p *coreParser) reject(si int, reason string, r byteRange) {
+	p.sections[si].malformed = true
+	p.malformed(p.sections[si].heading.section, reason, r)
+}
+
+// emptyText reports text made only of ASCII blanks and line breaks; Unicode
+// spaces are payload and never make an item empty.
+func emptyText(s string) bool {
+	for i := range len(s) {
+		if c := s[i]; c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			return false
+		}
+	}
+	return true
+}
+func blank(b []byte) bool { return len(bytes.Trim(b, " \t")) == 0 }
 func bulletPrefix(b []byte) int {
 	if len(b) >= 2 && (b[0] == '-' || b[0] == '*') && b[1] == ' ' {
 		return 2
@@ -86,7 +118,7 @@ func (p *coreParser) listItem(si int, lines []sourceLine, validate attributeVali
 	if len(b) > 0 && b[0] == '[' {
 		id, n, ok := lexID(b)
 		if !ok {
-			p.malformed(h.section, "invalid directive ID", item.byteRange)
+			p.reject(si, "invalid directive ID", item.byteRange)
 			return
 		}
 		item.id = id
@@ -95,7 +127,7 @@ func (p *coreParser) listItem(si int, lines []sourceLine, validate attributeVali
 		offset += n
 		if len(b) > 0 {
 			if b[0] != ' ' {
-				p.malformed(h.section, "invalid ID separator", item.byteRange)
+				p.reject(si, "invalid ID separator", item.byteRange)
 				return
 			}
 			b = b[1:]
@@ -106,12 +138,12 @@ func (p *coreParser) listItem(si int, lines []sourceLine, validate attributeVali
 	if len(b) > 0 && b[0] == '{' {
 		end := bytes.IndexByte(b, '}')
 		if end < 0 {
-			p.malformed(h.section, "unterminated item attributes", item.byteRange)
+			p.reject(si, "unterminated item attributes", item.byteRange)
 			return
 		}
 		lexed, ok := p.lexAttributes(h.section, b[1:end], offset+1)
 		if !ok {
-			p.malformed(h.section, "invalid attribute syntax", item.byteRange)
+			p.reject(si, "invalid attribute syntax", item.byteRange)
 			return
 		}
 		own := p.validated(h.section, lexed, validate)
@@ -130,7 +162,7 @@ func (p *coreParser) listItem(si int, lines []sourceLine, validate attributeVali
 		}
 		b = b[end+1:]
 		if len(b) == 0 || b[0] != ' ' {
-			p.malformed(h.section, "invalid attribute separator", item.byteRange)
+			p.reject(si, "invalid attribute separator", item.byteRange)
 			return
 		}
 		b = b[1:]
@@ -197,12 +229,12 @@ func (p *coreParser) join(slices []byteRange) string {
 func (p *coreParser) addItem(item rawItem) {
 	item.lifecycle = item.section == "Resolve" || item.section == "Unpin"
 	if item.lifecycle {
-		if item.id == "" || strings.TrimSpace(item.text) != "" {
-			p.malformed(item.section, "lifecycle command requires only a target ID", item.byteRange)
+		if item.id == "" || !emptyText(item.text) {
+			p.reject(item.sectionIndex, "lifecycle command requires only a target ID", item.byteRange)
 			return
 		}
-	} else if strings.TrimSpace(item.text) == "" {
-		p.malformed(item.section, "empty directive text", item.byteRange)
+	} else if emptyText(item.text) {
+		p.reject(item.sectionIndex, "empty directive text", item.byteRange)
 		return
 	}
 	if len(p.items) >= p.limits.maxItems {

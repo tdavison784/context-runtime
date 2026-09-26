@@ -19,6 +19,9 @@ func TestItemExtraction(t *testing.T) {
 		{"tab continuation", "## Working\n- a\n\tb\n\t\tc", []string{"a\nb\n\tc"}, []string{""}},
 		{"blank inside keeps excess", "## Working\n- a\n     \n  b", []string{"a\n   \nb"}, []string{""}},
 		{"payload spacing kept", "## Working\n- [a]  two\t", []string{" two\t"}, []string{"a"}},
+		{"stray prose is not an item", "## Working\n- a\nprose\n  more\n- b", []string{"a", "b"}, []string{"", ""}},
+		{"prose-first body is one item", "## Remember\nintro\n- a\n- b", []string{"intro\n- a\n- b"}, []string{""}},
+		{"unicode space is payload", "## Working\n- \u00a0", []string{"\u00a0"}, []string{""}},
 		{"EOF without EOL", "## Goal\nlast", []string{"last"}, []string{""}},
 		{"deeper heading", "## Goal [g]\nfirst\n### Notes\nlast\n## Other\nignored", []string{"first\n### Notes\nlast"}, []string{"g"}},
 		{"deeper keyword is body", "## Goal [g]\nfirst\n#### Pinned [p]\nsecond", []string{"first\n#### Pinned [p]\nsecond"}, []string{"g"}},
@@ -93,5 +96,30 @@ func TestHeadingAttributesValidatedOnce(t *testing.T) {
 	p.extract(func(_ string, _ rawAttribute) bool { calls++; return false })
 	if calls != 1 || len(p.items) != 3 {
 		t.Fatalf("validation calls=%d items=%d", calls, len(p.items))
+	}
+}
+
+func TestSectionMalformedFlag(t *testing.T) {
+	cases := []struct {
+		input     string
+		malformed []bool
+	}{
+		{"## Working\n- a\n- b\n## Remember\nx", []bool{false, false}},
+		{"## Working\n- a\nprose\n## Remember\nx", []bool{true, false}},
+		{"## Working\n- a\n- [bad/id] b", []bool{true}},
+		{"## Working\n\n## Goal [bad/id]\nx", []bool{true, true}},
+		{"## Working\n- a\n- {ttl=+1} b", []bool{true}},
+		{"## Unpin\n- [a]\n- [b] text", []bool{true}},
+	}
+	for _, tt := range cases {
+		r := Parse([]byte(tt.input), Options{Authority: domain.AuthoritySystem})
+		if r.Err != nil || len(r.Sections) != len(tt.malformed) {
+			t.Fatalf("%q: %+v", tt.input, r)
+		}
+		for i, want := range tt.malformed {
+			if s := r.Sections[i]; s.Malformed != want || s.Malformed && s.DirectiveID != "" && len(s.ItemIndexes) == 0 {
+				t.Fatalf("%q section %d: %+v", tt.input, i, s)
+			}
+		}
 	}
 }

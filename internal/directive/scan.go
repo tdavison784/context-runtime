@@ -20,9 +20,10 @@ type rawHeading struct {
 	valid bool
 }
 type rawSection struct {
-	heading rawHeading
-	body    []sourceLine
-	end     int
+	heading   rawHeading
+	body      []sourceLine
+	end       int
+	malformed bool
 }
 type parseDiagnostic struct {
 	code, reason, section, id string

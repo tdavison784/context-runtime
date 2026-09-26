@@ -62,6 +62,11 @@ type Section struct {
 	DirectiveID  string
 	Attributes   []Attribute
 	ItemIndexes  []int
+	// Malformed is true when the heading was malformed or any body content
+	// yielded no directive (dropped item, empty body, stray list prose).
+	// Ingestion must not apply a Working snapshot replacement from a
+	// malformed section, so a parse error cannot retire an omitted member (D11).
+	Malformed bool
 }
 
 // Item is a syntactically valid content directive, before defaults/classifying.
