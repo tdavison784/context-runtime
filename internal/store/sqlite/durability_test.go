@@ -341,3 +341,90 @@ func TestCallTransitionsRequireAttemptEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAuditedGrantAndTaskMutations(t *testing.T) {
+	s, _ := openTemp(t)
+	actor := domain.Principal{SessionID: "s", Authority: domain.AuthorityHarness}
+	err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		grantee := actor
+		grant := domain.MutationGrant{ID: "g", SessionID: "s", Action: domain.ActionResolve, TargetIDs: []string{"item"}, Issuer: actor, Grantee: &grantee, IssuedSeq: tx.NextSeq()}
+		if err := tx.InsertGrant(grant); err != nil {
+			return err
+		}
+		duplicate := domain.LifecycleEvent{ID: "audit", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetItem, TargetID: "item", Action: "first", Actor: actor}
+		if err := tx.AppendLifecycleEvent(duplicate); err != nil {
+			return err
+		}
+		bad := duplicate
+		bad.Seq = tx.NextSeq()
+		bad.TargetKind = domain.TargetGrant
+		bad.TargetID = "g"
+		if _, err := tx.RevokeGrant("g", bad); !errors.Is(err, domain.ErrImmutable) {
+			t.Fatalf("duplicate audit = %v", err)
+		}
+		still, err := tx.Grant("g")
+		if err != nil {
+			return err
+		}
+		if still.RevokedSeq != 0 {
+			t.Fatal("failed revocation changed grant")
+		}
+		good := bad
+		good.ID = "revoke"
+		good.Seq = tx.NextSeq()
+		revoked, err := tx.RevokeGrant("g", good)
+		if err != nil {
+			return err
+		}
+		if revoked.RevokedSeq != good.Seq {
+			t.Fatal("revocation did not use audit sequence")
+		}
+		task := domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive}
+		if _, err := tx.PutTask(task, 0, nil); !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Fatalf("unaudited task create = %v", err)
+		}
+		created := domain.LifecycleEvent{ID: "task-create", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "create", Actor: actor}
+		task, err = tx.PutTask(task, 0, &created)
+		if err != nil {
+			return err
+		}
+		task.Status = domain.TaskCompleted
+		task.CompletedSeq = tx.NextSeq()
+		if _, err := tx.PutTask(task, 1, nil); !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Fatalf("unaudited task completion = %v", err)
+		}
+		done := domain.LifecycleEvent{ID: "task-done", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "complete", Actor: actor}
+		_, err = tx.PutTask(task, 1, &done)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestObligationTransitionCAS(t *testing.T) {
+	s, _ := openTemp(t)
+	actor := domain.Principal{SessionID: "s", Authority: domain.AuthorityHarness}
+	err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		ob := domain.ObligationVersion{ObligationID: "o", Version: 1, SessionID: "s", TaskID: "task", SourceItemID: "source", SourceAuthority: domain.AuthorityUser,
+			Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, Status: domain.ObligationUnresolved, Current: true, CreatedSeq: tx.NextSeq(), Revision: 1}
+		if err := tx.InsertObligationVersion(ob); err != nil {
+			return err
+		}
+		tr := domain.ObligationTransition{ID: "tr", SessionID: "s", ObligationID: "o", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Actor: actor, EvidenceIDs: []string{"e"}}
+		if _, err := tx.AppendObligationTransition(tr, 2); !errors.Is(err, domain.ErrVersionConflict) {
+			t.Fatalf("stale transition = %v", err)
+		}
+		updated, err := tx.AppendObligationTransition(tr, 1)
+		if err != nil {
+			return err
+		}
+		if updated.Revision != 2 || updated.Status != domain.ObligationSatisfied {
+			t.Fatalf("updated obligation = %+v", updated)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
