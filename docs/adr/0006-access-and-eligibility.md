@@ -1,6 +1,6 @@
 # 6. Access boundary and context eligibility matrix
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
 ## Context
@@ -211,14 +211,23 @@ affects inherited content.
 
 ## Open questions
 
+### Resolved at acceptance (2026-09-26)
+
 - Exact representation of a retrieval lease (FR-RET-006) — not yet a type in
   `internal/domain`; needed before Phase 6 (archive/retention) but the
   eligibility table above already assumes its shape (principal/task/agent/
   turn-bound, with an expiry).
+  **Decision:** the retrieval lease type is deferred to Phase 6 and will be
+  added to this ADR by amendment before Phase 6 exits; the eligibility
+  table's assumed shape (principal/task/agent/turn-bound with expiry) is the
+  constraint it must meet.
 - Whether TTL expiry is measured in turns only (`ContextItem.TTLTurns`,
   `internal/domain/item.go`) or needs a session-sequence-based expiry too for
   scopes without a turn concept (WORKFLOW/AGENT/SESSION-scoped ephemeral
   content, if any is ever introduced).
+  **Decision:** V1 TTL is measured in turns only: `TTLTurns` counts turns of
+  the item's originating task (`TaskState.Turn`); no sequence-based expiry
+  in V1.
 
 ## Review
 
