@@ -7,13 +7,14 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
-// Execute is the outer boundary: it opens the one Store.Update for a handler
-// and returns only closed public errors, never nested store diagnostics.
-func Execute(ctx context.Context, st store.Store, i domain.ToolInvocation, handler func(store.Tx) (domain.ToolResult, error)) (domain.ToolResult, error) {
+// Execute is the outer boundary: it opens the one Store.Update for a handler,
+// allocates the operation sequence, and returns only closed public errors,
+// never nested store diagnostics.
+func Execute(ctx context.Context, st store.Store, session string, handler func(tx store.Tx, seq uint64) (domain.ToolResult, error)) (domain.ToolResult, error) {
 	var result domain.ToolResult
-	err := st.Update(ctx, i.SessionID, func(tx store.Tx) error {
+	err := st.Update(ctx, session, func(tx store.Tx) error {
 		var err error
-		result, err = handler(tx)
+		result, err = handler(tx, tx.NextSeq())
 		return err
 	})
 	if err != nil {

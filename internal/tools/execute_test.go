@@ -21,7 +21,7 @@ func testService(t *testing.T) *Service {
 }
 
 func runStub(s *Service, tx store.Tx, i domain.ToolInvocation, intent stubIntent, calls *int) (domain.ToolResult, error) {
-	return execute(s, tx, i, "stub", intent.RequestID, intent, func(tx store.Tx, _ store.SemanticTx, state invocationState) (domain.ToolResult, error) {
+	return execute(s, tx, dispatcher(i), Request[stubIntent]{i, intent}, "stub", intent.RequestID, tx.NextSeq(), func(tx store.Tx, _ store.SemanticTx, state invocationState) (domain.ToolResult, error) {
 		*calls++
 		if intent.Value == "fail" {
 			return domain.ToolResult{}, errors.New("private store detail")
@@ -70,7 +70,7 @@ func TestExecuteCommitsResultMembershipAndReceiptsOnce(t *testing.T) {
 	update(t, st, func(tx store.Tx) error {
 		before := tx.LastSeq()
 		again, err := runStub(s, tx, i, intent, &calls)
-		if err != nil || again != first || tx.LastSeq() != before || calls != 1 {
+		if err != nil || again != first || tx.LastSeq() != before+1 || calls != 1 {
 			t.Fatalf("replay: %+v, %v, calls %d", again, err, calls)
 		}
 		return nil
@@ -137,5 +137,34 @@ func TestExecuteDistinguishesToolCallsOfOneOutput(t *testing.T) {
 	})
 	if !errors.Is(err, domain.ErrEventIDConflict) {
 		t.Fatalf("second execution of one tool call: %v", err)
+	}
+}
+
+func TestExecuteRequiresExactTrustedDispatcherAndAllocatedSequence(t *testing.T) {
+	st, i := toolFixture(t)
+	s := testService(t)
+	intent := stubIntent{RequestID: "request", Value: "v"}
+	var calls int
+	update(t, st, func(tx store.Tx) error { _, err := runStub(s, tx, i, intent, &calls); return err })
+	session := dispatcher(i)
+	session.WorkflowID, session.TaskID, session.AgentID = "", "", ""
+	other := dispatcher(i)
+	other.AgentID = "b"
+	for name, d := range map[string]domain.Principal{"agent": i.Principal, "session harness": session, "other agent harness": other} {
+		// Checked before replay: an untrusted caller cannot read a committed result.
+		err := st.Update(testContext, "s", func(tx store.Tx) error {
+			_, err := execute(s, tx, d, Request[stubIntent]{i, intent}, "stub", intent.RequestID, tx.NextSeq(), nil)
+			return err
+		})
+		if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) || FixedError(err).Error() != domain.ToolErrorNotFound.Message() {
+			t.Fatalf("%s dispatcher: %v", name, err)
+		}
+	}
+	err := st.Update(testContext, "s", func(tx store.Tx) error {
+		_, err := execute(s, tx, dispatcher(i), Request[stubIntent]{i, intent}, "stub", intent.RequestID, tx.LastSeq()+1, nil)
+		return err
+	})
+	if !errors.Is(err, domain.ErrInvalidRecord) {
+		t.Fatalf("unallocated sequence: %v", err)
 	}
 }

@@ -29,18 +29,19 @@ var (
 )
 
 // Remember files a fact or decision as a new AGENT_KEY occurrence (P3-25).
-func (s *Service) Remember(tx store.Tx, i domain.ToolInvocation, intent domain.KeyedWriteIntent) (domain.ToolResult, error) {
-	return s.keyedWrite(tx, i, intent, rememberMethod)
+func (s *Service) Remember(tx store.Tx, dispatcher domain.Principal, r Request[domain.KeyedWriteIntent], seq uint64) (domain.ToolResult, error) {
+	return s.keyedWrite(tx, dispatcher, r, seq, rememberMethod)
 }
 
 // UpdateState files task_state as a new AGENT_KEY occurrence (P3-25).
-func (s *Service) UpdateState(tx store.Tx, i domain.ToolInvocation, intent domain.KeyedWriteIntent) (domain.ToolResult, error) {
-	return s.keyedWrite(tx, i, intent, updateStateMethod)
+func (s *Service) UpdateState(tx store.Tx, dispatcher domain.Principal, r Request[domain.KeyedWriteIntent], seq uint64) (domain.ToolResult, error) {
+	return s.keyedWrite(tx, dispatcher, r, seq, updateStateMethod)
 }
 
-func (s *Service) keyedWrite(tx store.Tx, i domain.ToolInvocation, intent domain.KeyedWriteIntent, method keyedMethod) (domain.ToolResult, error) {
-	intent = intent.Clone()
-	return execute(s, tx, i, method.name, intent.RequestID, intent, func(tx store.Tx, _ store.SemanticTx, state invocationState) (domain.ToolResult, error) {
+func (s *Service) keyedWrite(tx store.Tx, dispatcher domain.Principal, r Request[domain.KeyedWriteIntent], seq uint64, method keyedMethod) (domain.ToolResult, error) {
+	i, intent := r.Invocation, r.Intent.Clone()
+	r.Intent = intent
+	return execute(s, tx, dispatcher, r, method.name, intent.RequestID, seq, func(tx store.Tx, _ store.SemanticTx, state invocationState) (domain.ToolResult, error) {
 		var none domain.ToolResult
 		if intent.Validate() != nil || !slices.Contains(method.kinds, intent.Kind) {
 			return none, domain.ErrInvalidRecord

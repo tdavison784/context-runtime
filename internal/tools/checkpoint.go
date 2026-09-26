@@ -13,9 +13,10 @@ const MethodCheckpoint = "context_checkpoint"
 // CreateCheckpoint records an AGENT checkpoint for the invocation's own
 // conversation. Its source is exactly the generation manifest of the inference
 // that issued the call; it covers the closed prefix before the issuing round.
-func (s *Service) CreateCheckpoint(tx store.Tx, i domain.ToolInvocation, intent domain.CheckpointIntent) (domain.ToolResult, error) {
-	intent = intent.Clone()
-	return execute(s, tx, i, MethodCheckpoint, intent.RequestID, intent, func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, error) {
+func (s *Service) CreateCheckpoint(tx store.Tx, dispatcher domain.Principal, r Request[domain.CheckpointIntent], seq uint64) (domain.ToolResult, error) {
+	i, intent := r.Invocation, r.Intent.Clone()
+	r.Intent = intent
+	return execute(s, tx, dispatcher, r, MethodCheckpoint, intent.RequestID, seq, func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, error) {
 		invocationID, _ := i.ID()
 		id, err := s.writeCheckpoint(tx, sem, checkpointInput{actor: i.Principal, recipient: i.Principal, issuing: state.exchange, callID: i.CallID, key: invocationID, intent: intent})
 		return domain.ToolResult{CheckpointID: id}, err

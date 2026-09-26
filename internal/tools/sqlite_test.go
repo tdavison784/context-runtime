@@ -23,7 +23,7 @@ func TestToolReceiptsAndCheckpointSurviveSQLiteReopen(t *testing.T) {
 	var first domain.ToolResult
 	update(t, st, func(tx store.Tx) error {
 		var err error
-		first, err = s.CreateCheckpoint(tx, i2, intent)
+		first, err = s.CreateCheckpoint(tx, dispatcher(i2), Request[domain.CheckpointIntent]{i2, intent}, tx.NextSeq())
 		return err
 	})
 	if err := st.Close(); err != nil {
@@ -36,12 +36,12 @@ func TestToolReceiptsAndCheckpointSurviveSQLiteReopen(t *testing.T) {
 	defer st.Close()
 	update(t, st, func(tx store.Tx) error {
 		before := tx.LastSeq()
-		again, err := s.CreateCheckpoint(tx, i2, intent)
-		if err != nil || again != first || tx.LastSeq() != before {
+		again, err := s.CreateCheckpoint(tx, dispatcher(i2), Request[domain.CheckpointIntent]{i2, intent}, tx.NextSeq())
+		if err != nil || again != first || tx.LastSeq() != before+1 {
 			t.Fatalf("checkpoint replay: %+v, %v", again, err)
 		}
-		keyedAgain, err := s.Remember(tx, i, keyed("r1", "db", "postgres"))
-		if err != nil || keyedAgain.Keyed == nil || tx.LastSeq() != before {
+		keyedAgain, err := s.Remember(tx, dispatcher(i), Request[domain.KeyedWriteIntent]{i, keyed("r1", "db", "postgres")}, tx.NextSeq())
+		if err != nil || keyedAgain.Keyed == nil || tx.LastSeq() != before+2 {
 			t.Fatalf("keyed replay: %+v, %v", keyedAgain, err)
 		}
 		sem, _ := store.Semantic(tx)

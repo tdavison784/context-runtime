@@ -17,7 +17,9 @@ func TestConcurrentIdenticalInvocationsProduceOneEffect(t *testing.T) {
 	var wg sync.WaitGroup
 	for n := range results {
 		wg.Go(func() {
-			results[n], errs[n] = Execute(testContext, st, i, func(tx store.Tx) (domain.ToolResult, error) { return s.Remember(tx, i, intent) })
+			results[n], errs[n] = Execute(testContext, st, "s", func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
+				return s.Remember(tx, dispatcher(i), Request[domain.KeyedWriteIntent]{i, intent}, seq)
+			})
 		})
 	}
 	wg.Wait()
@@ -37,7 +39,9 @@ func TestConcurrentIdenticalInvocationsProduceOneEffect(t *testing.T) {
 	missing := i
 	missing.CallID = "missing-call"
 	other := keyed("r-missing", "db", "postgres")
-	_, err := Execute(testContext, st, missing, func(tx store.Tx) (domain.ToolResult, error) { return s.Remember(tx, missing, other) })
+	_, err := Execute(testContext, st, "s", func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
+		return s.Remember(tx, dispatcher(missing), Request[domain.KeyedWriteIntent]{missing, other}, seq)
+	})
 	if err == nil || err.Error() != domain.ToolErrorNotFound.Message() {
 		t.Fatalf("outer error: %v", err)
 	}

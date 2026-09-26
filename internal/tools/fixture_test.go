@@ -148,3 +148,10 @@ func TestPersistedInvocationOwnership(t *testing.T) {
 		return checkInvocationRecords(i, x, call, task)
 	})
 }
+
+// dispatcher is the trusted harness actor with the invocation's exact owners.
+func dispatcher(i domain.ToolInvocation) domain.Principal {
+	d := i.Principal
+	d.Authority = domain.AuthorityHarness
+	return d
+}

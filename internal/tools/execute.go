@@ -24,9 +24,10 @@ func NewService(policy domain.Phase3Policy) (*Service, error) {
 	return &Service{policy: policy, membership: membership}, nil
 }
 
-// toolRequest binds the composite invocation into the request fingerprint, so
-// the same arguments under another output, call, or principal conflict.
-type toolRequest[I any] struct {
+// Request is a handler's typed intent (W7-5). It binds the harness-supplied
+// composite invocation into the request fingerprint, so the same arguments
+// under another output, call, or principal conflict.
+type Request[I any] struct {
 	Invocation domain.ToolInvocation
 	Intent     I
 }
@@ -37,15 +38,24 @@ type effect func(tx store.Tx, sem store.SemanticTx, state invocationState) (doma
 
 // execute replays a committed invocation before reading any current state,
 // otherwise authenticates it, applies the effect, and commits the result
-// transcript, its TOOL_RESULT membership, and both receipts atomically.
-func execute[I any](s *Service, tx store.Tx, i domain.ToolInvocation, method, requestID string, intent I, apply effect) (result domain.ToolResult, err error) {
+// transcript, its TOOL_RESULT membership, and both receipts atomically. The
+// dispatcher is the trusted actor executing on the agent's behalf; seq is the
+// operation sequence the caller allocated in tx (W7-5).
+func execute[I any](s *Service, tx store.Tx, dispatcher domain.Principal, request Request[I], method, requestID string, seq uint64, apply effect) (result domain.ToolResult, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
 		}
 	}()
+	i := request.Invocation
 	if i.Validate() != nil || i.SessionID != tx.SessionID() {
 		return result, domain.ErrNotFound
+	}
+	if err = checkDispatcher(tx, dispatcher, i.Principal); err != nil {
+		return result, err
+	}
+	if seq == 0 || !tx.Allocated(seq) {
+		return result, domain.ErrInvalidRecord
 	}
 	sem, err := store.Semantic(tx)
 	if err != nil {
@@ -56,7 +66,6 @@ func execute[I any](s *Service, tx store.Tx, i domain.ToolInvocation, method, re
 	if err != nil {
 		return result, err
 	}
-	request := toolRequest[I]{Invocation: i, Intent: intent}
 	prior, err := sem.ToolExecutionReceipt(invocationID)
 	if err == nil {
 		return replayTool(sem, prior, request, method, requestID, mutationID, s.policy)
@@ -87,11 +96,11 @@ func execute[I any](s *Service, tx store.Tx, i domain.ToolInvocation, method, re
 	if err = result.Validate(); err != nil {
 		return domain.ToolResult{}, err
 	}
-	if err = s.associateResult(tx, i, invocationID, state, ResultText(result)); err != nil {
+	if err = s.associateResult(tx, dispatcher, i, invocationID, state, ResultText(result)); err != nil {
 		return domain.ToolResult{}, err
 	}
 	receipt := domain.MutationReceipt{
-		SemanticMeta: domain.SemanticMeta{ID: mutationID, SessionID: tx.SessionID(), SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+		SemanticMeta: domain.SemanticMeta{ID: mutationID, SessionID: tx.SessionID(), SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
 		Family:       domain.MutationTool, RequestID: requestID, Principal: i.Principal, CanonicalMethod: method,
 		CanonicalArguments: args, RequestHashVersion: domain.RequestHashV3, RequestHash: hash,
 		PolicyVersion: s.policy.Version, Result: domain.MutationResult{Tool: &result},
@@ -114,7 +123,7 @@ func execute[I any](s *Service, tx store.Tx, i domain.ToolInvocation, method, re
 
 // replayTool returns the frozen result only for the identical request. It
 // checks no task, turn, target, or policy state and allocates no sequence.
-func replayTool[I any](sem store.SemanticReader, prior domain.ToolExecutionReceipt, request toolRequest[I], method, requestID, mutationID string, policy domain.Phase3Policy) (domain.ToolResult, error) {
+func replayTool[I any](sem store.SemanticReader, prior domain.ToolExecutionReceipt, request Request[I], method, requestID, mutationID string, policy domain.Phase3Policy) (domain.ToolResult, error) {
 	var none domain.ToolResult
 	m, err := sem.MutationReceipt(domain.MutationTool, requestID)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -141,10 +150,9 @@ func replayTool[I any](sem store.SemanticReader, prior domain.ToolExecutionRecei
 }
 
 // associateResult persists the closed result text as a TOOL transcript of the
-// originating turn and registers it as the call's TOOL_RESULT. The recorded
-// trusted dispatcher of the producing inference performs the registration;
-// the model never asserts membership.
-func (s *Service) associateResult(tx store.Tx, i domain.ToolInvocation, invocationID string, state invocationState, text string) error {
+// originating turn and registers it as the call's TOOL_RESULT. The trusted
+// dispatcher performs the registration; the model never asserts membership.
+func (s *Service) associateResult(tx store.Tx, dispatcher domain.Principal, i domain.ToolInvocation, invocationID string, state invocationState, text string) error {
 	if len(text) > s.policy.MaxToolResultBytes {
 		return domain.ErrResourceLimit
 	}
@@ -161,12 +169,23 @@ func (s *Service) associateResult(tx store.Tx, i domain.ToolInvocation, invocati
 	if err := tx.InsertItem(item); err != nil {
 		return err
 	}
-	_, err := s.membership.RegisterExchangeMember(tx, state.call.ServiceActor, domain.RegisterExchangeMemberIntent{
+	_, err := s.membership.RegisterExchangeMember(tx, dispatcher, domain.RegisterExchangeMemberIntent{
 		RequestID: toolID("toolresult-member", invocationID), ExchangeID: x.ID, ExpectedRevision: x.Revision,
 		Position: state.nextPosition, Role: domain.MemberToolResult, Source: domain.ItemContentRef{ItemID: item.ID, ContentHash: item.ContentHash},
 		CallID: i.CallID, ToolCallID: i.ToolCallID,
 	})
 	return err
+}
+
+// checkDispatcher requires a trusted HARNESS/SYSTEM actor with the agent's
+// exact owners; a session-level or other-agent harness is no wildcard. It is
+// checked before replay, so an untrusted caller learns nothing.
+func checkDispatcher(tx store.ReadTx, dispatcher, p domain.Principal) error {
+	if dispatcher.Validate() != nil || dispatcher.Authority != domain.AuthorityHarness && dispatcher.Authority != domain.AuthoritySystem ||
+		dispatcher.SessionID != tx.SessionID() || dispatcher.WorkflowID != p.WorkflowID || dispatcher.TaskID != p.TaskID || dispatcher.AgentID != p.AgentID {
+		return domain.ErrInvalidAuthorityPromotion
+	}
+	return nil
 }
 
 func toolID(kind string, parts ...string) string {

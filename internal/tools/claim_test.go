@@ -41,7 +41,7 @@ func TestCompletionClaimReportsActualStatusAndMutatesNothing(t *testing.T) {
 		update(t, st, func(tx store.Tx) error {
 			before, _ := tx.Item(goal)
 			var err error
-			if r, err = s.RecordCompletionClaim(tx, inv, domain.CompletionClaimIntent{RequestID: "claim-" + goal, GoalItemID: goal}); err != nil {
+			if r, err = s.RecordCompletionClaim(tx, dispatcher(inv), Request[domain.CompletionClaimIntent]{inv, domain.CompletionClaimIntent{RequestID: "claim-" + goal, GoalItemID: goal}}, tx.NextSeq()); err != nil {
 				return err
 			}
 			after, _ := tx.Item(goal)
@@ -67,7 +67,7 @@ func TestCompletionClaimReportsActualStatusAndMutatesNothing(t *testing.T) {
 		}
 		// Retrying records exactly one claim.
 		update(t, st, func(tx store.Tx) error {
-			again, err := s.RecordCompletionClaim(tx, inv, domain.CompletionClaimIntent{RequestID: "claim-" + goal, GoalItemID: goal})
+			again, err := s.RecordCompletionClaim(tx, dispatcher(inv), Request[domain.CompletionClaimIntent]{inv, domain.CompletionClaimIntent{RequestID: "claim-" + goal, GoalItemID: goal}}, tx.NextSeq())
 			if err != nil || *again.Claim != *c {
 				t.Fatalf("replay: %+v, %v", again, err)
 			}
@@ -77,7 +77,7 @@ func TestCompletionClaimReportsActualStatusAndMutatesNothing(t *testing.T) {
 	for _, target := range []string{"missing", "private-goal", "output"} {
 		inv := addToolCall(t, st, i, "t-"+target)
 		err := FixedError(st.Update(testContext, "s", func(tx store.Tx) error {
-			_, err := s.RecordCompletionClaim(tx, inv, domain.CompletionClaimIntent{RequestID: "x-" + target, GoalItemID: target})
+			_, err := s.RecordCompletionClaim(tx, dispatcher(inv), Request[domain.CompletionClaimIntent]{inv, domain.CompletionClaimIntent{RequestID: "x-" + target, GoalItemID: target}}, tx.NextSeq())
 			return err
 		}))
 		if err.Error() != domain.ToolErrorNotFound.Message() {

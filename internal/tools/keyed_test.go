@@ -19,7 +19,7 @@ func remember(t *testing.T, st store.Store, s *Service, i domain.ToolInvocation,
 	var r domain.ToolResult
 	update(t, st, func(tx store.Tx) error {
 		var err error
-		r, err = s.Remember(tx, i, intent)
+		r, err = s.Remember(tx, dispatcher(i), Request[domain.KeyedWriteIntent]{i, intent}, tx.NextSeq())
 		return err
 	})
 	return *r.Keyed
@@ -105,7 +105,7 @@ func TestKeyedWriteCitationFailuresAreUniformAndAtomic(t *testing.T) {
 		var before uint64
 		err := FixedError(st.Update(testContext, "s", func(tx store.Tx) error {
 			before = tx.LastSeq()
-			_, err := s.Remember(tx, i, keyed("r", "k", "v", evidence...))
+			_, err := s.Remember(tx, dispatcher(i), Request[domain.KeyedWriteIntent]{i, keyed("r", "k", "v", evidence...)}, tx.NextSeq())
 			return err
 		}))
 		texts = append(texts, err.Error())
@@ -126,7 +126,10 @@ func TestKeyedWriteCitationFailuresAreUniformAndAtomic(t *testing.T) {
 		"key":        keyed("k", ".bad", "v"),
 		"transcript": keyed("k", "k", "v", "output"),
 	} {
-		err := st.Update(testContext, "s", func(tx store.Tx) error { _, err := s.Remember(tx, i, intent); return err })
+		err := st.Update(testContext, "s", func(tx store.Tx) error {
+			_, err := s.Remember(tx, dispatcher(i), Request[domain.KeyedWriteIntent]{i, intent}, tx.NextSeq())
+			return err
+		})
 		var te *Error
 		if !errors.As(FixedError(err), &te) || te.Code() != domain.ToolErrorInvalidArgument {
 			t.Fatalf("%s: %v", name, err)

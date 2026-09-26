@@ -22,7 +22,9 @@ func FuzzKeyedWriteInputs(f *testing.F) {
 		st, i := toolFixture(t)
 		s := testService(t)
 		intent := domain.KeyedWriteIntent{RequestID: "fuzz", Key: key, Kind: domain.Kind(kind), Parts: []domain.ContentPart{{Type: domain.PartText, MediaType: "text/plain", Text: text}}}
-		r, err := Execute(testContext, st, i, func(tx store.Tx) (domain.ToolResult, error) { return s.Remember(tx, i, intent) })
+		r, err := Execute(testContext, st, "s", func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
+			return s.Remember(tx, dispatcher(i), Request[domain.KeyedWriteIntent]{i, intent}, seq)
+		})
 		if err != nil {
 			if !closed[err.Error()] {
 				t.Fatalf("open error template: %q", err)

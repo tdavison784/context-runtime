@@ -16,7 +16,7 @@ func TestHarnessCheckpointKeepsHarnessAuthorityAndReplays(t *testing.T) {
 	var id string
 	update(t, st, func(tx store.Tx) error {
 		var err error
-		if id, err = s.ApplyHarnessCheckpoint(tx, actor, i2.Principal, i2.ExchangeID, intent); err != nil {
+		if id, err = s.ApplyHarnessCheckpoint(tx, actor, HarnessCheckpointRequest{i2.Principal, i2.ExchangeID, intent}, tx.NextSeq()); err != nil {
 			return err
 		}
 		sem, _ := store.Semantic(tx)
@@ -29,8 +29,8 @@ func TestHarnessCheckpointKeepsHarnessAuthorityAndReplays(t *testing.T) {
 			t.Fatalf("harness checkpoint: %+v %+v", c, item)
 		}
 		before := tx.LastSeq()
-		again, err := s.ApplyHarnessCheckpoint(tx, actor, i2.Principal, i2.ExchangeID, intent)
-		if err != nil || again != id || tx.LastSeq() != before {
+		again, err := s.ApplyHarnessCheckpoint(tx, actor, HarnessCheckpointRequest{i2.Principal, i2.ExchangeID, intent}, tx.NextSeq())
+		if err != nil || again != id || tx.LastSeq() != before+1 {
 			t.Fatalf("replay: %s, %v", again, err)
 		}
 		return nil
@@ -49,7 +49,7 @@ func TestHarnessCheckpointKeepsHarnessAuthorityAndReplays(t *testing.T) {
 		"changed retry": {actor, changed, domain.ErrEventIDConflict},
 	} {
 		err := st.Update(testContext, "s", func(tx store.Tx) error {
-			_, err := s.ApplyHarnessCheckpoint(tx, tc.actor, i2.Principal, i2.ExchangeID, tc.intent)
+			_, err := s.ApplyHarnessCheckpoint(tx, tc.actor, HarnessCheckpointRequest{i2.Principal, i2.ExchangeID, tc.intent}, tx.NextSeq())
 			return err
 		})
 		if !errors.Is(err, tc.want) {

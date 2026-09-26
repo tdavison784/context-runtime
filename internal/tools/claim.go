@@ -11,9 +11,10 @@ const MethodResolve = "context_resolve"
 // RecordCompletionClaim records that the agent claims a goal is complete. It
 // changes no goal, obligation, currentness, or protection, and reports the
 // goal occurrence's actual observed status and currentness (P3-26, C-18).
-func (s *Service) RecordCompletionClaim(tx store.Tx, i domain.ToolInvocation, intent domain.CompletionClaimIntent) (domain.ToolResult, error) {
-	intent = intent.Clone()
-	return execute(s, tx, i, MethodResolve, intent.RequestID, intent, func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, error) {
+func (s *Service) RecordCompletionClaim(tx store.Tx, dispatcher domain.Principal, r Request[domain.CompletionClaimIntent], seq uint64) (domain.ToolResult, error) {
+	i, intent := r.Invocation, r.Intent.Clone()
+	r.Intent = intent
+	return execute(s, tx, dispatcher, r, MethodResolve, intent.RequestID, seq, func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, error) {
 		var none domain.ToolResult
 		if intent.Validate() != nil {
 			return none, domain.ErrInvalidRecord

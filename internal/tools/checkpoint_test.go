@@ -39,7 +39,7 @@ func TestCheckpointCoversClosedPrefixWithSeparateGenerationProvenance(t *testing
 	var r domain.ToolResult
 	update(t, st, func(tx store.Tx) error {
 		var err error
-		r, err = s.CreateCheckpoint(tx, i2, summary("c1", manifest, "Using postgres; goal F1 open."))
+		r, err = s.CreateCheckpoint(tx, dispatcher(i2), Request[domain.CheckpointIntent]{i2, summary("c1", manifest, "Using postgres; goal F1 open.")}, tx.NextSeq())
 		return err
 	})
 	update(t, st, func(tx store.Tx) error {
@@ -82,7 +82,7 @@ func TestCheckpointRejectsOpenPrefixOversizeAndForeignManifests(t *testing.T) {
 		var before uint64
 		err := FixedError(st.Update(testContext, "s", func(tx store.Tx) error {
 			before = tx.LastSeq()
-			_, err := s.CreateCheckpoint(tx, i, intent)
+			_, err := s.CreateCheckpoint(tx, dispatcher(i), Request[domain.CheckpointIntent]{i, intent}, tx.NextSeq())
 			return err
 		}))
 		if err.Error() != want.Message() {
@@ -134,7 +134,7 @@ func TestCheckpointChainCarriesOnlyTheValidatedPrior(t *testing.T) {
 	var first domain.ToolResult
 	update(t, st, func(tx store.Tx) error {
 		var err error
-		first, err = s.CreateCheckpoint(tx, i2, summary("c1", manifest, "first"))
+		first, err = s.CreateCheckpoint(tx, dispatcher(i2), Request[domain.CheckpointIntent]{i2, summary("c1", manifest, "first")}, tx.NextSeq())
 		return err
 	})
 	var firstItem string
@@ -146,7 +146,7 @@ func TestCheckpointChainCarriesOnlyTheValidatedPrior(t *testing.T) {
 	})
 	i3, manifest3 := nextRound(t, st, i2, "3", true, firstItem)
 	update(t, st, func(tx store.Tx) error {
-		r, err := s.CreateCheckpoint(tx, i3, summary("c2", manifest3, "second"))
+		r, err := s.CreateCheckpoint(tx, dispatcher(i3), Request[domain.CheckpointIntent]{i3, summary("c2", manifest3, "second")}, tx.NextSeq())
 		if err != nil {
 			return err
 		}

@@ -9,7 +9,9 @@ import (
 
 const methodHarnessCheckpoint = "HarnessCheckpoint"
 
-type harnessCheckpointRequest struct {
+// HarnessCheckpointRequest names the recipient conversation, the open issuing
+// round, and the checkpoint intent of one trusted checkpoint (W7-5 intent).
+type HarnessCheckpointRequest struct {
 	Recipient         domain.Principal
 	IssuingExchangeID string
 	Intent            domain.CheckpointIntent
@@ -19,23 +21,27 @@ type harnessCheckpointRequest struct {
 // recipient conversation in the caller's transaction. The actor must match the
 // recipient's exact owners; the checkpoint keeps the actor's authority and
 // names its generation manifest, never an arbitrary accessible subset (P3-27).
-func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor, recipient domain.Principal, issuingExchangeID string, intent domain.CheckpointIntent) (id string, err error) {
+func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r HarnessCheckpointRequest, seq uint64) (id string, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
 		}
 	}()
+	recipient, issuingExchangeID, intent := r.Recipient, r.IssuingExchangeID, r.Intent.Clone()
 	if actor.Validate() != nil || recipient.Validate() != nil || actor.Authority != domain.AuthorityHarness && actor.Authority != domain.AuthoritySystem ||
 		recipient.Authority != domain.AuthorityAgent || recipient.TaskID == "" || recipient.AgentID == "" ||
 		actor.SessionID != tx.SessionID() || recipient.SessionID != tx.SessionID() ||
 		actor.WorkflowID != recipient.WorkflowID || actor.TaskID != recipient.TaskID || actor.AgentID != recipient.AgentID {
 		return "", domain.ErrInvalidAuthorityPromotion
 	}
+	if seq == 0 || !tx.Allocated(seq) {
+		return "", domain.ErrInvalidRecord
+	}
 	sem, err := store.Semantic(tx)
 	if err != nil {
 		return "", err
 	}
-	request := harnessCheckpointRequest{Recipient: recipient, IssuingExchangeID: issuingExchangeID, Intent: intent.Clone()}
+	request := HarnessCheckpointRequest{Recipient: recipient, IssuingExchangeID: issuingExchangeID, Intent: intent}
 	if prior, err := sem.MutationReceipt(domain.MutationMembership, intent.RequestID); err == nil {
 		args, err := domain.CanonicalSemanticArguments(request, max(s.policy.MaxMetadataBytes, len(prior.CanonicalArguments)))
 		if err != nil {
@@ -78,7 +84,7 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor, recipient domain.Pr
 	}
 	result := domain.RecordResult{Kind: "MEMBERSHIP", IDs: []string{id}}
 	receipt := domain.MutationReceipt{
-		SemanticMeta: domain.SemanticMeta{ID: receiptID, SessionID: tx.SessionID(), SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+		SemanticMeta: domain.SemanticMeta{ID: receiptID, SessionID: tx.SessionID(), SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
 		Family:       domain.MutationMembership, RequestID: intent.RequestID, Principal: actor, CanonicalMethod: methodHarnessCheckpoint,
 		CanonicalArguments: args, RequestHashVersion: domain.RequestHashV3, RequestHash: hash, PolicyVersion: s.policy.Version,
 		Result: domain.MutationResult{Records: &result},
