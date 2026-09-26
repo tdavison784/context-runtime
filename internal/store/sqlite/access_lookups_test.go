@@ -133,3 +133,15 @@ func TestGraphReadsUseIndex(t *testing.T) {
 	q, args := itemQuery("s", store.ItemFilter{TaskID: "task"})
 	assertIndexed(t, s, []string{"session_id", "f_task_id"}, q, args...)
 }
+
+// TestObligationReadsUseIndex locks obligation reads to their keys
+// (SPEC-2.1): versions of one obligation by primary key, versions bound to
+// a source by the 0006 index. Ingest reads the latest version once per
+// declared obligation, so a session-wide read made one event quadratic.
+func TestObligationReadsUseIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	q, args := obligationVersionsQuery("s", "o")
+	assertIndexed(t, s, []string{"session_id", "id"}, q, args...)
+	q, args = obligationsBySourceQuery("s", "item", 2)
+	assertIndexed(t, s, []string{"session_id", "f_source_item_id"}, q, args...)
+}
