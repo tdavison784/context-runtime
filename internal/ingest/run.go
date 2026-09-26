@@ -28,6 +28,7 @@ type run struct {
 
 	items    []domain.ContextItem
 	rels     int
+	refs     int // unresolved references declared so far (ordinals)
 	diags    diagnostics
 	commands []domain.LifecycleCommandRecord
 	dups     []domain.IngestLink
@@ -181,6 +182,13 @@ func (r *run) ingestSpan(si int) error {
 	span := r.e.Spans[si]
 	transcript, err := r.transcript(si, span)
 	if err != nil {
+		return err
+	}
+	actor, err := domain.SourceActor(r.p, span.Authority)
+	if err != nil {
+		return err
+	}
+	if err := r.linkPendingReferences(actor, transcript); err != nil {
 		return err
 	}
 	return r.deriveSpan(si, span, transcript)

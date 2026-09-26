@@ -133,6 +133,9 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	if item.Obligation != "" {
 		return r.declareObligation(it, item.Obligation)
 	}
+	if it.Section == domain.SectionReferences {
+		return r.declareReference(c, it)
+	}
 	return nil
 }
 
