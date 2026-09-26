@@ -1,6 +1,6 @@
 # 3. SQLite driver and migration mechanism
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
 ## Context
@@ -285,6 +285,8 @@ the AUTH-1.3 existence-disclosure pattern recurring in a new code path);
 fixed in `a8e895f`. Passes on both stores now.
 
 ## Open questions
+
+### Resolved at acceptance (2026-09-26)
 
 `busy_timeout` (5s default, `WithBusyTimeout` to override) is decided in
 code. None remaining for this ADR's original scope; all DUR findings and

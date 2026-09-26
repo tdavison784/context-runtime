@@ -1,0 +1,33 @@
+{
+  "endpoint": "/responses",
+  "error": "POST \"https://api.openai.com/v1/responses\": 400 Bad Request {\n    \"message\": \"The encrypted content for item <redacted id length=53 sha256=0cf21c8093302858565734fa819e9cb4a7d48e57a1dd4096135abc413bcecd77> could not be verified. Reason: Encrypted content could not be decrypted or parsed.\",\n    \"type\": \"invalid_request_error\",\n    \"param\": null,\n    \"code\": \"invalid_encrypted_content\"\n  }",
+  "name": "gpt_6_astra_r3_corrupt",
+  "request": {
+    "input": [
+      {
+        "content_length": 145,
+        "role": "user"
+      },
+      {
+        "encrypted_content": {
+          "length": 1336,
+          "sha256": "d9e5653cb6b9100b90d6d1ab9b8f6eadc9c94960caabec26cc0aaa88432eeed0"
+        },
+        "type": "reasoning"
+      },
+      {
+        "name": "lookup",
+        "type": "function_call"
+      },
+      {
+        "type": "function_call_output"
+      }
+    ],
+    "max_output_tokens": 160,
+    "model": "gpt-6-astra",
+    "reasoning": {
+      "effort": "medium"
+    },
+    "store": false
+  }
+}

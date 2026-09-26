@@ -242,6 +242,11 @@ func (it ContextItem) Validate() error {
 	if it.TTLTurns != nil && (*it.TTLTurns <= 0 || *it.TTLTurns > MaxTTLTurns) {
 		return invalid("item %s: TTL must be a count of turns in 1..%d", it.ID, MaxTTLTurns)
 	}
+	// ADR 6: TTL counts turns of the originating task. Without one the TTL
+	// could never be counted and the item would never expire (fail open).
+	if it.TTLTurns != nil && it.TaskID == "" {
+		return invalid("item %s: TTL requires an originating task", it.ID)
+	}
 	if len(it.Parts) == 0 {
 		return invalid("item %s: at least one content part is required", it.ID)
 	}

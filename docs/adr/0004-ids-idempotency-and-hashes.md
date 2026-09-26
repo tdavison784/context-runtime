@@ -1,6 +1,6 @@
 # 4. Stable IDs, event/call idempotency, and canonical hashes
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
 ## Context
@@ -319,10 +319,21 @@ item ID only when it actually occurs, is less disruptive and matches how
 
 ## Open questions
 
+### Resolved at acceptance (2026-09-26)
+
 - Whether `shortHash`'s 32-hex-char truncation for item/call IDs should also
   move to the full hash now that storage cost is not a stated constraint.
+  **Decision:** keep the 32-hex-character truncated hash for generated
+  item/call IDs: 128 bits is ample for identifier uniqueness within a
+  session, and content hashes remain full 256-bit; changing it would break
+  stored IDs.
 - Whether FR-DIR-006's grammar should also case-normalize user-supplied IDs,
   so a hand-typed ID can never collide in shape with a derived one.
+  **Decision:** directive IDs remain exact (case-sensitive) per FR-DIR-006;
+  instead of case-normalizing, Phase 2 rejects a user-supplied ID that has
+  the derived-ID shape (a directive keyword, a hyphen, 64 lowercase hex
+  digits) with an `ErrMalformedDirective` diagnostic, so explicit and
+  derived IDs can never collide. This is recorded in ADR 19 (Phase 2).
 
 ## Review
 

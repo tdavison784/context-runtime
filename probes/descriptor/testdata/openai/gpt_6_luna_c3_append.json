@@ -1,0 +1,134 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_luna_c3_append",
+  "request": {
+    "input": [
+      {
+        "content_length": 8270,
+        "role": "developer"
+      },
+      {
+        "content": "Reply with the marker, then stop.",
+        "content_length": 33,
+        "role": "user"
+      }
+    ],
+    "max_output_tokens": 32,
+    "model": "gpt-6-luna",
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790427081,
+    "created_at": 1790427080,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "b5d4e0dbc8b880dcd60afa2b0247c090916a9642fc33039943b17077c39722b8"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 32,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-luna",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [],
+        "encrypted_content": {
+          "length": 1316,
+          "sha256": "b169a20c91e11fcfcbc5aeb011293bc8befcba368acde19a53062a6915624716"
+        },
+        "id": {
+          "length": 53,
+          "sha256": "5ea84b672690bac240e89f51d550793af1a2926dba30db5ab4ee88abc8eadcee"
+        },
+        "summary": [],
+        "type": "reasoning"
+      },
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "BLUE",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "70922b7f8729edb15cd0461b3c7a60917628edc6d68f2f3cbf96ab077a0199dd"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 1648,
+      "input_tokens_details": {
+        "cache_write_tokens": 12,
+        "cached_tokens": 1633
+      },
+      "output_tokens": 29,
+      "output_tokens_details": {
+        "reasoning_tokens": 22
+      },
+      "total_tokens": 1677
+    },
+    "user": "[redacted]"
+  }
+}
