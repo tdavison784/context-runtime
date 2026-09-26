@@ -13,8 +13,10 @@ type callReader interface {
 
 // validateToolOrigin accepts only a tool call recorded alongside its
 // producing assistant output in the authenticated logical exchange, whose
-// inference call completed for the exact holder (P3-24/30).
-func validateToolOrigin(calls callReader, r store.MembershipReader, origin domain.RetrievalOrigin, pageSize, maxWork int) error {
+// inference call completed for the exact holder (P3-24/30). With
+// rejectAnswered, a tool call that already has a recorded result conflicts:
+// W5 records the result after Apply, and exact replays return earlier.
+func validateToolOrigin(calls callReader, r store.MembershipReader, origin domain.RetrievalOrigin, pageSize, maxWork int, rejectAnswered bool) error {
 	if err := origin.Validate(); err != nil {
 		return err
 	}
@@ -51,7 +53,7 @@ func validateToolOrigin(calls callReader, r store.MembershipReader, origin domai
 		return domain.ErrInvalidAuthorityPromotion
 	}
 	var outputRef, toolRef domain.ItemContentRef
-	var foundOutput, foundTool bool
+	var foundOutput, foundTool, answered bool
 	var outputPosition, toolPosition uint64
 	positions := map[uint64]bool{}
 	after := store.Cursor{}
@@ -93,6 +95,8 @@ func validateToolOrigin(calls callReader, r store.MembershipReader, origin domai
 					return domain.ErrIntegrity
 				}
 				foundTool, toolRef, toolPosition = true, member.Source, member.Position
+			case member.Role == domain.MemberToolResult && member.CallID == inv.CallID && member.ToolCallID == inv.ToolCallID:
+				answered = true
 			}
 		}
 		if !page.More {
@@ -110,6 +114,9 @@ func validateToolOrigin(calls callReader, r store.MembershipReader, origin domai
 	}
 	if toolPosition <= outputPosition {
 		return domain.ErrIntegrity
+	}
+	if rejectAnswered && answered {
+		return domain.ErrEventIDConflict
 	}
 	return nil
 }

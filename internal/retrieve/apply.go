@@ -9,11 +9,16 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
-// Rehydrate admits historical data atomically. The authenticated actor and
-// origin are supplied by the harness; model text cannot choose either one.
+// Rehydrate admits historical data atomically for a trusted HARNESS origin
+// only. Model context_get/context_rehydrate run Apply inside W5's execute
+// transaction, which owns the tool receipt and result membership.
 func (s *Service) Rehydrate(ctx context.Context, actor domain.Principal, intent AdmissionIntent, execution domain.Phase3Policy, allowStub bool) (domain.RetrievalResult, error) {
 	if err := validateDenialOrigin(actor, intent); err != nil {
 		_, fixed := FixedRetrievalError(err)
+		return domain.RetrievalResult{}, fixed
+	}
+	if actor.Authority != domain.AuthorityHarness || intent.Origin.Invocation != nil {
+		_, fixed := FixedRetrievalError(domain.ErrInvalidAuthorityPromotion)
 		return domain.RetrievalResult{}, fixed
 	}
 	if err := execution.Validate(); err != nil {
@@ -72,7 +77,7 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	if err != nil {
 		return out, err
 	}
-	if err = validateToolOrigin(tx, sem, intent.Origin, execution.MaxPageSize, execution.MaxTransactionWork); err != nil {
+	if err = validateToolOrigin(tx, sem, intent.Origin, execution.MaxPageSize, execution.MaxTransactionWork, true); err != nil {
 		return out, err
 	}
 	got, err := readGet(tx, actor, intent.Rehydrate.ItemID)

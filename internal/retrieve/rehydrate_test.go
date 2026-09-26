@@ -48,3 +48,14 @@ func TestRehydrateReturnsUnavailableIfDenialCannotCommit(t *testing.T) {
 		t.Fatalf("audit failure should fail closed: %v, updates=%d", err, s.updates)
 	}
 }
+
+func TestRehydrateServiceRejectsModelOriginWithoutStoreAccess(t *testing.T) {
+	p := storetest.NewPrincipal("s", domain.AuthorityAgent)
+	conv := domain.ConversationIDFor(p.TaskID, p.AgentID)
+	inv := domain.ToolInvocation{SessionID: "s", ConversationID: conv, CallID: "call", ToolCallID: "tool", ExchangeID: "exchange", TurnID: "turn", Principal: p}
+	i := AdmissionIntent{Rehydrate: domain.RehydrateIntent{RequestID: "request", ItemID: "source"}, Origin: domain.RetrievalOrigin{Holder: p, ConversationID: conv, TurnID: "turn", Invocation: &inv}, Method: "context_get"}
+	s := &denialStore{}
+	if _, err := New(s).Rehydrate(context.Background(), p, i, leasePolicy(), false); !errors.Is(err, domain.ErrNotFound) || s.updates != 0 {
+		t.Fatalf("model origin bypassed W5 execute: %v, updates=%d", err, s.updates)
+	}
+}
