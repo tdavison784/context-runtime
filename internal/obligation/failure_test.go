@@ -32,7 +32,12 @@ func (f fixture) snap(t *testing.T) snapshot {
 type scenario struct {
 	name  string
 	setup func(t *testing.T) (fixture, func(tx store.Tx) error)
+	obs   bool // files OBSERVATION-namespace state
 }
+
+// observationsUnsupported is set by a backend suite whose store cannot file
+// OBSERVATION-namespace state yet; scenarios that need it are skipped.
+var observationsUnsupported bool
 
 func injectionScenarios() []scenario {
 	satisfiedEval := func(t *testing.T) *evalFixture {
@@ -67,16 +72,16 @@ func injectionScenarios() []scenario {
 				_, err := f.s.ReportResourceChangeTx(tx, f.harness, in, tx.NextSeq())
 				return err
 			}
-		}},
+		}, true},
 		{"observation deriving state and satisfying", func(t *testing.T) (fixture, func(tx store.Tx) error) {
 			f := newEvalFixture(t)
 			f.matcherGrant(t, "g-sys", f.sysTests, TestsPassV1, f.system)
 			return f.fixture, observe(f, registered(t, f), hashOf("W1"))
-		}},
+		}, true},
 		{"proof refresh pair", func(t *testing.T) (fixture, func(tx store.Tx) error) {
 			f := satisfiedEval(t)
 			return f.fixture, observe(f, registered(t, f), hashOf("W1"))
-		}},
+		}, true},
 		{"proof rejection", func(t *testing.T) (fixture, func(tx store.Tx) error) {
 			f := satisfiedEval(t)
 			run := registered(t, f)
@@ -88,7 +93,21 @@ func injectionScenarios() []scenario {
 				_, err = f.s.reportObservation(tx, sem, f.harness, obsIntent("obs-fail", run, f.evidence.ID, domain.OutcomeFail, hashOf("W1")), tx.LastSeq())
 				return err
 			}
-		}},
+		}, true},
+		{"resource report invalidating an assertion proof", func(t *testing.T) (fixture, func(tx store.Tx) error) {
+			f := newEvalFixture(t)
+			in := intent(f.user, 1, domain.ObligationSatisfied)
+			in.AssertionMode = domain.AssertionResourceBound
+			in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyWorkspace, ResourceID: "repo1", ResourceRevision: 1, Fingerprint: hashOf("W1")}}
+			if _, err := f.s.transition(t, f.st, f.system, in); err != nil {
+				t.Fatal(err)
+			}
+			rep := domain.ReportResourceChangeIntent{RequestID: "inject", ResourceID: "repo1", ExpectedRevision: f.r.rev, ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf("W2"), AllPaths: true}
+			return f.fixture, func(tx store.Tx) error {
+				_, err := f.s.ReportResourceChangeTx(tx, f.harness, rep, tx.NextSeq())
+				return err
+			}
+		}, false},
 		{"resource-bound assertion", func(t *testing.T) (fixture, func(tx store.Tx) error) {
 			f := newEvalFixture(t)
 			in := intent(f.user, 1, domain.ObligationSatisfied)
@@ -99,7 +118,7 @@ func injectionScenarios() []scenario {
 				_, err := f.s.ApplyTransitionTx(tx, f.system, in, tx.NextSeq())
 				return err
 			}
-		}},
+		}, false},
 		{"HARNESS declaration", func(t *testing.T) (fixture, func(tx store.Tx) error) {
 			f := newFixture(t)
 			src := seedPinned(t, f.st, "p-h", "h", domain.AuthorityUser, "Deploy.")
@@ -107,7 +126,7 @@ func injectionScenarios() []scenario {
 				_, err := f.s.DeclareObligationTx(tx, f.harness, harnessDecl("d-inject", src.ID, 1, "1"), tx.NextSeq())
 				return err
 			}
-		}},
+		}, false},
 		{"reevaluation satisfying", func(t *testing.T) (fixture, func(tx store.Tx) error) {
 			f := newEvalFixture(t)
 			f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
@@ -116,7 +135,7 @@ func injectionScenarios() []scenario {
 				_, err := f.s.ReevaluateTx(tx, f.harness, domain.ReevaluateIntent{RequestID: "re-inject", Target: f.sysTests, ExpectedRevision: 1}, tx.NextSeq())
 				return err
 			}
-		}},
+		}, true},
 	}
 }
 
@@ -126,6 +145,9 @@ func injectionScenarios() []scenario {
 func TestFailureInjectionAtomicity(t *testing.T) {
 	for _, sc := range injectionScenarios() {
 		t.Run(sc.name, func(t *testing.T) {
+			if sc.obs && observationsUnsupported {
+				t.Skip("backend cannot file OBSERVATION-namespace state yet")
+			}
 			for k := 1; ; k++ {
 				if k > 64 {
 					t.Fatal("operation never completed")

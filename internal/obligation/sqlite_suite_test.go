@@ -44,6 +44,8 @@ func TestSQLiteSuite(t *testing.T) {
 	backendFactory = sqliteBackend
 	t.Cleanup(func() { backendFactory = prev })
 	observations := observationNamespaceSupported(t, sqliteBackend(t))
+	observationsUnsupported = !observations
+	t.Cleanup(func() { observationsUnsupported = false })
 	for _, tc := range []struct {
 		name string
 		fn   func(*testing.T)
@@ -88,7 +90,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"SatisfiesNoEdgeForAttestation", TestSatisfiesNoEdgeForAttestation, false},
 		{"VisibleObligations", TestVisibleObligations, false},
 		{"SemanticChangeRecords", TestSemanticChangeRecords, true},
-		{"FailureInjectionAtomicity", TestFailureInjectionAtomicity, true},
+		{"FailureInjectionAtomicity", TestFailureInjectionAtomicity, false},
 		{"TraceT06", TestTraceT06, true},
 		{"TraceT07", TestTraceT07, true},
 		{"TraceT02Obligation", TestTraceT02Obligation, true},
