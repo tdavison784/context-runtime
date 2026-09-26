@@ -305,3 +305,28 @@ content preceding an open reasoning/tool round as SAFE specifically for this pro
 back to a REJECTED/LOSSY default that would force unnecessary resets); and continue to bracket
 tighter on the minimum cache prefix length before shipping a hard-coded threshold into
 `CachingRules`.
+
+## Commander rulings (2026-09-26)
+
+Rulings on the three open questions above, binding for ADR 12 and this descriptor:
+
+1. **`ContextWindow`/`MaxOutput`.** No limit-exceeding probe will be run — it would cost money and
+   settles nothing about reasoning/cache/compaction binding, the actual purpose of this probe.
+   ADR 12 (Phase 5 gate) takes these two fields as **DOCUMENTED**, sourced from provider docs and
+   cited with a retrieval date, not from a live probe. In this document they are
+   **DOCUMENTED-PENDING**: the row above (`— / NOT DETERMINED`) stands until that docs citation is
+   added at the ADR 12 draft; no further live probing is planned for them.
+
+2. **`CompactionProtocol` / automatic `context_management` compaction.** Ruled **not trusted** as
+   an FR-MAT-005/FR-MAT-006 checkpoint. The descriptor for `gpt-6-astra`/`gpt-6-luna` uses the
+   explicit `/responses/compact` checkpoint/pause protocol (K1a/K2 above) as the only sanctioned
+   compaction primitive; the automatic path stays unverified and unused by the strategy layer. A
+   harder probe — several pins, goals, and an open tool round compacted together, not a single
+   marker word — is required before any automatic path is enabled, and is scheduled for Phase 5,
+   not this phase.
+
+3. **`Edits[REWRITE]` = SAFE-when-reasoning-untouched.** Ruled a **per-profile descriptor
+   override for OpenAI only**, not a change to the FR-CAP-002 framework default. FR-CAP-002's
+   conservative default (a REWRITE drops trailing reasoning) stays as-is for every other/unknown
+   profile; `gpt-6-astra`/`gpt-6-luna`'s descriptor carries the observed exception explicitly
+   (R4 above), and no other provider's descriptor should infer the same behavior from this one.
