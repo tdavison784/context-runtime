@@ -2,9 +2,9 @@
 
 Status: proposed
 
-Version: 0.8
+Version: 0.9
 
-Date: 2026-09-25
+Date: 2026-09-26
 
 ## 1. Purpose
 
