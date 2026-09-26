@@ -225,14 +225,24 @@ operation. The runtime can therefore use the manual endpoint as the FR-MAT-005 c
 primitive, but should not rely on the automatic `context_management` path to provide a
 pause-before-continue boundary — it decides and applies inline.
 
-**K2 — mandatory-restoration message after compaction: accepted, restores correctly.**
+**K2 — mandatory-restoration message after compaction: accepted; effectiveness not demonstrated
+(no control; the marker was already present in the echoed plaintext).**
 `gpt_6_astra_k2_restore.json` / `gpt_6_luna_k2_restore.json` take the `k1_compact` output, append a
 `{role: "developer", content: "Mandatory restoration: answer with the original marker word."}` plus
 a new user turn, and call `/responses` normally (not `/responses/compact`). Both succeed and both
 answer `"cobalt"` correctly (`usage.output... text: ["cobalt"]`), confirming the runtime *can*
-append a restoration message ahead of the next inference after a manual compaction, per
-FR-MAT-005 step 4. This is the intended checkpoint/pause pattern for the manual endpoint; K1b above
-shows the automatic path doesn't offer an equivalent seam.
+append a `developer`-role message ahead of the next inference after a manual compaction (accepted,
+no error) and get a correct answer, per FR-MAT-005 step 4's structural shape. **But** the
+`k1_compact` output already echoes the original `user` message verbatim ("Remember the marker
+cobalt. Say ready.") — see K1a — so the model could answer `"cobalt"` correctly from that echoed
+plaintext alone, with or without the `developer` restoration message actually carrying any
+authority. No run was made without the restoration message (a control), and no run asked the model
+to follow a *new* rule not already present in the echoed plaintext (contrast the Anthropic probe's
+K2, which restored a rule — hex output — absent from the compacted input and confirmed the model
+obeyed it). This fixture cannot distinguish "the restoration message was read and given authority"
+from "the model read the echoed user turn." Verdict: **accepted, effectiveness UNVERIFIED**. K1b's
+inline-vs-checkpoint framing above still stands (that part concerns request shape, not authority),
+but no claim of demonstrated restoration follows from this fixture.
 
 **K3 — compacted artifacts are opaque/encrypted, not inspectable.**
 Both the manual endpoint's `compaction` item (`k1_compact`) and the automatic path's `compaction`
@@ -286,7 +296,7 @@ provenance.
 | `Reasoning.ReplayRequired` | false | OBSERVED (R5: dropping pre-last-turn reasoning is accepted and produces a correct answer) |
 | `Reasoning.BoundToPriorHistory` | false (bound only to the reasoning item's own encrypted content, not surrounding text) | OBSERVED (R3 corrupts the item itself → REJECTED; R4 edits surrounding text, leaves the item untouched → ACCEPTED) |
 | `Edits[APPEND]` | SAFE | OBSERVED (R1) |
-| `Edits[APPEND_SYSTEM]` | SAFE | OBSERVED (K2: a `developer`-role message inserted mid-history before the next inference is accepted and effective) |
+| `Edits[APPEND_SYSTEM]` | accepted (O); authority/effectiveness UNVERIFIED | OBSERVED that a `developer`-role message inserted mid-history before the next inference is accepted (no error); **NOT DETERMINED** whether it carries any authority — K2's fixture cannot separate that from the model reading the already-echoed plaintext user turn (see K2, SEC-1.1) |
 | `Edits[DROP_LEADING_REASONING]` | LOSSY | OBSERVED (R5-drop: accepted, fresh reasoning generated instead of the original) |
 | `Edits[DROP_ALL_REASONING]` | LOSSY | OBSERVED (R2: accepted, fresh reasoning generated instead of the original) |
 | `Edits[REWRITE]` | **SAFE when the rewrite doesn't touch the reasoning item itself** (narrower than the general REWRITE-drops-reasoning default) | OBSERVED (R4); flagged for ADR 12 as a provider-specific exception worth encoding explicitly rather than falling back to the framework default, since it is more permissive, not less |
@@ -298,7 +308,7 @@ provenance.
 | `CompactionMinimumTrigger` | 1000 (units unconfirmed, presumably tokens) | OBSERVED, automatic path only (400 at `compact_threshold: 1`); manual endpoint's minimum untested |
 | `MandatoryPreservation` | a manually-inserted restoration message survives one compaction/restore round for a single fact | OBSERVED for that narrow case only; **ASSUMED** to generalize to a full mandatory set (policy/goals/pins/obligations) — untested, matches the caution above |
 | `ContextEditing` | — | **NOT DETERMINED / ASSUMED false** — no distinct context-editing primitive (separate from compaction) was found or probed |
-| `MidConversationSystem` | true | OBSERVED (K2's `developer`-role insertion mid-history, see `Edits[APPEND_SYSTEM]`) |
+| `MidConversationSystem` | **false (UNVERIFIED)** | fail-closed per commander ruling 4 below; K2 only shows the request is accepted, not that the inserted message carries authority (see `Edits[APPEND_SYSTEM]`) |
 | `NativeMemory` | — | **NOT DETERMINED / ASSUMED false** — not probed |
 
 **Recommendation for the adapter/strategy layer:** use `/responses/compact` (not automatic
@@ -333,3 +343,14 @@ Rulings on the three open questions above, binding for ADR 12 and this descripto
    conservative default (a REWRITE drops trailing reasoning) stays as-is for every other/unknown
    profile; `gpt-6-astra`/`gpt-6-luna`'s descriptor carries the observed exception explicitly
    (R4 above), and no other provider's descriptor should infer the same behavior from this one.
+
+4. **`MidConversationSystem` (SEC-1.1).** Ruled **false, fail-closed**, mirroring the Anthropic
+   probe's ruling 4. K2's fixture accepts a mid-history `developer`-role restoration message, but
+   cannot show that message carries any authority: the marker it "restores" was already present
+   verbatim in the plaintext `user` turn `/responses/compact` echoes back (K1a), so the model's
+   correct answer is equally explained by reading that echo, with zero contribution from the
+   inserted message. `Edits[APPEND_SYSTEM]` and `MidConversationSystem` both read as
+   accepted-but-UNVERIFIED, not SAFE/true, until a Phase 5 test proves otherwise. That test must
+   restore a rule *absent* from the compacted input (so obedience can only be explained by the
+   restoration message) and include a no-restoration control run, matching the Anthropic K2
+   design.
