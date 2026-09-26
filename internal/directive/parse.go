@@ -98,6 +98,8 @@ func diagnosticReason(reason string) domain.DiagnosticReason {
 		return domain.ReasonBlockQuote
 	case "HTML comment":
 		return domain.ReasonHTMLComment
+	case "unsupported lifecycle":
+		return domain.ReasonUnsupportedLifecycle
 	case "nested heading":
 		return domain.ReasonNestedHeading
 	case "indented heading":

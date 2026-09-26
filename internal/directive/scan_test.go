@@ -61,6 +61,27 @@ func TestScannerOffsetsAndExtents(t *testing.T) {
 		t.Fatal(a.heading)
 	}
 }
+func TestUnsupportedLifecycleVocabulary(t *testing.T) {
+	for _, word := range []string{"Archive", "UNARCHIVE", "promote", "Demote", "Block", "Unblock", "Waive", "CompleteTask", "reopen"} {
+		p := parsedCore("## Goal [g]\nx\n## " + word + " [g]\n### Pinned\n- hidden\n## Remember\n- kept")
+		if len(p.items) != 2 || p.items[0].id != "g" || p.items[1].text != "kept" {
+			t.Fatalf("%s: %+v", word, p.items)
+		}
+		if len(p.diagnostics) < 2 || p.diagnostics[0].code != "ErrUnsupportedDirective" || p.diagnostics[0].section != "" {
+			t.Fatalf("%s: %+v", word, p.diagnostics)
+		}
+	}
+	// Unrelated or look-alike headings remain ordinary content.
+	for _, input := range []string{"## Archived\nx", "## Complete Task\nx", "## Arc\u0127ive\nx", "## Notes\nx"} {
+		if p := parsedCore(input); len(p.diagnostics) != 0 || len(p.items) != 0 {
+			t.Fatalf("%q: %+v", input, p.diagnostics)
+		}
+	}
+	// Non-capable spans never diagnose lifecycle words as commands.
+	if p := scanner("## Archive [x]", false); len(p.diagnostics) != 0 {
+		t.Fatal(p.diagnostics)
+	}
+}
 func TestIDAndAttributeLexing(t *testing.T) {
 	for _, id := range []string{"a", "A_Z.9-", strings.Repeat("x", 80)} {
 		got, _, ok := lexID([]byte("[" + id + "]"))

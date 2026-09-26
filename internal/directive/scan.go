@@ -60,6 +60,7 @@ func (p *coreParser) diagnostic(code, reason, section, id string, r byteRange) {
 // disjoint section ranges. Newline and BOM handling never rewrite source offsets.
 func (p *coreParser) scan(capable bool) {
 	active := -1
+	inert := 0 // level of an open unsupported-lifecycle heading region
 	var fence byte
 	fenceLength := 0
 	comment := false
@@ -158,16 +159,31 @@ func (p *coreParser) scan(capable bool) {
 			// D6/FR-DIR-006: only a same-or-higher heading ends a section. A
 			// deeper heading, keyword or not, is body text of the open section
 			// (including a malformed one) and never opens a nested directive.
-			if active >= 0 && level > p.sections[active].heading.level {
+			open := inert
+			if active >= 0 {
+				open = p.sections[active].heading.level
+			}
+			if open > 0 && level > open {
 				if section != "" {
 					p.diagnostic("DirectiveNotParsed", "nested heading", section, "", byteRange{start, end})
 				}
-				p.sections[active].body = append(p.sections[active].body, line)
+				if active >= 0 {
+					p.sections[active].body = append(p.sections[active].body, line)
+				}
 				continue
 			}
 			if active >= 0 {
 				p.sections[active].end = line.start
 				active = -1
+			}
+			inert = 0
+			if section == "" && unsupportedLifecycle(word) {
+				// M4: a finite parser-v1 vocabulary is diagnosed rather than
+				// treated as prose; its body gets no directive semantics until
+				// the next same-or-higher heading. Nothing is mutated.
+				p.diagnostic("ErrUnsupportedDirective", "unsupported lifecycle", "", "", byteRange{start, end})
+				inert = level
+				continue
 			}
 			if section != "" {
 				h := rawHeading{section: section, level: level, byteRange: byteRange{start, end}, valid: true}
@@ -250,6 +266,19 @@ func keyword(b []byte) string {
 		return "Unpin"
 	}
 	return ""
+}
+
+// unsupportedLifecycle recognizes the parser-v1 unsupported lifecycle words
+// (M4) with the same ASCII-only case folding as keywords.
+func unsupportedLifecycle(b []byte) bool {
+	if len(b) > 12 {
+		return false
+	}
+	switch asciiLower(string(b)) {
+	case "archive", "unarchive", "promote", "demote", "block", "unblock", "waive", "completetask", "reopen":
+		return true
+	}
+	return false
 }
 func asciiValue(b []byte) bool {
 	if len(b) == 0 {
