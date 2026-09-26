@@ -62,7 +62,7 @@ func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 }
 
 // itemQuery pushes an item filter's equality and range predicates into SQL
-// (SPEC-1.3): a task filter uses the item_task index instead of loading
+// (SPEC-1.3): a task filter uses the item_task_seq index instead of loading
 // the session. Kinds are filtered after decoding.
 func itemQuery(session string, f store.ItemFilter) (string, []any) {
 	q, args := schemas["item"].selectSQL+" WHERE session_id=?", []any{session}
@@ -91,7 +91,8 @@ func (t *transaction) Relationships(f store.RelationshipFilter) ([]domain.Relati
 }
 
 // relationshipQuery pushes a relationship filter into SQL (SPEC-1.3): a
-// type with a source or target uses relationship_from or relationship_to.
+// type with a source or target uses relationship_from_seq or
+// relationship_to_seq.
 func relationshipQuery(session string, f store.RelationshipFilter) (string, []any) {
 	q, args := schemas["relationship"].selectSQL+" WHERE session_id=?", []any{session}
 	for _, c := range []struct {
