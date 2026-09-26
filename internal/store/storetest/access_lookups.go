@@ -294,3 +294,50 @@ func testVisibleReferences(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// testSourceItemsMixedOwners checks that a lookup paged across several
+// owner combinations the viewer can see returns one merged (Seq, ID) order
+// with no duplicates or skips, at every page size (SPEC-4.3): items of the
+// session, workflow, task, agent, and task+agent boundaries are interleaved
+// with hidden ones, so serving the combinations one after another fails.
+func testSourceItemsMixedOwners(t *testing.T, s store.Store) {
+	owners := []domain.AccessBoundary{
+		{Scope: domain.ScopeSession, SessionID: sessA},
+		{Scope: domain.ScopeWorkflow, SessionID: sessA, WorkflowID: "wf"},
+		{Scope: domain.ScopeTask, SessionID: sessA, TaskID: "task"},
+		{Scope: domain.ScopeAgent, SessionID: sessA, AgentID: "agent"},
+		{Scope: domain.ScopeTask, SessionID: sessA, TaskID: "task", AgentID: "agent"},
+	}
+	var want []string
+	update(t, s, sessA, func(tx store.Tx) error {
+		for i := range 15 {
+			it := sourcedItem(sessA, fmt.Sprintf("mixed-%02d", i), tx.NextSeq(), domain.SourcePath, "mixed.go")
+			it.Access = owners[i%len(owners)]
+			it.Scope = it.Access.Scope
+			noErr(t, tx.InsertItem(it))
+			want = append(want, it.ID)
+			noErr(t, tx.InsertItem(inTask2(sourcedItem(sessA, fmt.Sprintf("hidden-mixed-%02d", i), tx.NextSeq(), domain.SourcePath, "mixed.go"))))
+		}
+		return nil
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		for limit := 1; limit <= 4; limit++ {
+			var got []string
+			f := store.SourceFilter{Viewer: viewerT, LocatorKey: "path:mixed.go", Page: store.Page{Limit: limit}}
+			for pages := 0; ; pages++ {
+				l, err := tx.SourceItems(f)
+				noErr(t, err)
+				got = append(got, ids(l.Items)...)
+				if !l.More {
+					break
+				}
+				if pages > 20 {
+					t.Fatal("paging does not terminate")
+				}
+				f.Page.After = l.Next
+			}
+			assertEqual(t, fmt.Sprintf("mixed-owner pages of %d", limit), got, want)
+		}
+		return nil
+	})
+}
