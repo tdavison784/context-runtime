@@ -120,11 +120,12 @@ const (
 	IDDomainDiagnostic IDDomain = "dgn"
 	IDDomainCommand    IDDomain = "cmd"
 	IDDomainSection    IDDomain = "sec"
+	IDDomainReference  IDDomain = "ref"
 )
 
 // Valid reports whether d is a known ID domain.
 func (d IDDomain) Valid() bool {
-	return d == IDDomainDiagnostic || d == IDDomainCommand || d == IDDomainSection
+	return d == IDDomainDiagnostic || d == IDDomainCommand || d == IDDomainSection || d == IDDomainReference
 }
 
 // DerivedArtifactID is the deterministic ID of an occurrence artifact at the

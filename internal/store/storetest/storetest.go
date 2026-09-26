@@ -72,6 +72,8 @@ var suite = []testCase{
 	{"ItemLosslessText", testItemLosslessText},
 	{"ByteExactStringLists", testByteExactStringLists},
 	{"ItemProvenance", testItemProvenance},
+	{"ItemsByBlob", testItemsByBlob},
+	{"DuplicateCandidates", testDuplicateCandidates},
 	{"ItemInsertRules", testItemInsertRules},
 	{"ItemBlobIntegrity", testItemBlobIntegrity},
 	{"ItemsFilterOrder", testItemsFilterOrder},
@@ -84,7 +86,7 @@ var suite = []testCase{
 	{"Blobs", testBlobs},
 	{"DirectiveReplacement", testDirectiveReplacement},
 	{"DirectiveBoundaries", testDirectiveBoundaries},
-	{"CurrentDirectivesOrder", testCurrentDirectivesOrder},
+	{"CurrentVersions(DIRECTIVE)Order", testCurrentDirectivesOrder},
 	{"CurrentNamespaces", testCurrentNamespaces},
 
 	// Ingestion records.
@@ -94,6 +96,8 @@ var suite = []testCase{
 	{"AnonymousIngestions", testAnonymousIngestions},
 	{"DiagnosticsAccess", testDiagnosticsAccess},
 	{"IngestionDeepCopies", testIngestionDeepCopies},
+	{"UnresolvedReferences", testUnresolvedReferences},
+	{"UnresolvedReferenceInsertRules", testUnresolvedReferenceInsertRules},
 
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},

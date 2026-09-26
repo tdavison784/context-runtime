@@ -33,12 +33,15 @@ func (t *tx) commit(st *state) bool {
 	wrote := t.items.dirty() || t.rels.dirty() || t.events.dirty() || t.blobs.dirty() ||
 		t.directives.dirty() || t.obligations.dirty() || t.transitions.dirty() || t.grants.dirty() ||
 		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty() ||
-		t.receipts.dirty() || t.envelopes.dirty()
+		t.receipts.dirty() || t.envelopes.dirty() || t.references.dirty()
 	t.items.commit()
 	t.rels.commit()
 	t.supersedes.commit()
 	t.supersededBy.commit()
 	t.relsFrom.commit()
+	t.itemsByBlob.commit()
+	t.duplicates.commit()
+	t.refsByKey.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
 	t.events.commit()
@@ -55,6 +58,7 @@ func (t *tx) commit(st *state) bool {
 	t.attempts.commit()
 	t.receipts.commit()
 	t.envelopes.commit()
+	t.references.commit()
 	st.lastSeq = t.lastSeq
 	return wrote
 }
@@ -148,6 +152,14 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 		}
 	}
 	t.items.put(it.ID, it)
+	indexed := map[string]bool{}
+	for _, p := range it.Parts {
+		if p.BlobHash != "" && !indexed[p.BlobHash] {
+			indexed[p.BlobHash] = true
+			t.itemsByBlob.add(p.BlobHash, it.ID)
+		}
+	}
+	t.duplicates.add(itemDuplicateKey(it), it.ID)
 	t.markSequenced()
 	return nil
 }
@@ -237,23 +249,6 @@ func (t *tx) SetCurrentVersion(itemID string) error {
 	t.directives.put(directiveKey{key.TaskID, key.ID, key.Access, key.Namespace}, itemID)
 	t.markSemantic()
 	return nil
-}
-
-func (t *tx) SetCurrentDirective(taskID, directiveID, itemID string) error {
-	if err := t.check(); err != nil {
-		return err
-	}
-	if taskID == "" || directiveID == "" {
-		return invalid("directive: task and directive IDs are required")
-	}
-	it, ok := t.items.peek(itemID)
-	if !ok {
-		return notFound("item", itemID)
-	}
-	if it.DirectiveID != directiveID || it.TaskID != taskID {
-		return invalid("item %s is not directive %s of task %s", itemID, directiveID, taskID)
-	}
-	return t.SetCurrentVersion(itemID)
 }
 
 func (t *tx) InsertBlob(b domain.Blob) error {
@@ -763,6 +758,9 @@ func (t *tx) checkLedgerSeqs() error {
 	for _, r := range t.receipts.over {
 		seqs = append(seqs, r.Seq)
 	}
+	for _, r := range t.references.over {
+		seqs = append(seqs, r.Seq)
+	}
 	for _, e := range t.lifecycle.over {
 		if e.TargetKind != domain.TargetCall {
 			seqs = append(seqs, e.Seq)
@@ -825,6 +823,28 @@ func (t *tx) InsertIngestion(env domain.EventEnvelope, r domain.IngestReceipt) e
 	}
 	t.receipts.put(r.OccurrenceID, r)
 	t.envelopes.put(env.OccurrenceID, env)
+	t.markSequenced()
+	return nil
+}
+
+func (t *tx) InsertUnresolvedReference(r domain.UnresolvedReference) error {
+	if err := t.own(r.SessionID); err != nil {
+		return err
+	}
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if err := t.fresh("unresolved reference "+r.ID, r.Seq); err != nil {
+		return err
+	}
+	if !t.items.has(r.ItemID) {
+		return invalid("unresolved reference %s: declaring item %s is not stored", r.ID, r.ItemID)
+	}
+	if t.references.has(r.ID) {
+		return fmt.Errorf("unresolved reference %s: %w", r.ID, domain.ErrImmutable)
+	}
+	t.references.put(r.ID, r)
+	t.refsByKey.add(r.LocatorKey, r.ID)
 	t.markSequenced()
 	return nil
 }

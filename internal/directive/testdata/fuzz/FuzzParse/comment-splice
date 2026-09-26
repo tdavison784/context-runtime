@@ -1,0 +1,5 @@
+go test fuzz v1
+[]byte("## Pi<!--x-->nned\x0a- evil\x0a## Pin<!--\x0a-->ned\x0a- evil")
+uint8(0)
+bool(false)
+uint16(10)

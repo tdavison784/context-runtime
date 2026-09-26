@@ -75,7 +75,7 @@ func populate(tx store.Tx, sess string) error {
 		func() error {
 			return tx.InsertRelationship(NewRelationship(sess, "r1", domain.RelSupersedes, "i2", "i1", s[3]))
 		},
-		func() error { return tx.SetCurrentDirective("task", "dir", "i2") },
+		func() error { return tx.SetCurrentVersion("i2") },
 		func() error { return tx.InsertBlob(NewBlob(sess, []byte("blob"))) },
 		func() error { return tx.InsertObligationVersion(NewObligation(sess, "o1", 1, s[4], "i2")) },
 		func() error {
@@ -127,8 +127,8 @@ func assertAbsent(t *testing.T, tx store.ReadTx) {
 	notFound("Item", err)
 	_, err = tx.Item("i2")
 	notFound("Item", err)
-	_, err = tx.CurrentDirective("task", "dir", DirectiveBoundary(tx.SessionID()))
-	notFound("CurrentDirective", err)
+	_, err = currentDirective(tx, "task", "dir", DirectiveBoundary(tx.SessionID()))
+	notFound("CurrentVersion", err)
 	_, err = tx.Blob(domain.HashBytes([]byte("blob")))
 	notFound("Blob", err)
 	_, err = tx.Obligation("o1")
@@ -258,10 +258,10 @@ func testReadOwnWrites(t *testing.T, s store.Store) {
 			_, err = tx.Item(id)
 			noErr(t, err)
 		}
-		cur, err := tx.CurrentDirective("task", "dir", DirectiveBoundary(tx.SessionID()))
+		cur, err := currentDirective(tx, "task", "dir", DirectiveBoundary(tx.SessionID()))
 		noErr(t, err)
 		if cur != "i2" {
-			t.Errorf("CurrentDirective = %q, want i2", cur)
+			t.Errorf("CurrentVersion(DIRECTIVE) = %q, want i2", cur)
 		}
 		_, err = tx.Blob(domain.HashBytes([]byte("blob")))
 		noErr(t, err)
@@ -436,7 +436,7 @@ func testSessionIsolation(t *testing.T, s store.Store) {
 		wantErr(t, tx.InsertRelationship(NewRelationship(sessB, "r1", domain.RelDerivedFrom, "i1", "i2", seq)),
 			domain.ErrDanglingRelationship)
 		// Directive targets must be items in this session.
-		wantErr(t, tx.SetCurrentDirective("task", "dir", "i2"), domain.ErrNotFound)
+		wantErr(t, tx.SetCurrentVersion("i2"), domain.ErrNotFound)
 		// Obligation transitions and call attempts need records in this session.
 		wantErr(t, errOf(tx.AppendObligationTransition(NewTransition(sessB, "t1", "o1", 1, seq,
 			domain.ObligationUnresolved, domain.ObligationBlocked), 1)), domain.ErrNotFound)

@@ -25,8 +25,7 @@ func namespaceKey(sess string, ns domain.DirectiveNamespace, id string) domain.C
 
 // testCurrentNamespaces checks that the current-version map is keyed by
 // namespace (M6, R6): a parsed directive and keyed agent state with the same
-// ID, task, and boundary are independent, and the directive-only methods
-// never see agent keys.
+// ID, task, and boundary are independent.
 func testCurrentNamespaces(t *testing.T, s store.Store) {
 	const id = "agent.status" // legal in both namespaces (FR-DIR-006)
 	update(t, s, sessA, func(tx store.Tx) error {
@@ -50,16 +49,7 @@ func testCurrentNamespaces(t *testing.T, s store.Store) {
 			noErr(t, err)
 			assertEqual(t, "CurrentVersions("+string(c.ns)+")", ids, []string{c.want})
 		}
-		// The deprecated untyped view prefers DIRECTIVE and lists both.
-		got, err := tx.CurrentDirective("task", id, DirectiveBoundary(sessA))
-		noErr(t, err)
-		if got != "dir" {
-			t.Errorf("CurrentDirective = %q, want the DIRECTIVE version", got)
-		}
-		ids, err := tx.CurrentDirectives("task", id)
-		noErr(t, err)
-		assertEqual(t, "CurrentDirectives", ids, []string{"dir", "key"})
-		_, err = tx.CurrentVersion(namespaceKey(sessA, "BOGUS", id))
+		_, err := tx.CurrentVersion(namespaceKey(sessA, "BOGUS", id))
 		wantErr(t, err, domain.ErrInvalidRecord)
 		_, err = tx.CurrentVersions("task", "BOGUS", id)
 		wantErr(t, err, domain.ErrInvalidRecord)
@@ -78,7 +68,7 @@ func testCurrentNamespaces(t *testing.T, s store.Store) {
 		// Rolled back below: a second agent-key version moves only its own
 		// namespace's pointer.
 		noErr(t, tx.InsertItem(NewAgentKeyItem(sessA, "key2", id, tx.NextSeq(), "agent state 2")))
-		noErr(t, tx.SetCurrentDirective("task", id, "key2")) // namespace from the item
+		noErr(t, tx.SetCurrentVersion("key2")) // namespace from the item
 		got, err := tx.CurrentVersion(namespaceKey(sessA, domain.NamespaceDirective, id))
 		noErr(t, err)
 		if got != "dir" {
@@ -100,4 +90,15 @@ func testCurrentNamespaces(t *testing.T, s store.Store) {
 		}
 		return nil
 	})
+}
+
+// currentDirective reads the DIRECTIVE-namespace pointer for (task, ID,
+// boundary). A boundary in another session names nothing (ErrNotFound).
+func currentDirective(tx store.ReadTx, taskID, id string, boundary domain.AccessBoundary) (string, error) {
+	return tx.CurrentVersion(domain.CurrentKey{SessionID: boundary.SessionID, TaskID: taskID, Access: boundary, Namespace: domain.NamespaceDirective, ID: id})
+}
+
+// currentDirectives reads the DIRECTIVE-namespace pointers for (task, ID).
+func currentDirectives(tx store.ReadTx, taskID, id string) ([]string, error) {
+	return tx.CurrentVersions(taskID, domain.NamespaceDirective, id)
 }

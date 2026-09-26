@@ -34,6 +34,7 @@ var durableSuite = []durableCase{
 	{"LosslessTextAcrossRestart", testLosslessTextAcrossRestart},
 	{"IngestionAcrossRestart", testIngestionAcrossRestart},
 	{"Phase2StateAcrossRestart", testPhase2StateAcrossRestart},
+	{"UnresolvedReferencesAcrossRestart", testUnresolvedReferencesAcrossRestart},
 }
 
 // openDurable opens the backing state and closes the store when the test
