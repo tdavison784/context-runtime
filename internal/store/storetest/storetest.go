@@ -87,6 +87,14 @@ var suite = []testCase{
 	{"CurrentDirectivesOrder", testCurrentDirectivesOrder},
 	{"CurrentNamespaces", testCurrentNamespaces},
 
+	// Ingestion records.
+	{"IngestionRoundTrip", testIngestionRoundTrip},
+	{"ReceiptKeepsOriginalItems", testReceiptKeepsOriginalItems},
+	{"IngestionInsertRules", testIngestionInsertRules},
+	{"AnonymousIngestions", testAnonymousIngestions},
+	{"DiagnosticsAccess", testDiagnosticsAccess},
+	{"IngestionDeepCopies", testIngestionDeepCopies},
+
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
 	{"ObligationClaim", testObligationClaim},

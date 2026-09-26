@@ -31,6 +31,7 @@ type durableCase struct {
 // durableSuite lists every restart conformance test in execution order.
 var durableSuite = []durableCase{
 	{"LosslessTextAcrossRestart", testLosslessTextAcrossRestart},
+	{"IngestionAcrossRestart", testIngestionAcrossRestart},
 }
 
 // openDurable opens the backing state and closes the store when the test
