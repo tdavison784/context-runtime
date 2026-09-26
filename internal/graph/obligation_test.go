@@ -14,7 +14,7 @@ import (
 func pinWithObligations(t *testing.T, tx store.Tx, actor domain.Principal, pinID, dirID string, obligationIDs ...string) {
 	t.Helper()
 	pin := newDirective(actor.SessionID, pinID, dirID, tx.NextSeq(), "All tests must pass "+pinID)
-	mustInsert(t, tx, pin)
+	mustCreate(t, tx, pin)
 	if _, err := ReplaceDirective(tx, actor, "task", dirID, pin.ID, "evt-"+pinID); err != nil {
 		t.Fatalf("file %s: %v", pinID, err)
 	}
@@ -110,7 +110,7 @@ func TestD13_SnapshotIDReplacementRetiresObligations(t *testing.T) {
 		update(t, s, sess, func(tx store.Tx) error {
 			w := member(sess, "wx", tx.NextSeq(), "working x")
 			w.DirectiveID = "x"
-			mustInsert(t, tx, w)
+			mustCreate(t, tx, w)
 			_, err := SupersedeSnapshot(tx, actor, []string{"wx"}, "task", "evt-w")
 			return err
 		})
@@ -135,7 +135,7 @@ func TestD13_DuplicateLeavesObligations(t *testing.T) {
 		})
 		update(t, s, sess, func(tx store.Tx) error {
 			dup := newDirective(sess, "p1-dup", "tests", tx.NextSeq(), "All tests must pass p1")
-			mustInsert(t, tx, dup)
+			mustCreate(t, tx, dup)
 			_, err := LinkDuplicate(tx, actor, dup.ID, "p1", "evt-dup", "", "")
 			return err
 		})
