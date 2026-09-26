@@ -219,9 +219,6 @@ func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID
 	if err != nil {
 		return supersessionPlan{}, err
 	}
-	if err := domain.AuthorizeSupersession(actor, newItem, oldItem); err != nil {
-		return supersessionPlan{}, err
-	}
 	dup, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: newID})
 	if err != nil {
 		return supersessionPlan{}, err
@@ -247,6 +244,10 @@ func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID
 		EventID:     eventID,
 		RuleVersion: ruleVersion,
 	}
+	grantID, err := authorizeReplacement(tx, actor, newItem, oldItem, rel.Seq)
+	if err != nil {
+		return supersessionPlan{}, err
+	}
 	ev := domain.LifecycleEvent{
 		ID:         lifecycleEventID(actor.SessionID, oldID, "superseded", eventID, newID),
 		SessionID:  actor.SessionID,
@@ -257,6 +258,7 @@ func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID
 		From:       oldID,
 		To:         newID,
 		Actor:      actor,
+		GrantID:    grantID,
 		EventID:    eventID,
 	}
 	obligations, err := planObligationRetirement(tx, actor, oldID)
