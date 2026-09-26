@@ -833,25 +833,34 @@ reconciles exact names in a later round.
 
 ## Open questions
 
-- Whether the classification table (§2/M2) needs its own version number
-  independent of the parser version, once Phase 3 adds sections the table
-  doesn't yet cover.
-- Whether the References lexical identity rule (§16) needs a configurable
-  base-directory/namespace policy beyond the default this ADR assumes,
-  once multi-repository sessions exist.
-- Whether `MutationGrant`'s exact-target-ID matching (ADR 16) is
-  expressive enough once Phase 3's matcher registry needs a grant scoped
-  to "any target satisfying obligation claim X," which would touch §9's
-  obligation identity here.
-- Whether the SDD §8 `Runtime.Ingest` signature amendment (§19, deferred
-  to Phase 5 by R3) should be drafted now as a proposed-but-unapplied
-  amendment, so Phase 5 doesn't have to rediscover the shape Phase 2's
-  internal `IngestResult` already settled.
-- Whether `graph.Supersede`'s per-event audit-ID collision (§7,
-  Consequences) should be fixed by versioning the audit identity or by
-  restructuring the planned edge set to guarantee at most one retirement
-  of a given old target per event; `p2-graph` decides the mechanism, this
-  ADR only requires the collision not occur.
+Five open questions, all resolved by commander ruling:
+
+- **Classification-table versioning (§2/M2) — resolved.** The table gets
+  its own version number, independent of the parser version: Phase 3 will
+  add sections the table doesn't yet cover, and coupling the two would
+  force a parser bump for a table-only change.
+- **References base-directory policy (§16) — resolved, deferred.** The
+  default lexical-identity rule this ADR assumes is sufficient for Phase 2;
+  a configurable base-directory/namespace policy is deferred until a
+  multi-repository session actually exists, not designed speculatively now.
+- **`MutationGrant` exact-target-ID matching (ADR 16, touching §9) —
+  resolved, out of scope here.** Whether it is expressive enough for a
+  Phase 3 matcher-registry grant scoped to "any target satisfying
+  obligation claim X" stays with ADR 8 / Phase 3; it is not this ADR's or
+  Phase 2's decision to make.
+- **SDD §8 `Runtime.Ingest` signature amendment (§19, deferred to Phase 5
+  by R3) — resolved, drafted in a later round.** The amendment will be
+  added to this ADR as an explicit **unapplied** proposal — a "Required SDD
+  amendment" subsection, not "applied" — once `p2-ingest`'s `IngestResult`
+  shape has actually stabilized against the landed contract/parser/store/
+  graph work; drafting it now, before that shape exists, would risk
+  proposing a signature Phase 2's own implementation then contradicts. Not
+  yet drafted as of this ADR revision.
+- **`graph.Supersede`'s per-event audit-ID collision (§7, Consequences) —
+  resolved.** `p2-graph` versions the audit identity (rather than
+  restructuring D11's planned edge set to guarantee at most one retirement
+  of a given old target per event); this ADR's requirement is unchanged —
+  the collision must not occur — only the mechanism is now fixed.
 
 ## SDD amendment (applied in v0.9)
 
