@@ -243,37 +243,48 @@ preserve valid state.
   `go test -race ./... -count=1` (measured on this branch), consistent with
   a real SQLite file per test rather than a mocked backend.
 
-### Round 1 additions (findings DUR-1.2, 1.4, 1.6, 1.7) — required, `sqlite-worker`'s fix in flight
+### Round 1 additions (findings DUR-1.2, 1.4, 1.6, 1.7) — landed
 
-None of the following exist yet; the `internal/store/sqlite` implementation
-for round 1 has not landed as of this update (the package currently does
-not compile against the merged `store.go` contract — see ADR 16/17 for the
-same blocking state in `internal/graph`/`internal/store/memory`).
+`internal/store/sqlite`'s round-1 implementation is merged and passing:
 
-- A test that cancels the context at a randomly-timed point during
-  `Update` and asserts: if an error is returned, the transaction did **not**
-  commit (`errors.Is(err, context.Canceled)` and the write is absent on
-  reopen); reproduces DUR-1.2's exact scenario (thousands of trials with
-  cancellation timed across the commit window) as a bounded, deterministic
+- `internal/store/sqlite/dur_1_2_test.go:TestCancelledUpdateRollsBack`
+  cancels the context at a randomly-timed point during `Update` and
+  asserts that any reported error corresponds to a transaction that did
+  **not** commit — the exact DUR-1.2 regression, as a bounded deterministic
   test rather than a one-off experiment.
-- A test asserting a cancelled context surfaces as
-  `errors.Is(err, context.Canceled)` from `tx.Item`/`tx.Call`/etc., never
-  wrapped as `ErrIntegrity` (DUR-1.4); a genuine decode failure (corrupt
-  row bytes) still produces `ErrIntegrity`.
-- `TestSQLiteConcurrentOpen` (or similar): N goroutines calling `Open` on
-  the same fresh file path concurrently all succeed (DUR-1.6); today this
-  reproduces mostly-`SQLITE_BUSY` failures.
-- The interrupted-migration replay test ADR 3 has called for since its
-  first version (DUR-1.7): a migration whose last statement fails leaves
-  `schema_migrations` empty and no `rec_*` tables present, and a subsequent
-  `Open` on the same file succeeds cleanly.
+- `internal/store/sqlite/dur_1_4_test.go:TestScanCancellationIsOperationalError`
+  asserts a cancelled context surfaces as
+  `errors.Is(err, context.Canceled)` from a read, never wrapped as
+  `ErrIntegrity`; `TestEmptyAndCorruptBlob` (pre-existing) confirms a
+  genuine decode failure still produces `ErrIntegrity`.
+- `internal/store/sqlite/dur_1_6_test.go:TestConcurrentFirstOpen` runs N
+  goroutines calling `Open` on the same fresh file path concurrently and
+  asserts they all succeed — the exact DUR-1.6 regression.
+- `internal/store/sqlite/dur_1_7_test.go:TestInterruptedMigrationReplays`
+  is the interrupted-migration replay test this ADR has called for since
+  its first version: a migration whose last statement fails leaves
+  `schema_migrations` empty and no `rec_*` tables present, and a
+  subsequent `Open` on the same file succeeds cleanly.
+- `internal/store/sqlite/contract_review_test.go:TestSessionsListsCommittedRecords`
+  covers `Store.Sessions` (DUR-1.8, ADR 17) SQLite-specifically.
+
+**Known regression found during verification, not one of the four DUR
+findings above:** `TestConformance/DirectiveBoundaries` — new round-1
+coverage for ADR 4's boundary-keyed directive identity — fails on
+`internal/store/sqlite` only. Querying `CurrentDirective` with a boundary
+from a different session than the transaction's returns `invalid record:
+record belongs to another session` instead of the `ErrNotFound` the memory
+store and the test both expect; this is the AUTH-1.3 existence-disclosure
+pattern recurring in a new code path. `go test ./internal/store/sqlite/...`
+fails on this subtest as of this update. See ADR 4/17 for the full
+citation; flagging here too since it is this package's bug.
 
 ## Open questions
 
 None remaining for this ADR's original scope; `busy_timeout` (5s default,
-`WithBusyTimeout` to override) is decided in code. Round 1 leaves four
-required tests and their implementation (DUR-1.2/1.4/1.6/1.7) outstanding,
-tracked in the section above.
+`WithBusyTimeout` to override) is decided in code. Round 1's four DUR
+findings are fixed and tested; the `DirectiveBoundaries` regression above
+is the one open item against this package.
 
 ## Review
 
@@ -304,8 +315,12 @@ concurrent `Open` on a fresh file mostly fails `SQLITE_BUSY` at the WAL-mode
 switch; decided fix is DSN-level `busy_timeout`, a WAL-switch retry, and
 `BEGIN IMMEDIATE` migrations. DUR-1.7 (LOW): the interrupted-migration
 replay test this ADR has called for since its first version still doesn't
-exist. All five decisions are recorded above; DUR-1.2/1.4 have a decided
-contract in `store.go` today, while DUR-1.6/1.7's SQLite-side implementation
-and all four findings' tests are `sqlite-worker`'s in-flight round-1 fix —
-this ADR's Tests section marks them accordingly rather than claiming they
-already pass.
+exist. All five decisions are recorded above.
+
+Verified against the merged `sqlite-worker` branch: all four DUR findings
+now have a passing test (`TestCancelledUpdateRollsBack`,
+`TestScanCancellationIsOperationalError`, `TestConcurrentFirstOpen`,
+`TestInterruptedMigrationReplays`), cited in the "Round 1 additions"
+subsection. One regression found independently while verifying, not one
+of the four DUR findings: `TestConformance/DirectiveBoundaries` fails on
+this package (see Tests, above, and ADR 4/17 for the full citation).
