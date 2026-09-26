@@ -96,6 +96,14 @@ var suite = []testCase{
 	{"CurrentVersions(DIRECTIVE)Order", testCurrentDirectivesOrder},
 	{"CurrentNamespaces", testCurrentNamespaces},
 
+	// Phase 3 semantic facet (membership, coverage, receipts).
+	{"SemanticFacet", testSemanticFacet},
+	{"SemanticCoverage", testSemanticCoverage},
+	{"SemanticExchanges", testSemanticExchanges},
+	{"SemanticMembershipFrontier", testSemanticMembershipFrontier},
+	{"SemanticCheckpoints", testSemanticCheckpoints},
+	{"SemanticReceipts", testSemanticReceipts},
+
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},
 	{"ReceiptKeepsOriginalItems", testReceiptKeepsOriginalItems},
