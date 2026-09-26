@@ -303,14 +303,21 @@ func (r *run) detectDuplicate(si, pi int, actor domain.Principal, it domain.Cont
 		if c.ID == it.ID || c.Seq >= it.Seq || c.Scope != it.Scope {
 			continue
 		}
+		// Compare before mutating: a failed graph mutation poisons the
+		// transaction (W1 1babf3c). The index already matched content,
+		// role, kind, authority, boundary and task; a candidate that is
+		// itself a duplicate cannot be canonical, and a later one may be.
+		dupOf, err := r.tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: c.ID})
+		if err != nil {
+			return err
+		}
+		if len(dupOf) > 0 {
+			continue
+		}
 		if r.rels >= r.limits.MaxRelationships {
 			return errLimit("MaxRelationships")
 		}
-		_, err := graph.LinkDuplicate(r.tx, actor, it.ID, c.ID, r.graphEventID(), dedupRule, "")
-		switch {
-		case errors.Is(err, graph.ErrNotDuplicate):
-			continue // c is itself a duplicate; a later candidate may be canonical
-		case err != nil:
+		if _, err := graph.LinkDuplicate(r.tx, actor, it.ID, c.ID, r.graphEventID(), dedupRule, ""); err != nil {
 			return err
 		}
 		r.rels++
