@@ -257,7 +257,9 @@ func TestBlobReferenceLookupBound_R19(t *testing.T) {
 		if _, err := f.ingest(user, e); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
 			t.Errorf("over the bound: err = %v", err)
 		}
-		f.in.LookupLimit = 3
+		// Within the blob bound; the image transcript's duplicate lookup
+		// also sees three identical earlier transcripts plus itself.
+		f.in.LookupLimit = 4
 		if _, err := f.ingest(user, e); err != nil {
 			t.Errorf("within the bound: %v", err)
 		}

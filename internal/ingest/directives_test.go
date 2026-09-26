@@ -279,3 +279,24 @@ func TestNonDirectiveDuplicates_D10(t *testing.T) {
 		}
 	})
 }
+
+// TestDuplicateLookupBound_R19: duplicate candidates come from the bounded
+// index; more identical prior occurrences than the lookup limit reject the
+// event (fail closed) instead of linking against a partial list.
+func TestDuplicateLookupBound_R19(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		for _, id := range []string{"y1", "y2", "y3"} {
+			f.mustIngest(user, userEvent(id, "yes", false))
+		}
+		f.in.LookupLimit = 3 // the new occurrence itself is a candidate too
+		before := f.lastSeq()
+		if _, err := f.ingest(user, userEvent("y4", "yes", false)); !errors.Is(err, store.ErrLimitExceeded) || f.lastSeq() != before {
+			t.Errorf("over the bound: err = %v", err)
+		}
+		f.in.LookupLimit = 4
+		if r, err := f.ingest(user, userEvent("y4", "yes", false)); err != nil || len(r.Duplicates) != 1 {
+			t.Errorf("within the bound: %v, dups %v", err, r.Duplicates)
+		}
+	})
+}
