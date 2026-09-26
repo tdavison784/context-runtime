@@ -130,6 +130,19 @@ func mustInsert(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
 	}
 }
 
+// mustFile points each directive item's current-version map entry at it
+// directly through the store, modelling prior directive state without
+// re-running authorization: a directive item is current only while the
+// map names it (D10).
+func mustFile(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
+	t.Helper()
+	for _, it := range items {
+		if err := tx.SetCurrentDirective(it.TaskID, it.DirectiveID, it.ID); err != nil {
+			t.Fatalf("SetCurrentDirective(%s): %v", it.ID, err)
+		}
+	}
+}
+
 // -- T02: directive replacement ------------------------------------------
 
 func TestReplaceDirective_T02(t *testing.T) {
@@ -307,6 +320,7 @@ func TestSupersedeSnapshot_NewItemNotWorking(t *testing.T) {
 		oldWorking = workingItem(sess, "old-working", tx.NextSeq(), domain.AuthorityUser)
 		notWorking = storetest.NewDirective(sess, "pinned-not-working", "some-pin", tx.NextSeq(), "text")
 		mustInsert(t, tx, oldWorking, notWorking)
+		mustFile(t, tx, oldWorking)
 		return nil
 	})
 	if err != nil {
@@ -816,6 +830,7 @@ func TestSupersedeSnapshot_FRDIR007(t *testing.T) {
 		otherAgentItem = agentScopedWorkingItem(sess, "agent-restricted", tx.NextSeq(), domain.AuthorityUser, "agent-b")
 		w2 = workingItem(sess, "w2", tx.NextSeq(), domain.AuthorityUser)
 		mustInsert(t, tx, w1a, otherAgentItem, w2)
+		mustFile(t, tx, w1a, otherAgentItem)
 
 		rels, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
 		if err != nil {
@@ -870,6 +885,7 @@ func TestSupersedeSnapshot_MultipleOldItems(t *testing.T) {
 		w1b := workingItem(sess, "m-w1b", tx.NextSeq(), domain.AuthorityUser)
 		w2 := workingItem(sess, "m-w2", tx.NextSeq(), domain.AuthorityUser)
 		mustInsert(t, tx, w1a, w1b, w2)
+		mustFile(t, tx, w1a, w1b)
 
 		rels, err := SupersedeSnapshot(tx, actor, []string{w2.ID}, taskID, "evt-w2")
 		if err != nil {
@@ -927,6 +943,7 @@ func TestSupersedeSnapshot_ConversationKindAndIndependentTaskState(t *testing.T)
 		independent = independentTaskStateItem(sess, "independent", tx.NextSeq(), domain.AuthorityUser)
 		newConv = workingConversationItem(sess, "new-conv", tx.NextSeq(), domain.AuthorityUser)
 		mustInsert(t, tx, oldConv, independent, newConv)
+		mustFile(t, tx, oldConv)
 
 		rels, err := SupersedeSnapshot(tx, actor, []string{newConv.ID}, taskID, "evt-conv")
 		if err != nil {
