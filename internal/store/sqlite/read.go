@@ -98,8 +98,10 @@ func (t *transaction) CurrentDirective(taskID, directiveID string, boundary doma
 	if err := boundary.Validate(); err != nil {
 		return "", err
 	}
-	if err := t.checkSession(boundary.SessionID); err != nil {
-		return "", err
+	// A boundary in another session names nothing here: reads report it as
+	// missing, never as invalid, so they cannot probe other sessions.
+	if boundary.SessionID != t.session {
+		return "", domain.ErrNotFound
 	}
 	var id string
 	err := t.conn.QueryRowContext(t.ctx, "SELECT item_id FROM directives WHERE session_id=? AND task_id=? AND directive_id=? AND boundary_scope=? AND boundary_session_id=? AND boundary_workflow_id=? AND boundary_task_id=? AND boundary_agent_id=?", t.session, taskID, directiveID, boundary.Scope, boundary.SessionID, boundary.WorkflowID, boundary.TaskID, boundary.AgentID).Scan(&id)
