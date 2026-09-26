@@ -188,7 +188,7 @@ func TestReplaceDirective_T02(t *testing.T) {
 
 	err = s.View(ctx, sess, func(tx store.ReadTx) error {
 		boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: taskID}
-		cur, err := tx.CurrentDirective(taskID, dirID, boundary)
+		cur, err := tx.CurrentVersion(domain.CurrentKey{SessionID: sess, TaskID: taskID, Access: boundary, Namespace: domain.NamespaceDirective, ID: dirID})
 		if err != nil {
 			return err
 		}
@@ -523,12 +523,12 @@ func TestReplaceDirective_VisibleBoundaryConflict(t *testing.T) {
 		// h must remain the only current version; the rejected write left
 		// nothing behind.
 		err = s.View(ctx, sess, func(tx store.ReadTx) error {
-			versions, err := tx.CurrentDirectives(taskID, dirID)
+			versions, err := tx.CurrentVersions(taskID, domain.NamespaceAgentKey, dirID)
 			if err != nil {
 				return err
 			}
 			if len(versions) != 1 || versions[0] != "h" {
-				t.Errorf("CurrentDirectives(%s) = %v, want [h]", dirID, versions)
+				t.Errorf("CurrentVersions(%s) = %v, want [h]", dirID, versions)
 			}
 			return nil
 		})
@@ -794,9 +794,9 @@ func TestReplaceDirective_KeyedAgentWriteChain_T17(t *testing.T) {
 
 	err = s.View(ctx, sess, func(tx store.ReadTx) error {
 		boundary := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sess, TaskID: taskID}
-		cur, err := tx.CurrentDirective(taskID, dirID, boundary)
+		cur, err := tx.CurrentVersion(domain.CurrentKey{SessionID: sess, TaskID: taskID, Access: boundary, Namespace: domain.NamespaceAgentKey, ID: dirID})
 		if err != nil || cur != v2 {
-			t.Errorf("CurrentDirective = %q, %v; want %q, nil", cur, err, v2)
+			t.Errorf("CurrentVersion = %q, %v; want %q, nil", cur, err, v2)
 		}
 		if ok, err := IsCurrent(tx, v1); err != nil || ok {
 			t.Errorf("IsCurrent(v1) = %v, %v; want false, nil", ok, err)
@@ -1811,7 +1811,7 @@ func TestResolveLifecycleTarget_HiddenItemNeverBlocksDirective(t *testing.T) {
 
 // TestResolveLifecycleTarget_StaleDirectivePointerNotReturned is AUTH-3.2:
 // SupersedeSnapshot (like a direct Supersede) retires an item without
-// touching the directive-pointer map, so tx.CurrentDirective(s) can still
+// touching the directive-pointer map, so the current-version map can still
 // name an item that is no longer current. ResolveLifecycleTarget must never
 // hand back a superseded version.
 func TestResolveLifecycleTarget_StaleDirectivePointerNotReturned(t *testing.T) {
@@ -1851,9 +1851,9 @@ func TestResolveLifecycleTarget_StaleDirectivePointerNotReturned(t *testing.T) {
 			t.Fatalf("IsCurrent(w1) = %v, %v; want false, nil (test setup invariant)", ok, err)
 		}
 		// The pointer is now stale: it still names w1.
-		stale, err := tx.CurrentDirective(taskID, dirID, boundary)
+		stale, err := tx.CurrentVersion(domain.CurrentKey{SessionID: sess, TaskID: taskID, Access: boundary, Namespace: domain.NamespaceDirective, ID: dirID})
 		if err != nil || stale != w1ID {
-			t.Fatalf("CurrentDirective = %q, %v; want stale pointer to %q (test setup invariant)", stale, err, w1ID)
+			t.Fatalf("CurrentVersion = %q, %v; want stale pointer to %q (test setup invariant)", stale, err, w1ID)
 		}
 		_, err = ResolveLifecycleTarget(tx, actor, taskID, dirID)
 		return err
