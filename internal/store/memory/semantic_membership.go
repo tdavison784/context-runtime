@@ -72,9 +72,10 @@ func (t *semTx) checkMember(c domain.CoverageRecord, m domain.CoverageMember) er
 			return fmt.Errorf("coverage %s: %w", c.ID, err)
 		}
 		if m.LeaseID != "" {
-			// Lease records land with the retrieval family; until then a
-			// lease member cannot be verified, so it fails closed.
-			return fmt.Errorf("coverage %s: lease member: %w", c.ID, domain.ErrUnsupportedSchema)
+			// A lease member names its lease's exact source content.
+			if l, ok := t.r.sem.ret.leases.peek(m.LeaseID); !ok || l.Source != *m.Source {
+				return invalid("coverage %s: lease %s is not a stored lease of its source", c.ID, m.LeaseID)
+			}
 		}
 	case m.NestedCoverageID != "":
 		if !t.r.sem.coverages.has(m.NestedCoverageID) {
