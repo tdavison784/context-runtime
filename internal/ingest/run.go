@@ -46,8 +46,10 @@ type run struct {
 	suppliedBlobs map[string]bool // blob hashes whose bytes this event supplied
 	unverified    map[string]bool // unverified items already reported (DUR-3.1)
 
-	transcripts map[int]domain.ContextItem // span index -> its transcript item
-	opResults   []domain.OperationResult   // in operation order (P3-34)
+	transcripts      map[int]domain.ContextItem // span index -> its transcript item
+	opResults        []domain.OperationResult   // in operation order (P3-34)
+	mutationReceipts []string                   // typed operations' receipts, in order
+	created          map[string]Created         // operation alias -> what it created
 }
 
 func isNotFound(err error) bool { return errors.Is(err, domain.ErrNotFound) }
@@ -100,15 +102,23 @@ func (r *run) apply() (domain.IngestReceipt, error) {
 
 // operation applies the oi-th operation of the event's ordered stream
 // (P3-34). A span operation ingests its span, exactly once (ValidateV3);
-// its result is readable at the span's transcript boundary. Typed
-// operations have no executor yet and fail closed.
+// its result is readable at the span's transcript boundary, and an alias
+// of it names what the span created. A typed operation runs through its
+// registered handler.
 func (r *run) operation(oi int, op domain.SemanticOperation) error {
 	if op.Kind != domain.OperationSpan {
-		return domain.ErrUnsupportedSchema
+		return r.typedOperation(oi, op)
 	}
-	si := op.Span.Index
+	si, from := op.Span.Index, len(r.items)
 	if err := r.ingestSpan(si); err != nil {
 		return err
+	}
+	if op.Alias != "" {
+		c, err := r.spanCreated(from)
+		if err != nil {
+			return err
+		}
+		r.alias(op.Alias, c)
 	}
 	r.opResults = append(r.opResults, domain.OperationResult{Index: oi, Kind: op.Kind, Alias: op.Alias, Access: r.transcripts[si].Access})
 	return nil
@@ -310,7 +320,7 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 		err error
 	)
 	if r.g.Semantic != nil {
-		rc.SchemaVersion, rc.RequestHashVersion, rc.Operations = domain.IngestReceiptSchemaV2, domain.RequestHashV3, r.opResults
+		rc.SchemaVersion, rc.RequestHashVersion, rc.Operations, rc.MutationReceiptIDs = domain.IngestReceiptSchemaV2, domain.RequestHashV3, r.opResults, r.mutationReceipts
 		env, err = newSemanticEnvelope(r.p, r.occurrence, r.e, r.limits, *r.g.Semantic)
 	} else {
 		env, err = domain.NewEventEnvelope(r.p, r.occurrence, r.e)

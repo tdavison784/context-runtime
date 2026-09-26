@@ -44,6 +44,9 @@ type Ingester struct {
 	// limits and policy. Nil keeps the frozen v2 identity and rejects typed
 	// operations and resource control as unsupported (fail closed).
 	Semantic *domain.Phase3Policy
+	// Operations executes typed operations by kind (P3-34). A kind with no
+	// handler fails closed with domain.ErrUnsupportedSchema.
+	Operations map[domain.SemanticOperationKind]OperationHandler
 }
 
 // DefaultLookupLimit is the default bound on one indexed lookup.
