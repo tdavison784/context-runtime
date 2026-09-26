@@ -37,7 +37,7 @@ func TestOpenAndMode(t *testing.T) {
 
 func TestConformance(t *testing.T) {
 	storetest.Run(t, func(t *testing.T) store.Store {
-		s, err := Open(context.Background(), filepath.Join(t.TempDir(), "state.db"))
+		s, err := Open(context.Background(), freshPath(t))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,7 +47,7 @@ func TestConformance(t *testing.T) {
 
 func TestDurableConformance(t *testing.T) {
 	storetest.RunDurable(t, func(t *testing.T) storetest.Opener {
-		path := filepath.Join(t.TempDir(), "state.db")
+		path := freshPath(t)
 		return func(t *testing.T) store.Store {
 			s, err := Open(context.Background(), path)
 			if err != nil {

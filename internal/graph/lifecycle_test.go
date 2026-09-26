@@ -22,7 +22,7 @@ func lifecycleFixture(t *testing.T, s store.Store, sess string) {
 		sysGoal := goalLike(sess, "sys-goal-1", "sys-goal", tx.NextSeq(), "System goal")
 		sysGoal.Authority = domain.AuthoritySystem
 		userGoal := goalLike(sess, "user-goal-1", "user-goal", tx.NextSeq(), "User goal")
-		pin := storetest.NewDirective(sess, "user-pin-1", "user-pin", tx.NextSeq(), "Pinned")
+		pin := newDirective(sess, "user-pin-1", "user-pin", tx.NextSeq(), "Pinned")
 		hidden := goalLike(sess, "hidden-goal-1", "hidden-goal", tx.NextSeq(), "Private goal")
 		hidden.Scope = domain.ScopeAgent
 		hidden.AgentID = "agent-b"

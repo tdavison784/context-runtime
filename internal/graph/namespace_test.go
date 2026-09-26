@@ -6,7 +6,6 @@ import (
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
-	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
 
 // TestR6_LifecycleResolvesOnlyDirectiveNamespace: Resolve/Unpin targets
@@ -40,7 +39,7 @@ func TestR6_LifecycleResolvesOnlyDirectiveNamespace(t *testing.T) {
 		// A parsed directive legitimately named "agent.status" in another
 		// task-visible boundary resolves uniquely despite the keyed write.
 		update(t, s, sess, func(tx store.Tx) error {
-			pin := storetest.NewDirective(sess, "pin-status", key, tx.NextSeq(), "Report status")
+			pin := newDirective(sess, "pin-status", key, tx.NextSeq(), "Report status")
 			pin.Scope = domain.ScopeWorkflow
 			pin.Access = domain.AccessBoundary{Scope: domain.ScopeWorkflow, SessionID: sess, WorkflowID: pin.WorkflowID}
 			mustInsert(t, tx, pin)
@@ -69,7 +68,7 @@ func TestR6_NamespacesNeverReplaceEachOther(t *testing.T) {
 			return err
 		})
 		update(t, s, sess, func(tx store.Tx) error {
-			pin := storetest.NewDirective(sess, "pin-status", key, tx.NextSeq(), "Report status")
+			pin := newDirective(sess, "pin-status", key, tx.NextSeq(), "Report status")
 			mustInsert(t, tx, pin)
 			prev, err := ReplaceDirective(tx, principal(sess, domain.AuthoritySystem), "task", key, pin.ID, "evt-pin")
 			if prev != "" {
@@ -102,15 +101,16 @@ func TestR13_CheckBoundaryConflict(t *testing.T) {
 		const sess, dirID = "sess-r13", "d"
 		user := principal(sess, domain.AuthorityUser)
 		update(t, s, sess, func(tx store.Tx) error {
-			task := storetest.NewDirective(sess, "d-task", dirID, tx.NextSeq(), "task-wide")
+			task := newDirective(sess, "d-task", dirID, tx.NextSeq(), "task-wide")
 			hidden := agentScopedItem(sess, "h-hidden", tx.NextSeq(), "agent-b")
 			hidden.DirectiveID, hidden.Section = "h", domain.SectionPinned
+			hidden.Namespace = domain.NamespaceDirective
 			mustInsert(t, tx, task, hidden)
 			mustFile(t, tx, task, hidden)
 			return nil
 		})
 		probe := func(id, dir string, scope domain.Scope) domain.ContextItem {
-			it := storetest.NewDirective(sess, id, dir, 99, "probe")
+			it := newDirective(sess, id, dir, 99, "probe")
 			it.Scope = scope
 			it.Access.Scope = scope
 			return it
@@ -139,12 +139,12 @@ func TestCurrentVersionFor(t *testing.T) {
 		const sess = "sess-cvf"
 		user := principal(sess, domain.AuthorityUser)
 		update(t, s, sess, func(tx store.Tx) error {
-			d := storetest.NewDirective(sess, "d1", "d", tx.NextSeq(), "v1")
+			d := newDirective(sess, "d1", "d", tx.NextSeq(), "v1")
 			mustInsert(t, tx, d)
 			mustFile(t, tx, d)
 			return nil
 		})
-		probe := storetest.NewDirective(sess, "probe", "d", 99, "v2")
+		probe := newDirective(sess, "probe", "d", 99, "v2")
 		view(t, s, sess, func(tx store.ReadTx) error {
 			got, err := CurrentVersionFor(tx, user, probe)
 			if err != nil || got.ID != "d1" {
@@ -158,7 +158,7 @@ func TestCurrentVersionFor(t *testing.T) {
 			return nil
 		})
 		update(t, s, sess, func(tx store.Tx) error {
-			r := storetest.NewDirective(sess, "retirer", "r", tx.NextSeq(), "r")
+			r := newDirective(sess, "retirer", "r", tx.NextSeq(), "r")
 			mustInsert(t, tx, r)
 			_, err := Supersede(tx, user, "retirer", "d1", "evt", "")
 			return err

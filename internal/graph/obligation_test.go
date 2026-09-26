@@ -13,8 +13,8 @@ import (
 // obligation version per ID bound to it.
 func pinWithObligations(t *testing.T, tx store.Tx, actor domain.Principal, pinID, dirID string, obligationIDs ...string) {
 	t.Helper()
-	pin := storetest.NewDirective(actor.SessionID, pinID, dirID, tx.NextSeq(), "All tests must pass "+pinID)
-	mustInsert(t, tx, pin)
+	pin := newDirective(actor.SessionID, pinID, dirID, tx.NextSeq(), "All tests must pass "+pinID)
+	mustCreate(t, tx, pin)
 	if _, err := ReplaceDirective(tx, actor, "task", dirID, pin.ID, "evt-"+pinID); err != nil {
 		t.Fatalf("file %s: %v", pinID, err)
 	}
@@ -53,7 +53,7 @@ func TestD13_ReplacementRetiresBoundObligations(t *testing.T) {
 		})
 		var replaceSeq uint64
 		update(t, s, sess, func(tx store.Tx) error {
-			p2 := storetest.NewDirective(sess, "p2", "tests", tx.NextSeq(), "Replacement without obligation")
+			p2 := newDirective(sess, "p2", "tests", tx.NextSeq(), "Replacement without obligation")
 			mustInsert(t, tx, p2)
 			_, err := ReplaceDirective(tx, actor, "task", "tests", p2.ID, "evt-p2")
 			replaceSeq = tx.LastSeq()
@@ -110,7 +110,7 @@ func TestD13_SnapshotIDReplacementRetiresObligations(t *testing.T) {
 		update(t, s, sess, func(tx store.Tx) error {
 			w := member(sess, "wx", tx.NextSeq(), "working x")
 			w.DirectiveID = "x"
-			mustInsert(t, tx, w)
+			mustCreate(t, tx, w)
 			_, err := SupersedeSnapshot(tx, actor, []string{"wx"}, "task", "evt-w")
 			return err
 		})
@@ -134,8 +134,8 @@ func TestD13_DuplicateLeavesObligations(t *testing.T) {
 			return nil
 		})
 		update(t, s, sess, func(tx store.Tx) error {
-			dup := storetest.NewDirective(sess, "p1-dup", "tests", tx.NextSeq(), "All tests must pass p1")
-			mustInsert(t, tx, dup)
+			dup := newDirective(sess, "p1-dup", "tests", tx.NextSeq(), "All tests must pass p1")
+			mustCreate(t, tx, dup)
 			_, err := LinkDuplicate(tx, actor, dup.ID, "p1", "evt-dup", "", "")
 			return err
 		})
@@ -163,7 +163,7 @@ func TestD13_UnauthorizedIndirectRetirementAbortsReplacement(t *testing.T) {
 			return tx.InsertObligationVersion(o)
 		})
 		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			p2 := storetest.NewDirective(sess, "p2", "tests", tx.NextSeq(), "Replacement")
+			p2 := newDirective(sess, "p2", "tests", tx.NextSeq(), "Replacement")
 			mustInsert(t, tx, p2)
 			_, err := ReplaceDirective(tx, actor, "task", "tests", p2.ID, "evt-p2")
 			return err
