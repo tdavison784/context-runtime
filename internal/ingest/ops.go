@@ -45,6 +45,41 @@ type LifecycleOutcome = lifecycle.LifecycleOutcome
 
 var _ LifecycleExecutor = (*lifecycle.Service)(nil)
 
+// GrantExecutor issues and revokes grants for GRANT/REVOKE_GRANT operations
+// (P3-11): the lifecycle service derives issuer, session and sequence from
+// the authenticated actor and the allocated seq. *lifecycle.Service
+// implements it; a LifecycleExecutor that does not leaves grants
+// fail-closed.
+type GrantExecutor interface {
+	IssueGrant(tx store.Tx, actor domain.Principal, intent domain.GrantIntent, seq uint64) (lifecycle.MutationOutcome, error)
+	RevokeGrant(tx store.Tx, actor domain.Principal, intent domain.RevokeGrantIntent, seq uint64) (lifecycle.MutationOutcome, error)
+}
+
+var _ GrantExecutor = (*lifecycle.Service)(nil)
+
+// grantHandler adapts a GrantExecutor to OperationHandler. The issued or
+// revoked grant ID is aliasable (GRANT_ID); the result is readable only at
+// the issuing principal's own boundary.
+type grantHandler struct{ g GrantExecutor }
+
+func (h grantHandler) Execute(tx store.Tx, actor domain.Principal, op domain.SemanticOperation, seq uint64) (OperationOutcome, error) {
+	var out lifecycle.MutationOutcome
+	var err error
+	if op.Grant != nil {
+		out, err = h.g.IssueGrant(tx, actor, *op.Grant, seq)
+	} else {
+		out, err = h.g.RevokeGrant(tx, actor, *op.RevokeGrant, seq)
+	}
+	if err != nil {
+		return OperationOutcome{}, err
+	}
+	res := OperationOutcome{MutationReceiptID: out.MutationReceiptID, Result: out.Result, Access: ownBoundary(actor)}
+	if op.Grant != nil {
+		res.Created.GrantID = op.Grant.GrantID
+	}
+	return res, nil
+}
+
 // ItemVersion is an exact item occurrence at a version.
 type ItemVersion struct {
 	ID      string
@@ -110,11 +145,18 @@ func (r *run) typedOperation(oi int, op domain.SemanticOperation) error {
 }
 
 // handler is the executor of kind: a configured Ingester.Operations entry,
-// else the obligation service's adapter for a W4 kind; anything else fails
-// closed.
+// else W3's grant executor for GRANT/REVOKE_GRANT or the obligation
+// service's adapter for a W4 kind; anything else fails closed.
 func (r *run) handler(kind domain.SemanticOperationKind) (OperationHandler, error) {
 	if h, ok := r.g.Operations[kind]; ok && h != nil {
 		return h, nil
+	}
+	if kind == domain.OperationGrant || kind == domain.OperationRevokeGrant {
+		g, ok := r.g.Lifecycle.(GrantExecutor)
+		if !ok {
+			return nil, domain.ErrUnsupportedSchema
+		}
+		return grantHandler{g}, nil
 	}
 	op, ok := obligationOps[kind]
 	if !ok {

@@ -65,10 +65,12 @@ func sysOpsEvent(id string, spans []domain.Span, ops ...domain.SemanticOperation
 }
 
 // TestOps_MissingHandlerFailsClosed (P3-34): a typed operation with no
-// registered executor aborts the whole event, including its span writes
-// and task creation.
+// registered executor (here GRANT, with a lifecycle executor that cannot
+// issue grants) aborts the whole event, including its span writes and task
+// creation.
 func TestOps_MissingHandlerFailsClosed(t *testing.T) {
 	phase3Stores(t, func(t *testing.T, f *fixture) {
+		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
 		sys := principal(domain.AuthoritySystem)
 		e := sysOpsEvent("ops-none", []domain.Span{textSpan(domain.AuthoritySystem, false, "## Goal [g]\nShip.\n")}, spanOp(0), grantOp(""))
 		f.requireAtomic(domain.ErrUnsupportedSchema, func() error { _, err := f.ingest(sys, e); return err })
