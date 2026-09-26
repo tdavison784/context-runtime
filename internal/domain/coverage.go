@@ -31,6 +31,7 @@ func (r ItemContentRef) Validate() error {
 
 // CoverageMember is an indexed normalized row, not copied onto each edge.
 // Exactly one member form is set. Lease members always preserve source identity.
+// Persisted members use Key() as ID, indexed within their parent CoverageID.
 type CoverageMember struct {
 	SemanticMeta
 	CoverageID                            string
