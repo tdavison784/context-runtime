@@ -244,3 +244,44 @@ func TestEventCloneAndParseUnits(t *testing.T) {
 		t.Fatal("unmarked USER unit parses")
 	}
 }
+
+// TestEventIDRejectsReservedPrefixes enforces R20.1: a caller EventID can
+// never look like an internally generated ID, so no caller-chosen value can
+// be confused with (or alias) an occurrence, artifact, item, call, turn,
+// obligation, relationship, or lifecycle-audit ID.
+func TestEventIDRejectsReservedPrefixes(t *testing.T) {
+	var gen SequentialIDs
+	generated := map[string]string{
+		"caller occurrence":    CallerOccurrenceID("s", "e"),
+		"anonymous occurrence": NewAnonymousOccurrenceID(&gen),
+		"random anonymous":     NewAnonymousOccurrenceID(RandomIDs{}),
+		"item":                 DerivedItemID("s", "e", 0),
+		"call":                 DerivedCallID("s", "c", 1, HashBytes(nil)),
+		"turn":                 DerivedTurnID("s", "t", 1),
+		"obligation":           DerivedObligationID(CurrentKey{SessionID: "s"}, 0),
+	}
+	for _, d := range idDomains {
+		generated["domain "+string(d)] = DerivedArtifactID(d, "s", "o", 0)
+	}
+	for _, prefix := range []string{"evc_", "eva_", "dgn_", "cmd_", "sec_", "ref_", "turn_", "obl_", "itm_", "call_", "rel_", "evt_"} {
+		generated["prefix "+prefix] = prefix + "x"
+		generated["bare "+prefix] = prefix
+	}
+	for name, id := range generated {
+		_, e := ingestFixture()
+		e.EventID = id
+		if err := e.Validate(); !errors.Is(err, ErrInvalidRecord) {
+			t.Errorf("%s: reserved EventID %q accepted (err %v)", name, id, err)
+		}
+		if !ReservedIDPrefix(id) {
+			t.Errorf("%s: %q not reported reserved", name, id)
+		}
+	}
+	for _, id := range []string{"e1", "eva", "evaluate-1", "call-7", "item_1", "EVA_1", "x_eva_1", "turns_1"} {
+		_, e := ingestFixture()
+		e.EventID = id
+		if err := e.Validate(); err != nil {
+			t.Errorf("ordinary EventID %q rejected: %v", id, err)
+		}
+	}
+}
