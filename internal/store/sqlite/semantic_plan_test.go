@@ -61,6 +61,59 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 			_, err := r.SemanticChanges(viewer, domain.ItemGrantTarget("s", "i"), page)
 			return err
 		}},
+		{"ResourceUpdates", []string{"session_id", "f_resource_id"}, func(r store.SemanticReader) error { _, err := r.ResourceUpdates("repo", page); return err }},
+		{"WorkspaceBindingsByContext", []string{"session_id", "f_context_kind", "f_context_id"}, func(r store.SemanticReader) error {
+			_, err := r.WorkspaceBindingsByContext("", "task", "", page)
+			return err
+		}},
+		{"RunsBySubject", []string{"session_id", "f_subject_key"}, func(r store.SemanticReader) error { _, err := r.RunsBySubject("sub", page); return err }},
+		{"ObservationsByRun", []string{"session_id", "f_run_id"}, func(r store.SemanticReader) error { _, err := r.ObservationsByRun("run", page); return err }},
+		{"SubjectStatesByResource", []string{"session_id", "f_resource"}, func(r store.SemanticReader) error {
+			_, err := r.SubjectStatesByResource("repo", page)
+			return err
+		}},
+		{"ProofDependencies", []string{"session_id", "f_proof_id"}, func(r store.SemanticReader) error { _, err := r.ProofDependencies("p", page); return err }},
+		{"TransitionsByVersion", []string{"session_id", "f_obligation_id", "f_version"}, func(r store.SemanticReader) error {
+			_, err := r.TransitionsByVersion(domain.ObligationRef{SessionID: "s", ObligationID: "o", Version: 1}, page)
+			return err
+		}},
+		{"ObligationsByTaskOwner", []string{"session_id", "f_access_task_id"}, func(r store.SemanticReader) error {
+			_, err := r.ObligationsByTaskOwner("task", page)
+			return err
+		}},
+		{"CurrentBoundObligationsBySubject", []string{"session_id", "f_target_subject_key"}, func(r store.SemanticReader) error {
+			_, err := r.CurrentBoundObligationsBySubject("sub", page)
+			return err
+		}},
+		{"CurrentProofsByDependency(path)", []string{"session_id", "resource_id"}, func(r store.SemanticReader) error {
+			_, err := r.CurrentProofsByDependency("repo", "k", page)
+			return err
+		}},
+		{"CurrentProofsByDependency(all)", []string{"session_id", "resource_id"}, func(r store.SemanticReader) error {
+			_, err := r.CurrentProofsByDependency("repo", "", page)
+			return err
+		}},
+		{"LeasesByHolder", []string{"session_id", "f_conversation_id", "f_turn_id", "f_holder_task_id", "f_holder_agent_id"}, func(r store.SemanticReader) error {
+			_, err := r.LeasesByHolder(domain.Principal{SessionID: "s", TaskID: "t", AgentID: "a", Authority: domain.AuthorityAgent}, "conv", "turn", page)
+			return err
+		}},
+		{"LeasesBySource", []string{"session_id", "f_source_item_id", "f_source_content_hash"}, func(r store.SemanticReader) error {
+			_, err := r.LeasesBySource(domain.ItemContentRef{ItemID: "i", ContentHash: "h"}, page)
+			return err
+		}},
+		{"RetrievalEventsByRequest", []string{"session_id", "f_request_id"}, func(r store.SemanticReader) error {
+			_, err := r.RetrievalEventsByRequest(viewer, "req", page)
+			return err
+		}},
+		{"OpenGoalsByTaskOwner", []string{"session_id", "f_task_id"}, func(r store.SemanticReader) error {
+			_, err := r.OpenGoalsByTaskOwner("task", page)
+			return err
+		}},
+		{"GCCandidates(task)", []string{"session_id", "f_task_id"}, func(r store.SemanticReader) error {
+			_, err := r.GCCandidates(store.GCCandidateFilter{Viewer: viewer, Scope: domain.CollectTask, TaskID: "task", SnapshotSeq: 9, Page: page})
+			return err
+		}},
+		{"PendingGCRequests", []string{"session_id"}, func(r store.SemanticReader) error { _, err := r.PendingGCRequests(page); return err }},
 	}
 	for _, rd := range reads {
 		var q string
@@ -95,6 +148,12 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 		{[]string{"session_id", "f_family", "f_request_id"}, "SELECT id FROM rec_mutation_receipt WHERE session_id=? AND f_family=? AND f_request_id=?"},
 		{[]string{"session_id", "f_conversation_id"}, "SELECT COALESCE(MAX(f_ordinal),0) FROM rec_exchange WHERE session_id=? AND f_conversation_id=?"},
 		{[]string{"session_id", "f_id"}, "SELECT id FROM rec_creation_declaration WHERE session_id=? AND f_id=?"},
+		{[]string{"session_id", "f_id"}, "SELECT id FROM rec_resource_binding WHERE session_id=? AND f_id=?"},
+		{[]string{"session_id", "f_resource_id", "f_request_id"}, "SELECT id FROM rec_resource_update WHERE session_id=? AND f_resource_id=? AND f_request_id=?"},
+		{[]string{"session_id", "f_state_semantic_meta_id"}, "SELECT id FROM rec_subject_state WHERE session_id=? AND f_state_semantic_meta_id=?"},
+		{[]string{"session_id", "f_item_id"}, "SELECT id FROM rec_projection WHERE session_id=? AND f_item_id=?"},
+		{[]string{"session_id", "f_collect_intent_request_id"}, "SELECT id FROM rec_gc_request WHERE session_id=? AND f_collect_intent_request_id=?"},
+		{[]string{"session_id", "f_declaration_semantic_meta_id"}, "SELECT id FROM rec_obligation_declaration WHERE session_id=? AND f_declaration_semantic_meta_id=?"},
 		{[]string{"session_id", "f_type", "f_to_id"}, "SELECT 1 FROM rec_relationship WHERE session_id=? AND f_type=? AND f_to_id=? LIMIT 1"},
 		{[]string{"session_id", "f_type", "f_from_id"}, "SELECT 1 FROM rec_relationship WHERE session_id=? AND f_type=? AND f_from_id=? LIMIT 1"},
 	} {
