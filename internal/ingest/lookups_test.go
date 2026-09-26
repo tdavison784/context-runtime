@@ -1,10 +1,12 @@
 package ingest
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 // otherTask is a principal in another workflow and task of the session,
@@ -77,6 +79,42 @@ func TestLookupsNeverLockOut_F1(t *testing.T) {
 		}
 		if _, err := f.ingest(user, sourceEvent("s2", "src/main.go", taskAccess())); err != nil {
 			t.Errorf("source ingestion after padding: %v", err)
+		}
+	})
+}
+
+// unverifiedStore reports one extra unverified match from every duplicate
+// candidate lookup, standing in for a legacy row whose content no longer
+// verifies (which only a SQLite upgrade can produce).
+type unverifiedStore struct{ store.Store }
+
+func (s unverifiedStore) Update(ctx context.Context, sessionID string, fn func(store.Tx) error) error {
+	return s.Store.Update(ctx, sessionID, func(tx store.Tx) error { return fn(unverifiedTx{tx}) })
+}
+
+type unverifiedTx struct{ store.Tx }
+
+func (t unverifiedTx) CanonicalCandidates(f store.CanonicalFilter) (store.Lookup, error) {
+	l, err := t.Tx.CanonicalCandidates(f)
+	l.Unverified = append(l.Unverified, "itm_legacy")
+	return l, err
+}
+
+// TestUnverifiedMatchesNeverBlock_DUR14: a lookup match that fails
+// verification never blocks ingestion; it is reported as a content-free
+// ItemUnverified diagnostic that names no item.
+func TestUnverifiedMatchesNeverBlock_DUR14(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		f.s = unverifiedStore{f.s}
+		r := f.mustIngest(principal(domain.AuthorityUser), userEvent("u1", "hello", false))
+		n := 0
+		for _, d := range r.Diagnostics {
+			if d.Code == domain.ItemUnverified && d.Reason == domain.ReasonUnverifiedItem && d.DirectiveID == "" {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("ItemUnverified diagnostics = %d, want 1: %+v", n, r.Diagnostics)
 		}
 	})
 }
