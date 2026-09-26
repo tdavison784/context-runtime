@@ -113,28 +113,12 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 // not a conflict (AUTH-3.2): the pointer is stale, not a second live
 // version, and must never block a legitimate write.
 func rejectVisibleBoundaryConflict(tx store.ReadTx, actor domain.Principal, taskID, directiveID string) error {
-	ids, err := tx.CurrentDirectives(taskID, directiveID)
+	versions, err := CurrentVersions(tx, actor, taskID, directiveID)
 	if err != nil {
 		return err
 	}
-	for _, id := range ids {
-		it, err := tx.Item(id)
-		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				continue
-			}
-			return err
-		}
-		if !it.Access.Permits(actor) {
-			continue
-		}
-		cur, err := IsCurrent(tx, id)
-		if err != nil {
-			return err
-		}
-		if cur {
-			return domain.ErrInvalidAuthorityPromotion
-		}
+	if len(versions) > 0 {
+		return domain.ErrInvalidAuthorityPromotion
 	}
 	return nil
 }
@@ -430,6 +414,52 @@ func currentVersionAt(tx store.ReadTx, taskID, directiveID string, boundary doma
 	return id, nil
 }
 
+// CurrentVersions returns every current version (IsCurrent, D10) of
+// directive directiveID in taskID that actor can access, ordered by (Seq,
+// ID). FR-DIR-002 keys a directive by (task, directive ID, access
+// boundary), so one ID may have several current versions; this is the one
+// deterministic place a caller chooses among them (for example a
+// deduplication canonical candidate), and every access and currentness
+// filter is applied before anything is ordered or counted, so a version
+// actor cannot see, a stale map pointer, and a duplicate are never
+// returned and never influence the result.
+func CurrentVersions(tx store.ReadTx, actor domain.Principal, taskID, directiveID string) ([]domain.ContextItem, error) {
+	ids, err := tx.CurrentDirectives(taskID, directiveID)
+	if err != nil {
+		return nil, err
+	}
+	var out []domain.ContextItem
+	for _, id := range ids {
+		it, err := tx.Item(id)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		if !it.Access.Permits(actor) {
+			continue
+		}
+		cur, err := isCurrentItem(tx, it)
+		if err != nil {
+			return nil, err
+		}
+		if cur {
+			out = append(out, it)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.ContextItem) int {
+		switch {
+		case a.Seq < b.Seq:
+			return -1
+		case a.Seq > b.Seq:
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out, nil
+}
+
 // ResolveLifecycleTarget resolves a lifecycle command's bare id (SDD v0.8,
 // SPEC-2.2, e.g. "Resolve [id]" or "Unpin [id]") to exactly one accessible,
 // current item ID. id is tried two ways, since a caller may hold either
@@ -475,36 +505,18 @@ func ResolveLifecycleTarget(tx store.ReadTx, actor domain.Principal, taskID, id 
 		return "", err
 	}
 
-	versions, err := tx.CurrentDirectives(taskID, id)
+	// CurrentVersions drops stale map pointers (a version superseded
+	// outside the directive map, e.g. by a Working snapshot, AUTH-3.2) and
+	// duplicates: a lifecycle command must never resolve to a version that
+	// is no longer current (D10).
+	versions, err := CurrentVersions(tx, actor, taskID, id)
 	if err != nil {
 		return "", err
 	}
-	for _, versionID := range versions {
-		if seen[versionID] {
-			continue
-		}
-		it, err := tx.Item(versionID)
-		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				continue
-			}
-			return "", err
-		}
-		if !it.Access.Permits(actor) {
-			continue
-		}
-		// tx.CurrentDirectives points at the current-directive record, but
-		// that record can go stale the moment the item it names is
-		// superseded outside the directive map (e.g. by a Working
-		// snapshot, AUTH-3.2): a lifecycle command must never resolve to a
-		// version that is no longer current.
-		cur, err := IsCurrent(tx, versionID)
-		if err != nil {
-			return "", err
-		}
-		if cur {
-			candidates = append(candidates, versionID)
-			seen[versionID] = true
+	for _, v := range versions {
+		if !seen[v.ID] {
+			candidates = append(candidates, v.ID)
+			seen[v.ID] = true
 		}
 	}
 

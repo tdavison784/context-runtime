@@ -3,6 +3,7 @@ package graph
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -205,6 +206,79 @@ func TestD10_StalePointerIsNotAPreviousVersion(t *testing.T) {
 			}
 			if got, err := ResolveLifecycleTarget(tx, actor, "task", dirID); err != nil || got != "x2" {
 				t.Errorf("Resolve(%s) = %q, %v; want x2", dirID, got, err)
+			}
+			return nil
+		})
+	})
+}
+
+// TestD10_CurrentVersionsDeterministicAndFiltered: canonical candidates for
+// deduplication are chosen after access and currentness filtering, in
+// (Seq, ID) order (D10): an inaccessible version, a stale pointer, and a
+// duplicate never appear, and the order does not depend on map iteration
+// or boundary encoding.
+func TestD10_CurrentVersionsDeterministicAndFiltered(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess, dirID = "sess-d10-versions", "d"
+		agentA := principalWithAgent(sess, domain.AuthorityUser, "agent-a")
+		agentB := principalWithAgent(sess, domain.AuthorityUser, "agent-b")
+		harness := principal(sess, domain.AuthorityHarness)
+
+		update(t, s, sess, func(tx store.Tx) error {
+			// z-private sorts after a-task by ID but is filed first, so
+			// (Seq, ID) order must put it first.
+			private := agentScopedItem(sess, "z-private", tx.NextSeq(), "agent-a")
+			private.DirectiveID = dirID
+			mustInsert(t, tx, private)
+			if _, err := ReplaceDirective(tx, agentA, "task", dirID, private.ID, "evt-1"); err != nil {
+				return err
+			}
+			hidden := agentScopedItem(sess, "b-hidden", tx.NextSeq(), "agent-b")
+			hidden.DirectiveID = dirID
+			mustInsert(t, tx, hidden)
+			if _, err := ReplaceDirective(tx, agentB, "task", dirID, hidden.ID, "evt-2"); err != nil {
+				return err
+			}
+			taskWide := taskItem(sess, "a-task", tx.NextSeq(), domain.AuthorityHarness)
+			taskWide.DirectiveID = dirID
+			mustInsert(t, tx, taskWide)
+			_, err := ReplaceDirective(tx, harness, "task", dirID, taskWide.ID, "evt-3")
+			return err
+		})
+
+		ids := func(items []domain.ContextItem) []string {
+			var out []string
+			for _, it := range items {
+				out = append(out, it.ID)
+			}
+			return out
+		}
+		view(t, s, sess, func(tx store.ReadTx) error {
+			got, err := CurrentVersions(tx, agentA, "task", dirID)
+			if err != nil {
+				return err
+			}
+			if want := []string{"z-private", "a-task"}; !slices.Equal(ids(got), want) {
+				t.Errorf("CurrentVersions(agent-a) = %v, want %v", ids(got), want)
+			}
+			return nil
+		})
+
+		// Retire the private version outside the map: its pointer goes
+		// stale and it must drop out.
+		update(t, s, sess, func(tx store.Tx) error {
+			next := agentScopedItem(sess, "y-private-next", tx.NextSeq(), "agent-a")
+			mustInsert(t, tx, next)
+			_, err := Supersede(tx, agentA, next.ID, "z-private", "evt-4", "")
+			return err
+		})
+		view(t, s, sess, func(tx store.ReadTx) error {
+			got, err := CurrentVersions(tx, agentA, "task", dirID)
+			if err != nil {
+				return err
+			}
+			if want := []string{"a-task"}; !slices.Equal(ids(got), want) {
+				t.Errorf("CurrentVersions after stale pointer = %v, want %v", ids(got), want)
 			}
 			return nil
 		})
