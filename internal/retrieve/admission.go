@@ -11,27 +11,11 @@ type AdmissionIntent struct {
 }
 
 func validateAdmission(actor domain.Principal, i AdmissionIntent, task domain.TaskState, conv domain.Conversation, policy domain.Phase3Policy) (uint64, error) {
-	if err := actor.Validate(); err != nil {
-		return 0, err
-	}
-	if err := i.Rehydrate.Validate(); err != nil {
-		return 0, err
-	}
-	if err := i.Origin.Validate(); err != nil {
+	if err := validateDenialOrigin(actor, i); err != nil {
 		return 0, err
 	}
 	if err := policy.Validate(); err != nil {
 		return 0, err
-	}
-	if actor != i.Origin.Holder {
-		return 0, domain.ErrInvalidAuthorityPromotion
-	}
-	if i.Origin.Invocation == nil {
-		if i.Method != "rehydrate" || actor.Authority != domain.AuthorityHarness {
-			return 0, domain.ErrInvalidAuthorityPromotion
-		}
-	} else if actor.Authority != domain.AuthorityAgent || i.Method != "context_get" && i.Method != "context_rehydrate" {
-		return 0, domain.ErrInvalidAuthorityPromotion
 	}
 	if task.Validate() != nil || conv.Validate() != nil || task.SessionID != actor.SessionID ||
 		task.TaskID != actor.TaskID || task.WorkflowID != actor.WorkflowID ||

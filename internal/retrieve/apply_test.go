@@ -90,6 +90,9 @@ func (s *applySemantic) InsertRetrievalResult(v domain.RetrievalResult) error {
 	return nil
 }
 func (s *applySemantic) InsertRetrievalEvent(v domain.RetrievalEvent) error {
+	if s.failAt == "event" {
+		return domain.ErrIntegrity
+	}
 	s.events = append(s.events, v)
 	return nil
 }
