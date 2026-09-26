@@ -39,3 +39,25 @@ func TestItemNamespaceSeparatesDirectivesFromAgentKeys(t *testing.T) {
 		t.Fatal("item without an ID has a namespace")
 	}
 }
+
+func TestExplicitNamespaceOverridesLegacyShape(t *testing.T) {
+	it := ContextItem{SessionID: "s1", TaskID: "t1", DirectiveID: "same", Namespace: NamespaceObservation,
+		Access: AccessBoundary{Scope: ScopeTask, SessionID: "s1", TaskID: "t1"}}
+	k, ok := it.CurrentKey()
+	if !ok || k.Namespace != NamespaceObservation {
+		t.Fatal("observation inferred as agent key")
+	}
+	seen := map[string]bool{}
+	for _, ns := range []DirectiveNamespace{NamespaceDirective, NamespaceAgentKey, NamespaceObservation} {
+		k.Namespace = ns
+		h, err := k.CanonicalHash()
+		if err != nil || seen[h] {
+			t.Fatal("namespace key collision", err)
+		}
+		seen[h] = true
+	}
+	it.Namespace = "UNKNOWN"
+	if _, ok := it.CurrentKey(); ok {
+		t.Fatal("unknown namespace downgraded to legacy")
+	}
+}
