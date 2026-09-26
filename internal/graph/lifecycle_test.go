@@ -52,7 +52,7 @@ func TestD1_AuthorizeLifecycleCommand_SourceActor(t *testing.T) {
 			if err != nil {
 				t.Errorf("USER Resolve of USER goal: %v", err)
 			}
-			if got.Command.ResolvedItemID != "user-goal-1" || got.GrantID != "" || got.SourceActor.Authority != domain.AuthorityUser {
+			if got.ResolvedItemID != "user-goal-1" || got.GrantID != "" || got.SourceActor.Authority != domain.AuthorityUser {
 				t.Errorf("result = %+v", got)
 			}
 
@@ -71,7 +71,7 @@ func TestD1_AuthorizeLifecycleCommand_SourceActor(t *testing.T) {
 			if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 				t.Errorf("span outranks caller: err = %v, want ErrInvalidAuthorityPromotion", err)
 			}
-			if got, err := AuthorizeLifecycleCommand(tx, user, "task", command(domain.LifecycleUnpin, "user-pin", domain.AuthorityUser)); err != nil || got.Command.ResolvedItemID != "user-pin-1" {
+			if got, err := AuthorizeLifecycleCommand(tx, user, "task", command(domain.LifecycleUnpin, "user-pin", domain.AuthorityUser)); err != nil || got.ResolvedItemID != "user-pin-1" {
 				t.Errorf("USER Unpin = %+v, %v", got, err)
 			}
 			return nil
@@ -107,7 +107,7 @@ func TestD1_AuthorizeLifecycleCommand_Grant(t *testing.T) {
 		})
 		view(t, s, sess, func(tx store.ReadTx) error {
 			got, err := AuthorizeLifecycleCommand(tx, system, "task", command(domain.LifecycleResolve, "sys-goal", domain.AuthorityUser))
-			if err != nil || got.GrantID != "grant-1" || got.Command.ResolvedItemID != "sys-goal-1" {
+			if err != nil || got.GrantID != "grant-1" || got.ResolvedItemID != "sys-goal-1" {
 				t.Errorf("granted = %+v, %v; want grant-1", got, err)
 			}
 			// The grant names Resolve only.

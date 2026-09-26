@@ -22,8 +22,10 @@ var ErrLifecycleTargetMismatch = errors.New("graph: lifecycle target is not of t
 // source authorization, the target's version and currentness, and grants
 // in the executing transaction.
 type LifecycleAuthorization struct {
-	// Command is the input with ResolvedItemID set to the unique target.
+	// Command is the parsed command as given.
 	Command domain.LifecycleCommand
+	// ResolvedItemID is the unique target the command resolved to.
+	ResolvedItemID string
 	// SourceActor is the principal the command was authorized as: the
 	// caller's authenticated ownership IDs with the span's authority (D15).
 	SourceActor domain.Principal
@@ -108,11 +110,11 @@ func AuthorizeLifecycleCommand(tx store.ReadTx, caller domain.Principal, taskID 
 		return LifecycleAuthorization{}, err
 	}
 
-	cmd.ResolvedItemID = target.ID
 	return LifecycleAuthorization{
-		Command:       cmd,
-		SourceActor:   actor,
-		TargetVersion: target.Version,
-		GrantID:       auth.GrantIDs[target.ID],
+		Command:        cmd,
+		ResolvedItemID: target.ID,
+		SourceActor:    actor,
+		TargetVersion:  target.Version,
+		GrantID:        auth.GrantIDs[target.ID],
 	}, nil
 }
