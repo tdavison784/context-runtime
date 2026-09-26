@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -130,6 +132,29 @@ func legacyPartsJSON(t *testing.T, parts []domain.ContentPart) string {
 	return string(b)
 }
 
+// legacyLists returns overrides that store every string list of record as
+// the binaries before migration 0003 did: plain encoding/json.
+func legacyLists(t *testing.T, kind string, record any) map[string]any {
+	t.Helper()
+	out := make(map[string]any)
+	v := reflect.ValueOf(record)
+	for _, c := range schemas[kind].columns {
+		if c.typ != stringsType {
+			continue
+		}
+		f, ok := pathValue(v, c.path)
+		if !ok {
+			continue // absent parent: the column stays NULL
+		}
+		b, err := json.Marshal(f.Interface())
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[c.name] = string(b)
+	}
+	return out
+}
+
 func TestUpgradeLosslessParts(t *testing.T) {
 	l := openLegacy(t, 1)
 	blob := domain.Blob{SessionID: "s", Hash: domain.HashBytes([]byte("png")), MediaType: "image/png", Data: []byte("png")}
@@ -168,5 +193,74 @@ func TestUpgradeLosslessParts(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUpgradeLosslessStringLists(t *testing.T) {
+	for _, upTo := range []int{1, 2} {
+		t.Run(fmt.Sprintf("from %04d", upTo), func(t *testing.T) {
+			l := openLegacy(t, upTo)
+			tagged := storetest.NewItem("s", "tagged", 1, "x")
+			tagged.Tags = []string{"t1", "\u00fc", "\"q\""}
+			untagged := storetest.NewItem("s", "untagged", 2, "y")
+			untagged.Tags = nil
+			empty := storetest.NewItem("s", "empty", 3, "z")
+			empty.Tags = []string{}
+			for _, it := range []domain.ContextItem{tagged, untagged, empty} {
+				o := legacyLists(t, "item", it)
+				if upTo < 2 {
+					o["f_parts"] = legacyPartsJSON(t, it.Parts)
+				}
+				l.insert("item", it, o)
+			}
+			covered := storetest.NewRelationship("s", "covered", domain.RelDerivedFrom, "tagged", "untagged", 4)
+			covered.Coverage = &domain.Coverage{ConversationID: "c", FromSeq: 1, ToSeq: 2, ItemIDs: []string{"tagged", "untagged"}}
+			plain := storetest.NewRelationship("s", "plain", domain.RelDerivedFrom, "empty", "untagged", 5)
+			event := storetest.NewEvent("s", "e", 6, "p")
+			grant := storetest.NewGrant("s", "g", 7, "tagged", "untagged")
+			obligation := storetest.NewObligation("s", "o", 1, 8, "tagged")
+			obligation.EvidenceIDs = []string{"tagged"}
+			transition := storetest.NewTransition("s", "tr", "o", 1, 9, domain.ObligationUnresolved, domain.ObligationSatisfied)
+			for kind, rec := range map[string]any{"relationship": covered, "event": event, "grant": grant, "obligation": obligation, "obligation_transition": transition} {
+				l.insert(kind, rec, legacyLists(t, kind, rec))
+			}
+			l.insert("relationship", plain, legacyLists(t, "relationship", plain))
+
+			s := l.upgrade()
+			if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+				for _, want := range []domain.ContextItem{tagged, untagged, empty} {
+					got, err := tx.Item(want.ID)
+					if err != nil {
+						t.Fatalf("item %s: %v", want.ID, err)
+					}
+					if !reflect.DeepEqual(got.Tags, want.Tags) {
+						t.Errorf("item %s tags = %#v, want %#v", want.ID, got.Tags, want.Tags)
+					}
+				}
+				rels, err := tx.Relationships(store.RelationshipFilter{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(rels) != 2 || rels[0].Coverage == nil || !reflect.DeepEqual(rels[0].Coverage.ItemIDs, covered.Coverage.ItemIDs) || rels[1].Coverage != nil {
+					t.Errorf("relationships = %+v", rels)
+				}
+				if got, err := tx.Event("e"); err != nil || !reflect.DeepEqual(got.ItemIDs, event.ItemIDs) {
+					t.Errorf("event = %+v, %v", got, err)
+				}
+				if got, err := tx.Grant("g"); err != nil || !reflect.DeepEqual(got.TargetIDs, grant.TargetIDs) {
+					t.Errorf("grant = %+v, %v", got, err)
+				}
+				if got, err := tx.Obligation("o"); err != nil || !reflect.DeepEqual(got.EvidenceIDs, obligation.EvidenceIDs) {
+					t.Errorf("obligation = %+v, %v", got, err)
+				}
+				trs, err := tx.ObligationTransitions("o")
+				if err != nil || len(trs) != 1 || !reflect.DeepEqual(trs[0].EvidenceIDs, transition.EvidenceIDs) || !reflect.DeepEqual(trs[0].Fingerprints, transition.Fingerprints) {
+					t.Errorf("transitions = %+v, %v", trs, err)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

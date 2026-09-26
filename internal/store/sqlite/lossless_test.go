@@ -17,3 +17,26 @@ func TestLosslessPartsDecodeIsStrict(t *testing.T) {
 		}
 	}
 }
+
+func TestLosslessStringsRoundTripAndStrictDecode(t *testing.T) {
+	for _, ss := range [][]string{nil, {}, {"", "a\xffb", "\x00", "ü"}} {
+		b, err := encodeLosslessStrings(ss)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := decodeLosslessStrings(b)
+		if err != nil || (got == nil) != (ss == nil) || len(got) != len(ss) {
+			t.Fatalf("round trip of %q = %q, %v", ss, got, err)
+		}
+		for i := range ss {
+			if got[i] != ss[i] {
+				t.Errorf("element %d = %q, want %q", i, got[i], ss[i])
+			}
+		}
+	}
+	for _, data := range []string{`["t1"]`, `["FF"]`, `["f"]`, `[1]`, `{}`, `[] []`, ``} {
+		if _, err := decodeLosslessStrings([]byte(data)); err == nil {
+			t.Errorf("decode accepted %q", data)
+		}
+	}
+}

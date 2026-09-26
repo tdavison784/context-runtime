@@ -262,8 +262,9 @@ func TestMigrationChecksumMismatch(t *testing.T) {
 // Migrations are forward-only (ADR 3, R8): a committed file is never edited,
 // and a schema change always lands as a new numbered file added here.
 var committedMigrations = map[string]string{
-	"0001_init.sql":           "b854c18a7c7573ef8346e39903fb8d2faed2336b02bd92f3f26862c676e7f3a6",
-	"0002_lossless_parts.sql": "a897953dc55e11ebf150735f7456a8928602633deb4393f890344475d4c29140",
+	"0001_init.sql":                  "b854c18a7c7573ef8346e39903fb8d2faed2336b02bd92f3f26862c676e7f3a6",
+	"0002_lossless_parts.sql":        "a897953dc55e11ebf150735f7456a8928602633deb4393f890344475d4c29140",
+	"0003_lossless_string_lists.sql": "5a6ea923364592d6d5352e9d88f5a008c874cfa6e9fffc96d694b7cf974cb783",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {

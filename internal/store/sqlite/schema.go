@@ -17,9 +17,9 @@ import (
 // every other scalar or nested field occupies one typed column. A presence
 // column distinguishes nil pointers from zero-valued nested records, and a
 // nil column distinguishes nil byte slices from empty BLOBs. JSON is used
-// only for leaf lists (tags, IDs, fingerprints, and usage iterations); content
-// parts use the lossless hex form in parts.go. No complete record is stored
-// as a second, opaque copy.
+// only for leaf lists (parts, tags, IDs, fingerprints, and usage
+// iterations); every string inside one is stored as the hex of its exact
+// bytes (lossless.go). No complete record is stored as a second, opaque copy.
 type columnRole uint8
 
 const (
@@ -139,7 +139,7 @@ func (c recordColumn) sqlType() string {
 		return "TEXT"
 	}
 	if t == partsType {
-		return "BLOB" // lossless parts (parts.go)
+		return "BLOB" // lossless parts (lossless.go)
 	}
 	switch t.Kind() {
 	case reflect.String:
@@ -256,6 +256,10 @@ func encodeField(v reflect.Value) (any, error) {
 	}
 	if v.Type() == partsType {
 		return encodeLosslessParts(v.Interface().([]domain.ContentPart))
+	}
+	if v.Type() == stringsType {
+		b, err := encodeLosslessStrings(v.Interface().([]string))
+		return string(b), err
 	}
 	switch v.Kind() {
 	case reflect.String:
@@ -391,6 +395,14 @@ func decodeField(f reflect.Value, x any, bytesNil bool) error {
 			return err
 		}
 		f.Set(reflect.ValueOf(parts))
+		return nil
+	}
+	if f.Type() == stringsType {
+		ss, err := decodeLosslessStrings([]byte(asString(x)))
+		if err != nil {
+			return err
+		}
+		f.Set(reflect.ValueOf(ss))
 		return nil
 	}
 	switch f.Kind() {

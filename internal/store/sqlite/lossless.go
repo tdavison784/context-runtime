@@ -10,7 +10,8 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
-// Content parts are stored losslessly (R8, D3). JSON strings cannot carry
+// Content parts are stored losslessly (R8, D3; migration 0002 names this
+// file by its former name, parts.go). JSON strings cannot carry
 // arbitrary bytes: encoding/json replaces invalid UTF-8 with U+FFFD, which
 // silently changed text and broke the stored ContentHash. The parts column
 // therefore holds a JSON array of objects keyed by ContentPart field name in
@@ -20,6 +21,66 @@ import (
 // hex, or trailing data fails with domain.ErrIntegrity, so a later change to
 // ContentPart needs a forward migration rather than an invented default.
 var partsType = reflect.TypeFor[[]domain.ContentPart]()
+
+// String lists (tags, item IDs, evidence IDs, grant targets, fingerprints)
+// are stored the same way: a JSON array of the lowercase hex of each
+// string's bytes, or JSON null for a nil list. A lossy form would map
+// distinct IDs such as "a\xffb" and "a\xfeb" to one "a\ufffdb", so a grant
+// or evidence reference could come back naming a different record.
+// Migration 0003 rewrites rows written before it.
+var stringsType = reflect.TypeFor[[]string]()
+
+func encodeLosslessStrings(ss []string) ([]byte, error) {
+	if ss == nil {
+		return []byte("null"), nil
+	}
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = hex.EncodeToString([]byte(s))
+	}
+	return json.Marshal(out)
+}
+
+func decodeLosslessStrings(data []byte) ([]string, error) {
+	var raw []string
+	if err := strictJSON(data, &raw); err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	out := make([]string, len(raw))
+	for i, h := range raw {
+		b, err := decodeHex(h)
+		if err != nil {
+			return nil, fmt.Errorf("element %d: %v", i, err)
+		}
+		out[i] = string(b)
+	}
+	return out, nil
+}
+
+// strictJSON decodes exactly one JSON value into v.
+func strictJSON(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if dec.More() {
+		return fmt.Errorf("trailing data")
+	}
+	return nil
+}
+
+// decodeHex accepts only the canonical lowercase hex encoding.
+func decodeHex(h string) ([]byte, error) {
+	b, err := hex.DecodeString(h)
+	if err != nil || hex.EncodeToString(b) != h {
+		return nil, fmt.Errorf("not lowercase hex")
+	}
+	return b, nil
+}
 
 func encodeLosslessParts(parts []domain.ContentPart) ([]byte, error) {
 	out := make([]map[string]any, len(parts))
@@ -51,14 +112,9 @@ func encodeLosslessParts(parts []domain.ContentPart) ([]byte, error) {
 }
 
 func decodeLosslessParts(data []byte) ([]domain.ContentPart, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
 	var raw []map[string]json.RawMessage
-	if err := dec.Decode(&raw); err != nil {
+	if err := strictJSON(data, &raw); err != nil {
 		return nil, err
-	}
-	if dec.More() {
-		return nil, fmt.Errorf("trailing data after parts")
 	}
 	if raw == nil {
 		return nil, nil
@@ -83,9 +139,9 @@ func decodeLosslessParts(data []byte) ([]domain.ContentPart, error) {
 				if err := json.Unmarshal(msg, &h); err != nil {
 					return nil, fmt.Errorf("part %d %s: %v", i, name, err)
 				}
-				b, err := hex.DecodeString(h)
-				if err != nil || hex.EncodeToString(b) != h {
-					return nil, fmt.Errorf("part %d %s: not lowercase hex", i, name)
+				b, err := decodeHex(h)
+				if err != nil {
+					return nil, fmt.Errorf("part %d %s: %v", i, name, err)
 				}
 				f.SetString(string(b))
 			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
