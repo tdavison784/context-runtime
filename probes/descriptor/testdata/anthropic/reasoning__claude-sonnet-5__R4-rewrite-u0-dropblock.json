@@ -1,0 +1,127 @@
+{
+  "betas": [
+    "thinking-binding-controls-2026-08-01"
+  ],
+  "model": "claude-sonnet-5",
+  "probe": "reasoning/claude-sonnet-5/R4-rewrite-u0-dropblock",
+  "question": "R4 edit earlier user message; prefix_mismatch_behavior=drop_block",
+  "request": {
+    "max_tokens": 4096,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "First work out the key: it is the lowercase English name of the Greek letter whose 1-based position in the Greek alphabet equals the number of primes below 20. Then call the lookup tool with that key. Afterwards compute (value * 17 + 3) mod 23, showing the arithmetic in one line. Be brief.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "signature": "EoUDCpABCBIYAipA…[len=528 sha256=f3acbbae61840cb5]",
+            "thinking": "Counting primes below 20 gives 8 of them, and the 8th letter of the Greek alphabet is theta, so the key is \"theta\".\n\n",
+            "type": "thinking"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_013TspxzwCBk5DUjMHppykzX",
+            "input": {
+              "key": "theta"
+            },
+            "name": "lookup",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "41",
+                "type": "text"
+              }
+            ],
+            "is_error": false,
+            "tool_use_id": "toolu_013TspxzwCBk5DUjMHppykzX",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "effort": "medium"
+    },
+    "system": [
+      {
+        "text": "You are a terse probe assistant. When asked for a key's value, call the lookup tool; never guess values.",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "block_binding": {
+        "prefix_mismatch_behavior": "drop_block"
+      },
+      "display": "summarized",
+      "type": "adaptive"
+    },
+    "tools": [
+      {
+        "description": "Look up the integer value stored under a key.",
+        "input_schema": {
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "lookup"
+      }
+    ]
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "text": "(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 5",
+        "type": "text"
+      }
+    ],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "input_transformations": [],
+    "model": "claude-sonnet-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 717,
+      "output_tokens": 43,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}

@@ -1,0 +1,151 @@
+{
+  "betas": [
+    "compact-2026-09-04",
+    "thinking-binding-controls-2026-08-01"
+  ],
+  "model": "claude-opus-5-5",
+  "probe": "compaction/claude-opus-5-5/K-kept-turns-thinking-dropblock",
+  "question": "kept turns after on-demand block: thinking still valid?",
+  "request": {
+    "max_tokens": 4096,
+    "messages": [
+      {
+        "content": [
+          {
+            "content": "**Summary for continuation:**\n\n- **User's request:** Find the key, which is the lowercase English name of the Greek letter whose 1-based position matches the number of primes below 20. Call lookup with that key, then compute (value × 17 + 3) mod 23 and show the arithmetic in one line.\n- **Key derivation:** There are 8 primes below 20 (2, 3, 5, 7, 11, 13, 17, 19). The 8th Greek letter is theta, so the key is **\"theta\"**.\n- **Lookup:** \"theta\" returned **41**.\n- **Computation:** 41 × 17 + 3 = 697 + 3 = 700; 700 mod 23 = 700 − 690 = **10**.\n- **Status:** The request is complete and nothing is left open. The only key looked up was \"theta\".",
+            "signature": "CAISjgoKHggSGALy…[len=1736 sha256=fe99b72681817f02]",
+            "type": "compaction"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Now look up key 'beta' and apply the same formula.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_01TqHTGNCZG1QnPF3iX2SQLH",
+            "input": {
+              "key": "beta"
+            },
+            "name": "lookup",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "7",
+                "type": "text"
+              }
+            ],
+            "is_error": false,
+            "tool_use_id": "toolu_01TqHTGNCZG1QnPF3iX2SQLH",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-opus-5-5",
+    "output_config": {
+      "effort": "medium"
+    },
+    "system": [
+      {
+        "text": "You are a terse probe assistant. When asked for a key's value, call the lookup tool; never guess values.",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "block_binding": {
+        "prefix_mismatch_behavior": "drop_block"
+      },
+      "display": "summarized",
+      "type": "adaptive"
+    },
+    "tools": [
+      {
+        "description": "Look up the integer value stored under a key.",
+        "input_schema": {
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "lookup"
+      }
+    ]
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "signature": "CAQSkgUKEAgSGAI4…[len=888 sha256=c2d0425b9f102bf0]",
+        "thinking": "7*17+3 = 122, and 122 mod 23 = 7.\n\n",
+        "type": "thinking"
+      },
+      {
+        "text": "The lookup for \"beta\" returned 7, and the formula gives **7**.\n\n(7 × 17 + 3) mod 23 = (119 + 3) mod 23 = 122 mod 23 = 122 − 115 = **7**",
+        "type": "text"
+      }
+    ],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "input_transformations": [],
+    "model": "claude-opus-5-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 773,
+      "iterations": [
+        {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 773,
+          "output_tokens": 113,
+          "type": "message"
+        }
+      ],
+      "output_tokens": 113,
+      "output_tokens_details": {
+        "thinking_tokens": 36
+      },
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}
