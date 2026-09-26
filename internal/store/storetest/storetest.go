@@ -102,6 +102,7 @@ var suite = []testCase{
 	{"AnonymousIngestions", testAnonymousIngestions},
 	{"DiagnosticsAccess", testDiagnosticsAccess},
 	{"IngestionDeepCopies", testIngestionDeepCopies},
+	{"ReceiptRecordsEveryLimit", testReceiptRecordsEveryLimit},
 	{"UnresolvedReferences", testUnresolvedReferences},
 	{"UnresolvedReferenceInsertRules", testUnresolvedReferenceInsertRules},
 
