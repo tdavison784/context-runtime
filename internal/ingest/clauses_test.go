@@ -170,7 +170,9 @@ func TestAmbiguousLifecycleTarget(t *testing.T) {
 			t.Fatalf("setup: current pins = %v, want both versions", pins)
 		}
 		r := f.mustIngest(agent, userEvent("a2", "## Unpin [p]\n", true))
-		if len(r.Lifecycle) != 1 || r.Lifecycle[0].Resolution != domain.TargetAmbiguous || r.Lifecycle[0].ResolvedItemID != "" || r.Lifecycle[0].Status != domain.CommandParsedNotExecuted {
+		// Phase 3 (P3-35): recorded as not executed, outcome AMBIGUOUS.
+		if len(r.Lifecycle) != 1 || r.Lifecycle[0].Resolution != domain.TargetAmbiguous || r.Lifecycle[0].ResolvedItemID != "" ||
+			r.Lifecycle[0].Status != domain.CommandNotExecuted || r.Lifecycle[0].Execution.Outcome != domain.CommandOutcomeAmbiguous {
 			t.Fatalf("command = %+v", r.Lifecycle)
 		}
 		found := false
@@ -198,7 +200,8 @@ func TestReplayNeverRecomputes(t *testing.T) {
 		user := principal(domain.AuthorityUser)
 		first := f.mustIngest(user, richEvent("rich"))
 		seq := f.lastSeq()
-		changed := Ingester{Limits: domain.Limits{MaxDiagnosticsPerSpan: 1, MaxEventDiagnostics: 1}, IDs: &domain.SequentialIDs{}, Now: f.in.Now}
+		changed := f.in
+		changed.Limits, changed.IDs = domain.Limits{MaxDiagnosticsPerSpan: 1, MaxEventDiagnostics: 1}, &domain.SequentialIDs{}
 		if reflect.DeepEqual(changed.Versions(), first.Versions) {
 			t.Fatal("precondition: the changed ingester must record different execution versions")
 		}

@@ -390,7 +390,7 @@ func (r *run) lifecycle(c unitCtx, cmd domain.LifecycleCommand) error {
 	if diag != nil {
 		r.unitDiags = append(r.unitDiags, scopedDiag{*diag, detail})
 	}
-	if r.g.Semantic != nil {
+	if r.pol != nil {
 		if err := r.executeCommand(&rec, outcome, diag); err != nil {
 			return err
 		}

@@ -38,12 +38,16 @@ type Ingester struct {
 	// bound is unreachable in routine use; exceeding it still rejects the
 	// event (store.ErrLimitExceeded) rather than deciding on a partial set.
 	LookupLimit int
-	// Semantic is the recorded Phase 3 policy (P3-40/42). When set, every
-	// new event is identified by the v3 request hash and may carry a typed
-	// operation stream; its receipt and envelope record the hash schema,
-	// limits and policy. Nil keeps the frozen v2 identity and rejects typed
-	// operations and resource control as unsupported (fail closed).
+	// Semantic is the recorded Phase 3 policy (P3-40/42); nil means
+	// policy.DefaultPhase3Policy(). Every new event is identified by the v3
+	// request hash and may carry a typed operation stream; its receipt and
+	// envelope record the hash schema, limits and policy. Frozen v2 identity
+	// remains only for retries of events recorded under it.
 	Semantic *domain.Phase3Policy
+	// legacyV2 makes new events use the frozen Phase 2 identity and
+	// PARSED_NOT_EXECUTED commands. Tests only: it recreates Phase 2
+	// history for upgrade and retry coverage.
+	legacyV2 bool
 	// Operations executes typed operations by kind (P3-34). A kind with no
 	// handler fails closed with domain.ErrUnsupportedSchema.
 	Operations map[domain.SemanticOperationKind]OperationHandler
@@ -67,11 +71,23 @@ func (g Ingester) lookupLimit() int {
 // receipt (D14, M2).
 func (g Ingester) Versions() domain.ExecutionVersions {
 	v := domain.ExecutionVersions{Parser: directive.ParserVersion, Policy: policy.Version, Limits: g.Limits.Effective()}
-	if g.Semantic != nil {
-		pol := *g.Semantic
-		v.Semantic = &pol
+	if pol := g.semantic(); pol != nil {
+		v.Semantic = pol
 	}
 	return v
+}
+
+// semantic is the effective Phase 3 policy for new events, a fresh copy,
+// or nil for frozen v2 identity (tests only).
+func (g Ingester) semantic() *domain.Phase3Policy {
+	if g.legacyV2 {
+		return nil
+	}
+	pol := policy.DefaultPhase3Policy()
+	if g.Semantic != nil {
+		pol = *g.Semantic
+	}
+	return &pol
 }
 
 func (g Ingester) now() time.Time {
@@ -109,7 +125,7 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	if err := checkSizes(e, hardSizes()); err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	if err := checkSizes(e, configuredSizes(g.Limits.Effective(), g.Semantic)); err != nil {
+	if err := checkSizes(e, configuredSizes(g.Limits.Effective(), g.semantic())); err != nil {
 		if e.EventID == "" || p.Validate() != nil {
 			return domain.IngestReceipt{}, err
 		}
@@ -127,7 +143,7 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	e = e.Clone()
 	// Structure and authority only: configured limits apply after the
 	// idempotency lookup, to new events (F3).
-	if err := validateRequest(e, p, retryCeiling(g.Limits), ceilingPolicy(g.Semantic)); err != nil {
+	if err := validateRequest(e, p, retryCeiling(g.Limits), ceilingPolicy(g.semantic())); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	var anonymous string
@@ -182,15 +198,15 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	if err := checkSizes(e, hardSizes()); err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	validation, pol := limits, g.Semantic
-	if err := checkSizes(e, configuredSizes(limits, g.Semantic)); err != nil {
+	validation, pol := limits, g.semantic()
+	if err := checkSizes(e, configuredSizes(limits, g.semantic())); err != nil {
 		if e.EventID == "" || p.Validate() != nil {
 			return domain.IngestReceipt{}, err
 		}
 		if admit := admitKnownRetry(tx, p, e, err); admit != nil {
 			return domain.IngestReceipt{}, admit
 		}
-		validation, pol = retryCeiling(g.Limits), ceilingPolicy(g.Semantic)
+		validation, pol = retryCeiling(g.Limits), ceilingPolicy(g.semantic())
 	}
 	e = e.Clone()
 	if err := validateRequest(e, p, validation, pol); err != nil {
@@ -222,15 +238,15 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	// Only a new occurrence is held to the currently configured limits and
 	// policy (F3, SPEC-1.7, DUR-1.2): a retry above replayed its receipt
 	// whatever they are now.
-	if err := validateRequest(e, p, limits, g.Semantic); err != nil {
+	if err := validateRequest(e, p, limits, g.semantic()); err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	payload, err := newRequestHash(e, p, limits, g.Semantic)
+	payload, err := newRequestHash(e, p, limits, g.semantic())
 	if err != nil {
 		return domain.IngestReceipt{}, err
 	}
 
-	r := &run{g: g, tx: tx, p: p, e: e, binding: b, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
+	r := &run{g: g, pol: g.semantic(), tx: tx, p: p, e: e, binding: b, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
 	rc, err := r.apply()
 	if err != nil {
 		// Everything above only read; from here the core has written. Any

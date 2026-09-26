@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/lifecycle"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -37,11 +38,11 @@ type LifecycleExecutor interface {
 }
 
 // LifecycleOutcome is an executed command's committed receipt, the grant
-// that authorized it if any, and its frozen item result.
-type LifecycleOutcome struct {
-	MutationReceiptID, GrantID string
-	Result                     domain.ItemMutationResult
-}
+// that authorized it if any, and its frozen item result: the lifecycle
+// service's own type, so *lifecycle.Service is a LifecycleExecutor.
+type LifecycleOutcome = lifecycle.LifecycleOutcome
+
+var _ LifecycleExecutor = (*lifecycle.Service)(nil)
 
 // ItemVersion is an exact item occurrence at a version.
 type ItemVersion struct {

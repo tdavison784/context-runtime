@@ -85,6 +85,9 @@ func TestWorking_DuplicateAndMalformed(t *testing.T) {
 // retry returns the identical records.
 func TestLifecycle_ParsedNotExecuted_D1(t *testing.T) {
 	eachStore(t, func(t *testing.T, f *fixture) {
+		// D1 is the frozen Phase 2 contract, still what every v1 record
+		// means; new Phase 3 events execute (TestCommandsV2_*).
+		f.in.legacyV2 = true
 		user := principal(domain.AuthorityUser)
 		e := userEvent("u1", "## Goal [ship]\nShip it.\n## Resolve [ship]\n## Unpin [ship]\n## Resolve [nope]\n", true)
 		r := f.mustIngest(user, e)

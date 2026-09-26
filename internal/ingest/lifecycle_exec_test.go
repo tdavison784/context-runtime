@@ -46,7 +46,7 @@ func (l fakeLifecycle) apply(tx store.Tx, a domain.LifecycleAction, actor domain
 	}
 	audit := "life_" + in.RequestID
 	after, err := tx.UpdateItem(in.ItemID, in.ExpectedVersion, ch, domain.LifecycleEvent{
-		ID: audit, SessionID: sess, Seq: seq, TargetKind: domain.TargetItem, TargetID: in.ItemID, Action: string(a), Actor: actor})
+		ID: audit, SessionID: actor.SessionID, Seq: seq, TargetKind: domain.TargetItem, TargetID: in.ItemID, Action: string(a), Actor: actor})
 	if err != nil {
 		return LifecycleOutcome{}, err
 	}
@@ -160,6 +160,7 @@ func TestCommandsV2_AbortsAtomically(t *testing.T) {
 		sys, user := principal(domain.AuthoritySystem), principal(domain.AuthorityUser)
 		f.mustIngest(sys, sysEvent("g", "## Goal [G]\nShip.\n"))
 
+		f.in.Lifecycle = nil
 		f.requireAtomic(domain.ErrUnsupportedSchema, func() error {
 			_, err := f.ingest(sys, sysEvent("no-exec", "## Remember\n- n\n## Resolve [G]\n"))
 			return err

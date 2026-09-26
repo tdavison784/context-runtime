@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
 )
@@ -81,11 +82,12 @@ func TestV3_NewEventRecordsSchema(t *testing.T) {
 	})
 }
 
-// TestV3_LegacyIngesterRejectsOperations (P3-34, fail closed): an ingester
-// without a recorded Phase 3 policy cannot accept typed operations or
-// resource control; nothing is written.
+// TestV3_LegacyIngesterRejectsOperations (P3-34, fail closed): frozen v2
+// identity (which only tests can still select for new events) cannot
+// accept typed operations or resource control; nothing is written.
 func TestV3_LegacyIngesterRejectsOperations(t *testing.T) {
 	eachStore(t, func(t *testing.T, f *fixture) {
+		f.in.legacyV2 = true
 		user := principal(domain.AuthorityUser)
 		e := userEvent("v3-legacy", "hi", false)
 		e.Operations = []domain.SemanticOperation{spanOp(0)}
@@ -103,13 +105,12 @@ func TestV3_RetryUsesRecordedSchema(t *testing.T) {
 	phase3Stores(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
 		e := userEvent("v2-old", "## Remember\n- old fact\n", true)
-		semantic := f.in.Semantic
-		f.in.Semantic = nil
+		f.in.legacyV2 = true
 		old := f.mustIngest(user, e)
 		if old.SchemaVersion != domain.IngestReceiptSchemaVersion || old.RequestHashVersion != "" {
 			t.Fatalf("legacy receipt %q/%q", old.SchemaVersion, old.RequestHashVersion)
 		}
-		f.in.Semantic = semantic
+		f.in.legacyV2 = false
 		seq := f.lastSeq()
 		if got := f.mustIngest(user, e); !reflect.DeepEqual(normReceipt(got), normReceipt(old)) {
 			t.Fatalf("v2 retry after upgrade did not replay the original receipt")
@@ -214,13 +215,12 @@ func TestV3_OperationCountCeiling(t *testing.T) {
 func TestV3_DirectiveNamespaceExplicit(t *testing.T) {
 	phase3Stores(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
-		semantic := f.in.Semantic
-		f.in.Semantic = nil
+		f.in.legacyV2 = true
 		old := mustDirective(t, f.mustIngest(user, userEvent("ns-old", "## Pinned\n- [dep] Use v2.\n", true)), "dep")
 		if old.Namespace != "" {
 			t.Fatalf("legacy ingestion set namespace %q", old.Namespace)
 		}
-		f.in.Semantic = semantic
+		f.in.legacyV2 = false
 		r := f.mustIngest(user, userEvent("ns-new", "## Pinned\n- [dep] Use v3.\n", true))
 		pin := mustDirective(t, r, "dep")
 		if pin.Namespace != domain.NamespaceDirective || pin.ValidateSemantic() != nil {
@@ -235,4 +235,16 @@ func TestV3_DirectiveNamespaceExplicit(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestV3_DefaultPolicy (P3-40/42): with no policy configured, a new event
+// uses v3 identity under policy.DefaultPhase3Policy(), recorded in full.
+func TestV3_DefaultPolicy(t *testing.T) {
+	ms := memory.New() // SQLite joins after W2's receipt/envelope v2 columns
+	t.Cleanup(func() { ms.Close() })
+	f := newFixture(t, ms)
+	r := f.mustIngest(principal(domain.AuthorityUser), userEvent("dflt", "hello", false))
+	if r.RequestHashVersion != domain.RequestHashV3 || r.Versions.Semantic == nil || *r.Versions.Semantic != policy.DefaultPhase3Policy() {
+		t.Fatalf("receipt policy %+v under %q", r.Versions.Semantic, r.RequestHashVersion)
+	}
 }

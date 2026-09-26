@@ -2,11 +2,14 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/lifecycle"
+	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
 	"github.com/tdavison784/context-runtime/internal/store/sqlite"
@@ -42,7 +45,33 @@ func eachStore(t *testing.T, fn func(t *testing.T, f *fixture)) {
 }
 
 func newFixture(t *testing.T, s store.Store) *fixture {
-	return &fixture{t: t, s: s, in: Ingester{IDs: &domain.SequentialIDs{}, Now: func() time.Time { return t0 }}}
+	return &fixture{t: t, s: s, in: Ingester{IDs: &domain.SequentialIDs{}, Now: func() time.Time { return t0 }, Lifecycle: lifecycleFor(t, s)}}
+}
+
+// errProbe rolls back the semantic-facet probe.
+var errProbe = errors.New("probe")
+
+// lifecycleFor is W3's lifecycle service over s under the default Phase 3
+// policy. A store without the Phase 3 semantic facet (before W2's backends
+// land) cannot run it; the fixture then uses the routing fake, which is
+// never gate evidence, and says so.
+func lifecycleFor(t *testing.T, s store.Store) LifecycleExecutor {
+	t.Helper()
+	svc, err := lifecycle.New(s, policy.DefaultPhase3Policy())
+	if err != nil {
+		t.Fatalf("lifecycle.New: %v", err)
+	}
+	supported := false
+	_ = s.Update(ctx, sess, func(tx store.Tx) error {
+		_, err := store.Semantic(tx)
+		supported = err == nil
+		return errProbe
+	})
+	if !supported {
+		t.Log("lifecycle executor: routing fake (store lacks the Phase 3 semantic facet; pending W2)")
+		return fakeLifecycle{calls: new([]lifecycleCall)}
+	}
+	return svc
 }
 
 const sess = "S"

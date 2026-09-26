@@ -14,6 +14,7 @@ import (
 type run struct {
 	g          Ingester
 	binding    *domain.OutcomeBinding // a provider outcome's originating context
+	pol        *domain.Phase3Policy   // effective Phase 3 policy; nil only for frozen v2 (tests)
 	tx         store.Tx
 	p          domain.Principal
 	e          domain.Event
@@ -206,7 +207,7 @@ func (r *run) fill(it domain.ContextItem) domain.ContextItem {
 	}
 	// Under a Phase 3 policy a parsed directive's namespace is explicit
 	// (P3-3); its current key is the same as the legacy fallback's.
-	if r.g.Semantic != nil && it.DirectiveID != "" && it.Section != domain.SectionNone && it.Namespace == "" {
+	if r.pol != nil && it.DirectiveID != "" && it.Section != domain.SectionNone && it.Namespace == "" {
 		it.Namespace = domain.NamespaceDirective
 	}
 	it.ContentHash = domain.ContentHash(it.Parts)
@@ -226,7 +227,7 @@ func (r *run) newItem(it domain.ContextItem) (domain.ContextItem, error) {
 	it.ID = domain.DerivedItemID(r.p.SessionID, r.itemKey(), len(r.items))
 	it.Seq = r.tx.NextSeq()
 	validate := it.Validate
-	if r.g.Semantic != nil {
+	if r.pol != nil {
 		validate = it.ValidateSemantic
 	}
 	if err := validate(); err != nil {
@@ -343,9 +344,9 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 		env domain.EventEnvelope
 		err error
 	)
-	if r.g.Semantic != nil {
+	if r.pol != nil {
 		rc.SchemaVersion, rc.RequestHashVersion, rc.Operations, rc.MutationReceiptIDs = domain.IngestReceiptSchemaV2, domain.RequestHashV3, r.opResults, r.mutationReceipts
-		env, err = newSemanticEnvelope(r.p, r.occurrence, r.e, r.limits, *r.g.Semantic)
+		env, err = newSemanticEnvelope(r.p, r.occurrence, r.e, r.limits, *r.pol)
 	} else {
 		env, err = domain.NewEventEnvelope(r.p, r.occurrence, r.e)
 	}
