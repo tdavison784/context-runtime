@@ -29,6 +29,7 @@ func (p *coreParser) extract() {
 			// Only top-level bullets start items; blank and indented lines
 			// continue the preceding item. Unindented prose is malformed
 			// content through the next bullet, never an implicit item (M4).
+			first := len(p.items)
 			for i := 0; i < len(lines); {
 				j := i + 1
 				for j < len(lines) && continuation(p.lineBytes(lines[j])) {
@@ -44,6 +45,7 @@ func (p *coreParser) extract() {
 				}
 				i = k
 			}
+			p.dropRepeatedIDs(si, first)
 		} else {
 			// A single body keeps every byte between its first and last
 			// non-blank lines, including original line endings (D7).
@@ -55,6 +57,26 @@ func (p *coreParser) extract() {
 			p.addItem(rawItem{section: h.section, id: h.id, explicit: h.id != "", text: p.join(slices), slices: slices, attrs: h.attrs, byteRange: r, headingRange: h.byteRange, sectionIndex: si})
 		}
 	}
+}
+
+// dropRepeatedIDs removes every member of section si (items from first on)
+// whose explicit or derived directive ID repeats within that list, so no
+// member under an ambiguous ID is applied (M4). Repetition across sections is
+// left to source order in ingestion.
+func (p *coreParser) dropRepeatedIDs(si, first int) {
+	counts := make(map[string]int, len(p.items)-first)
+	for _, it := range p.items[first:] {
+		counts[it.id]++
+	}
+	kept := p.items[:first]
+	for _, it := range p.items[first:] {
+		if counts[it.id] > 1 {
+			p.reject(si, "duplicate directive ID", it.byteRange)
+			continue
+		}
+		kept = append(kept, it)
+	}
+	p.items = kept
 }
 func (p *coreParser) lineBytes(l sourceLine) []byte { return p.data[l.start:l.end] }
 func continuation(b []byte) bool {

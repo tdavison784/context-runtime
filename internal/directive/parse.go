@@ -136,6 +136,8 @@ func diagnosticReason(reason string) domain.DiagnosticReason {
 		return domain.ReasonBlockQuote
 	case "HTML comment":
 		return domain.ReasonHTMLComment
+	case "duplicate directive ID":
+		return domain.ReasonDuplicateID
 	case "unsupported lifecycle":
 		return domain.ReasonUnsupportedLifecycle
 	case "nested heading":

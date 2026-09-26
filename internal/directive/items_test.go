@@ -162,8 +162,35 @@ func TestMalformedItemsAndLifecycle(t *testing.T) {
 		t.Fatal(p)
 	}
 }
+func TestRepeatedIDsWithinList(t *testing.T) {
+	cases := []struct {
+		input string
+		texts []string
+	}{
+		{"## Working\n- [a] one\n- [b] two\n- [a] three", []string{"two"}},
+		{"## Remember\n- {ttl=1} same\n- {ttl=5} same\n- other", []string{"other"}},
+		{"## Unpin\n- [a]\n- [a]\n- [b]", []string{"b"}},
+		// Across sections, repetition is source order for ingestion to apply.
+		{"## Working\n- [a] one\n## Working\n- [a] two", []string{"one", "two"}},
+		{"## Pinned [a]\nx\n## Pinned [a]\ny", []string{"x", "y"}},
+	}
+	for _, tt := range cases {
+		p := parsedCore(tt.input)
+		var got []string
+		for _, it := range p.items {
+			if it.lifecycle {
+				got = append(got, it.id)
+			} else {
+				got = append(got, it.text)
+			}
+		}
+		if !reflect.DeepEqual(got, tt.texts) {
+			t.Fatalf("%q: %q %+v", tt.input, got, p.diagnostics)
+		}
+	}
+}
 func TestDerivedIDsAndItemLimit(t *testing.T) {
-	p := parsedCore("## Remember\n- same\n- same")
+	p := parsedCore("## Remember\n- same\n## Remember\n- same")
 	hash := domain.ContentHash([]domain.ContentPart{{Type: domain.PartText, Text: "same"}})
 	want := "remember-" + strings.TrimPrefix(hash, "sha256:")
 	if len(p.items) != 2 || p.items[0].id != want || p.items[1].id != want || len(want) != 73 {
