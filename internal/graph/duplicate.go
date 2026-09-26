@@ -25,20 +25,33 @@ var (
 
 // SameDirectiveSemantics reports whether a and b are the same semantic
 // directive for deduplication (FR-ING-005, D10): same session, task,
-// workflow, agent and turn (the eligibility origin), exact authority and
+// workflow, agent, role, and eligibility origin (turn ID and creation turn
+// for a TURN-scoped item, creation turn for a TTL item, R11), exact authority and
 // access boundary, section and directive ID, canonical content, and every
 // effective kind/generation/scope/retention/TTL/goal-state/residency,
 // importance, and tag value. Mutable lifecycle fields are compared as they
 // currently are, so a canonical item that was since resolved, unpinned, or
 // archived never absorbs a fresh write. Source locators, event IDs, item
-// IDs, sequence numbers, creation times, and usage counters identify the
-// occurrence, not its meaning, and are not compared.
+// IDs, sequence numbers, creation times, source ranges, and usage counters
+// identify the occurrence, not its meaning, and are not compared. An
+// obligation declaration is not an item field: callers compare it
+// separately (R11).
 func SameDirectiveSemantics(a, b domain.ContextItem) bool {
+	// The turn origin is part of meaning only where it governs eligibility
+	// (R11): a TURN-scoped item expires with its turn, and a TTL counts
+	// from its creation turn. A TASK-scoped directive restated verbatim in
+	// a later turn is the same directive.
+	if a.Scope == domain.ScopeTurn && (a.TurnID != b.TurnID || a.CreatedTurn != b.CreatedTurn) {
+		return false
+	}
+	if a.TTLTurns != nil && a.CreatedTurn != b.CreatedTurn {
+		return false
+	}
 	return a.SessionID == b.SessionID &&
 		a.TaskID == b.TaskID &&
 		a.WorkflowID == b.WorkflowID &&
 		a.AgentID == b.AgentID &&
-		a.TurnID == b.TurnID &&
+		a.Role == b.Role &&
 		a.Authority == b.Authority &&
 		a.Access == b.Access &&
 		a.Scope == b.Scope &&
