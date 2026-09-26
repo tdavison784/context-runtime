@@ -1503,11 +1503,11 @@ each with its own fix and test.
 
 ## Tests that lock the behavior
 
-Concrete test names are cited per clause below where they exist (SPEC-1.4:
-most now do); a clause phrased as a requirement rather than naming a test
-is either still landing on another worker's branch (noted inline) or is a
-genuine gap `p2-tests`/this ADR's final reconciliation pass should close,
-not an unwritten placeholder for the whole section.
+Concrete test names are cited per clause below where they exist
+(SPEC-1.4: nearly all now do, confirmed against the merged integration
+head); a clause still phrased as a requirement rather than naming a test
+is a genuine gap for `p2-tests` to close, not an unwritten placeholder
+for the whole section.
 
 - **§1 (lifecycle commands):** `internal/ingest` — an unauthorized source
   actor's Resolve/Unpin aborts the whole event (no partial mutation); an
