@@ -237,3 +237,56 @@ func TestLookupCursorsSeek(t *testing.T) {
 		Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}})(mid, lookupBatch)
 	assertSeeks(t, s, "(seq,item_id)>(?,?)", q, args...)
 }
+
+// TestSourceItemsReportsUnverifiedOnce is DUR-3.1: paging through sources
+// interleaved with legacy rows 0001 altered reports each unverified ID on
+// exactly one page, never one past the page's Next cursor (which the next
+// page reads again).
+func TestSourceItemsReportsUnverifiedOnce(t *testing.T) {
+	l := openLegacy(t, 1)
+	for i, id := range []string{"src-a", "lossy-1", "src-b", "lossy-2", "src-c"} {
+		text := id
+		if strings.HasPrefix(id, "lossy") {
+			text = id + "\xff"
+		}
+		it := storetest.NewItem("s", id, uint64(i+1), text)
+		it.Source = &domain.SourceRef{Kind: domain.SourcePath, Locator: "src/main.go"}
+		o := legacyLists(t, "item", it)
+		o["f_parts"] = legacyPartsJSON(t, it.Parts)
+		l.insert("item", it, o)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		f := store.SourceFilter{Viewer: planViewer, LocatorKey: "path:src/main.go", Page: store.Page{Limit: 1}}
+		var items []string
+		seen := map[string]int{}
+		for page := 0; ; page++ {
+			lk, err := tx.SourceItems(f)
+			if err != nil {
+				return err
+			}
+			for _, it := range lk.Items {
+				items = append(items, it.ID)
+			}
+			for _, id := range lk.Unverified {
+				seen[id]++
+			}
+			if page > 10 {
+				t.Fatal("paging does not terminate")
+			}
+			if !lk.More {
+				break
+			}
+			f.Page.After = lk.Next
+		}
+		if strings.Join(items, ",") != "src-a,src-b,src-c" {
+			t.Errorf("items = %v", items)
+		}
+		if seen["lossy-1"] != 1 || seen["lossy-2"] != 1 {
+			t.Errorf("unverified reported %v, want each once", seen)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
