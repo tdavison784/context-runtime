@@ -778,19 +778,18 @@ Answers to `p2-contract`'s implementation questions, appended to
 
 **R18 (p2-store questions, all accepted):**
 
-- **Retiring the untyped namespace methods (refines §17, M6/R6/R10 — in
-  progress).** `p2-store` has landed the typed methods
+- **Retiring the untyped namespace methods (refines §17, M6/R6/R10 —
+  landed, SPEC-1.4).** `p2-store` landed the typed methods
   `store.CurrentVersion(domain.CurrentKey)` and
   `store.CurrentVersions(taskID, ns, id)`; the pre-M6
-  `CurrentDirective`/`CurrentDirectives`/`SetCurrentDirective` methods are
-  marked `Deprecated` in `internal/store/store.go` but not yet removed.
-  R18 confirms the sequence: `internal/graph` and `internal/ingest` switch
-  every call site to the typed methods (retiring R10's
-  `ErrNamespaceConflict` transitional fail-closed rule, which was never
-  actually implemented since the switch was still pending), and only then
-  does `p2-store` delete the deprecated methods. As of this ADR revision,
-  `internal/graph` (`graph.go`) still calls the deprecated methods; the
-  switch is `p2-graph`'s outstanding work, not yet done.
+  `CurrentDirective`/`CurrentDirectives`/`SetCurrentDirective` methods were
+  deleted once every caller switched (`55761b8`; `internal/graph`'s call
+  sites now use `CurrentVersion`/`CurrentVersions` exclusively,
+  `0a99ac7`). R10's `ErrNamespaceConflict` transitional fail-closed rule
+  was never actually implemented, since the switch itself landed directly
+  — there was no gap for a transitional rule to cover, and no such symbol
+  exists in the codebase; this ADR's Tests section no longer requires one
+  (SPEC-1.4 correction, below).
 - **Obligation retirement lookup, named (confirms §9/§20, D13/R9).**
   `store.ObligationsBySource(sourceItemID string, limit int)
   ([]domain.ObligationVersion, error)` and
@@ -800,25 +799,22 @@ Answers to `p2-contract`'s implementation questions, appended to
   (`internal/store/memory`, `internal/store/sqlite`) R9 called for — the
   `limit` parameter is D17's bounded-scan requirement made concrete.
 - **`domain.UnresolvedReference` and migration 0008 (refines §16, M5/R2 —
-  not yet landed).** `p2-contract` is to add `domain.UnresolvedReference`
-  (session, occurrence, span, and item IDs; lexical locator key and rule
-  version; owner access boundary and authority; `Seq`; an ID derived from
-  occurrence plus ordinal) and `p2-store` persists it in a new migration
-  0008, so an unresolved References item survives restart for later
-  linking (§16's "unresolved references persist" requirement, now given a
-  concrete shape). Neither the type nor migration 0008 exists as of this
-  ADR revision; `p2-tests` should not assume it when writing References
-  fixtures until it lands.
-- **`domain.TTLLive`'s zero-creation-turn guard (refines §19, M8 — not yet
-  landed).** `TTLLive(created, current uint64, n int) bool` is landed
-  (`internal/domain/item.go`) with D18's difference-form comparison, but
-  does not yet special-case `created == 0`: R18 rules that a pre-Phase-2
-  item with no recorded creation turn (`created == 0`) must report
-  `false` regardless of `current`/`n`, so a record migrated without turn
-  metadata is never treated as live by an invented default (M8) merely
-  because the difference formula happens to fall inside `n`. This guard
-  is not yet in the merged `TTLLive`; landing it is `p2-contract`'s
-  outstanding work.
+  landed, SPEC-1.4).** `domain.UnresolvedReference` (`internal/domain
+  /reference.go`) carries session, occurrence, span, and item IDs; lexical
+  locator key and rule version; owner access boundary and authority;
+  `Seq`; an ID derived from occurrence plus ordinal. Migration
+  `0008_unresolved_references.sql` persists it as `rec_reference`, indexed
+  on `(session_id, locator_key, rule_version, seq, id)`, so an unresolved
+  References item survives restart for later linking (§16's "unresolved
+  references persist" requirement).
+- **`domain.TTLLive`'s zero-creation-turn guard (refines §19, M8 —
+  landed, SPEC-1.4).** `TTLLive(created, current uint64, n int) bool`
+  (`internal/domain/item.go`) now reads `n > 0 && created > 0 && current
+  >= created && current-created < uint64(n)`: a pre-Phase-2 item with no
+  recorded creation turn (`created == 0`) reports `false` regardless of
+  `current`/`n`, so a record migrated without turn metadata is never
+  treated as live by an invented default (M8) merely because the
+  difference formula would otherwise fall inside `n`.
 - **Bounded diagnostic/lifecycle-command list reads (refines §12/§1 —
   deferred).** A future cross-event caller reading diagnostics or
   lifecycle commands by list (rather than by one event's receipt) needs a
@@ -846,14 +842,19 @@ Answers to `p2-ingest`'s implementation questions, appended to
   message" and its pending-input items — no separate pending-input
   structure is needed; the receipt already carries it.
 - **Indexed lookups, not session-wide scans (refines §7/§13/§15/§16,
-  D10/D17/D19/M5 — not yet landed).** `p2-store` adds indexes so blob-
-  reference lookup (§15, R5), duplicate-candidate lookup (§7, D10), and
-  reference matching (§16, M5/R2) are bounded lookups, not a scan of every
-  item in a session, matching D17/NFR's bounded-work discipline. No such
-  index or lookup method exists in `internal/store/store.go` as of this
-  ADR revision; this is `p2-store`'s outstanding work, and `p2-ingest`
-  must not implement any of the three as a full-session scan in the
-  meantime.
+  D10/D17/D19/M5 — landed, SPEC-1.4).** `p2-store` added indexed lookups
+  so blob reference (`ItemsByBlob`, migration 0009, §15/R5),
+  duplicate-candidate (`DuplicateCandidates`, migration 0010, §7/D10), and
+  reference matching (`UnresolvedReferences`, migration 0008, §16/M5/R2)
+  are bounded, not a scan of every item in a session, matching D17/NFR's
+  bounded-work discipline; a fourth, `ItemsBySourceKey` (migration 0011,
+  R19), was added for the same reason. ADR 3 records the migrations and
+  the `assertIndexed` `EXPLAIN QUERY PLAN` tests locking each to a real
+  index. **These three lookups are properly indexed; the *other* graph and
+  current-version reads `internal/ingest` calls once per ingested item or
+  section — repeated `Relationships`/`Items`/`Grants` calls — reintroduce
+  an unbounded scan one level up, which is a separate, still-open finding
+  (SPEC-1.3/F1, §26).**
 - **Locator identity has no repository namespace in V1 (resolves the §16
   open question, M5/R2).** Sharpens this ADR's earlier "References
   base-directory policy — resolved, deferred" open-question answer with
@@ -893,66 +894,49 @@ Findings from `p2-ingest`'s own test suite, appended to
 `phase2-amendments.md` as R20.
 
 - **Reserved internal ID prefixes on caller `EventID` (refines §10/§11,
-  D14/D15/R16 — not yet landed).** `Event.Validate`
-  (`internal/domain/ingest.go`) checks length and printable-ASCII (R16)
-  but not shape: a caller-supplied `EventID` equal to or prefixed like an
-  internally generated occurrence or artifact ID — `evc_` (caller
-  occurrence, `internal/domain/ids.go`'s `callerOccurrencePrefix`), `eva_`
-  (anonymous occurrence), or any `IDDomain` prefix (`dgn`, `cmd`, `sec`,
-  `ref`, `internal/domain/ids.go`) — currently passes validation. R20
-  rules that `Event.Validate` must reject any caller `EventID` using a
-  reserved internal prefix, so a caller can never construct an `EventID`
-  that collides with, or is mistaken for, an internally derived ID; this
-  is `p2-contract`'s outstanding work. Separately, R20 confirms "ingest
-  errors never echo item IDs" as already true: `internal/ingest`'s only
+  D14/D15/R16 — landed, SPEC-1.4).** `Event.Validate`
+  (`internal/domain/ingest.go:111`) now also calls `ReservedIDPrefix`: a
+  caller-supplied `EventID` equal to or prefixed like an internally
+  generated occurrence or artifact ID — `evc_`, `eva_`, any `IDDomain`
+  prefix (`dgn`, `cmd`, `sec`, `ref`), `itm_`, `call_`, `turn_`, `obl_`,
+  `rel_`, `evt_`, or `lce_` (SPEC-1.13 added the last) — is rejected,
+  locked by `TestEventIDRejectsReservedPrefixes`. "Ingest errors never
+  echo item IDs" is likewise confirmed true: `internal/ingest`'s only
   formatted error (`internal/ingest/ids.go`) names a limit, never an ID.
 - **`DirectiveIDDerived` notices for a refused section (refines §6/§10,
-  D9/D14 — not yet landed).** `internal/directive` emits an informational
-  `DirectiveIDDerived` diagnostic (`internal/directive/items.go:265`) for
-  every item it derives an ID for, before `internal/ingest` decides
-  whether that item's section is actually applied. `internal/ingest
-  /diagnostics.go`'s `diagnostics.add`/`records` currently keep every
-  diagnostic the parser produced regardless of that later decision, so a
-  section ingest ultimately refuses (for example a Working section
-  `workingSection` drops entirely on a boundary conflict, per the D11 item
-  below) can still leave a `DirectiveIDDerived` notice in the receipt for
-  an item that was never created. R20 rules the receipt must drop a
-  section's `DirectiveIDDerived` notices when ingest refuses that section,
-  so a diagnostic never reports a derived ID for an item that does not
-  exist; `p2-ingest`'s outstanding work.
+  D9/D14 — landed, SPEC-1.4).** `internal/directive` emits an
+  informational `DirectiveIDDerived` diagnostic for every item it derives
+  an ID for, before `internal/ingest` decides whether that item's section
+  is actually applied. `internal/ingest`'s unit loop now filters this: `if
+  d.Code == domain.DirectiveIDDerived && !r.written[d.Range] { continue
+  }` — a derived-ID notice is reported only for a range ingestion actually
+  wrote, so a section ingest refuses (a Working section dropped whole on a
+  boundary conflict, per the D11 item below) never leaves a
+  `DirectiveIDDerived` notice for an item that does not exist.
 - **Residual instructions: no BOM/whitespace-only items, lossless bytes,
   and malformed trusted headings still produce residue (refines §5, D8 —
-  not yet landed as specified).** `internal/ingest/derive.go`'s
-  `residualSlices` already drops a whitespace-only residual range before
-  `residualInstruction` is ever called (its trim loop empties `out`, and
-  `applyUnit` only queues a residual step when `len(residual) > 0`), so
-  whitespace-only residue already creates no item; R20 additionally
-  requires the same for a residue that is only a leading UTF-8 BOM
-  (3 bytes, not ASCII whitespace, so the current trim loop does not strip
-  it) — not yet handled. R20's other two requirements are not yet
-  implemented and contradict the function's current documented behavior:
-  (a) *lossless bytes* — `residualSlices`'s trim loop mutates the same
-  `Start`/`End` range both to decide whether residue exists and to build
-  the residual instruction item's actual content
-  (`residualInstruction`'s `b.WriteString(c.text[s.Start:s.End])`), so
-  today a residual instruction's persisted text has already lost its
-  leading/trailing whitespace bytes; R20 requires the trim to affect only
-  the *emptiness* decision, never the bytes actually stored. (b) *malformed
-  trusted headings still produce residue* — `residualSlices`'s doc comment
-  states "Malformed section bytes are never salvaged into an instruction:
-  only text the parser did not claim is residual," and its implementation
-  excludes every section's `Range` from residual regardless of
-  `Section.Malformed`; for a SYSTEM/HARNESS span this means a malformed
-  trusted heading's body currently is neither a directive item (it failed
-  to parse) nor a residual instruction (its bytes are excluded as
-  "claimed") — it is silently dropped, which is exactly the outcome D8's
-  residual-instruction mechanism exists to prevent. R20 rules that for a
-  SYSTEM/HARNESS span specifically, a malformed section's bytes must
-  still be included in `residualSlices`'s output (not excluded as
-  claimed), so a malformed trusted heading degrades to trusted plain text
-  instead of vanishing. This is `p2-ingest`'s outstanding work; the
-  function's doc comment above states the pre-R20 behavior and must be
-  updated when the fix lands.
+  landed, SPEC-1.4).** `internal/ingest/derive.go`'s pre-ruling
+  `residualSlices`/`residualInstruction` were replaced by `residue`
+  (called last from `applyUnit`, after every directive item and lifecycle
+  command in the unit, per R21's amended M3 order below): a SYSTEM/HARNESS
+  unit's residue is now every byte not claimed by an accepted section or a
+  written item — computed from the parser's own `Section` extents, never
+  re-scanned — so a malformed or refused trusted section's bytes join
+  residue instead of vanishing, exactly as R20 required. The function's
+  own doc comment states this plainly: "text inside a malformed or refused
+  trusted section becomes instruction text rather than silently
+  vanishing." Bytes are kept exactly (no separate trim-for-content step,
+  closing the lossless-bytes gap this ADR previously flagged), and "a
+  residue of only ASCII whitespace and a leading BOM creates no item"
+  closes the BOM-only gap. What remains from a naive "any malformed
+  trusted section becomes residual" reading — wrongly turning a malformed
+  *lifecycle* section (Resolve, Unpin, or an unsupported word) into a
+  residual instruction, which would surface a runtime command's text as
+  trusted instruction content — is `residue`'s own explicit exclusion:
+  "Lifecycle commands ... are never shown to the model as trusted
+  instructions (R21)." §25 records that carve-out and R21's other two
+  refinements in full; all three are landed together in the same
+  function.
 - **A malformed Working section writes no members, stricter than D11's
   literal text (confirms §7, D11 — landed).** `internal/ingest/derive.go
   :workingSection` already returns immediately, creating no items and no
@@ -969,62 +953,56 @@ Findings from `p2-ingest`'s own test suite, appended to
   ReasonBoundaryConflict` (§23), not a per-member drop, because a Working
   snapshot is one atomic operation (D11).
 
-### 25. Round 7 ruling: R21
+### 25. Round 7 ruling: R21 (landed together with R20, SPEC-1.4)
 
-Refines §24/R20's residual-instruction fix before it lands, plus a
-creation-order amendment to M3.
+Refines §24/R20's residual-instruction fix, plus a creation-order
+amendment to M3. All three points below are implemented in the single
+landed `internal/ingest/derive.go:residue` function (§24).
 
 - **A residue that is only a bare heading line creates no item (refines
-  §5/§24, D8/R20 — not yet landed).** Once R20's fix lands (a malformed
-  content section's bytes join residual for a SYSTEM/HARNESS span instead
-  of being excluded as claimed), an empty malformed section — a heading
-  with no body at all — would otherwise become a residual instruction
-  whose entire content is the bare heading line itself. R21 narrows R20:
-  if a unit's residual, after R20's fix, reduces to nothing but such a
-  bare malformed heading line with no other trusted body text anywhere in
-  the unit, no residual instruction item is created for it — a heading
-  alone conveys no instruction content worth preserving, and creating an
-  item for it would just be noise. This does not change R20's core fix
-  for a malformed section that *does* have body text.
+  §5/§24, D8/R20).** An empty malformed section — a heading with no body
+  at all — would otherwise become a residual instruction whose entire
+  content is the bare heading line itself. R21 narrows R20: `residue`'s
+  `case blankBytes(c.text, s.BodyRange):` treats such a section's `Range`
+  as claimed (excluded from residual) directly, so no residual instruction
+  item is ever created for it — a heading alone conveys no instruction
+  content worth preserving. A malformed section that *does* have body text
+  is unaffected and still joins residual under R20's core fix.
 - **Malformed lifecycle sections are never residual instructions (refines
   §5/§24 and §1/§9, D1/D8/R20 — a scoping limit on R20, not a gap).** R20's
   fix (§24) is scoped to malformed *content* sections (Goal, Pinned,
   Working, Remember, References, Ephemeral); it does not extend to a
   malformed Resolve, Unpin, or unsupported-lifecycle-word section (M4's
-  closed vocabulary, §4). A malformed lifecycle heading in a trusted span
-  stays transcript-only, with its diagnostic, exactly as today — R21
-  forbids ever surfacing it as a residual *instruction* item. The reason
-  is D1's core guarantee: a lifecycle command is `PARSED_NOT_EXECUTED`
-  and must never be rendered as a trusted instruction to the model; if a
-  malformed `## Resolve`/`## Unpin`/unsupported-word heading became
-  residual instruction text, a runtime command that failed to parse would
-  reappear as ordinary trusted prose, which is worse than the diagnostic-
-  only status quo it would replace. `internal/directive`'s `Section`
-  already carries its `Keyword`, so `p2-ingest`'s R20 implementation must
-  gate on it: only a content-section keyword's malformed bytes join
-  residual; a lifecycle-section keyword's malformed bytes never do,
-  regardless of span authority.
+  closed vocabulary, §4). `residue`'s first case —
+  `s.Status == directive.SectionUnsupported || s.Keyword == directive.Resolve
+  || s.Keyword == directive.Unpin` — claims (excludes from residual) every
+  lifecycle section regardless of whether it is malformed, so a malformed
+  lifecycle heading in a trusted span stays transcript-only, with its
+  diagnostic, exactly as before R20. The reason is D1's core guarantee: a
+  lifecycle command is `PARSED_NOT_EXECUTED` and must never be rendered as
+  a trusted instruction to the model; if a malformed
+  `## Resolve`/`## Unpin`/unsupported-word heading became residual
+  instruction text, a runtime command that failed to parse would reappear
+  as ordinary trusted prose, which is worse than the diagnostic-only
+  status quo it would replace.
 - **Creation order: a unit's residual instruction item is created after
-  its directive items, amending M3 (refines §10 — not yet landed).** M3
-  (§10) originally ordered a unit's items as "transcript items first, then
-  residual/directive items in source order" — treating residual and
-  directive items as one byte-position-ordered group. R21 amends this: a
-  unit's residual content, and thus its residual instruction item, can
-  only be computed *after* every section and lifecycle command in the
-  unit has been resolved, because whether a given section's bytes end up
-  in residual depends on whether ingest ultimately refused that section
-  (R20) and on that section's keyword (R21, above) — information that
-  does not exist until the whole unit has been processed. `internal/ingest
-  /derive.go`'s `applyUnit` currently sorts a single residual step into
-  its position-ordered `steps` list by `residual[0].Start` — the byte
-  offset of the first residual range — which can place it before some of
-  the unit's own directive items when residual text happens to start
-  earlier in the span than a later section. R21 requires the residual
-  step to run last for its unit unconditionally, never by byte position;
-  `p2-ingest`'s `applyUnit` must be changed accordingly, and this is the
-  amended creation-order M3 (§10) now records: transcript item, then the
-  unit's directive items and lifecycle commands in source order, then
-  finally its residual instruction item, if any.
+  its directive items, amending M3 (refines §10).** M3 (§10) originally
+  ordered a unit's items as "transcript items first, then residual/
+  directive items in source order" — treating residual and directive items
+  as one byte-position-ordered group. R21 amends this: a unit's residual
+  content, and thus its residual instruction item, can only be computed
+  *after* every section and lifecycle command in the unit has been
+  resolved, because whether a given section's bytes end up in residual
+  depends on whether ingest ultimately refused that section (R20) and on
+  that section's keyword (R21, above) — information that does not exist
+  until the whole unit has been processed. `applyUnit` no longer sorts a
+  residual step into its position-ordered `steps` list at all: the steps
+  loop covers only directive items, Working sections, and lifecycle
+  commands, and the function ends with an unconditional `return
+  r.residue(c)` — residue always runs last for its unit, never ordered by
+  byte position. This is the amended creation-order M3 (§10) now records:
+  transcript item, then the unit's directive items and lifecycle commands
+  in source order, then finally its residual instruction item, if any.
 
 ### 26. PR #5 review round 1: F2's accepted residual risk (SEC-1.5)
 
