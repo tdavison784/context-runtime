@@ -285,6 +285,7 @@ var committedMigrations = map[string]string{
 	"0021_phase3_declarations.sql":         "2e1b287ab04010fd28fa38494d0f5ce6d3f51e858979da59fc8e2b55bd89e0d7",
 	"0022_phase3_resources.sql":            "25c4e4c659dd885d34c0a59e1002ed715118ae1697c028b18ddc80d10c7d63b3",
 	"0023_phase3_proofs.sql":               "68b0b1b69d0c7fd4577156000f806b95fd2061a242d18a714befe0321c4461fe",
+	"0024_phase3_retrieval.sql":            "e3ba996a790c1c5bdb80238b2f73c75da1b92635832d2e7e0ece3cd2dadc3d5f",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {
