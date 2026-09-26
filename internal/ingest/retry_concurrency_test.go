@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -114,6 +115,61 @@ func TestConcurrentAnonymous(t *testing.T) {
 		slices.Sort(occurrences)
 		if len(slices.Compact(occurrences)) != n || len(f.items()) != n {
 			t.Fatalf("anonymous submissions merged: %v", occurrences)
+		}
+	})
+}
+
+// TestLateLimitRejectionIsAtomic (TEST-1.3, D17, DUR-1.3): a whole-event
+// limit that trips mid-plan, after earlier items, provenance edges and
+// obligations were already written into the transaction, rejects the event
+// with nothing persisted on either store, and never poisons its EventID:
+// the same event later succeeds under the default limits.
+//
+// MaxEventDiagnostics is deliberately not one of these: it truncates with a
+// DiagnosticsTruncated marker and never rejects (D17), and the commit-time
+// check in run.go is an invariant guard that input cannot reach. That is
+// asserted by TestDiagnosticsCapTruncates below.
+func TestLateLimitRejectionIsAtomic(t *testing.T) {
+	for name, limits := range map[string]domain.Limits{
+		"MaxEventItems":    {MaxEventItems: 5},
+		"MaxRelationships": {MaxRelationships: 3},
+	} {
+		t.Run(name, func(t *testing.T) {
+			eachStore(t, func(t *testing.T, f *fixture) {
+				user := principal(domain.AuthorityUser)
+				f.mustIngest(user, userEvent("w0", "## Working\n- earlier state\n", true))
+				before := f.snapshot()
+				tight := Ingester{Limits: limits, IDs: &domain.SequentialIDs{}, Now: f.in.Now}
+				if _, err := tight.Ingest(ctx, f.s, user, richEvent("rich")); !errors.Is(err, domain.ErrInvalidRecord) {
+					t.Fatalf("err = %v, want an ErrInvalidRecord limit rejection", err)
+				}
+				if after := f.snapshot(); !reflect.DeepEqual(before, after) {
+					t.Fatalf("rejected event wrote state: %+v -> %+v", before, after)
+				}
+				if r := f.mustIngest(user, richEvent("rich")); len(semantic(r)) < 10 {
+					t.Fatalf("event not accepted after the rejection: %d items", len(r.Items))
+				}
+			})
+		})
+	}
+}
+
+// TestDiagnosticsCapTruncates (TEST-1.3, D17): past MaxEventDiagnostics the
+// event is still accepted in full; its receipt keeps at most the cap plus
+// one DiagnosticsTruncated marker per span, and nothing else changes.
+func TestDiagnosticsCapTruncates(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		full := f.mustIngest(user, richEvent("full"))
+		capped, err := Ingester{Limits: domain.Limits{MaxEventDiagnostics: 2}, IDs: &domain.SequentialIDs{}, Now: f.in.Now}.Ingest(ctx, f.s, user, richEvent("capped"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(full.Diagnostics) <= 3 || len(capped.Diagnostics) != 3 || capped.Diagnostics[2].Code != domain.DiagnosticsTruncated {
+			t.Fatalf("diagnostics: full %d, capped %+v", len(full.Diagnostics), capped.Diagnostics)
+		}
+		if len(capped.Items) != len(full.Items) || len(capped.Lifecycle) != len(full.Lifecycle) {
+			t.Fatal("the diagnostics cap changed an ingestion decision")
 		}
 	})
 }
