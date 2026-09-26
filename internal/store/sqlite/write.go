@@ -174,7 +174,10 @@ func (t *transaction) SetCurrentDirective(taskID, directiveID, itemID string) er
 	if v.TaskID != taskID || v.DirectiveID != directiveID {
 		return fmt.Errorf("%w: directive item mismatch", domain.ErrInvalidRecord)
 	}
-	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO directives(session_id,task_id,directive_id,item_id) VALUES(?,?,?,?) ON CONFLICT(session_id,task_id,directive_id) DO UPDATE SET item_id=excluded.item_id", t.session, taskID, directiveID, itemID)
+	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO directives(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id) DO UPDATE SET item_id=excluded.item_id", t.session, taskID, directiveID, v.Access.Scope, v.Access.SessionID, v.Access.WorkflowID, v.Access.TaskID, v.Access.AgentID, itemID)
+	if err == nil {
+		t.semanticWrite, t.wrote = true, true
+	}
 	return err
 }
 func (t *transaction) InsertBlob(v domain.Blob) error {
@@ -199,6 +202,9 @@ func (t *transaction) InsertBlob(v domain.Blob) error {
 		data = []byte{}
 	}
 	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO blobs(session_id,hash,media_type,data,data_nil) VALUES(?,?,?,?,?)", t.session, v.Hash, v.MediaType, data, v.Data == nil)
+	if err == nil {
+		t.wrote = true
+	}
 	return err
 }
 func (t *transaction) InsertObligationVersion(v domain.ObligationVersion) error {
@@ -360,7 +366,7 @@ func (t *transaction) RevokeGrant(id string, event domain.LifecycleEvent) (domai
 	})
 	return v.Clone(), err
 }
-func (t *transaction) PutTask(v domain.TaskState, expected uint64, event *domain.LifecycleEvent) (domain.TaskState, error) {
+func (t *transaction) PutTask(v domain.TaskState, expected uint64, event domain.LifecycleEvent) (domain.TaskState, error) {
 	if err := t.checkSession(v.SessionID); err != nil {
 		return domain.TaskState{}, err
 	}
@@ -376,11 +382,7 @@ func (t *transaction) PutTask(v domain.TaskState, expected uint64, event *domain
 	if err := v.Validate(); err != nil {
 		return domain.TaskState{}, err
 	}
-	needsEvent := creating || old.Status != v.Status
-	if needsEvent != (event != nil) {
-		return domain.TaskState{}, fmt.Errorf("%w: task status change requires exactly one audit event", domain.ErrInvalidRecord)
-	}
-	if event != nil {
+	{
 		if event.TargetKind != domain.TargetTask || event.TargetID != v.TaskID {
 			return domain.TaskState{}, fmt.Errorf("%w: task audit target mismatch", domain.ErrInvalidRecord)
 		}
@@ -404,7 +406,7 @@ func (t *transaction) PutTask(v domain.TaskState, expected uint64, event *domain
 			if err := t.put("task", v.TaskID, 0, v, false); err != nil {
 				return err
 			}
-			return t.AppendLifecycleEvent(*event)
+			return t.AppendLifecycleEvent(event)
 		})
 		return v, err
 	}
@@ -413,16 +415,12 @@ func (t *transaction) PutTask(v domain.TaskState, expected uint64, event *domain
 			return domain.TaskState{}, err
 		}
 	}
-	if event != nil {
-		err = t.atomic(func() error {
-			if err := t.put("task", v.TaskID, 0, v, true); err != nil {
-				return err
-			}
-			return t.AppendLifecycleEvent(*event)
-		})
-	} else {
-		err = t.put("task", v.TaskID, 0, v, true)
-	}
+	err = t.atomic(func() error {
+		if err := t.put("task", v.TaskID, 0, v, true); err != nil {
+			return err
+		}
+		return t.AppendLifecycleEvent(event)
+	})
 	return v, err
 }
 func (t *transaction) AppendLifecycleEvent(v domain.LifecycleEvent) error {
@@ -513,11 +511,21 @@ func (t *transaction) UpdateCall(v domain.CallRecord, expected uint64) (domain.C
 	if old.Revision != expected {
 		return domain.CallRecord{}, domain.ErrVersionConflict
 	}
+	if old.State.Terminal() {
+		return domain.CallRecord{}, domain.ErrImmutable
+	}
 	v.Revision = expected + 1
 	if err = v.Validate(); err != nil {
 		return domain.CallRecord{}, err
 	}
 	if old.State != v.State && !domain.ValidCallTransition(old.State, v.State) {
+		return domain.CallRecord{}, domain.ErrInvalidTransition
+	}
+	wantAttempts := old.Attempts
+	if old.State == domain.CallPrepared && v.State == domain.CallSent {
+		wantAttempts++
+	}
+	if v.Attempts != wantAttempts {
 		return domain.CallRecord{}, domain.ErrInvalidTransition
 	}
 	if old.OutcomeHash != "" && old.OutcomeHash != v.OutcomeHash {
@@ -572,7 +580,10 @@ func (t *transaction) checkCallEvidence(old, next domain.CallRecord) error {
 	}
 	var a domain.CallAttempt
 	if err := t.get("attempt", next.CallID, next.Attempts, &a); err != nil {
-		return domain.ErrInvalidTransition
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.ErrInvalidTransition
+		}
+		return err
 	}
 	switch {
 	case old.State == domain.CallPrepared && next.State == domain.CallSent:

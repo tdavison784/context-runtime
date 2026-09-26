@@ -4,7 +4,9 @@
 // type. Session and record identity form each table's key; other scalar and
 // nested fields occupy typed columns. Presence columns preserve nil pointers
 // and byte slices, while JSON is limited to leaf lists. The migration checksum
-// guards this layout against silent drift when a database is reopened.
+// guards this layout against silent drift when a database is reopened. The
+// sessions table tracks the sequence cursor and whether any record committed;
+// directives use the item's full access boundary as part of their key.
 package sqlite
 
 import (
@@ -52,10 +54,13 @@ type Store struct {
 }
 
 var _ store.Store = (*Store)(nil)
+var openMu sync.Mutex // Serializes first-open WAL setup and migration replay.
 
 // Open opens a SQLite database, applies forward-only migrations, and checks
 // the checksums of previously applied migrations.
 func Open(ctx context.Context, path string, opts ...Option) (*Store, error) {
+	openMu.Lock()
+	defer openMu.Unlock()
 	if path == "" {
 		return nil, fmt.Errorf("%w: empty database path", domain.ErrInvalidRecord)
 	}
@@ -94,9 +99,9 @@ func Open(ctx context.Context, path string, opts ...Option) (*Store, error) {
 
 func (s *Store) initialize(ctx context.Context) error {
 	for _, q := range []string{
+		"PRAGMA busy_timeout=" + strconv.FormatInt(s.timeout.Milliseconds(), 10),
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=" + strconv.FormatInt(s.timeout.Milliseconds(), 10),
 		"PRAGMA synchronous=FULL",
 		"CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL)",
 	} {
@@ -104,7 +109,13 @@ func (s *Store) initialize(ctx context.Context) error {
 			return err
 		}
 	}
-	names, err := fs.Glob(migrations, "migrations/*.sql")
+	return s.applyMigrations(ctx, migrations)
+}
+
+// applyMigrations uses an immediate write transaction for each file, so a
+// failed statement leaves neither schema fragments nor a version marker.
+func (s *Store) applyMigrations(ctx context.Context, source fs.FS) error {
+	names, err := fs.Glob(source, "migrations/*.sql")
 	if err != nil {
 		return err
 	}
@@ -120,37 +131,51 @@ func (s *Store) initialize(ctx context.Context) error {
 			return fmt.Errorf("migration %s: versions must increase", base)
 		}
 		newest = number
-		sqlBytes, err := migrations.ReadFile(name)
+		sqlBytes, err := fs.ReadFile(source, name)
 		if err != nil {
 			return err
 		}
 		sum := sha256.Sum256(sqlBytes)
 		checksum := hex.EncodeToString(sum[:])
-		tx, err := s.db.BeginTx(ctx, nil)
+		conn, err := s.db.Conn(ctx)
 		if err != nil {
 			return err
 		}
-		var gotName, gotChecksum string
-		err = tx.QueryRowContext(ctx, "SELECT name, checksum FROM schema_migrations WHERE version=?", number).Scan(&gotName, &gotChecksum)
-		switch {
-		case err == nil:
-			if gotName != base || gotChecksum != checksum {
-				_ = tx.Rollback()
-				return fmt.Errorf("migration %d checksum mismatch", number)
+		err = func() error {
+			defer conn.Close()
+			if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+				return err
 			}
-		case errors.Is(err, sql.ErrNoRows):
-			if _, err = tx.ExecContext(ctx, string(sqlBytes)); err == nil {
-				_, err = tx.ExecContext(ctx, "INSERT INTO schema_migrations(version,name,checksum) VALUES(?,?,?)", number, base, checksum)
+			committed := false
+			defer func() {
+				if !committed {
+					_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+				}
+			}()
+			var gotName, gotChecksum string
+			err := conn.QueryRowContext(ctx, "SELECT name, checksum FROM schema_migrations WHERE version=?", number).Scan(&gotName, &gotChecksum)
+			switch {
+			case err == nil:
+				if gotName != base || gotChecksum != checksum {
+					return fmt.Errorf("migration %d checksum mismatch", number)
+				}
+			case errors.Is(err, sql.ErrNoRows):
+				if _, err = conn.ExecContext(ctx, string(sqlBytes)); err == nil {
+					_, err = conn.ExecContext(ctx, "INSERT INTO schema_migrations(version,name,checksum) VALUES(?,?,?)", number, base, checksum)
+				}
+				if err != nil {
+					return fmt.Errorf("migration %s: %w", base, err)
+				}
+			default:
+				return err
 			}
-			if err != nil {
-				_ = tx.Rollback()
-				return fmt.Errorf("migration %s: %w", base, err)
+			if _, err := conn.ExecContext(context.WithoutCancel(ctx), "COMMIT"); err != nil {
+				return err
 			}
-		default:
-			_ = tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
+			committed = true
+			return nil
+		}()
+		if err != nil {
 			return err
 		}
 	}
@@ -183,6 +208,8 @@ func (s *Store) writer(session string) *sync.Mutex {
 	}
 	return m
 }
+
+// Close releases the database; repeated calls are harmless.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -192,6 +219,8 @@ func (s *Store) Close() error {
 	s.closed = true
 	return s.db.Close()
 }
+
+// Update runs a session transaction and commits it atomically after the final cancellation check.
 func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) error) error {
 	if session == "" {
 		return fmt.Errorf("%w: empty session ID", domain.ErrInvalidRecord)
@@ -227,15 +256,21 @@ func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) er
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	if _, err = c.ExecContext(ctx, "UPDATE sessions SET last_seq=? WHERE session_id=?", tx.last, session); err != nil {
+	if tx.semanticWrite && !tx.semanticSeqRecord {
+		return domain.ErrInvalidRecord
+	}
+	commitCtx := context.WithoutCancel(ctx)
+	if _, err = c.ExecContext(commitCtx, "UPDATE sessions SET last_seq=?,committed=CASE WHEN ? THEN 1 ELSE committed END WHERE session_id=?", tx.last, tx.wrote, session); err != nil {
 		return err
 	}
-	if _, err = c.ExecContext(ctx, "COMMIT"); err != nil {
+	if _, err = c.ExecContext(commitCtx, "COMMIT"); err != nil {
 		return err
 	}
 	committed = true
 	return nil
 }
+
+// View reads one committed snapshot for a session.
 func (s *Store) View(ctx context.Context, session string, fn func(store.ReadTx) error) error {
 	if session == "" {
 		return fmt.Errorf("%w: empty session ID", domain.ErrInvalidRecord)
@@ -258,6 +293,29 @@ func (s *Store) View(ctx context.Context, session string, fn func(store.ReadTx) 
 	return fn(tx)
 }
 
+// Sessions returns session IDs with committed records in ascending order.
+func (s *Store) Sessions(ctx context.Context) ([]string, error) {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	rows, err := c.QueryContext(ctx, "SELECT session_id FROM sessions WHERE committed=1 ORDER BY session_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 type transaction struct {
 	conn               *sql.Conn
 	ctx                context.Context
@@ -267,6 +325,9 @@ type transaction struct {
 	writable           bool
 	supersession       map[string][]string
 	supersessionLoaded bool
+	semanticWrite      bool
+	semanticSeqRecord  bool
+	wrote              bool
 }
 
 var _ store.Tx = (*transaction)(nil)
@@ -290,15 +351,20 @@ func (t *transaction) checkSeq(seq uint64) error {
 // atomic keeps a multi-record method indivisible if its caller handles an
 // error and continues the outer Update.
 func (t *transaction) atomic(fn func() error) error {
+	wasWrite, wasSeq, wasWrote := t.semanticWrite, t.semanticSeqRecord, t.wrote
 	if _, err := t.conn.ExecContext(t.ctx, "SAVEPOINT store_method"); err != nil {
 		return err
 	}
 	if err := fn(); err != nil {
 		_, _ = t.conn.ExecContext(t.ctx, "ROLLBACK TO SAVEPOINT store_method")
 		_, _ = t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
+		t.semanticWrite, t.semanticSeqRecord, t.wrote = wasWrite, wasSeq, wasWrote
 		return err
 	}
 	_, err := t.conn.ExecContext(t.ctx, "RELEASE SAVEPOINT store_method")
+	if err != nil {
+		t.semanticWrite, t.semanticSeqRecord, t.wrote = wasWrite, wasSeq, wasWrote
+	}
 	return err
 }
 
@@ -323,11 +389,24 @@ func (t *transaction) put(kind, id string, sub int, value any, replace bool) err
 		if n == 0 {
 			return domain.ErrNotFound
 		}
+		t.wrote = true
+		if kind != "conversation" && kind != "call" && kind != "attempt" {
+			t.semanticWrite = true
+		}
 		return nil
 	}
 	_, err = t.conn.ExecContext(t.ctx, s.insertSQL, values...)
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "PRIMARY KEY constraint failed")) {
 		return fmt.Errorf("%w: %s %s", domain.ErrImmutable, kind, id)
+	}
+	if err == nil && kind != "conversation" && kind != "call" && kind != "attempt" && (kind != "lifecycle" || value.(domain.LifecycleEvent).TargetKind != domain.TargetCall) {
+		t.semanticWrite = true
+		if kind != "task" {
+			t.semanticSeqRecord = true
+		}
+	}
+	if err == nil {
+		t.wrote = true
 	}
 	return err
 }
@@ -341,7 +420,7 @@ func (t *transaction) get(kind, id string, sub int, out any) error {
 		return domain.ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %s %s: %v", domain.ErrIntegrity, kind, id, err)
+		return fmt.Errorf("%s %s: %w", kind, id, err)
 	}
 	reflect.ValueOf(out).Elem().Set(v)
 	return nil
