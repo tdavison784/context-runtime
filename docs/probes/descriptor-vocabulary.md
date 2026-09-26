@@ -155,3 +155,27 @@ conversation: `system`/instructions, tool definitions, and every message or item
 Acceptance alone is never evidence of `SAFE` for an edit that leaves reasoning in the request.
 The fixture must show that the remaining reasoning was used (billed, not dropped), or the
 profile must report drops (`DropsReported`) with none reported.
+
+## 7. Open questions (ADR 12)
+
+Rulings from PR #4 review round 1, 2026-09-26.
+
+1. **`APPEND_SYSTEM` while `MidConversationSystem` is false.** Ruling: the Anthropic drafts
+   keep `Edits[APPEND_SYSTEM]: REJECTED` as a fail-closed policy value (the observed provider
+   behavior is recorded in the comment). This stands until ADR 12 defines **capability-gated
+   edit kinds**: an edit kind that needs a capability is unavailable while that capability is
+   `false`, and `Edits` records only the observed provider verdict.
+2. **`CompactionMinimumTrigger` with several protocols.** Ruling: ADR 12 keys the trigger by
+   protocol (for example `CHECKPOINT: 0, PAUSE: 50_000` for claude-opus-5-5). Until then drafts
+   record the provider-triggered minimum and name the other protocol's minimum in the comment.
+3. **Proposed sub-fields.** Ruling: these five go to ADR 12 as proposals, not as settled §7
+   fields:
+   - `CachingRules.Automatic`
+   - `ReasoningRules.BoundToModel`
+   - `ReasoningRules.DropsReported`
+   - `ReasoningRules.PostEditReplay`
+   - `Version` used as the full FR-CAP-001 profile identity
+
+   Drafts may use them with the names defined here. Not covered by this ruling: the section 3.4
+   `PreservationRules` sub-field names are also derived (SDD §7 gives that type no comment)
+   rather than verbatim.
