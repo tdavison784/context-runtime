@@ -316,3 +316,50 @@ func TestUpgradeProvenanceColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeCurrentNamespace checks that pointers written before migration
+// 0005 take the namespace of the item they name (M6, R6).
+func TestUpgradeCurrentNamespace(t *testing.T) {
+	l := openLegacy(t, 4)
+	dir := storetest.NewDirective("s", "dir", "agent.status", 1, "directive")
+	key := storetest.NewAgentKeyItem("s", "key", "other", 2, "agent state")
+	for _, it := range []domain.ContextItem{dir, key} {
+		l.insert("item", it, nil)
+		a := it.Access
+		if _, err := l.db.Exec("INSERT INTO directives(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id) VALUES(?,?,?,?,?,?,?,?,?)",
+			"s", it.TaskID, it.DirectiveID, a.Scope, a.SessionID, a.WorkflowID, a.TaskID, a.AgentID, it.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A pointer whose item is missing lands outside the DIRECTIVE namespace.
+	if _, err := l.db.Exec("INSERT INTO directives(session_id,task_id,directive_id,boundary_scope,boundary_session_id,boundary_workflow_id,boundary_task_id,boundary_agent_id,item_id) VALUES('s','task','ghost','TASK','s','','task','','gone')"); err != nil {
+		t.Fatal(err)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		key := func(ns domain.DirectiveNamespace, id string) domain.CurrentKey {
+			return domain.CurrentKey{SessionID: "s", TaskID: "task", Access: storetest.DirectiveBoundary("s"), Namespace: ns, ID: id}
+		}
+		for _, c := range []struct {
+			ns     domain.DirectiveNamespace
+			id     string
+			want   string
+			exists bool
+		}{
+			{domain.NamespaceDirective, "agent.status", "dir", true},
+			{domain.NamespaceAgentKey, "agent.status", "", false},
+			{domain.NamespaceAgentKey, "other", "key", true},
+			{domain.NamespaceDirective, "other", "", false},
+			{domain.NamespaceDirective, "ghost", "", false},
+			{domain.NamespaceAgentKey, "ghost", "gone", true},
+		} {
+			got, err := tx.CurrentVersion(key(c.ns, c.id))
+			if c.exists && (err != nil || got != c.want) || !c.exists && !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("CurrentVersion(%s, %s) = %q, %v; want %q", c.ns, c.id, got, err, c.want)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

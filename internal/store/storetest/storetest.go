@@ -85,6 +85,7 @@ var suite = []testCase{
 	{"DirectiveReplacement", testDirectiveReplacement},
 	{"DirectiveBoundaries", testDirectiveBoundaries},
 	{"CurrentDirectivesOrder", testCurrentDirectivesOrder},
+	{"CurrentNamespaces", testCurrentNamespaces},
 
 	// Obligations, grants, tasks, audit, and the call ledger.
 	{"ObligationVersions", testObligationVersions},
