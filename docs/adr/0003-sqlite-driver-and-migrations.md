@@ -200,12 +200,13 @@ preserve valid state.
   such a caller must now handle context/driver errors separately, which is
   the point of the fix (they are different failure classes with different
   correct responses).
-- DUR-1.2's regression test (`TestCancelledUpdateRollsBack`) cancels the
-  context from inside the transaction function before the transaction
-  reaches its commit sequence, so it does not exercise the race the fix
-  actually closes (a cancellation landing concurrently with `COMMIT`);
-  see Tests, below, for the still-required deterministic race test
-  (TEST-2.3).
+- DUR-1.2's fix is locked by two tests with different scopes:
+  `TestCancelledUpdateRollsBack` (an ordinary pre-commit cancellation rolls
+  back cleanly) and `TestCancellationAtCommitBoundaryReportsCommitted` (the
+  actual race — cancellation lands exactly between the pre-commit check
+  and `COMMIT` — deterministically, via a test-only `context.Context` whose
+  `Err()` returns nil once after `arm()` and `context.Canceled` on every
+  call after, rather than a timing-dependent probabilistic repro).
 
 ## Tests that lock the behavior
 
@@ -250,19 +251,18 @@ preserve valid state.
 `internal/store/sqlite`'s round-1 implementation is merged and passing:
 
 - `internal/store/sqlite/dur_1_2_test.go:TestCancelledUpdateRollsBack`
-  cancels the context from inside the transaction function and asserts the
-  write does not commit. **This does not exercise DUR-1.2's actual race**
-  (TEST-2.3, round 2): the cancellation happens before the transaction
-  ever reaches its commit sequence, so `ctx.Err()` is already non-nil at
-  the pre-commit check and the `context.WithoutCancel`-guarded commit path
-  the fix added is never reached — confirmed by reverting
-  `commitCtx := context.WithoutCancel(ctx)` back to `commitCtx := ctx`:
-  the whole package, including this test, still passes. A genuine
-  regression test needs the cancellation racing a real commit (canceling
-  concurrently, from a separate goroutine, after `Update` has begun its
-  final statements) run enough times to land in that window, asserting
-  that any reported error is `context.Canceled` and the write is
-  verifiably absent on a fresh `View`. Required, `sqlite-worker`'s to add.
+  cancels the context from inside the transaction function and asserts an
+  ordinary pre-commit cancellation rolls back cleanly.
+  `TestCancellationAtCommitBoundaryReportsCommitted` (round 2) is the test
+  that actually exercises DUR-1.2's fix: a test-only `context.Context`
+  (`commitEdgeContext`) returns a nil error the first time `Err()` is
+  called after `arm()`, then `context.Canceled` on every subsequent call —
+  landing the cancellation deterministically between the pre-commit check
+  and `COMMIT`, rather than relying on a timing-dependent probabilistic
+  repro — and asserts the write is present afterward. Reverting
+  `commitCtx := context.WithoutCancel(ctx)` back to `commitCtx := ctx`
+  makes this test fail (an error is reported for the committed write);
+  `TestCancelledUpdateRollsBack` alone does not catch that regression.
 - `internal/store/sqlite/dur_1_4_test.go:TestScanCancellationIsOperationalError`
   asserts a cancelled context surfaces as
   `errors.Is(err, context.Canceled)` from a read, never wrapped as
@@ -290,10 +290,9 @@ fixed in `a8e895f`. Passes on both stores now.
 ## Open questions
 
 `busy_timeout` (5s default, `WithBusyTimeout` to override) is decided in
-code. DUR-1.2 is fixed in code but not yet verified by a test that
-actually exercises the race (TEST-2.3, `sqlite-worker` assigned); the other
-three DUR findings and the independently-found `DirectiveBoundaries`
-regression are fixed and genuinely tested.
+code. None remaining for this ADR's original scope; all DUR findings and
+the independently-found `DirectiveBoundaries` regression are fixed and
+genuinely tested.
 
 ## Review
 
@@ -326,19 +325,24 @@ switch; decided fix is DSN-level `busy_timeout`, a WAL-switch retry, and
 replay test this ADR has called for since its first version still doesn't
 exist. All five decisions are recorded above.
 
-Verified against the merged `sqlite-worker` branch: three of four DUR
-findings have a passing test that genuinely exercises the fix
+Verified against the merged `sqlite-worker` branch: all four DUR findings
+have a passing test that genuinely exercises the fix
 (`TestScanCancellationIsOperationalError`, `TestConcurrentFirstOpen`,
-`TestInterruptedMigrationReplays`). One regression found independently
-while verifying, `TestConformance/DirectiveBoundaries`, is also fixed
-(`a8e895f`) and now passes on this package.
+`TestInterruptedMigrationReplays`, and — after the round-2 fix below —
+`TestCancellationAtCommitBoundaryReportsCommitted`). One regression found
+independently while verifying, `TestConformance/DirectiveBoundaries`, is
+also fixed (`a8e895f`) and now passes on this package.
 
 **Round 2 review** (PR #2; TEST — Claude Sonnet, `test-review-round2.md`,
 finding TEST-2.3): `TestCancelledUpdateRollsBack` cancels synchronously
 inside the transaction function, before the transaction reaches its commit
 sequence — the pre-commit `ctx.Err()` check catches it, so the
-`context.WithoutCancel`-guarded commit path DUR-1.2 actually fixed is never
-exercised. Confirmed by reverting the fix in a throwaway clone: the whole
-package, including this test, still passed. Changed: recorded in
-Consequences and Tests that this test does not verify DUR-1.2, and that a
-genuine concurrent-cancellation race test is still required.
+`context.WithoutCancel`-guarded commit path DUR-1.2 actually fixed was
+never exercised; confirmed by reverting the fix in a throwaway clone, where
+the whole package, including this test, still passed. Fixed:
+`TestCancellationAtCommitBoundaryReportsCommitted` uses a deterministic
+test-only context (`commitEdgeContext`, arms to report not-yet-cancelled
+exactly once, then cancelled on every later call) to land the cancellation
+in the exact window DUR-1.2 closes, without a probabilistic repro — I
+independently reconfirmed it fails when `context.WithoutCancel` is
+reverted. Finding closed.
