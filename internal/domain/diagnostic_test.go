@@ -212,3 +212,22 @@ func TestIngestionReasonCodePairing(t *testing.T) {
 		}
 	}
 }
+
+// TestItemUnverifiedDiagnostic is DUR-1.4 (F1): a lookup match that fails
+// verification is excluded and reported with its own warning code, paired
+// with exactly one reason, carrying no item or directive ID.
+func TestItemUnverifiedDiagnostic(t *testing.T) {
+	d := Diagnostic{Code: ItemUnverified, Reason: ReasonUnverifiedItem, ParserVersion: "directive/v1"}
+	if err := d.Validate(); err != nil || ItemUnverified.Severity() != SeverityWarning {
+		t.Fatalf("valid unverified diagnostic rejected: %v", err)
+	}
+	for _, bad := range []Diagnostic{
+		{Code: ErrMalformedDirective, Reason: ReasonUnverifiedItem, ParserVersion: "v"},
+		{Code: ItemUnverified, Reason: ReasonInvalidSyntax, ParserVersion: "v"},
+		{Code: ItemUnverified, Reason: ReasonUnverifiedItem, DirectiveID: "x", ParserVersion: "v"},
+	} {
+		if bad.Validate() == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+}

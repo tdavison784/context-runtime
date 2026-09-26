@@ -111,8 +111,6 @@ func TestReferences_SurviveRestart(t *testing.T) {
 	}
 }
 
-
-
 // TestReferencesByItemID_F4 is SPEC-1.2 (FR-DIR-003): a References item
 // naming an accessible same-session item ID links to it; a missing and an
 // inaccessible ID link nothing and produce identical receipts (apart from
