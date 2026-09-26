@@ -1,0 +1,121 @@
+{
+  "endpoint": "/responses",
+  "name": "gpt_6_astra_c3_append",
+  "request": {
+    "input": [
+      {
+        "content_length": 8270,
+        "role": "developer"
+      },
+      {
+        "content": "Reply with the marker, then stop.",
+        "content_length": 33,
+        "role": "user"
+      }
+    ],
+    "max_output_tokens": 32,
+    "model": "gpt-6-astra",
+    "store": false
+  },
+  "response": {
+    "access_programs": null,
+    "background": false,
+    "billing": {
+      "payer": "developer"
+    },
+    "completed_at": 1790427069,
+    "created_at": 1790427068,
+    "error": null,
+    "frequency_penalty": 0,
+    "id": {
+      "length": 55,
+      "sha256": "42dbdc0826cf79693e1a0c6e8f8b8b9f121d56afff0804e4ed4755ef3b339952"
+    },
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": 32,
+    "max_tool_calls": null,
+    "metadata": {},
+    "model": "gpt-6-astra",
+    "moderation": null,
+    "object": "response",
+    "output": [
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "BLUE",
+            "type": "output_text"
+          }
+        ],
+        "id": {
+          "length": 54,
+          "sha256": "e7338ada31da875d82e7fdab6cdc4f418e764225ad060e777d838e496ede730b"
+        },
+        "phase": "final_answer",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "parallel_tool_calls": true,
+    "presence_penalty": 0,
+    "previous_response_id": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": "24h",
+    "reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "safety_identifier": "[redacted]",
+    "service_tier": "default",
+    "status": "completed",
+    "store": false,
+    "temperature": 1,
+    "text": {
+      "format": {
+        "type": "text"
+      },
+      "verbosity": "medium"
+    },
+    "tool_choice": "auto",
+    "tool_usage": {
+      "image_gen": {
+        "input_tokens": 0,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "output_tokens": 0,
+        "output_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 0
+        },
+        "total_tokens": 0
+      },
+      "web_search": {
+        "num_requests": 0
+      }
+    },
+    "tools": [],
+    "top_logprobs": 0,
+    "top_p": 0.98,
+    "truncation": "disabled",
+    "usage": {
+      "input_tokens": 1648,
+      "input_tokens_details": {
+        "cache_write_tokens": 12,
+        "cached_tokens": 1633
+      },
+      "output_tokens": 5,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 1653
+    },
+    "user": "[redacted]"
+  }
+}

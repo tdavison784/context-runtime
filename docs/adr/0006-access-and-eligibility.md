@@ -1,6 +1,6 @@
 # 6. Access boundary and context eligibility matrix
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
 ## Context
@@ -59,7 +59,7 @@ affects inherited content.
   | WORKFLOW | the workflow's active-owner state |
   | AGENT | the agent's active-owner state |
   | SESSION | no additional owner check (session-level content has no narrower active-owner state) |
-  | any scope | an unexpired TTL, or an explicit retrieval lease (FR-RET-006) covering the item |
+  | any scope | an unexpired TTL, or an explicit retrieval lease (FR-RET-006) covering the item. A TTL is counted in turns of the item's originating task and is treated as expired when the originating task is terminal or is not the dispatching task's turn source (see the TTL decision below) |
 
   This table is recorded now (Phase 1) even though the eligibility engine
   (active task/turn tracking, lease issuance) is Phase 3/4 work
@@ -96,7 +96,7 @@ affects inherited content.
      is transmitted ... so the IDs must be complete; a range alone cannot
      show which items lost eligibility"). A `FromSeq`/`ToSeq` range is
      insufficient on its own because a range cannot be diffed against which
-     specific items later lost eligibility.
+     specific items later lost eligibility. An opaque reasoning block/item covers every item rendered before it in the request, including system/instructions and tool definitions.
   2. Before every dispatch, the materialization strategy rechecks each
      covered item's access (`AccessBoundary.Permits`) and context
      eligibility (turn/task/TTL, per this ADR's eligibility table) — or an
@@ -211,14 +211,33 @@ affects inherited content.
 
 ## Open questions
 
+### Resolved at acceptance (2026-09-26)
+
 - Exact representation of a retrieval lease (FR-RET-006) — not yet a type in
   `internal/domain`; needed before Phase 6 (archive/retention) but the
   eligibility table above already assumes its shape (principal/task/agent/
   turn-bound, with an expiry).
+  **Decision:** the retrieval lease type is deferred to Phase 6 and will be
+  added to this ADR by amendment before Phase 6 exits; the eligibility
+  table's assumed shape (principal/task/agent/turn-bound with expiry) is the
+  constraint it must meet.
 - Whether TTL expiry is measured in turns only (`ContextItem.TTLTurns`,
   `internal/domain/item.go`) or needs a session-sequence-based expiry too for
   scopes without a turn concept (WORKFLOW/AGENT/SESSION-scoped ephemeral
   content, if any is ever introduced).
+  **Decision:** V1 TTL is measured in turns only: `TTLTurns` counts turns of
+  the item's originating task (`TaskState.Turn`); no sequence-based expiry
+  in V1.
+  **Amendment (PR #4 review, SEC-1.3):** a TTL is only defined when the item
+  names its originating task. `TTLTurns` therefore requires a non-empty
+  `TaskID`; `ContextItem.Validate` rejects a TTL without one with
+  `ErrInvalidRecord` (`internal/domain/item.go`). When expiry cannot be
+  decided from the originating task, ambiguity resolves to **expired**
+  (ineligible; fail closed): this covers an originating task that is
+  terminal (its `Turn` no longer advances) and a dispatching task that is
+  not the item's turn source. Access is unaffected. An expired item stays
+  readable through the API and archive retrieval, and only an explicit
+  retrieval lease (FR-RET-006) can re-admit it to a plan.
 
 ## Review
 
@@ -241,3 +260,13 @@ Test citations verified against the integrated `phase-1-foundation`
 codebase (tip `ddbb53e`): every citation above is a real, passing test;
 none of this ADR's originally "Required" test placeholders remained
 genuinely missing except the Phase 4/5 planner-side fixtures noted above.
+
+Phase 1 acceptance amendment (PR #4 review round 2, SEC-2.2): rule 1 now
+states what an opaque reasoning block/item covers: every item rendered
+before it in the request, including system/instructions and tool
+definitions. The descriptor probes found that reasoning is replayed as
+stale when earlier content changes (`Reasoning.PostEditReplay: STALE` on
+profiles without a provider-side check). So the pre-dispatch recheck and
+the adapter's post-edit strip rely on this coverage definition. A coverage
+that records only the reasoning's own round would pass rule 1 as it was
+worded before and still replay stale reasoning.

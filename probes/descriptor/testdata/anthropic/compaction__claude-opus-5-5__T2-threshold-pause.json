@@ -1,0 +1,104 @@
+{
+  "betas": [
+    "compact-2026-01-12"
+  ],
+  "model": "claude-opus-5-5",
+  "probe": "compaction/claude-opus-5-5/T2-threshold-pause",
+  "question": "threshold compaction with pause_after_compaction",
+  "request": {
+    "context_management": {
+      "edits": [
+        {
+          "instructions": "Summarize this conversation for continuation. Preserve every key looked up, every returned value, every computed result and the user's open request. Do not call tools; respond with the summary text only.",
+          "pause_after_compaction": true,
+          "trigger": {
+            "type": "input_tokens",
+            "value": 50000
+          },
+          "type": "compact_20260112"
+        }
+      ]
+    },
+    "max_tokens": 8192,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Garden notebook threshold-20260926T130218.\nGarden note 0000: row 0 has 0 tulips and 0 daisies in bed A.\nGarden note 0001…[len=101898 sha256=0d826fdbd6fcebbd]",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-opus-5-5",
+    "output_config": {
+      "effort": "medium"
+    },
+    "system": [
+      {
+        "text": "You are a terse probe assistant. When asked for a key's value, call the lookup tool; never guess values.",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "display": "summarized",
+      "type": "adaptive"
+    },
+    "tools": [
+      {
+        "description": "Look up the integer value stored under a key.",
+        "input_schema": {
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "lookup"
+      }
+    ]
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "content": "**Conversation summary**\n\n**User's request:** The user shared a \"Garden notebook threshold-20260926T130218\" with 1,600 notes, numbered 0000 to 1599. Each note has the form \"row R has T tulips and D daisies in bed X.\" They asked: \"how many garden notes are in bed C? Answer with a number.\"\n\n**Keys looked up:** None. No lookup calls were made, because the answer comes straight from the notebook text and doesn't depend on any stored key.\n\n**Working:**\n- The bed letters repeat A to Z in order of note number, so bed = note number mod 26 (A=0, B=1, C=2, …).\n- Spot checks confirm this: notes 0002, 0028, 0054 and 1588 are all in bed C.\n- 1600 = 26 × 61 + 14. That gives 61 full A–Z cycles, which covers notes 0000–1585.\n- The last 14 notes (1586–1599) run from A to N, so they include one more C (note 1588).\n- Total bed C notes: 61 + 1 = **62**.\n\n**Status:** Worked out but not yet sent. The final reply to the user should be: **62**",
+        "type": "compaction"
+      }
+    ],
+    "context_management": {
+      "applied_edits": []
+    },
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "model": "claude-opus-5-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "compaction",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "input_tokens": 0,
+      "iterations": [
+        {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 51924,
+          "output_tokens": 602,
+          "type": "compaction"
+        }
+      ],
+      "output_tokens": 0
+    }
+  },
+  "status": 200
+}
