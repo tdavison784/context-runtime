@@ -408,3 +408,38 @@ API surfaces it directly) and is tested to prove it can perform no other
 transition and disclose no proof detail beyond the invalidated status
 itself. FR-AUTH-002 and FR-OBL-002 are amended (§below) to name this path
 explicitly.
+
+## Alternatives considered
+
+Each numbered decision above already records, inline, the specific rejected
+alternative for every conflict the commander ruled on (C-4, C-5, C-6, C-7,
+C-8, C-9, C-10, C-11, C-14) as "Claude review" vs. "Codex cross-check"
+positions with the trade-off and the FROZEN ruling — that is the "Alternatives
+considered" content this ADR format calls for, kept next to the decision it
+disputes rather than repeated in a second list. Three further alternatives
+were rejected outright by the binding decision record, not merely by a
+disputed cross-check, and are recorded once here because no single
+numbered decision above is the obvious place for them:
+
+- **A seventh `OBSERVATION` authority, alongside the six `EventKind`
+  authorities.** Rejected: observations are typed payloads carried by an
+  existing SYSTEM/HARNESS/TOOL-authority event (§11), not a new authority
+  level; adding one would require re-deriving FR-ING-002's total order for no
+  behavior this contract needs.
+- **A dedicated `ActionEvaluateMatcher` mutation-grant action.** Rejected:
+  matcher grants already authorize `ActionAssertObligation` only (ADR 16,
+  reaffirmed at §1); a separate action would let a grant scoped to
+  "evaluate" bypass the same-action restriction the ADR 16 matcher-grant
+  validation depends on, with no requirement this contract needs it for.
+- **A separately stored item-to-obligation `SATISFIES` edge in
+  `graph.Relationship`.** Rejected at §4/Q2: it would let a caller construct
+  a fabricated satisfaction edge the way M7 (ADR 19 §18) already forbids for
+  every other relationship type, and it duplicates state that the transition/
+  proof records already hold as the single source of truth.
+- **Reusing `AuthorizeMutation`'s live grant-target check for the
+  invalidation path (§13).** Rejected as part of C-10: invalidation only
+  ever narrows one already-SATISFIED target to UNRESOLVED as a documented
+  side effect of an accepted resource report, never a fresh grant-authorized
+  mutation; running it through the same live-grant check would let a
+  reporter's session-level authority be mistaken for target-specific mutation
+  authority it does not have.
