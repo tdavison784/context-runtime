@@ -1474,14 +1474,20 @@ each with its own fix and test.
   ranges/receipts (§10/19), obligation claim names (§9), diagnostics
   (§12), and the typed directive/agent-key namespace (§17) — all additive
   to migration history; migration 0001 is never edited (R8).
-- `graph.IsCurrent`'s existing incoming-edge-only semantics are
-  insufficient for D10's "never becomes current" guarantee (§7); every
-  current-version consumer, not just the write path, must be updated to
-  also exclude a `DUPLICATE_OF` item and a stale current-map pointer.
+- `graph.IsCurrent`'s existing incoming-edge-only semantics were
+  insufficient for D10's "never becomes current" guarantee (§7); resolved
+  (see ADR 4/16's Phase 2 amendment notes) — every current-version
+  consumer now also excludes a `DUPLICATE_OF` item and a stale
+  current-map pointer.
 - `graph.Supersede`'s `(session, old target, action, event)` audit-ID
-  scheme collides on two retirements of the same old target within one
-  event; D11's planned edge set (§7) must resolve this itself rather than
-  leaving it for `p2-graph` to discover independently.
+  scheme collided on two retirements of the same old target within one
+  event; resolved by versioning the audit identity
+  (`internal/graph/ids.go`'s `lifecycleEventIDTag` v1→v2), which adds the
+  retirement's counterpart (its successor) to the hashed identity, so two
+  audit records about one target in one event can never alias — a v1 ID
+  already stored is left as it is. DUR-1.7 (§28) separately fixed a
+  related nondeterminism: which of several retirements' *failures*
+  surfaces first, now ordered by `(Seq, ID)`.
 - The SDD §8 `Runtime.Ingest([]ContextItem, error)` signature is unchanged
   by Phase 2 (§19, R3); any code written against a richer expected return
   type must wait for the Phase 5 amendment.
