@@ -240,3 +240,21 @@ Coverage of what the compacted block actually represents must be tracked by the 
 own request construction (what it sent into `/responses/compact`), not recovered by inspecting the
 returned block, consistent with FR-MAT-005's "persist the canonical returned blocks and their
 source coverage."
+
+## Counter endpoint and model list
+
+**Counter endpoint (`/responses/input_tokens`) matches billed input exactly, for every tested
+request.** In the C1 table above, the counter's reported value (`gpt_6_{astra,luna}_c1_{n}_count.json`
+`.response.input_tokens`) equals the corresponding live call's `usage.input_tokens` at every one
+of the four prefix lengths, for both models (914/914, 1022/1022, 1034/1034, 1214/1214). This is
+**OBSERVED** for these specific request shapes (plain developer+user text turns); it was not
+re-verified for requests carrying tool definitions or reasoning items, since no `_count` probe was
+run against those shapes — **NOT DETERMINED** whether the counter also matches billed input once
+tools/reasoning are in the request.
+
+**Model list.** `/models` returned 132 IDs (`probes/descriptor/testdata/openai/models.json`),
+spanning `gpt-5` through `gpt-6-sol`. The `gpt-6-*` family (`gpt-6-astra`, `gpt-6-luna`,
+`gpt-6-sol`) is the newest available as of the run date; `gpt-6-astra` and `gpt-6-luna` were
+selected as the probed flagship-reasoning and cheaper-tier models respectively (`gpt-6-sol` was not
+probed). The `30m`-only TTL rule documented for "GPT-5.6 and later" (see C4) applies to this whole
+probed family.
