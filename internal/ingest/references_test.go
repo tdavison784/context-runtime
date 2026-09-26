@@ -149,3 +149,45 @@ func TestReferencesByItemID_F4(t *testing.T) {
 		}
 	})
 }
+
+// TestReferenceLinkBudget_Ruling1: optional REFERENCES edges have their own
+// per-event budget; reaching it stops linking with a
+// reference_links_truncated diagnostic, and optional links never consume
+// MaxRelationships, so they can never make an essential edge reject the
+// event.
+func TestReferenceLinkBudget_Ruling1(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("u0", "hi", false))
+		for i := range 4 {
+			f.mustIngest(user, sourceEvent(fmt.Sprintf("s%d", i), "a.md", taskAccess()))
+		}
+
+		f.in.MaxReferenceLinks = 2
+		r := f.mustIngest(user, userEvent("r1", "## References\n- a.md\n", true))
+		if got := f.references(semantic(r)[0].ID); len(got) != 2 {
+			t.Errorf("links = %d, want the budget of 2", len(got))
+		}
+		truncated := 0
+		for _, d := range r.Diagnostics {
+			if d.Code == domain.ReferenceLinksTruncated && d.Reason == domain.ReasonReferenceLinksTruncated {
+				truncated++
+			}
+		}
+		if truncated != 1 {
+			t.Errorf("truncation diagnostics = %d, want 1", truncated)
+		}
+
+		// Two essential DERIVED_FROM edges exactly fill MaxRelationships;
+		// four optional links must not push either out.
+		f.in.MaxReferenceLinks = 0
+		f.in.Limits = domain.Limits{MaxRelationships: 2}
+		r2, err := f.ingest(user, userEvent("r2", "## References\n- ./a.md\n## Remember\n- essential fact\n", true))
+		if err != nil {
+			t.Fatalf("optional links rejected the event: %v", err)
+		}
+		if got := f.references(semantic(r2)[0].ID); len(got) != 4 {
+			t.Errorf("links = %d, want all 4 within the default budget", len(got))
+		}
+	})
+}
