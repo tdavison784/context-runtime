@@ -28,21 +28,50 @@ distinct from the frozen inference principal.
   `SENT→PREPARED` (retry); `SENT→UNKNOWN`; `UNKNOWN→COMPLETED`/
   `UNKNOWN→FAILED` (reconciliation); `UNKNOWN→ABANDONED`. No `SENT→SENT` or
   `UNKNOWN→SENT` (FR-CALL-002).
-- **`SENT→PREPARED` requires a conclusively closed attempt, not just a
-  retryable flag.** The ledger's `RecordOutcome`
-  (`internal/invocation/dispatch.go`) only takes this transition from inside
-  the same call that just recorded the outcome: it validates `attemptNo ==
-  c.Attempts` and `c.State == CallSent`, writes the attempt's own immutable
-  `CallAttempt.State = AttemptFailed` / `FinishedSeq` alongside the call
-  transition in the same store transaction, and only then moves the call to
-  PREPARED (`o.Retryable && c.State == CallSent`). There is no path that
-  reopens PREPARED from a *presumed* failure — the attempt that failed is
-  durably recorded as FAILED first, atomically with the call's transition,
-  before the reservation becomes revalidatable. Reconciling an UNKNOWN call
-  never takes this edge: `UNKNOWN→PREPARED` is not in
-  `ValidCallTransition`, so a retryable failure discovered by reconciliation
-  is terminal (`UNKNOWN→FAILED`), matching the state-machine comment that a
-  transport outcome can never be assumed known once it was ever UNKNOWN.
+- **Evidence-gated `UpdateCall`: the store itself, not just ledger-package
+  discipline, refuses a call transition unless its evidencing attempt is
+  already stored in the matching closed state.** `store.Tx.UpdateCall`'s
+  contract requires, for every way of leaving SENT or UNKNOWN:
+  `→COMPLETED` needs attempt `c.Attempts` stored COMPLETED with
+  `OutcomeHash == c.OutcomeHash`; `→FAILED` needs it stored FAILED with the
+  same hash agreement; `→PREPARED` (retry, from SENT only) needs it stored
+  FAILED **and** `Retryable`; `→UNKNOWN`/`→ABANDONED` need it stored in the
+  matching attempt state. `PREPARED→SENT` needs attempt `c.Attempts` stored
+  SENT. Any mismatch fails `ErrInvalidTransition` at the store layer, so a
+  caller cannot commit a call-state transition whose attempt-level evidence
+  doesn't already exist in the same or an earlier commit — this is stronger
+  than "the ledger package happens to write both in one transaction," which
+  a differently-written caller could bypass.
+- **Attempt transition table and immutability.** `CallAttempt` gains a
+  `Retryable` field (a FAILED attempt the retry policy may retry — checked
+  by `CallAttempt.Validate`: `Retryable` is only valid on a FAILED attempt).
+  `domain.ValidAttemptTransition` fixes the attempt-level state machine
+  separately from the call-level one: `SENT→{COMPLETED,FAILED,UNKNOWN}`,
+  `UNKNOWN→{COMPLETED,FAILED,ABANDONED}` — an open attempt (SENT or
+  UNKNOWN) carries no `FinishedSeq`/`OutcomeHash`; a closed one
+  (COMPLETED/FAILED) requires both; ABANDONED is finished without an
+  outcome. `store.Tx.PutCallAttempt` is the one unversioned write in the
+  store (no CAS revision) precisely because the attempt transition table
+  itself is the serialization: once `OutcomeHash` is set, only
+  `State`/`OutcomeHash`/`Retryable`/`FinishedSeq`/`FinishedAt` may ever
+  change, and closed attempts (COMPLETED, FAILED, ABANDONED) are otherwise
+  fully immutable. Together with evidence-gated `UpdateCall` above, there is
+  no path that reopens PREPARED from a *presumed* failure: the attempt that
+  failed must already be durably FAILED-and-Retryable before the call
+  transition is even accepted. Reconciling an UNKNOWN call never takes the
+  retry edge: `UNKNOWN→PREPARED` is not in `ValidCallTransition`, so a
+  retryable failure discovered by reconciliation is terminal
+  (`UNKNOWN→FAILED`).
+- **`CallRecord.Validate`'s terminal-state consistency.** A COMPLETED call
+  requires its `Outcome`; a FAILED call requires either an `Outcome` or
+  (only when `Attempts == 0`) a cancellation `Reason` with no outcome — a
+  call that was ever sent cannot fail without one; an ABANDONED call
+  requires a `Reason` and **no** `Outcome`; any non-terminal state carries
+  no `Outcome` at all. Where an `Outcome` is present, `Outcome.State` must
+  equal `State` and `Outcome.Attempt` must equal `Attempts` — closing the
+  gap where a completed call's `Outcome` could silently describe a
+  different state or a different (non-final) attempt than the record
+  itself claims.
 - Restart recovery: `internal/invocation.Recover` turns every `SENT` call
   into `UNKNOWN` at startup — a crash in the send/ack gap is
   indistinguishable from "sent, no ack," and treating it as more certain
@@ -66,10 +95,22 @@ distinct from the frozen inference principal.
   fail with `ErrCallInFlight` if the conversation already holds another
   reserving call, so no store implementation (memory or SQLite) can be
   written to skip this rule.
-- Idempotent re-`Prepare` and semantic-sequence revalidation: `DerivedCallID`
-  v2 and `CallProposalHash` (ADR 4) let `Prepare` recognize a repeated
-  identical proposal against the conversation's currently held in-flight
-  record. The semantic-sequence check is **strict** in Phase 1: a preview is
+- **Required check order in `Prepare`: base version, then semantic
+  staleness, then the in-flight `ProposalHash` comparison — never the
+  reverse.** `Prepare` must first check the conversation's committed
+  version against the preview's base version (`ErrVersionConflict` on
+  mismatch) and semantic staleness (below), and only then compare an
+  existing in-flight PREPARED record's `ProposalHash` (ADR 4) to decide
+  whether this is an idempotent repeat. Checking the in-flight record
+  first — returning a match before validating the base version or
+  semantic sequence — would let a `Prepare` call that is idempotent by ID
+  alone return success for a proposal whose semantic basis has since
+  changed, silently reusing a now-stale reservation instead of failing
+  `ErrVersionConflict`. `DerivedCallID`'s conversation-revision binding
+  (ADR 4) and this check order are two halves of the same guarantee: the ID
+  prevents *aliasing* across reservations, the order prevents a *correct*
+  ID match from skipping revalidation.
+- Semantic-sequence revalidation: the check is **strict** in Phase 1; a preview is
   stale iff any sequence number in `(SemanticSeq, LastSeq]` is **not** a
   `TargetCall` lifecycle event
   (`internal/invocation.semanticStale`) — i.e. any committed sequence number
@@ -126,6 +167,19 @@ distinct from the frozen inference principal.
 - **Relevance-aware `PrepareCall` revalidation now.** Rejected: requires the
   Phase 4 planner; the strict per-sequence-number rule never
   under-invalidates and is the documented interim.
+- **Trusting `DerivedCallID`'s conversation-revision binding alone to make
+  re-`Prepare` safe, without also fixing the check order.** Rejected
+  (Codex finding N1): the ID scheme prevents an unrelated later operation
+  from aliasing an earlier call's ID, but it does not by itself stop a
+  *correct* ID match from short-circuiting past a revalidation the base
+  version or semantic sequence would otherwise fail. Both the ID scheme and
+  the check order are required, and neither substitutes for the other.
+- **A CAS revision on `PutCallAttempt`, matching every other store method.**
+  Rejected: the attempt-level state machine (`ValidAttemptTransition`,
+  immutability once closed) is itself the serialization discipline for
+  attempts; a caller can only ever move an attempt forward along that table,
+  so a separate revision number would duplicate a guarantee the transition
+  table already provides.
 - **Implementing the §8 service grant now instead of an owner-match check.**
   Rejected for Phase 1: no grant-issuance machinery for dispatch actions
   exists yet, and SYSTEM/HARNESS-plus-owner-match is a sound, conservative
@@ -134,6 +188,18 @@ distinct from the frozen inference principal.
 
 ## Consequences / compatibility impact
 
+- **Known implementation gap (not yet fixed as of this ADR):** the
+  committed `internal/invocation/prepare.go` still checks the conversation's
+  in-flight held record *before* the base-version and semantic-staleness
+  checks, and its `nextCallID` still derives the call ID from
+  `(session, conversation, BaseConversationVersion, requestHash)` with a
+  generation-probing loop rather than `(session, conversation,
+  conversationRevision, CallProposalHash)`, and never populates
+  `CallRecord.ProposalHash` before `InsertCall` — which now fails
+  `CallRecord.Validate`'s `ProposalHash == CallProposalHash(c)` check. This
+  ADR's Decision is the target contract; bringing `internal/invocation` in
+  line with it (check order, `DerivedCallID` v2 call site, `ProposalHash`
+  population) is required before Phase 1's gate, not optional cleanup.
 - The strict semantic-sequence check produces more `ErrVersionConflict`
   invalidations than a relevance-aware Phase 4+ planner would; narrowing it
   later is a compatible relaxation, not a breaking change.
@@ -150,15 +216,33 @@ distinct from the frozen inference principal.
 
 ## Tests that lock the behavior
 
-- `internal/domain/call_test.go`: `ValidCallTransition` exhaustive;
-  `CallOutcome.Validate`/`OutcomeHash` per-attempt behavior (ADR 4);
-  `CallRecord.Validate` proposal-hash and finished-sequence agreement.
+- `internal/domain/call_test.go`: `ValidCallTransition` and
+  `ValidAttemptTransition` exhaustive; `CallOutcome.Validate`/`OutcomeHash`
+  per-attempt behavior (ADR 4); `CallAttempt.Validate` — open/closed
+  consistency per state, `Retryable` only valid on FAILED;
+  `CallRecord.Validate` — proposal-hash and finished-sequence agreement,
+  and now the per-state `Outcome`/`Reason` matrix (COMPLETED requires
+  Outcome; FAILED requires Outcome or a zero-attempt cancellation Reason;
+  ABANDONED requires Reason and no Outcome; `Outcome.State == State` and
+  `Outcome.Attempt == Attempts` when Outcome is present).
+- Required: `internal/store/storetest` — `UpdateCall`'s evidence gating:
+  each of `→COMPLETED`/`→FAILED`/`→PREPARED`/`→UNKNOWN`/`→ABANDONED` and
+  `PREPARED→SENT` fails `ErrInvalidTransition` when attempt `c.Attempts`
+  isn't already stored in the required closed/matching state; `PutCallAttempt`
+  rejects any field change on a closed attempt other than
+  `State`/`OutcomeHash`/`Retryable`/`FinishedSeq`/`FinishedAt`.
 - `internal/invocation` (`ledger_test.go`, `t10_test.go`, `property_test.go`,
-  `helpers_test.go`, already committed): retry only from a durably closed
-  attempt; reconciling UNKNOWN never takes `UNKNOWN→PREPARED`; late-outcome
-  audit path for ABANDONED calls; `semanticStale` true/false boundary at
-  `SemanticSeq == LastSeq` and across intervening non-ledger sequence
-  numbers; lifecycle event ID determinism across a simulated restart.
+  `helpers_test.go`, already committed, but see the Consequences gap above):
+  retry only from a durably closed attempt; reconciling UNKNOWN never takes
+  `UNKNOWN→PREPARED`; late-outcome audit path for ABANDONED calls;
+  `semanticStale` true/false boundary at `SemanticSeq == LastSeq` and across
+  intervening non-ledger sequence numbers; lifecycle event ID determinism
+  across a simulated restart.
+- Required: an `internal/invocation` test asserting `Prepare`'s check
+  order directly — construct a conversation with an in-flight PREPARED call
+  whose `ProposalHash` matches a new request, but whose base version or
+  semantic sequence is now stale, and assert `ErrVersionConflict`, not a
+  silent idempotent return (locks the N1 fix once `prepare.go` is corrected).
 - `internal/store/storetest`: `InsertCall`/`UpdateCall` reject a second
   reserving call for the same conversation with `ErrCallInFlight`; a
   transition violating `ValidCallTransition` rejected at the store layer.
@@ -174,17 +258,33 @@ distinct from the frozen inference principal.
 - Whether `CallAttempt.ProviderRequestID` is sufficient for FR-CALL-004's
   reconciliation mechanism, or reconciliation needs more provider-specific
   fields decided in ADR 9.
+- Tracking item: land the `internal/invocation/prepare.go` fix described in
+  Consequences (check order; `DerivedCallID` v2 call site; populate
+  `ProposalHash`) before Phase 1's gate is claimed met.
 
 ## Review
 
-Scrutinized by Codex gpt-6-sol xhigh (`codex-decision-review-out.md`,
-finding 3). Changed: outcome identity moved to per-attempt (ADR 4, applied
-here to the retry edge); documented that `SENT→PREPARED` only follows a
-durably closed FAILED attempt in the same transaction as the call
-transition, never a bare retryable flag; recorded that reconciliation from
-UNKNOWN is terminal (`UNKNOWN→FAILED`), never `UNKNOWN→PREPARED`. Also
-updated against the committed `internal/invocation` implementation (not
-reviewed by Codex, which predates it): the store-enforced single-reservation
-rule, per-transaction sequence allocation with derived lifecycle-event IDs,
-the exact semantic-staleness rule, and the deferred service-grant status of
-dispatcher authorization.
+First pass (Codex gpt-6-sol xhigh, `codex-decision-review-out.md`, finding
+3): outcome identity moved to per-attempt (ADR 4, applied here to the retry
+edge); documented that `SENT→PREPARED` only follows a durably closed FAILED
+attempt, never a bare retryable flag; reconciliation from UNKNOWN recorded
+as terminal. Also updated (not itself a Codex finding) against the then-new
+`internal/invocation` implementation: store-enforced single-reservation
+rule, per-transaction sequence allocation, the exact semantic-staleness
+rule, and the deferred service-grant status.
+
+Second pass (Codex gpt-6-sol xhigh, `codex-contract-v2-review.md`, findings
+N1, N2, N5, verifying PARTIAL on finding 3): the first pass's retry-edge fix
+was real but incomplete, and a new high-severity defect (N1) surfaced in the
+committed ledger code. Changed: documented the store-level evidence gating
+now required on every `UpdateCall` transition out of SENT/UNKNOWN, not just
+ledger-package sequencing (N2/finding 3, closing the "a caller can commit
+the state change alone" gap); added `ValidAttemptTransition` and the
+attempt-immutability rule now enforced by `PutCallAttempt` (N5); added
+`CallRecord.Validate`'s per-state `Outcome`/`Reason` consistency matrix
+(N5, closing "a COMPLETED CallRecord with nil Outcome passes"); recorded
+the required `Prepare` check order (base version → semantic staleness →
+in-flight `ProposalHash`) as a decided rule, and flagged in Consequences
+and Open questions that the committed `internal/invocation/prepare.go`
+does not yet implement it (N1) — this ADR's Decision is the target
+contract that package must still be brought into line with.
