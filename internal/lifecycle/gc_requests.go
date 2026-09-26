@@ -79,6 +79,13 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 	if err != nil {
 		return out, err
 	}
+	// A committed collection replays under its recorded principal and policy
+	// before any of today's checks (P3-2).
+	if _, err = sem.GCResult(req.ID); err == nil {
+		return s.collect(tx, collector, req.CollectIntent, req.ID, seq)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return out, err
+	}
 	if collector.Authority != domain.AuthoritySystem && collector.Authority != domain.AuthorityHarness ||
 		req.Scope == domain.CollectTask && collector.TaskID != req.TaskID {
 		return out, domain.ErrInvalidAuthorityPromotion

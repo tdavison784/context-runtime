@@ -77,6 +77,18 @@ func TestCompletionGCRequestExecutesOnceAfterProducerCommit(t *testing.T) {
 	if err != nil || again.Result.Collect.ID != r.ID {
 		t.Fatalf("retry: %+v %v", again, err)
 	}
+	// A later, tightened policy still replays the committed collection.
+	tight := testPolicy()
+	tight.MaxTransactionWork = 1
+	s2, _ := New(mem, tight)
+	if replay, err := executeGC(f, mem, s2, collector, id); err != nil || replay.Result.Collect.ID != r.ID {
+		t.Fatalf("replay under new policy: %+v %v", replay, err)
+	}
+	other := collector
+	other.AgentID = "other-agent"
+	if _, err := executeGC(f, mem, s, other, id); !errors.Is(err, domain.ErrEventIDConflict) {
+		t.Fatalf("different collector replayed: %v", err)
+	}
 	if err := mem.View(ctx, "s", func(tx store.ReadTx) error {
 		task, _ := tx.Task("task")
 		if task.Status != domain.TaskCompleted {
