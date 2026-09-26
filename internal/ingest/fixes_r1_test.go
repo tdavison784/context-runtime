@@ -38,3 +38,22 @@ func TestRetryAfterLimitsChange_F3(t *testing.T) {
 		}
 	})
 }
+
+// TestRelationshipLimitOnReplaceAndDuplicate_DUR16: MaxRelationships bounds
+// the SUPERSEDES and DUPLICATE_OF edges too, not only DERIVED_FROM.
+func TestRelationshipLimitOnReplaceAndDuplicate_DUR16(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("v1", "## Pinned\n- [p] one\n", true))
+		f.in.Limits = domain.Limits{MaxRelationships: 1}
+		before := f.lastSeq()
+		for name, text := range map[string]string{
+			"replacement": "## Pinned\n- [p] two\n",
+			"duplicate":   "Note.\n## Pinned\n- [p] one\n",
+		} {
+			if _, err := f.ingest(user, userEvent(name, text, true)); !errors.Is(err, domain.ErrInvalidRecord) || f.lastSeq() != before {
+				t.Errorf("%s: err = %v, want the relationship limit", name, err)
+			}
+		}
+	})
+}
