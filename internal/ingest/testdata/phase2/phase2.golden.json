@@ -1,0 +1,4799 @@
+{
+  "Receipts": {
+    "amb-harness": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_dce7c9ac5984000354d2a1cb157b5946",
+      "EventID": "p2-amb-h",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "",
+        "Authority": "HARNESS"
+      },
+      "PayloadHash": "sha256:66e577d72504849b38ef2252cc021ac2a218b6aa092d03388c1affc6ca5771a6",
+      "Seq": 48,
+      "OpenedTurn": 0,
+      "TurnID": "",
+      "Items": [
+        {
+          "ID": "itm_e9ed8edf79272c3cc843ea435a299cf3",
+          "EventID": "p2-amb-h",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 49,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "",
+          "TurnID": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+          "Kind": "conversation",
+          "Generation": "WORKING",
+          "Authority": "HARNESS",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "## Pinned\n- [p] task-wide rule\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:2ef7f945e518eedfd2c5e58cf6c4fa90f0ef6ee6d587503cbd922441f428bd37",
+          "SemanticBytes": 78,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 4,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        },
+        {
+          "ID": "itm_87aa26e6d9aae1177acef594bc0e7ac9",
+          "EventID": "p2-amb-h",
+          "DirectiveID": "p",
+          "Section": "PINNED",
+          "Role": "",
+          "Seq": 50,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "",
+          "TurnID": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+          "Kind": "constraint",
+          "Generation": "PINNED",
+          "Authority": "HARNESS",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "task-wide rule",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:39aa97d11b2dcf34e3d0cd36cbb20e388258e94f5e430c152c046459880bf37f",
+          "SemanticBytes": 51,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 4,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_e9ed8edf79272c3cc843ea435a299cf3",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 10,
+                "End": 31
+              },
+              "Slices": [
+                {
+                  "Start": 16,
+                  "End": 30
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        }
+      ],
+      "Diagnostics": null,
+      "Lifecycle": null,
+      "Duplicates": null,
+      "Replacements": null,
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "amb-unpin": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_e8a9828d4d32fdfd05074ab0279165ad",
+      "EventID": "p2-amb-u",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "PayloadHash": "sha256:9bb1eca24887162bd8c785299a231769c7995fbcb4f5fe4d3f114e509b3ae9d9",
+      "Seq": 52,
+      "OpenedTurn": 5,
+      "TurnID": "turn_458b41939f4997de569a2beabb71adb5",
+      "Items": [
+        {
+          "ID": "itm_8575b9282b36e50a47303f454fabb89e",
+          "EventID": "p2-amb-u",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 54,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_458b41939f4997de569a2beabb71adb5",
+          "Kind": "user_message",
+          "Generation": "WORKING",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "## Unpin [p]\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:45065f318ec77c6dbb68c19c63293506193506983c30bea16e2fcf000282b71f",
+          "SemanticBytes": 60,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 5,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        }
+      ],
+      "Diagnostics": [
+        {
+          "ID": "dgn_e57a46cf7ce7b5fd68b515b72bef7709",
+          "SessionID": "S",
+          "OccurrenceID": "evc_e8a9828d4d32fdfd05074ab0279165ad",
+          "EventID": "p2-amb-u",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": "A"
+          },
+          "SchemaVersion": "diagnostic/v1",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Index": 0,
+          "Code": "ErrAmbiguousDirective",
+          "Reason": "ambiguous_target",
+          "Section": "UNPIN",
+          "DirectiveID": "",
+          "Range": {
+            "Start": 0,
+            "End": 13
+          },
+          "ParserVersion": "directive/v1"
+        }
+      ],
+      "Lifecycle": [
+        {
+          "ID": "cmd_e24af41067732e416863300d3f246e69",
+          "SessionID": "S",
+          "OccurrenceID": "evc_e8a9828d4d32fdfd05074ab0279165ad",
+          "EventID": "p2-amb-u",
+          "Ordinal": 0,
+          "Actor": {
+            "SessionID": "S",
+            "WorkflowID": "wf",
+            "TaskID": "T",
+            "AgentID": "A",
+            "Authority": "USER"
+          },
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "DetailAccess": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": "A"
+          },
+          "ParserVersion": "directive/v1",
+          "SchemaVersion": "lifecycle-command/v1",
+          "Status": "PARSED_NOT_EXECUTED",
+          "Resolution": "AMBIGUOUS",
+          "ResolvedItemID": "",
+          "ResolvedVersion": 0,
+          "Action": "UNPIN",
+          "TargetID": "p",
+          "Authority": "USER",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Range": {
+            "Start": 0,
+            "End": 13
+          }
+        }
+      ],
+      "Duplicates": null,
+      "Replacements": null,
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "amb-user": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_e8981b255d14aa0b8734d0263c07df3f",
+      "EventID": "p2-amb-a",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "PayloadHash": "sha256:ab812f9f16b18e17dd485dddab1188ff729be815aafc0d14df7294abb51b67c1",
+      "Seq": 43,
+      "OpenedTurn": 4,
+      "TurnID": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+      "Items": [
+        {
+          "ID": "itm_dc29ea9c51989bdbddd19fe8fc559b74",
+          "EventID": "p2-amb-a",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 45,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+          "Kind": "user_message",
+          "Generation": "WORKING",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "## Pinned\n- [p] {scope=AGENT} private rule\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:a0082f5841ac6bb4eed9d166839e614a58d7bdddd39148b539fee7add5b1f669",
+          "SemanticBytes": 90,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 4,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        },
+        {
+          "ID": "itm_2c7806460b04dbe06d8d058bb0dc773c",
+          "EventID": "p2-amb-a",
+          "DirectiveID": "p",
+          "Section": "PINNED",
+          "Role": "",
+          "Seq": 46,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+          "Kind": "constraint",
+          "Generation": "PINNED",
+          "Authority": "USER",
+          "Scope": "AGENT",
+          "Access": {
+            "Scope": "AGENT",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": "A"
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "private rule",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:57d2761b57e2fa463069b29e30a546b8f00f840c14c63b9fa4fa21dd58f4e04b",
+          "SemanticBytes": 49,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 4,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_dc29ea9c51989bdbddd19fe8fc559b74",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 10,
+                "End": 43
+              },
+              "Slices": [
+                {
+                  "Start": 30,
+                  "End": 42
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        }
+      ],
+      "Diagnostics": null,
+      "Lifecycle": null,
+      "Duplicates": null,
+      "Replacements": null,
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "anon": {
+      "SessionID": "S",
+      "OccurrenceID": "eva_1",
+      "EventID": "",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "PayloadHash": "sha256:377a6c9abed05d4f26156e55f74cb8ca102ea96feb5bd0eadd44f2118bd16148",
+      "Seq": 70,
+      "OpenedTurn": 7,
+      "TurnID": "turn_366ce34418ade9e4497f88d837832f77",
+      "Items": [
+        {
+          "ID": "itm_2abfb8aaf42a7c42e6d0dc007bacc7ef",
+          "EventID": "",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 72,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_366ce34418ade9e4497f88d837832f77",
+          "Kind": "user_message",
+          "Generation": "WORKING",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "hello",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:1b8b95793a40840de040d9dde474f0dd66b98386e156f659eaa769c2dceed35d",
+          "SemanticBytes": 52,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 7,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        }
+      ],
+      "Diagnostics": null,
+      "Lifecycle": null,
+      "Duplicates": null,
+      "Replacements": null,
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "harness-turn": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_e53a65f5d470113a920ee636c6e527ec",
+      "EventID": "p2-h-turn",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "HARNESS"
+      },
+      "PayloadHash": "sha256:6f6337641364176c597eea846abc7e503dd5c3796d8788b690b38bd8d77e4eb3",
+      "Seq": 55,
+      "OpenedTurn": 6,
+      "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+      "Items": [
+        {
+          "ID": "itm_7df51f435132759f2bc400a244b2173d",
+          "EventID": "p2-h-turn",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 57,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+          "Kind": "conversation",
+          "Generation": "WORKING",
+          "Authority": "HARNESS",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "## Remember\n- harness note\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:ae340786fd1db8eb875c4d6a55b01c7c79766f09d942032150b3652ccfae4f5f",
+          "SemanticBytes": 74,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 6,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        },
+        {
+          "ID": "itm_268b23a5967ababceb1c30209bd005ac",
+          "EventID": "p2-h-turn",
+          "DirectiveID": "remember-9269fdb0ce546d4b6f52408dcc55090f93f07b4aba229ee29f33863cfe4bdb16",
+          "Section": "REMEMBER",
+          "Role": "",
+          "Seq": 58,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+          "Kind": "fact",
+          "Generation": "DURABLE",
+          "Authority": "HARNESS",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "HIGH",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "harness note",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:9269fdb0ce546d4b6f52408dcc55090f93f07b4aba229ee29f33863cfe4bdb16",
+          "SemanticBytes": 49,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 6,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_7df51f435132759f2bc400a244b2173d",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 12,
+                "End": 27
+              },
+              "Slices": [
+                {
+                  "Start": 14,
+                  "End": 26
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        }
+      ],
+      "Diagnostics": [
+        {
+          "ID": "dgn_48bdaa084858638d067e9872e80005ff",
+          "SessionID": "S",
+          "OccurrenceID": "evc_e53a65f5d470113a920ee636c6e527ec",
+          "EventID": "p2-h-turn",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "SchemaVersion": "diagnostic/v1",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Index": 0,
+          "Code": "DirectiveIDDerived",
+          "Reason": "derived_id",
+          "Section": "REMEMBER",
+          "DirectiveID": "remember-9269fdb0ce546d4b6f52408dcc55090f93f07b4aba229ee29f33863cfe4bdb16",
+          "Range": {
+            "Start": 12,
+            "End": 27
+          },
+          "ParserVersion": "directive/v1"
+        }
+      ],
+      "Lifecycle": null,
+      "Duplicates": null,
+      "Replacements": null,
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "sys-1": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_16147734141ba8c03ca7926e7a7a4b7c",
+      "EventID": "p2-sys-1",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "SYSTEM"
+      },
+      "PayloadHash": "sha256:77353561067e141fa4e83f40552df9d756f6ca0188db3f7c0e0f2004ca52d648",
+      "Seq": 1,
+      "OpenedTurn": 0,
+      "TurnID": "",
+      "Items": [
+        {
+          "ID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+          "EventID": "p2-sys-1",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 3,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "",
+          "Kind": "conversation",
+          "Generation": "WORKING",
+          "Authority": "SYSTEM",
+          "Scope": "SESSION",
+          "Access": {
+            "Scope": "SESSION",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "## Goal [ship]\nShip the release.\n## Pinned\n- [deps] {obligation=tests_pass} Use dependency v2.\n- [suite] All tests must pass.\n- [reada] Read a.go\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:b03d0affdb7397b768b01e6f23d30e2cd25dd80fc16273cafb114cc86fa9554d",
+          "SemanticBytes": 194,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 0,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        },
+        {
+          "ID": "itm_73002b2de7aa8e93e1b6d9245df47bd6",
+          "EventID": "p2-sys-1",
+          "DirectiveID": "ship",
+          "Section": "GOAL",
+          "Role": "",
+          "Seq": 4,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "",
+          "Kind": "goal",
+          "Generation": "DURABLE",
+          "Authority": "SYSTEM",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": "OPEN",
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "Ship the release.",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:fccfcff2625e0d268ad686e42c301f03812d42a06d7b9f3141921d0e9793e8a4",
+          "SemanticBytes": 54,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 0,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 0,
+                "End": 33
+              },
+              "Slices": [
+                {
+                  "Start": 15,
+                  "End": 32
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        },
+        {
+          "ID": "itm_e657a4f299534da32f74a99f75eac485",
+          "EventID": "p2-sys-1",
+          "DirectiveID": "deps",
+          "Section": "PINNED",
+          "Role": "",
+          "Seq": 6,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "",
+          "Kind": "constraint",
+          "Generation": "PINNED",
+          "Authority": "SYSTEM",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "Use dependency v2.",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:90ca3b370606718b38370308d8740148164d24c1cbfa6e47d54606bbd4c5d66b",
+          "SemanticBytes": 55,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 0,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 43,
+                "End": 95
+              },
+              "Slices": [
+                {
+                  "Start": 76,
+                  "End": 94
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        },
+        {
+          "ID": "itm_fb5247de3607e0798b4691e5d1cac903",
+          "EventID": "p2-sys-1",
+          "DirectiveID": "suite",
+          "Section": "PINNED",
+          "Role": "",
+          "Seq": 9,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "",
+          "Kind": "constraint",
+          "Generation": "PINNED",
+          "Authority": "SYSTEM",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "All tests must pass.",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:7727a74aaaa8689c32dc38fc24275332ed5a053fcfaaaf2184ce461c49541945",
+          "SemanticBytes": 57,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 0,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 95,
+                "End": 126
+              },
+              "Slices": [
+                {
+                  "Start": 105,
+                  "End": 125
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        },
+        {
+          "ID": "itm_58e5e49258d0bff4539737b714b238a8",
+          "EventID": "p2-sys-1",
+          "DirectiveID": "reada",
+          "Section": "PINNED",
+          "Role": "",
+          "Seq": 11,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "",
+          "Kind": "constraint",
+          "Generation": "PINNED",
+          "Authority": "SYSTEM",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "Read a.go",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:dc0cb67e1d0f832a7f775335851b68fbc0dcabd285f32d79dd32e6b8569bc41c",
+          "SemanticBytes": 46,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 0,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 126,
+                "End": 146
+              },
+              "Slices": [
+                {
+                  "Start": 136,
+                  "End": 145
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        }
+      ],
+      "Diagnostics": null,
+      "Lifecycle": null,
+      "Duplicates": null,
+      "Replacements": null,
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "sys-2": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_56f1b2f81331056e25170cea161c11bd",
+      "EventID": "p2-sys-2",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "SYSTEM"
+      },
+      "PayloadHash": "sha256:6be69e41facb71de58d1129425377eb79504a2d4ef0d2e88d28141bf54d55fe7",
+      "Seq": 60,
+      "OpenedTurn": 0,
+      "TurnID": "",
+      "Items": [
+        {
+          "ID": "itm_461cb5543b89c7178674949b3e443ac2",
+          "EventID": "p2-sys-2",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 61,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+          "Kind": "conversation",
+          "Generation": "WORKING",
+          "Authority": "SYSTEM",
+          "Scope": "SESSION",
+          "Access": {
+            "Scope": "SESSION",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "## Pinned\n- [deps] {obligation=tests_pass} Use dependency v3.\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:28da8eacde32f8ab3b3d545570dfc0c7279242132dc2b1e152d3fe0097634d1e",
+          "SemanticBytes": 109,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 6,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        },
+        {
+          "ID": "itm_4699d7ef6acd8352bb69f67271717eb5",
+          "EventID": "p2-sys-2",
+          "DirectiveID": "deps",
+          "Section": "PINNED",
+          "Role": "",
+          "Seq": 62,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+          "Kind": "constraint",
+          "Generation": "PINNED",
+          "Authority": "SYSTEM",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "Use dependency v3.",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:3babdeb77ab4271ade86dc856ad867ba3084fa7de071052e418d7a2cc98c7535",
+          "SemanticBytes": 55,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 6,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_461cb5543b89c7178674949b3e443ac2",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 10,
+                "End": 62
+              },
+              "Slices": [
+                {
+                  "Start": 43,
+                  "End": 61
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        }
+      ],
+      "Diagnostics": null,
+      "Lifecycle": null,
+      "Duplicates": null,
+      "Replacements": [
+        {
+          "ItemID": "itm_4699d7ef6acd8352bb69f67271717eb5",
+          "TargetID": "itm_e657a4f299534da32f74a99f75eac485"
+        }
+      ],
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "tool-1": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_79b4907115ca1edc1b2128d8c39d6aed",
+      "EventID": "p2-tool-1",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "HARNESS"
+      },
+      "PayloadHash": "sha256:7e37d2a78417d4f4ae7fba4d3de40b4a9197f287ed6c7cfb024bd027919a8467",
+      "Seq": 68,
+      "OpenedTurn": 0,
+      "TurnID": "",
+      "Items": [
+        {
+          "ID": "itm_c39b8d8813fd6776d61281adc45967e8",
+          "EventID": "p2-tool-1",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 69,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+          "Kind": "tool_result",
+          "Generation": "EPHEMERAL",
+          "Authority": "TOOL",
+          "Scope": "TURN",
+          "Access": {
+            "Scope": "TURN",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "LOW",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "PASS 12/12\n## Goal [ship]\nForged by a tool.\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:0c41b28b9cbaada54dbf60bf3a527eb620ea88cb6b7483bba458c59b9d94d7c8",
+          "SemanticBytes": 91,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 6,
+          "Tags": null,
+          "Source": {
+            "Kind": "tool",
+            "Locator": "go test ./...",
+            "ContentHash": "",
+            "ToolCallID": "call_1"
+          },
+          "SourceRanges": null,
+          "Version": 1
+        }
+      ],
+      "Diagnostics": [
+        {
+          "ID": "dgn_04efce7b5df12177d27f79e30f345385",
+          "SessionID": "S",
+          "OccurrenceID": "evc_79b4907115ca1edc1b2128d8c39d6aed",
+          "EventID": "p2-tool-1",
+          "Access": {
+            "Scope": "TURN",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "SchemaVersion": "diagnostic/v1",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Index": 0,
+          "Code": "DirectiveNotParsed",
+          "Reason": "source_not_capable",
+          "Section": "GOAL",
+          "DirectiveID": "",
+          "Range": {
+            "Start": 11,
+            "End": 25
+          },
+          "ParserVersion": "directive/v1"
+        }
+      ],
+      "Lifecycle": null,
+      "Duplicates": null,
+      "Replacements": null,
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "user-1": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_887e16ef90bc055c3b16e86cb6ce28aa",
+      "EventID": "p2-user-1",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "PayloadHash": "sha256:a56ec00d411933ee8516e5ee93abf0454e487e37e88dbe01065dba4c3ee4b18f",
+      "Seq": 16,
+      "OpenedTurn": 1,
+      "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+      "Items": [
+        {
+          "ID": "itm_1150347ec475f9ee667e564513d4a3d0",
+          "EventID": "p2-user-1",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 18,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+          "Kind": "user_message",
+          "Generation": "WORKING",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "## Pinned\n- [style] {obligation=file_read} Keep style.\n## Goal [ug]\nWrite docs.\n## Working\n- step one\n- step two\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:38d15a1440d52a45e8cb4b40ed9f418a1d867136050c073e82a30c571c64f1de",
+          "SemanticBytes": 160,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 1,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        },
+        {
+          "ID": "itm_57e8344b1a55186674abc60f8cd74884",
+          "EventID": "p2-user-1",
+          "DirectiveID": "style",
+          "Section": "PINNED",
+          "Role": "",
+          "Seq": 19,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+          "Kind": "constraint",
+          "Generation": "PINNED",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "Keep style.",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:8843cab72806f8278face4a5478247de47636b9c4322bbee61eb72722c7be999",
+          "SemanticBytes": 48,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 1,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_1150347ec475f9ee667e564513d4a3d0",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 10,
+                "End": 55
+              },
+              "Slices": [
+                {
+                  "Start": 43,
+                  "End": 54
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        },
+        {
+          "ID": "itm_2b1cf8821572c698935a6ea9ea6d2907",
+          "EventID": "p2-user-1",
+          "DirectiveID": "ug",
+          "Section": "GOAL",
+          "Role": "",
+          "Seq": 22,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+          "Kind": "goal",
+          "Generation": "DURABLE",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": "OPEN",
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "Write docs.",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:f46999ca252bc9f4be449dffe56b7dfffde0666bd7426ec3bcbc7addf81e6fe1",
+          "SemanticBytes": 48,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 1,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_1150347ec475f9ee667e564513d4a3d0",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 55,
+                "End": 80
+              },
+              "Slices": [
+                {
+                  "Start": 68,
+                  "End": 79
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        },
+        {
+          "ID": "itm_92ab729b9f6a1f08ffbeb941fb71b61a",
+          "EventID": "p2-user-1",
+          "DirectiveID": "working-1eee177152db25173ce3d21e20912499bdad77f2495acca4a2566733b937435f",
+          "Section": "WORKING",
+          "Role": "",
+          "Seq": 24,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+          "Kind": "task_state",
+          "Generation": "WORKING",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "step one",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:1eee177152db25173ce3d21e20912499bdad77f2495acca4a2566733b937435f",
+          "SemanticBytes": 45,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 1,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_1150347ec475f9ee667e564513d4a3d0",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 91,
+                "End": 102
+              },
+              "Slices": [
+                {
+                  "Start": 93,
+                  "End": 101
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        },
+        {
+          "ID": "itm_5cabf601a31dde737753a5ee071356e3",
+          "EventID": "p2-user-1",
+          "DirectiveID": "working-255e89b3a2ade65906086736f1ec18f902cd6c5121d37b7fe193af8d78f56a42",
+          "Section": "WORKING",
+          "Role": "",
+          "Seq": 26,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+          "Kind": "task_state",
+          "Generation": "WORKING",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "step two",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:255e89b3a2ade65906086736f1ec18f902cd6c5121d37b7fe193af8d78f56a42",
+          "SemanticBytes": 45,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 1,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_1150347ec475f9ee667e564513d4a3d0",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 102,
+                "End": 113
+              },
+              "Slices": [
+                {
+                  "Start": 104,
+                  "End": 112
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        }
+      ],
+      "Diagnostics": [
+        {
+          "ID": "dgn_564b36bdb14ead05b4ded168fab8941e",
+          "SessionID": "S",
+          "OccurrenceID": "evc_887e16ef90bc055c3b16e86cb6ce28aa",
+          "EventID": "p2-user-1",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "SchemaVersion": "diagnostic/v1",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Index": 0,
+          "Code": "DirectiveIDDerived",
+          "Reason": "derived_id",
+          "Section": "WORKING",
+          "DirectiveID": "working-1eee177152db25173ce3d21e20912499bdad77f2495acca4a2566733b937435f",
+          "Range": {
+            "Start": 91,
+            "End": 102
+          },
+          "ParserVersion": "directive/v1"
+        },
+        {
+          "ID": "dgn_ec3534c236f1abdab48796b7f82e7eff",
+          "SessionID": "S",
+          "OccurrenceID": "evc_887e16ef90bc055c3b16e86cb6ce28aa",
+          "EventID": "p2-user-1",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "SchemaVersion": "diagnostic/v1",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Index": 1,
+          "Code": "DirectiveIDDerived",
+          "Reason": "derived_id",
+          "Section": "WORKING",
+          "DirectiveID": "working-255e89b3a2ade65906086736f1ec18f902cd6c5121d37b7fe193af8d78f56a42",
+          "Range": {
+            "Start": 102,
+            "End": 113
+          },
+          "ParserVersion": "directive/v1"
+        }
+      ],
+      "Lifecycle": null,
+      "Duplicates": null,
+      "Replacements": null,
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "user-2": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+      "EventID": "p2-user-2",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "PayloadHash": "sha256:a959bef94a046bed6e8f82b8d18b3b14ec7da7bf810e21b124d5b1368f1779f9",
+      "Seq": 28,
+      "OpenedTurn": 2,
+      "TurnID": "turn_cc9a42b4ef884e0df367d2a44e1bb6c6",
+      "Items": [
+        {
+          "ID": "itm_ae8c33f1ac84b562dfd4ae2cfeeea5c1",
+          "EventID": "p2-user-2",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 30,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_cc9a42b4ef884e0df367d2a44e1bb6c6",
+          "Kind": "user_message",
+          "Generation": "WORKING",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "## Resolve [ship]\n## Unpin [style]\n## Resolve [nosuch]\n## Resolve [style]\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:99bc7f75a87d6c90c0bc2ee3ce97d88cb17245efcdc194da9236166757bc78bb",
+          "SemanticBytes": 121,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 2,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        }
+      ],
+      "Diagnostics": [
+        {
+          "ID": "dgn_15b09e64b52faa56f6919617aec86400",
+          "SessionID": "S",
+          "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+          "EventID": "p2-user-2",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "wf",
+            "TaskID": "T",
+            "AgentID": "A"
+          },
+          "SchemaVersion": "diagnostic/v1",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Index": 0,
+          "Code": "ErrNotFound",
+          "Reason": "unknown_target",
+          "Section": "RESOLVE",
+          "DirectiveID": "",
+          "Range": {
+            "Start": 35,
+            "End": 55
+          },
+          "ParserVersion": "directive/v1"
+        },
+        {
+          "ID": "dgn_32bb34fae549fe9ac006c84a197d2bac",
+          "SessionID": "S",
+          "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+          "EventID": "p2-user-2",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "SchemaVersion": "diagnostic/v1",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Index": 1,
+          "Code": "ErrNotFound",
+          "Reason": "target_mismatch",
+          "Section": "RESOLVE",
+          "DirectiveID": "",
+          "Range": {
+            "Start": 55,
+            "End": 74
+          },
+          "ParserVersion": "directive/v1"
+        }
+      ],
+      "Lifecycle": [
+        {
+          "ID": "cmd_ac1ee21bd64d145dde40c955488e5e41",
+          "SessionID": "S",
+          "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+          "EventID": "p2-user-2",
+          "Ordinal": 0,
+          "Actor": {
+            "SessionID": "S",
+            "WorkflowID": "wf",
+            "TaskID": "T",
+            "AgentID": "A",
+            "Authority": "USER"
+          },
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "DetailAccess": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "ParserVersion": "directive/v1",
+          "SchemaVersion": "lifecycle-command/v1",
+          "Status": "PARSED_NOT_EXECUTED",
+          "Resolution": "RESOLVED",
+          "ResolvedItemID": "itm_73002b2de7aa8e93e1b6d9245df47bd6",
+          "ResolvedVersion": 1,
+          "Action": "RESOLVE",
+          "TargetID": "ship",
+          "Authority": "USER",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Range": {
+            "Start": 0,
+            "End": 18
+          }
+        },
+        {
+          "ID": "cmd_f05b08c10c275df5a2bff2de0bfa34a2",
+          "SessionID": "S",
+          "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+          "EventID": "p2-user-2",
+          "Ordinal": 1,
+          "Actor": {
+            "SessionID": "S",
+            "WorkflowID": "wf",
+            "TaskID": "T",
+            "AgentID": "A",
+            "Authority": "USER"
+          },
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "DetailAccess": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "ParserVersion": "directive/v1",
+          "SchemaVersion": "lifecycle-command/v1",
+          "Status": "PARSED_NOT_EXECUTED",
+          "Resolution": "RESOLVED",
+          "ResolvedItemID": "itm_57e8344b1a55186674abc60f8cd74884",
+          "ResolvedVersion": 1,
+          "Action": "UNPIN",
+          "TargetID": "style",
+          "Authority": "USER",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Range": {
+            "Start": 18,
+            "End": 35
+          }
+        },
+        {
+          "ID": "cmd_c34da6f7530e615947391db42bd1e68d",
+          "SessionID": "S",
+          "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+          "EventID": "p2-user-2",
+          "Ordinal": 2,
+          "Actor": {
+            "SessionID": "S",
+            "WorkflowID": "wf",
+            "TaskID": "T",
+            "AgentID": "A",
+            "Authority": "USER"
+          },
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "DetailAccess": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "wf",
+            "TaskID": "T",
+            "AgentID": "A"
+          },
+          "ParserVersion": "directive/v1",
+          "SchemaVersion": "lifecycle-command/v1",
+          "Status": "PARSED_NOT_EXECUTED",
+          "Resolution": "NOT_FOUND",
+          "ResolvedItemID": "",
+          "ResolvedVersion": 0,
+          "Action": "RESOLVE",
+          "TargetID": "nosuch",
+          "Authority": "USER",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Range": {
+            "Start": 35,
+            "End": 55
+          }
+        },
+        {
+          "ID": "cmd_ac4e19d025907db64af76a9564929bdc",
+          "SessionID": "S",
+          "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+          "EventID": "p2-user-2",
+          "Ordinal": 3,
+          "Actor": {
+            "SessionID": "S",
+            "WorkflowID": "wf",
+            "TaskID": "T",
+            "AgentID": "A",
+            "Authority": "USER"
+          },
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "DetailAccess": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "ParserVersion": "directive/v1",
+          "SchemaVersion": "lifecycle-command/v1",
+          "Status": "PARSED_NOT_EXECUTED",
+          "Resolution": "MISMATCH",
+          "ResolvedItemID": "itm_57e8344b1a55186674abc60f8cd74884",
+          "ResolvedVersion": 1,
+          "Action": "RESOLVE",
+          "TargetID": "style",
+          "Authority": "USER",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Range": {
+            "Start": 55,
+            "End": 74
+          }
+        }
+      ],
+      "Duplicates": null,
+      "Replacements": null,
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    },
+    "user-3": {
+      "SessionID": "S",
+      "OccurrenceID": "evc_c5720146ce3a4852d6ed5d3f73fd8765",
+      "EventID": "p2-user-3",
+      "Principal": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "PayloadHash": "sha256:57f82f23fb5080cb076ebaa592e631c5ef08838748664a97aef8123d83573676",
+      "Seq": 31,
+      "OpenedTurn": 3,
+      "TurnID": "turn_509aeddf1ffabdd1caf9adbfc65e4163",
+      "Items": [
+        {
+          "ID": "itm_6cecc31ad128650b3e962a7a1d9c4d90",
+          "EventID": "p2-user-3",
+          "DirectiveID": "",
+          "Section": "",
+          "Role": "TRANSCRIPT",
+          "Seq": 33,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_509aeddf1ffabdd1caf9adbfc65e4163",
+          "Kind": "user_message",
+          "Generation": "WORKING",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "## Goal [ug]\nWrite docs.\n## Working\n- step three\n",
+              "MediaType": "text/plain",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:b011885044430ad04b4650e047ed725b6c6c9efd65c14a59624ce3491c98459f",
+          "SemanticBytes": 96,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 3,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": null,
+          "Version": 1
+        },
+        {
+          "ID": "itm_bc9c7c1e8bd9a498ec3532c447ee7482",
+          "EventID": "p2-user-3",
+          "DirectiveID": "ug",
+          "Section": "GOAL",
+          "Role": "",
+          "Seq": 34,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_509aeddf1ffabdd1caf9adbfc65e4163",
+          "Kind": "goal",
+          "Generation": "DURABLE",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": "OPEN",
+          "Retention": "PROTECTED",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "Write docs.",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:f46999ca252bc9f4be449dffe56b7dfffde0666bd7426ec3bcbc7addf81e6fe1",
+          "SemanticBytes": 48,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 3,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_6cecc31ad128650b3e962a7a1d9c4d90",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 0,
+                "End": 25
+              },
+              "Slices": [
+                {
+                  "Start": 13,
+                  "End": 24
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        },
+        {
+          "ID": "itm_3aebfb71a097e8c682159c055f57e608",
+          "EventID": "p2-user-3",
+          "DirectiveID": "working-f2202c085add8198025422eda16b72b80442e94b83d388778094b45da396975d",
+          "Section": "WORKING",
+          "Role": "",
+          "Seq": 37,
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "TurnID": "turn_509aeddf1ffabdd1caf9adbfc65e4163",
+          "Kind": "task_state",
+          "Generation": "WORKING",
+          "Authority": "USER",
+          "Scope": "TASK",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "Residency": "RESIDENT",
+          "GoalStatus": null,
+          "Retention": "NORMAL",
+          "Parts": [
+            {
+              "Type": "text",
+              "Text": "step three",
+              "MediaType": "",
+              "BlobHash": "",
+              "BlobSize": 0
+            }
+          ],
+          "ContentHash": "sha256:f2202c085add8198025422eda16b72b80442e94b83d388778094b45da396975d",
+          "SemanticBytes": 47,
+          "Importance": 0,
+          "CreatedAt": "2026-09-26T12:00:00Z",
+          "LastUsedCall": 0,
+          "AccessCount": 0,
+          "TTLTurns": null,
+          "CreatedTurn": 3,
+          "Tags": null,
+          "Source": null,
+          "SourceRanges": [
+            {
+              "TranscriptID": "itm_6cecc31ad128650b3e962a7a1d9c4d90",
+              "PartIndex": 0,
+              "Range": {
+                "Start": 36,
+                "End": 49
+              },
+              "Slices": [
+                {
+                  "Start": 38,
+                  "End": 48
+                }
+              ]
+            }
+          ],
+          "Version": 1
+        }
+      ],
+      "Diagnostics": [
+        {
+          "ID": "dgn_3575ddee2ca0d83737077cc633929167",
+          "SessionID": "S",
+          "OccurrenceID": "evc_c5720146ce3a4852d6ed5d3f73fd8765",
+          "EventID": "p2-user-3",
+          "Access": {
+            "Scope": "TASK",
+            "SessionID": "S",
+            "WorkflowID": "",
+            "TaskID": "T",
+            "AgentID": ""
+          },
+          "SchemaVersion": "diagnostic/v1",
+          "SpanIndex": 0,
+          "PartIndex": 0,
+          "Index": 0,
+          "Code": "DirectiveIDDerived",
+          "Reason": "derived_id",
+          "Section": "WORKING",
+          "DirectiveID": "working-f2202c085add8198025422eda16b72b80442e94b83d388778094b45da396975d",
+          "Range": {
+            "Start": 36,
+            "End": 49
+          },
+          "ParserVersion": "directive/v1"
+        }
+      ],
+      "Lifecycle": null,
+      "Duplicates": [
+        {
+          "ItemID": "itm_bc9c7c1e8bd9a498ec3532c447ee7482",
+          "TargetID": "itm_2b1cf8821572c698935a6ea9ea6d2907"
+        }
+      ],
+      "Replacements": [
+        {
+          "ItemID": "itm_3aebfb71a097e8c682159c055f57e608",
+          "TargetID": "itm_92ab729b9f6a1f08ffbeb941fb71b61a"
+        },
+        {
+          "ItemID": "itm_3aebfb71a097e8c682159c055f57e608",
+          "TargetID": "itm_5cabf601a31dde737753a5ee071356e3"
+        }
+      ],
+      "Versions": {
+        "Parser": "directive/v1",
+        "Policy": "policy/v1",
+        "Limits": {
+          "MaxSpanBytes": 8388608,
+          "MaxItemsPerSpan": 4096,
+          "MaxDiagnosticsPerSpan": 256,
+          "MaxIDBytes": 80,
+          "MaxHeadingLevel": 6,
+          "MaxHeadingBytes": 1024,
+          "MaxAttributes": 16,
+          "MaxAttributeBytes": 128,
+          "MaxSpans": 256,
+          "MaxParts": 1024,
+          "MaxEventBytes": 67108864,
+          "MaxBlobBytes": 50331648,
+          "MaxEventItems": 16384,
+          "MaxEventDiagnostics": 4096,
+          "MaxRelationships": 65536,
+          "MaxReferenceLinks": 256
+        }
+      },
+      "SchemaVersion": "ingest-receipt/v1"
+    }
+  },
+  "LastSeq": 72,
+  "Items": [
+    {
+      "ID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+      "EventID": "p2-sys-1",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 3,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "",
+      "Kind": "conversation",
+      "Generation": "WORKING",
+      "Authority": "SYSTEM",
+      "Scope": "SESSION",
+      "Access": {
+        "Scope": "SESSION",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "## Goal [ship]\nShip the release.\n## Pinned\n- [deps] {obligation=tests_pass} Use dependency v2.\n- [suite] All tests must pass.\n- [reada] Read a.go\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:b03d0affdb7397b768b01e6f23d30e2cd25dd80fc16273cafb114cc86fa9554d",
+      "SemanticBytes": 194,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 0,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_73002b2de7aa8e93e1b6d9245df47bd6",
+      "EventID": "p2-sys-1",
+      "DirectiveID": "ship",
+      "Section": "GOAL",
+      "Role": "",
+      "Seq": 4,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "",
+      "Kind": "goal",
+      "Generation": "DURABLE",
+      "Authority": "SYSTEM",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": "OPEN",
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "Ship the release.",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:fccfcff2625e0d268ad686e42c301f03812d42a06d7b9f3141921d0e9793e8a4",
+      "SemanticBytes": 54,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 0,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 0,
+            "End": 33
+          },
+          "Slices": [
+            {
+              "Start": 15,
+              "End": 32
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_e657a4f299534da32f74a99f75eac485",
+      "EventID": "p2-sys-1",
+      "DirectiveID": "deps",
+      "Section": "PINNED",
+      "Role": "",
+      "Seq": 6,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "",
+      "Kind": "constraint",
+      "Generation": "PINNED",
+      "Authority": "SYSTEM",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "Use dependency v2.",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:90ca3b370606718b38370308d8740148164d24c1cbfa6e47d54606bbd4c5d66b",
+      "SemanticBytes": 55,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 0,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 43,
+            "End": 95
+          },
+          "Slices": [
+            {
+              "Start": 76,
+              "End": 94
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_fb5247de3607e0798b4691e5d1cac903",
+      "EventID": "p2-sys-1",
+      "DirectiveID": "suite",
+      "Section": "PINNED",
+      "Role": "",
+      "Seq": 9,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "",
+      "Kind": "constraint",
+      "Generation": "PINNED",
+      "Authority": "SYSTEM",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "All tests must pass.",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:7727a74aaaa8689c32dc38fc24275332ed5a053fcfaaaf2184ce461c49541945",
+      "SemanticBytes": 57,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 0,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 95,
+            "End": 126
+          },
+          "Slices": [
+            {
+              "Start": 105,
+              "End": 125
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_58e5e49258d0bff4539737b714b238a8",
+      "EventID": "p2-sys-1",
+      "DirectiveID": "reada",
+      "Section": "PINNED",
+      "Role": "",
+      "Seq": 11,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "",
+      "Kind": "constraint",
+      "Generation": "PINNED",
+      "Authority": "SYSTEM",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "Read a.go",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:dc0cb67e1d0f832a7f775335851b68fbc0dcabd285f32d79dd32e6b8569bc41c",
+      "SemanticBytes": 46,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 0,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 126,
+            "End": 146
+          },
+          "Slices": [
+            {
+              "Start": 136,
+              "End": 145
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_1150347ec475f9ee667e564513d4a3d0",
+      "EventID": "p2-user-1",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 18,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+      "Kind": "user_message",
+      "Generation": "WORKING",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "## Pinned\n- [style] {obligation=file_read} Keep style.\n## Goal [ug]\nWrite docs.\n## Working\n- step one\n- step two\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:38d15a1440d52a45e8cb4b40ed9f418a1d867136050c073e82a30c571c64f1de",
+      "SemanticBytes": 160,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 1,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_57e8344b1a55186674abc60f8cd74884",
+      "EventID": "p2-user-1",
+      "DirectiveID": "style",
+      "Section": "PINNED",
+      "Role": "",
+      "Seq": 19,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+      "Kind": "constraint",
+      "Generation": "PINNED",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "Keep style.",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:8843cab72806f8278face4a5478247de47636b9c4322bbee61eb72722c7be999",
+      "SemanticBytes": 48,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 1,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_1150347ec475f9ee667e564513d4a3d0",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 10,
+            "End": 55
+          },
+          "Slices": [
+            {
+              "Start": 43,
+              "End": 54
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_2b1cf8821572c698935a6ea9ea6d2907",
+      "EventID": "p2-user-1",
+      "DirectiveID": "ug",
+      "Section": "GOAL",
+      "Role": "",
+      "Seq": 22,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+      "Kind": "goal",
+      "Generation": "DURABLE",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": "OPEN",
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "Write docs.",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:f46999ca252bc9f4be449dffe56b7dfffde0666bd7426ec3bcbc7addf81e6fe1",
+      "SemanticBytes": 48,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 1,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_1150347ec475f9ee667e564513d4a3d0",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 55,
+            "End": 80
+          },
+          "Slices": [
+            {
+              "Start": 68,
+              "End": 79
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_92ab729b9f6a1f08ffbeb941fb71b61a",
+      "EventID": "p2-user-1",
+      "DirectiveID": "working-1eee177152db25173ce3d21e20912499bdad77f2495acca4a2566733b937435f",
+      "Section": "WORKING",
+      "Role": "",
+      "Seq": 24,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+      "Kind": "task_state",
+      "Generation": "WORKING",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "step one",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:1eee177152db25173ce3d21e20912499bdad77f2495acca4a2566733b937435f",
+      "SemanticBytes": 45,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 1,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_1150347ec475f9ee667e564513d4a3d0",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 91,
+            "End": 102
+          },
+          "Slices": [
+            {
+              "Start": 93,
+              "End": 101
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_5cabf601a31dde737753a5ee071356e3",
+      "EventID": "p2-user-1",
+      "DirectiveID": "working-255e89b3a2ade65906086736f1ec18f902cd6c5121d37b7fe193af8d78f56a42",
+      "Section": "WORKING",
+      "Role": "",
+      "Seq": 26,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_90199d7f41113c92b2b7c3be413fa39b",
+      "Kind": "task_state",
+      "Generation": "WORKING",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "step two",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:255e89b3a2ade65906086736f1ec18f902cd6c5121d37b7fe193af8d78f56a42",
+      "SemanticBytes": 45,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 1,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_1150347ec475f9ee667e564513d4a3d0",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 102,
+            "End": 113
+          },
+          "Slices": [
+            {
+              "Start": 104,
+              "End": 112
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_ae8c33f1ac84b562dfd4ae2cfeeea5c1",
+      "EventID": "p2-user-2",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 30,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_cc9a42b4ef884e0df367d2a44e1bb6c6",
+      "Kind": "user_message",
+      "Generation": "WORKING",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "## Resolve [ship]\n## Unpin [style]\n## Resolve [nosuch]\n## Resolve [style]\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:99bc7f75a87d6c90c0bc2ee3ce97d88cb17245efcdc194da9236166757bc78bb",
+      "SemanticBytes": 121,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 2,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_6cecc31ad128650b3e962a7a1d9c4d90",
+      "EventID": "p2-user-3",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 33,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_509aeddf1ffabdd1caf9adbfc65e4163",
+      "Kind": "user_message",
+      "Generation": "WORKING",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "## Goal [ug]\nWrite docs.\n## Working\n- step three\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:b011885044430ad04b4650e047ed725b6c6c9efd65c14a59624ce3491c98459f",
+      "SemanticBytes": 96,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 3,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_bc9c7c1e8bd9a498ec3532c447ee7482",
+      "EventID": "p2-user-3",
+      "DirectiveID": "ug",
+      "Section": "GOAL",
+      "Role": "",
+      "Seq": 34,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_509aeddf1ffabdd1caf9adbfc65e4163",
+      "Kind": "goal",
+      "Generation": "DURABLE",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": "OPEN",
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "Write docs.",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:f46999ca252bc9f4be449dffe56b7dfffde0666bd7426ec3bcbc7addf81e6fe1",
+      "SemanticBytes": 48,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 3,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_6cecc31ad128650b3e962a7a1d9c4d90",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 0,
+            "End": 25
+          },
+          "Slices": [
+            {
+              "Start": 13,
+              "End": 24
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_3aebfb71a097e8c682159c055f57e608",
+      "EventID": "p2-user-3",
+      "DirectiveID": "working-f2202c085add8198025422eda16b72b80442e94b83d388778094b45da396975d",
+      "Section": "WORKING",
+      "Role": "",
+      "Seq": 37,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_509aeddf1ffabdd1caf9adbfc65e4163",
+      "Kind": "task_state",
+      "Generation": "WORKING",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "step three",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:f2202c085add8198025422eda16b72b80442e94b83d388778094b45da396975d",
+      "SemanticBytes": 47,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 3,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_6cecc31ad128650b3e962a7a1d9c4d90",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 36,
+            "End": 49
+          },
+          "Slices": [
+            {
+              "Start": 38,
+              "End": 48
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_dc29ea9c51989bdbddd19fe8fc559b74",
+      "EventID": "p2-amb-a",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 45,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+      "Kind": "user_message",
+      "Generation": "WORKING",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "## Pinned\n- [p] {scope=AGENT} private rule\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:a0082f5841ac6bb4eed9d166839e614a58d7bdddd39148b539fee7add5b1f669",
+      "SemanticBytes": 90,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 4,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_2c7806460b04dbe06d8d058bb0dc773c",
+      "EventID": "p2-amb-a",
+      "DirectiveID": "p",
+      "Section": "PINNED",
+      "Role": "",
+      "Seq": 46,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+      "Kind": "constraint",
+      "Generation": "PINNED",
+      "Authority": "USER",
+      "Scope": "AGENT",
+      "Access": {
+        "Scope": "AGENT",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": "A"
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "private rule",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:57d2761b57e2fa463069b29e30a546b8f00f840c14c63b9fa4fa21dd58f4e04b",
+      "SemanticBytes": 49,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 4,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_dc29ea9c51989bdbddd19fe8fc559b74",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 10,
+            "End": 43
+          },
+          "Slices": [
+            {
+              "Start": 30,
+              "End": 42
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_e9ed8edf79272c3cc843ea435a299cf3",
+      "EventID": "p2-amb-h",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 49,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "",
+      "TurnID": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+      "Kind": "conversation",
+      "Generation": "WORKING",
+      "Authority": "HARNESS",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "## Pinned\n- [p] task-wide rule\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:2ef7f945e518eedfd2c5e58cf6c4fa90f0ef6ee6d587503cbd922441f428bd37",
+      "SemanticBytes": 78,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 4,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_87aa26e6d9aae1177acef594bc0e7ac9",
+      "EventID": "p2-amb-h",
+      "DirectiveID": "p",
+      "Section": "PINNED",
+      "Role": "",
+      "Seq": 50,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "",
+      "TurnID": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+      "Kind": "constraint",
+      "Generation": "PINNED",
+      "Authority": "HARNESS",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "task-wide rule",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:39aa97d11b2dcf34e3d0cd36cbb20e388258e94f5e430c152c046459880bf37f",
+      "SemanticBytes": 51,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 4,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_e9ed8edf79272c3cc843ea435a299cf3",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 10,
+            "End": 31
+          },
+          "Slices": [
+            {
+              "Start": 16,
+              "End": 30
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_8575b9282b36e50a47303f454fabb89e",
+      "EventID": "p2-amb-u",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 54,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_458b41939f4997de569a2beabb71adb5",
+      "Kind": "user_message",
+      "Generation": "WORKING",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "## Unpin [p]\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:45065f318ec77c6dbb68c19c63293506193506983c30bea16e2fcf000282b71f",
+      "SemanticBytes": 60,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 5,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_7df51f435132759f2bc400a244b2173d",
+      "EventID": "p2-h-turn",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 57,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+      "Kind": "conversation",
+      "Generation": "WORKING",
+      "Authority": "HARNESS",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "## Remember\n- harness note\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:ae340786fd1db8eb875c4d6a55b01c7c79766f09d942032150b3652ccfae4f5f",
+      "SemanticBytes": 74,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 6,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_268b23a5967ababceb1c30209bd005ac",
+      "EventID": "p2-h-turn",
+      "DirectiveID": "remember-9269fdb0ce546d4b6f52408dcc55090f93f07b4aba229ee29f33863cfe4bdb16",
+      "Section": "REMEMBER",
+      "Role": "",
+      "Seq": 58,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+      "Kind": "fact",
+      "Generation": "DURABLE",
+      "Authority": "HARNESS",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "HIGH",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "harness note",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:9269fdb0ce546d4b6f52408dcc55090f93f07b4aba229ee29f33863cfe4bdb16",
+      "SemanticBytes": 49,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 6,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_7df51f435132759f2bc400a244b2173d",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 12,
+            "End": 27
+          },
+          "Slices": [
+            {
+              "Start": 14,
+              "End": 26
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_461cb5543b89c7178674949b3e443ac2",
+      "EventID": "p2-sys-2",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 61,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+      "Kind": "conversation",
+      "Generation": "WORKING",
+      "Authority": "SYSTEM",
+      "Scope": "SESSION",
+      "Access": {
+        "Scope": "SESSION",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "## Pinned\n- [deps] {obligation=tests_pass} Use dependency v3.\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:28da8eacde32f8ab3b3d545570dfc0c7279242132dc2b1e152d3fe0097634d1e",
+      "SemanticBytes": 109,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 6,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_4699d7ef6acd8352bb69f67271717eb5",
+      "EventID": "p2-sys-2",
+      "DirectiveID": "deps",
+      "Section": "PINNED",
+      "Role": "",
+      "Seq": 62,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+      "Kind": "constraint",
+      "Generation": "PINNED",
+      "Authority": "SYSTEM",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "PROTECTED",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "Use dependency v3.",
+          "MediaType": "",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:3babdeb77ab4271ade86dc856ad867ba3084fa7de071052e418d7a2cc98c7535",
+      "SemanticBytes": 55,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 6,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": [
+        {
+          "TranscriptID": "itm_461cb5543b89c7178674949b3e443ac2",
+          "PartIndex": 0,
+          "Range": {
+            "Start": 10,
+            "End": 62
+          },
+          "Slices": [
+            {
+              "Start": 43,
+              "End": 61
+            }
+          ]
+        }
+      ],
+      "Version": 1
+    },
+    {
+      "ID": "itm_c39b8d8813fd6776d61281adc45967e8",
+      "EventID": "p2-tool-1",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 69,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_3035d7d274b011e5dd678a1f353d89d2",
+      "Kind": "tool_result",
+      "Generation": "EPHEMERAL",
+      "Authority": "TOOL",
+      "Scope": "TURN",
+      "Access": {
+        "Scope": "TURN",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "LOW",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "PASS 12/12\n## Goal [ship]\nForged by a tool.\n",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:0c41b28b9cbaada54dbf60bf3a527eb620ea88cb6b7483bba458c59b9d94d7c8",
+      "SemanticBytes": 91,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 6,
+      "Tags": null,
+      "Source": {
+        "Kind": "tool",
+        "Locator": "go test ./...",
+        "ContentHash": "",
+        "ToolCallID": "call_1"
+      },
+      "SourceRanges": null,
+      "Version": 1
+    },
+    {
+      "ID": "itm_2abfb8aaf42a7c42e6d0dc007bacc7ef",
+      "EventID": "",
+      "DirectiveID": "",
+      "Section": "",
+      "Role": "TRANSCRIPT",
+      "Seq": 72,
+      "SessionID": "S",
+      "WorkflowID": "wf",
+      "TaskID": "T",
+      "AgentID": "A",
+      "TurnID": "turn_366ce34418ade9e4497f88d837832f77",
+      "Kind": "user_message",
+      "Generation": "WORKING",
+      "Authority": "USER",
+      "Scope": "TASK",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Residency": "RESIDENT",
+      "GoalStatus": null,
+      "Retention": "NORMAL",
+      "Parts": [
+        {
+          "Type": "text",
+          "Text": "hello",
+          "MediaType": "text/plain",
+          "BlobHash": "",
+          "BlobSize": 0
+        }
+      ],
+      "ContentHash": "sha256:1b8b95793a40840de040d9dde474f0dd66b98386e156f659eaa769c2dceed35d",
+      "SemanticBytes": 52,
+      "Importance": 0,
+      "CreatedAt": "2026-09-26T12:00:00Z",
+      "LastUsedCall": 0,
+      "AccessCount": 0,
+      "TTLTurns": null,
+      "CreatedTurn": 7,
+      "Tags": null,
+      "Source": null,
+      "SourceRanges": null,
+      "Version": 1
+    }
+  ],
+  "Obligations": [
+    {
+      "ObligationID": "obl_17f5dbdd6164d53c7bf5484de9b6a769",
+      "Version": 2,
+      "SessionID": "S",
+      "TaskID": "T",
+      "SourceItemID": "itm_4699d7ef6acd8352bb69f67271717eb5",
+      "SourceAuthority": "SYSTEM",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Description": "tests_pass",
+      "Claim": "tests_pass",
+      "Matcher": null,
+      "Status": "UNRESOLVED",
+      "Current": true,
+      "EvidenceIDs": null,
+      "CreatedSeq": 67,
+      "RetiredSeq": 0,
+      "MaterializationDisabled": false,
+      "Revision": 1
+    },
+    {
+      "ObligationID": "obl_23721be26afda1d3b1aa1925f1725fcc",
+      "Version": 1,
+      "SessionID": "S",
+      "TaskID": "T",
+      "SourceItemID": "itm_57e8344b1a55186674abc60f8cd74884",
+      "SourceAuthority": "USER",
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "Description": "file_read",
+      "Claim": "file_read",
+      "Matcher": null,
+      "Status": "UNRESOLVED",
+      "Current": true,
+      "EvidenceIDs": null,
+      "CreatedSeq": 21,
+      "RetiredSeq": 0,
+      "MaterializationDisabled": false,
+      "Revision": 1
+    }
+  ],
+  "Versions": {
+    "obl_17f5dbdd6164d53c7bf5484de9b6a769": [
+      {
+        "ObligationID": "obl_17f5dbdd6164d53c7bf5484de9b6a769",
+        "Version": 1,
+        "SessionID": "S",
+        "TaskID": "T",
+        "SourceItemID": "itm_e657a4f299534da32f74a99f75eac485",
+        "SourceAuthority": "SYSTEM",
+        "Access": {
+          "Scope": "TASK",
+          "SessionID": "S",
+          "WorkflowID": "",
+          "TaskID": "T",
+          "AgentID": ""
+        },
+        "Description": "tests_pass",
+        "Claim": "tests_pass",
+        "Matcher": null,
+        "Status": "SATISFIED",
+        "Current": false,
+        "EvidenceIDs": [
+          "itm_8d256bf3bc538c4072e44ed674f8a22b"
+        ],
+        "CreatedSeq": 8,
+        "RetiredSeq": 66,
+        "MaterializationDisabled": false,
+        "Revision": 3
+      },
+      {
+        "ObligationID": "obl_17f5dbdd6164d53c7bf5484de9b6a769",
+        "Version": 2,
+        "SessionID": "S",
+        "TaskID": "T",
+        "SourceItemID": "itm_4699d7ef6acd8352bb69f67271717eb5",
+        "SourceAuthority": "SYSTEM",
+        "Access": {
+          "Scope": "TASK",
+          "SessionID": "S",
+          "WorkflowID": "",
+          "TaskID": "T",
+          "AgentID": ""
+        },
+        "Description": "tests_pass",
+        "Claim": "tests_pass",
+        "Matcher": null,
+        "Status": "UNRESOLVED",
+        "Current": true,
+        "EvidenceIDs": null,
+        "CreatedSeq": 67,
+        "RetiredSeq": 0,
+        "MaterializationDisabled": false,
+        "Revision": 1
+      }
+    ],
+    "obl_23721be26afda1d3b1aa1925f1725fcc": [
+      {
+        "ObligationID": "obl_23721be26afda1d3b1aa1925f1725fcc",
+        "Version": 1,
+        "SessionID": "S",
+        "TaskID": "T",
+        "SourceItemID": "itm_57e8344b1a55186674abc60f8cd74884",
+        "SourceAuthority": "USER",
+        "Access": {
+          "Scope": "TASK",
+          "SessionID": "S",
+          "WorkflowID": "",
+          "TaskID": "T",
+          "AgentID": ""
+        },
+        "Description": "file_read",
+        "Claim": "file_read",
+        "Matcher": null,
+        "Status": "UNRESOLVED",
+        "Current": true,
+        "EvidenceIDs": null,
+        "CreatedSeq": 21,
+        "RetiredSeq": 0,
+        "MaterializationDisabled": false,
+        "Revision": 1
+      }
+    ]
+  },
+  "Transitions": {
+    "obl_17f5dbdd6164d53c7bf5484de9b6a769": [
+      {
+        "ID": "p2-sat",
+        "SessionID": "S",
+        "ObligationID": "obl_17f5dbdd6164d53c7bf5484de9b6a769",
+        "Version": 1,
+        "Seq": 15,
+        "From": "UNRESOLVED",
+        "To": "SATISFIED",
+        "Action": "assert_obligation",
+        "Actor": {
+          "SessionID": "S",
+          "WorkflowID": "wf",
+          "TaskID": "T",
+          "AgentID": "A",
+          "Authority": "HARNESS"
+        },
+        "GrantID": "p2-grant-matcher",
+        "Matcher": {
+          "Name": "tests_pass",
+          "Version": "1"
+        },
+        "EvidenceIDs": [
+          "itm_8d256bf3bc538c4072e44ed674f8a22b"
+        ],
+        "Fingerprints": [
+          "sha256:4bb48e76f19de6ebed7d59d46800508030aecea46ba56bd19855d94473e28bc0"
+        ],
+        "Reason": ""
+      }
+    ],
+    "obl_23721be26afda1d3b1aa1925f1725fcc": []
+  },
+  "Grants": [
+    {
+      "ID": "p2-grant-matcher",
+      "SessionID": "S",
+      "Action": "assert_obligation",
+      "TargetIDs": [
+        "obl_17f5dbdd6164d53c7bf5484de9b6a769"
+      ],
+      "Issuer": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "SYSTEM"
+      },
+      "Grantee": null,
+      "Matcher": {
+        "Name": "tests_pass",
+        "Version": "1"
+      },
+      "IssuedSeq": 14,
+      "ExpiresAtSeq": 0,
+      "RevokedSeq": 0
+    },
+    {
+      "ID": "p2-grant-resolve",
+      "SessionID": "S",
+      "Action": "resolve",
+      "TargetIDs": [
+        "itm_73002b2de7aa8e93e1b6d9245df47bd6"
+      ],
+      "Issuer": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "SYSTEM"
+      },
+      "Grantee": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "Matcher": null,
+      "IssuedSeq": 13,
+      "ExpiresAtSeq": 0,
+      "RevokedSeq": 0
+    }
+  ],
+  "Task": {
+    "SessionID": "S",
+    "TaskID": "T",
+    "WorkflowID": "wf",
+    "Status": "ACTIVE",
+    "Turn": 7,
+    "TurnID": "turn_366ce34418ade9e4497f88d837832f77",
+    "CompletedSeq": 0,
+    "Version": 8
+  },
+  "Commands": [
+    {
+      "ID": "cmd_ac1ee21bd64d145dde40c955488e5e41",
+      "SessionID": "S",
+      "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+      "EventID": "p2-user-2",
+      "Ordinal": 0,
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "DetailAccess": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "ParserVersion": "directive/v1",
+      "SchemaVersion": "lifecycle-command/v1",
+      "Status": "PARSED_NOT_EXECUTED",
+      "Resolution": "RESOLVED",
+      "ResolvedItemID": "itm_73002b2de7aa8e93e1b6d9245df47bd6",
+      "ResolvedVersion": 1,
+      "Action": "RESOLVE",
+      "TargetID": "ship",
+      "Authority": "USER",
+      "SpanIndex": 0,
+      "PartIndex": 0,
+      "Range": {
+        "Start": 0,
+        "End": 18
+      }
+    },
+    {
+      "ID": "cmd_f05b08c10c275df5a2bff2de0bfa34a2",
+      "SessionID": "S",
+      "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+      "EventID": "p2-user-2",
+      "Ordinal": 1,
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "DetailAccess": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "ParserVersion": "directive/v1",
+      "SchemaVersion": "lifecycle-command/v1",
+      "Status": "PARSED_NOT_EXECUTED",
+      "Resolution": "RESOLVED",
+      "ResolvedItemID": "itm_57e8344b1a55186674abc60f8cd74884",
+      "ResolvedVersion": 1,
+      "Action": "UNPIN",
+      "TargetID": "style",
+      "Authority": "USER",
+      "SpanIndex": 0,
+      "PartIndex": 0,
+      "Range": {
+        "Start": 18,
+        "End": 35
+      }
+    },
+    {
+      "ID": "cmd_c34da6f7530e615947391db42bd1e68d",
+      "SessionID": "S",
+      "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+      "EventID": "p2-user-2",
+      "Ordinal": 2,
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "DetailAccess": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A"
+      },
+      "ParserVersion": "directive/v1",
+      "SchemaVersion": "lifecycle-command/v1",
+      "Status": "PARSED_NOT_EXECUTED",
+      "Resolution": "NOT_FOUND",
+      "ResolvedItemID": "",
+      "ResolvedVersion": 0,
+      "Action": "RESOLVE",
+      "TargetID": "nosuch",
+      "Authority": "USER",
+      "SpanIndex": 0,
+      "PartIndex": 0,
+      "Range": {
+        "Start": 35,
+        "End": 55
+      }
+    },
+    {
+      "ID": "cmd_ac4e19d025907db64af76a9564929bdc",
+      "SessionID": "S",
+      "OccurrenceID": "evc_5034462ada83cadeb755e155eb2a55c3",
+      "EventID": "p2-user-2",
+      "Ordinal": 3,
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "DetailAccess": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "ParserVersion": "directive/v1",
+      "SchemaVersion": "lifecycle-command/v1",
+      "Status": "PARSED_NOT_EXECUTED",
+      "Resolution": "MISMATCH",
+      "ResolvedItemID": "itm_57e8344b1a55186674abc60f8cd74884",
+      "ResolvedVersion": 1,
+      "Action": "RESOLVE",
+      "TargetID": "style",
+      "Authority": "USER",
+      "SpanIndex": 0,
+      "PartIndex": 0,
+      "Range": {
+        "Start": 55,
+        "End": 74
+      }
+    },
+    {
+      "ID": "cmd_e24af41067732e416863300d3f246e69",
+      "SessionID": "S",
+      "OccurrenceID": "evc_e8a9828d4d32fdfd05074ab0279165ad",
+      "EventID": "p2-amb-u",
+      "Ordinal": 0,
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "Access": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": ""
+      },
+      "DetailAccess": {
+        "Scope": "TASK",
+        "SessionID": "S",
+        "WorkflowID": "",
+        "TaskID": "T",
+        "AgentID": "A"
+      },
+      "ParserVersion": "directive/v1",
+      "SchemaVersion": "lifecycle-command/v1",
+      "Status": "PARSED_NOT_EXECUTED",
+      "Resolution": "AMBIGUOUS",
+      "ResolvedItemID": "",
+      "ResolvedVersion": 0,
+      "Action": "UNPIN",
+      "TargetID": "p",
+      "Authority": "USER",
+      "SpanIndex": 0,
+      "PartIndex": 0,
+      "Range": {
+        "Start": 0,
+        "End": 13
+      }
+    }
+  ],
+  "Relationships": [
+    {
+      "ID": "rel_995de1cadba6035150d821e7488d350b",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_73002b2de7aa8e93e1b6d9245df47bd6",
+      "ToID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+      "Seq": 5,
+      "Authority": "SYSTEM",
+      "EventID": "evc_16147734141ba8c03ca7926e7a7a4b7c",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_8d256bf3bc538c4072e44ed674f8a22b"
+        ]
+      }
+    },
+    {
+      "ID": "rel_4269bcd1e0a6ce55010a09c04b086d8a",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_e657a4f299534da32f74a99f75eac485",
+      "ToID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+      "Seq": 7,
+      "Authority": "SYSTEM",
+      "EventID": "evc_16147734141ba8c03ca7926e7a7a4b7c",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_8d256bf3bc538c4072e44ed674f8a22b"
+        ]
+      }
+    },
+    {
+      "ID": "rel_6459883a51f0a94c81d083e7b5e5393f",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_fb5247de3607e0798b4691e5d1cac903",
+      "ToID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+      "Seq": 10,
+      "Authority": "SYSTEM",
+      "EventID": "evc_16147734141ba8c03ca7926e7a7a4b7c",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_8d256bf3bc538c4072e44ed674f8a22b"
+        ]
+      }
+    },
+    {
+      "ID": "rel_d7cf4b113339d5ed9f36fa6395838be9",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_58e5e49258d0bff4539737b714b238a8",
+      "ToID": "itm_8d256bf3bc538c4072e44ed674f8a22b",
+      "Seq": 12,
+      "Authority": "SYSTEM",
+      "EventID": "evc_16147734141ba8c03ca7926e7a7a4b7c",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_8d256bf3bc538c4072e44ed674f8a22b"
+        ]
+      }
+    },
+    {
+      "ID": "rel_0dbf18ddd284e2fd046e5abed7e7f304",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_57e8344b1a55186674abc60f8cd74884",
+      "ToID": "itm_1150347ec475f9ee667e564513d4a3d0",
+      "Seq": 20,
+      "Authority": "USER",
+      "EventID": "evc_887e16ef90bc055c3b16e86cb6ce28aa",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_1150347ec475f9ee667e564513d4a3d0"
+        ]
+      }
+    },
+    {
+      "ID": "rel_5bf50a1235f359174d549e1850e4f443",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_2b1cf8821572c698935a6ea9ea6d2907",
+      "ToID": "itm_1150347ec475f9ee667e564513d4a3d0",
+      "Seq": 23,
+      "Authority": "USER",
+      "EventID": "evc_887e16ef90bc055c3b16e86cb6ce28aa",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_1150347ec475f9ee667e564513d4a3d0"
+        ]
+      }
+    },
+    {
+      "ID": "rel_7ada1f9c542daedf656e7daa3b87376b",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_92ab729b9f6a1f08ffbeb941fb71b61a",
+      "ToID": "itm_1150347ec475f9ee667e564513d4a3d0",
+      "Seq": 25,
+      "Authority": "USER",
+      "EventID": "evc_887e16ef90bc055c3b16e86cb6ce28aa",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_1150347ec475f9ee667e564513d4a3d0"
+        ]
+      }
+    },
+    {
+      "ID": "rel_e04ca1a360d55d37aebda4db267a8d91",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_5cabf601a31dde737753a5ee071356e3",
+      "ToID": "itm_1150347ec475f9ee667e564513d4a3d0",
+      "Seq": 27,
+      "Authority": "USER",
+      "EventID": "evc_887e16ef90bc055c3b16e86cb6ce28aa",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_1150347ec475f9ee667e564513d4a3d0"
+        ]
+      }
+    },
+    {
+      "ID": "rel_a03bac71583dbfbbab08c5f36ac5897b",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_bc9c7c1e8bd9a498ec3532c447ee7482",
+      "ToID": "itm_6cecc31ad128650b3e962a7a1d9c4d90",
+      "Seq": 35,
+      "Authority": "USER",
+      "EventID": "evc_c5720146ce3a4852d6ed5d3f73fd8765",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_6cecc31ad128650b3e962a7a1d9c4d90"
+        ]
+      }
+    },
+    {
+      "ID": "rel_3d19a7a09242bfed031af4696e6c4857",
+      "SessionID": "S",
+      "Type": "DUPLICATE_OF",
+      "FromID": "itm_bc9c7c1e8bd9a498ec3532c447ee7482",
+      "ToID": "itm_2b1cf8821572c698935a6ea9ea6d2907",
+      "Seq": 36,
+      "Authority": "USER",
+      "EventID": "evc_c5720146ce3a4852d6ed5d3f73fd8765",
+      "RuleVersion": "policy/v1",
+      "Coverage": null
+    },
+    {
+      "ID": "rel_999e2abde15cbf3e0d3500679c2b8c80",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_3aebfb71a097e8c682159c055f57e608",
+      "ToID": "itm_6cecc31ad128650b3e962a7a1d9c4d90",
+      "Seq": 38,
+      "Authority": "USER",
+      "EventID": "evc_c5720146ce3a4852d6ed5d3f73fd8765",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_6cecc31ad128650b3e962a7a1d9c4d90"
+        ]
+      }
+    },
+    {
+      "ID": "rel_bc2a6712da671dc06c19ca32d6799a18",
+      "SessionID": "S",
+      "Type": "SUPERSEDES",
+      "FromID": "itm_3aebfb71a097e8c682159c055f57e608",
+      "ToID": "itm_92ab729b9f6a1f08ffbeb941fb71b61a",
+      "Seq": 39,
+      "Authority": "USER",
+      "EventID": "evc_c5720146ce3a4852d6ed5d3f73fd8765",
+      "RuleVersion": "",
+      "Coverage": null
+    },
+    {
+      "ID": "rel_1dfa10761fe63bd4d7784b776c4e78be",
+      "SessionID": "S",
+      "Type": "SUPERSEDES",
+      "FromID": "itm_3aebfb71a097e8c682159c055f57e608",
+      "ToID": "itm_5cabf601a31dde737753a5ee071356e3",
+      "Seq": 41,
+      "Authority": "USER",
+      "EventID": "evc_c5720146ce3a4852d6ed5d3f73fd8765",
+      "RuleVersion": "",
+      "Coverage": null
+    },
+    {
+      "ID": "rel_728a0440819d25183f056c73c667d3db",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_2c7806460b04dbe06d8d058bb0dc773c",
+      "ToID": "itm_dc29ea9c51989bdbddd19fe8fc559b74",
+      "Seq": 47,
+      "Authority": "USER",
+      "EventID": "evc_e8981b255d14aa0b8734d0263c07df3f",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_dc29ea9c51989bdbddd19fe8fc559b74"
+        ]
+      }
+    },
+    {
+      "ID": "rel_29712330d77dae39596d6e257b68eec3",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_87aa26e6d9aae1177acef594bc0e7ac9",
+      "ToID": "itm_e9ed8edf79272c3cc843ea435a299cf3",
+      "Seq": 51,
+      "Authority": "HARNESS",
+      "EventID": "evc_dce7c9ac5984000354d2a1cb157b5946",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_e9ed8edf79272c3cc843ea435a299cf3"
+        ]
+      }
+    },
+    {
+      "ID": "rel_d35a8d554eb7f86e9c2626b3f571ad8a",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_268b23a5967ababceb1c30209bd005ac",
+      "ToID": "itm_7df51f435132759f2bc400a244b2173d",
+      "Seq": 59,
+      "Authority": "HARNESS",
+      "EventID": "evc_e53a65f5d470113a920ee636c6e527ec",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_7df51f435132759f2bc400a244b2173d"
+        ]
+      }
+    },
+    {
+      "ID": "rel_3f752c2ab1b6aa1e4a7e37c4c91a7c2a",
+      "SessionID": "S",
+      "Type": "DERIVED_FROM",
+      "FromID": "itm_4699d7ef6acd8352bb69f67271717eb5",
+      "ToID": "itm_461cb5543b89c7178674949b3e443ac2",
+      "Seq": 63,
+      "Authority": "SYSTEM",
+      "EventID": "evc_56f1b2f81331056e25170cea161c11bd",
+      "RuleVersion": "",
+      "Coverage": {
+        "ConversationID": "",
+        "FromSeq": 0,
+        "ToSeq": 0,
+        "ItemIDs": [
+          "itm_461cb5543b89c7178674949b3e443ac2"
+        ]
+      }
+    },
+    {
+      "ID": "rel_601b01ceadbfa47a2db9bbab286587fc",
+      "SessionID": "S",
+      "Type": "SUPERSEDES",
+      "FromID": "itm_4699d7ef6acd8352bb69f67271717eb5",
+      "ToID": "itm_e657a4f299534da32f74a99f75eac485",
+      "Seq": 64,
+      "Authority": "SYSTEM",
+      "EventID": "evc_56f1b2f81331056e25170cea161c11bd",
+      "RuleVersion": "",
+      "Coverage": null
+    }
+  ],
+  "Lifecycle": [
+    {
+      "ID": "evt_528a40d1254c02d1eea2517267649f4e",
+      "SessionID": "S",
+      "Seq": 2,
+      "TargetKind": "task",
+      "TargetID": "T",
+      "Action": "created",
+      "From": "",
+      "To": "",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "SYSTEM"
+      },
+      "GrantID": "",
+      "EventID": "p2-sys-1",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_77a04dc9d44ab2691d3a062fb502faf1",
+      "SessionID": "S",
+      "Seq": 17,
+      "TargetKind": "task",
+      "TargetID": "T",
+      "Action": "turn_opened",
+      "From": "",
+      "To": "turn_90199d7f41113c92b2b7c3be413fa39b",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "GrantID": "",
+      "EventID": "p2-user-1",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_ad58f8fd76d79f3713232655b8674e40",
+      "SessionID": "S",
+      "Seq": 29,
+      "TargetKind": "task",
+      "TargetID": "T",
+      "Action": "turn_opened",
+      "From": "",
+      "To": "turn_cc9a42b4ef884e0df367d2a44e1bb6c6",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "GrantID": "",
+      "EventID": "p2-user-2",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_4545fd44ad0d0dbd4549600f3eb785ea",
+      "SessionID": "S",
+      "Seq": 32,
+      "TargetKind": "task",
+      "TargetID": "T",
+      "Action": "turn_opened",
+      "From": "",
+      "To": "turn_509aeddf1ffabdd1caf9adbfc65e4163",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "GrantID": "",
+      "EventID": "p2-user-3",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_9973b7f91f7aff4f8f542f4257175914",
+      "SessionID": "S",
+      "Seq": 40,
+      "TargetKind": "item",
+      "TargetID": "itm_92ab729b9f6a1f08ffbeb941fb71b61a",
+      "Action": "superseded",
+      "From": "itm_92ab729b9f6a1f08ffbeb941fb71b61a",
+      "To": "itm_3aebfb71a097e8c682159c055f57e608",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "GrantID": "",
+      "EventID": "evc_c5720146ce3a4852d6ed5d3f73fd8765",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_dfc0b318dbca9fe5eab4834917a8755d",
+      "SessionID": "S",
+      "Seq": 42,
+      "TargetKind": "item",
+      "TargetID": "itm_5cabf601a31dde737753a5ee071356e3",
+      "Action": "superseded",
+      "From": "itm_5cabf601a31dde737753a5ee071356e3",
+      "To": "itm_3aebfb71a097e8c682159c055f57e608",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "GrantID": "",
+      "EventID": "evc_c5720146ce3a4852d6ed5d3f73fd8765",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_057748b2ff218597f7ebc09faa430a3b",
+      "SessionID": "S",
+      "Seq": 44,
+      "TargetKind": "task",
+      "TargetID": "T",
+      "Action": "turn_opened",
+      "From": "",
+      "To": "turn_6d805839d95aa7c8fe55b4b0c7f5fd45",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "GrantID": "",
+      "EventID": "p2-amb-a",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_7a2b5bfa18429ed76306f56e8ccaff5e",
+      "SessionID": "S",
+      "Seq": 53,
+      "TargetKind": "task",
+      "TargetID": "T",
+      "Action": "turn_opened",
+      "From": "",
+      "To": "turn_458b41939f4997de569a2beabb71adb5",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "GrantID": "",
+      "EventID": "p2-amb-u",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_0f77168404c386e1b8d6fda09a2019b7",
+      "SessionID": "S",
+      "Seq": 56,
+      "TargetKind": "task",
+      "TargetID": "T",
+      "Action": "turn_opened",
+      "From": "",
+      "To": "turn_3035d7d274b011e5dd678a1f353d89d2",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "HARNESS"
+      },
+      "GrantID": "",
+      "EventID": "p2-h-turn",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_85306c62781735bd8458fe70d09f3403",
+      "SessionID": "S",
+      "Seq": 65,
+      "TargetKind": "item",
+      "TargetID": "itm_e657a4f299534da32f74a99f75eac485",
+      "Action": "superseded",
+      "From": "itm_e657a4f299534da32f74a99f75eac485",
+      "To": "itm_4699d7ef6acd8352bb69f67271717eb5",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "SYSTEM"
+      },
+      "GrantID": "",
+      "EventID": "evc_56f1b2f81331056e25170cea161c11bd",
+      "Reason": "",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_f77c5e66d28025e983453818352125e4",
+      "SessionID": "S",
+      "Seq": 66,
+      "TargetKind": "obligation",
+      "TargetID": "obl_17f5dbdd6164d53c7bf5484de9b6a769",
+      "Action": "retired",
+      "From": "itm_e657a4f299534da32f74a99f75eac485",
+      "To": "itm_4699d7ef6acd8352bb69f67271717eb5",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "SYSTEM"
+      },
+      "GrantID": "",
+      "EventID": "evc_56f1b2f81331056e25170cea161c11bd",
+      "Reason": "source directive superseded",
+      "PayloadHash": ""
+    },
+    {
+      "ID": "evt_fe9ba985624d51dabf0a26a6a6a905b1",
+      "SessionID": "S",
+      "Seq": 71,
+      "TargetKind": "task",
+      "TargetID": "T",
+      "Action": "turn_opened",
+      "From": "",
+      "To": "turn_366ce34418ade9e4497f88d837832f77",
+      "Actor": {
+        "SessionID": "S",
+        "WorkflowID": "wf",
+        "TaskID": "T",
+        "AgentID": "A",
+        "Authority": "USER"
+      },
+      "GrantID": "",
+      "EventID": "",
+      "Reason": "",
+      "PayloadHash": ""
+    }
+  ]
+}
