@@ -49,6 +49,18 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 			_, err := r.CheckpointsByConversation(viewer, "conv", page)
 			return err
 		}},
+		{"GrantsFor", []string{"session_id", "action", "target_key"}, func(r store.SemanticReader) error {
+			_, err := r.GrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i"), 5)
+			return err
+		}},
+		{"LifecycleByTarget", []string{"session_id", "f_target_kind", "f_target_id"}, func(r store.SemanticReader) error {
+			_, err := r.LifecycleByTarget(domain.TargetItem, "i", page)
+			return err
+		}},
+		{"SemanticChanges", []string{"session_id", "f_target_authorization_key"}, func(r store.SemanticReader) error {
+			_, err := r.SemanticChanges(viewer, domain.ItemGrantTarget("s", "i"), page)
+			return err
+		}},
 	}
 	for _, rd := range reads {
 		var q string
@@ -82,6 +94,9 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 		{[]string{"session_id", "f_item_id"}, "SELECT id FROM rec_checkpoint WHERE session_id=? AND f_item_id=?"},
 		{[]string{"session_id", "f_family", "f_request_id"}, "SELECT id FROM rec_mutation_receipt WHERE session_id=? AND f_family=? AND f_request_id=?"},
 		{[]string{"session_id", "f_conversation_id"}, "SELECT COALESCE(MAX(f_ordinal),0) FROM rec_exchange WHERE session_id=? AND f_conversation_id=?"},
+		{[]string{"session_id", "f_id"}, "SELECT id FROM rec_creation_declaration WHERE session_id=? AND f_id=?"},
+		{[]string{"session_id", "f_type", "f_to_id"}, "SELECT 1 FROM rec_relationship WHERE session_id=? AND f_type=? AND f_to_id=? LIMIT 1"},
+		{[]string{"session_id", "f_type", "f_from_id"}, "SELECT 1 FROM rec_relationship WHERE session_id=? AND f_type=? AND f_from_id=? LIMIT 1"},
 	} {
 		args := make([]any, strings.Count(c.q, "?"))
 		for i := range args {
