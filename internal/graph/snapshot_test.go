@@ -76,7 +76,7 @@ func snapshot(t *testing.T, s store.Store, actor domain.Principal, eventID strin
 		var ids []string
 		for _, m := range members {
 			it := m(tx.NextSeq())
-			mustInsert(t, tx, it)
+			mustCreate(t, tx, it)
 			ids = append(ids, it.ID)
 		}
 		var err error
@@ -265,7 +265,7 @@ func TestSnapshot_ExplicitIDComposes(t *testing.T) {
 			}
 		}
 		update(t, s, sess, func(tx store.Tx) error {
-			pin := storetest.NewDirective(sess, "pin-x", "x", tx.NextSeq(), "pinned x")
+			pin := newDirective(sess, "pin-x", "x", tx.NextSeq(), "pinned x")
 			mustInsert(t, tx, pin)
 			_, err := ReplaceDirective(tx, actor, "task", "x", pin.ID, "evt-pin")
 			return err
@@ -302,12 +302,12 @@ func TestSnapshot_MultipleSectionsOneEvent(t *testing.T) {
 		snapshot(t, s, actor, "evt-0", m(sess, "a0", "A"), m(sess, "b0", "B"))
 		update(t, s, sess, func(tx store.Tx) error {
 			first := []domain.ContextItem{member(sess, "a1", tx.NextSeq(), "A1"), member(sess, "b1", tx.NextSeq(), "B1")}
-			mustInsert(t, tx, first...)
+			mustCreate(t, tx, first...)
 			if _, err := SupersedeSnapshot(tx, actor, []string{"a1", "b1"}, "task", "evt-1"); err != nil {
 				return err
 			}
 			second := member(sess, "c1", tx.NextSeq(), "C1")
-			mustInsert(t, tx, second)
+			mustCreate(t, tx, second)
 			res, err := SupersedeSnapshot(tx, actor, []string{"c1"}, "task", "evt-1")
 			if err != nil {
 				return err
@@ -339,6 +339,7 @@ func TestSnapshot_PartitionsByBoundaryAndAuthority(t *testing.T) {
 				it := member(sess, id, seq, text)
 				it.Scope = domain.ScopeTurn
 				it.Access.Scope = domain.ScopeTurn
+				it.CreatedTurn = 1 // turn eligibility is part of the declaration
 				return it
 			}
 		}
@@ -372,7 +373,7 @@ func TestSnapshot_RejectsBeforeWriting(t *testing.T) {
 			name: "RepeatedDirectiveID",
 			run: func(t *testing.T, tx store.Tx, actor domain.Principal) error {
 				a, b := member("sess", "r1", tx.NextSeq(), "same"), member("sess", "r2", tx.NextSeq(), "same")
-				mustInsert(t, tx, a, b)
+				mustCreate(t, tx, a, b)
 				_, err := SupersedeSnapshot(tx, actor, []string{"r1", "r2"}, "task", "evt")
 				return err
 			},
@@ -381,7 +382,7 @@ func TestSnapshot_RejectsBeforeWriting(t *testing.T) {
 		{
 			name: "RepeatedMemberID",
 			run: func(t *testing.T, tx store.Tx, actor domain.Principal) error {
-				mustInsert(t, tx, member("sess", "r1", tx.NextSeq(), "x"))
+				mustCreate(t, tx, member("sess", "r1", tx.NextSeq(), "x"))
 				_, err := SupersedeSnapshot(tx, actor, []string{"r1", "r1"}, "task", "evt")
 				return err
 			},
@@ -393,7 +394,7 @@ func TestSnapshot_RejectsBeforeWriting(t *testing.T) {
 				a := member("sess", "u", tx.NextSeq(), "u")
 				b := member("sess", "h", tx.NextSeq(), "h")
 				b.Authority = domain.AuthorityHarness
-				mustInsert(t, tx, a, b)
+				mustCreate(t, tx, a, b)
 				_, err := SupersedeSnapshot(tx, principal("sess", domain.AuthorityHarness), []string{"u", "h"}, "task", "evt")
 				return err
 			},
@@ -403,7 +404,7 @@ func TestSnapshot_RejectsBeforeWriting(t *testing.T) {
 			name: "PreClassifiedDuplicate",
 			run: func(t *testing.T, tx store.Tx, actor domain.Principal) error {
 				d := member("sess", "d", tx.NextSeq(), "A")
-				mustInsert(t, tx, d)
+				mustCreate(t, tx, d)
 				rawDuplicateOf(t, tx, "d", "a1")
 				_, err := SupersedeSnapshot(tx, actor, []string{"d"}, "task", "evt")
 				return err
@@ -423,7 +424,7 @@ func TestSnapshot_RejectsBeforeWriting(t *testing.T) {
 			run: func(t *testing.T, tx store.Tx, actor domain.Principal) error {
 				it := member("sess", "low", tx.NextSeq(), "low")
 				it.DirectiveID = "sys-status"
-				mustInsert(t, tx, it)
+				mustCreate(t, tx, it)
 				_, err := SupersedeSnapshot(tx, actor, []string{"low"}, "task", "evt")
 				return err
 			},
@@ -435,7 +436,8 @@ func TestSnapshot_RejectsBeforeWriting(t *testing.T) {
 				it := member("sess", "turn-a", tx.NextSeq(), "A")
 				it.Scope = domain.ScopeTurn
 				it.Access.Scope = domain.ScopeTurn
-				mustInsert(t, tx, it)
+				it.CreatedTurn = 1
+				mustCreate(t, tx, it)
 				_, err := SupersedeSnapshot(tx, actor, []string{"turn-a"}, "task", "evt")
 				return err
 			},
@@ -448,11 +450,11 @@ func TestSnapshot_RejectsBeforeWriting(t *testing.T) {
 				actor := principal("sess", domain.AuthorityUser)
 				snapshot(t, s, actor, "evt-w1", m("sess", "a1", "A"), m("sess", "b1", "B"))
 				update(t, s, "sess", func(tx store.Tx) error {
-					mustInsert(t, tx, member("sess", "old-unfiled", tx.NextSeq(), "unfiled"))
+					mustCreate(t, tx, member("sess", "old-unfiled", tx.NextSeq(), "unfiled"))
 					sys := member("sess", "sys", tx.NextSeq(), "system")
 					sys.Authority = domain.AuthoritySystem
 					sys.DirectiveID = "sys-status"
-					mustInsert(t, tx, sys)
+					mustCreate(t, tx, sys)
 					mustFile(t, tx, sys)
 					return nil
 				})
@@ -515,7 +517,7 @@ func TestSnapshot_DeterministicFailure_DUR17(t *testing.T) {
 			sys := member(sess, "sys", tx.NextSeq(), "system")
 			sys.Authority = domain.AuthoritySystem
 			sys.DirectiveID = "status"
-			mustInsert(t, tx, sys)
+			mustCreate(t, tx, sys)
 			mustFile(t, tx, sys)
 			return nil
 		})
@@ -523,7 +525,7 @@ func TestSnapshot_DeterministicFailure_DUR17(t *testing.T) {
 			err := s.Update(ctx, sess, func(tx store.Tx) error {
 				it := member(sess, "n", tx.NextSeq(), "new")
 				it.DirectiveID = "status"
-				mustInsert(t, tx, it)
+				mustCreate(t, tx, it)
 				_, err := SupersedeSnapshot(tx, actor, []string{"n"}, "task", "evt-n")
 				return err
 			})
@@ -538,6 +540,17 @@ func TestSnapshot_DeterministicFailure_DUR17(t *testing.T) {
 type noScanTx struct {
 	store.Tx
 	t *testing.T
+}
+
+// SemanticTransaction and SemanticReadBackend forward the wrapped
+// transaction's semantic facet, which embedding store.Tx alone would hide.
+func (n noScanTx) SemanticTransaction() (store.SemanticTx, error) { return store.Semantic(n.Tx) }
+func (n noScanTx) SemanticReadBackend() store.SemanticReader {
+	r, err := store.ReadSemantic(n.Tx)
+	if err != nil {
+		return nil
+	}
+	return r
 }
 
 func (n noScanTx) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
@@ -556,7 +569,7 @@ func TestSnapshot_NoTaskScan_SEC12(t *testing.T) {
 		var res SnapshotResult
 		update(t, s, sess, func(tx store.Tx) error {
 			it := member(sess, "c2", tx.NextSeq(), "C")
-			mustInsert(t, tx, it)
+			mustCreate(t, tx, it)
 			var err error
 			res, err = SupersedeSnapshot(noScanTx{tx, t}, actor, []string{"c2"}, "task", "evt-w2")
 			return err
