@@ -71,6 +71,56 @@ func TestItemCacheBounded_SPEC41(t *testing.T) {
 	}
 }
 
+// TestLookupScanDoesNotFillItemCache_SPEC41 keeps point-read working data
+// hot while an indexed source lookup pages through unrelated items.
+func TestLookupScanDoesNotFillItemCache_SPEC41(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		for i := range 5 {
+			it := storetest.NewItem("s", fmt.Sprintf("source-%d", i), tx.NextSeq(), "source text")
+			it.Source = &domain.SourceRef{Kind: domain.SourcePath, Locator: "shared.go"}
+			if err := tx.InsertItem(it); err != nil {
+				return err
+			}
+		}
+		return tx.InsertItem(storetest.NewItem("s", "hot", tx.NextSeq(), "hot text"))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		inner := tx.(*store.Guard).TxBase.(*transaction)
+		if _, err := tx.Item("hot"); err != nil {
+			return err
+		}
+		beforeEntries, beforeBytes := inner.itemCacheFootprint()
+		f := store.SourceFilter{Viewer: storetest.NewPrincipal("s", domain.AuthorityUser), LocatorKey: "path:shared.go", Page: store.Page{Limit: 2}}
+		for {
+			page, err := tx.SourceItems(f)
+			if err != nil {
+				return err
+			}
+			if entries, bytes := inner.itemCacheFootprint(); entries != beforeEntries || bytes != beforeBytes {
+				t.Errorf("lookup filled item cache: (%d, %d), want (%d, %d)", entries, bytes, beforeEntries, beforeBytes)
+			}
+			if !page.More {
+				break
+			}
+			f.Page.After = page.Next
+		}
+		inner.itemBytesLoaded = 0
+		if _, err := tx.Item("hot"); err != nil {
+			return err
+		}
+		if inner.itemBytesLoaded != 0 {
+			t.Errorf("lookup evicted point-read item; reloaded %d bytes", inner.itemBytesLoaded)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestItemCacheEntryCap_SPEC41: many small items stay within the entry cap.
 func TestItemCacheEntryCap_SPEC41(t *testing.T) {
 	n := itemCacheMaxEntries + 100
