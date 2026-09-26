@@ -216,3 +216,66 @@ func TestAgentKeyID(t *testing.T) {
 		t.Errorf("AgentKeyID(status) = %q, want agent.status", got)
 	}
 }
+
+// --- Occurrence and artifact IDs (M3) ----------------------------------------
+
+func TestCallerOccurrenceIDStableAndDistinct(t *testing.T) {
+	a := CallerOccurrenceID("s1", "e1")
+	if a != CallerOccurrenceID("s1", "e1") || !ValidOccurrenceID(a) {
+		t.Fatalf("caller occurrence %q not stable/valid", a)
+	}
+	for _, other := range []string{CallerOccurrenceID("s2", "e1"), CallerOccurrenceID("s1", "e2"), CallerOccurrenceID("s1e", "1")} {
+		if other == a {
+			t.Fatal("caller occurrence ignores an input")
+		}
+	}
+}
+
+func TestAnonymousOccurrenceNeverAliasesCaller(t *testing.T) {
+	var gen SequentialIDs
+	anon := NewAnonymousOccurrenceID(&gen)
+	if !ValidOccurrenceID(anon) || strings.HasPrefix(anon, callerOccurrencePrefix) {
+		t.Fatalf("anonymous occurrence %q", anon)
+	}
+	// A caller choosing the anonymous ID as its EventID gets a different occurrence.
+	if CallerOccurrenceID("s1", anon) == anon {
+		t.Fatal("caller EventID aliases an anonymous occurrence")
+	}
+	if NewAnonymousOccurrenceID(RandomIDs{}) == NewAnonymousOccurrenceID(RandomIDs{}) {
+		t.Fatal("anonymous occurrences repeat")
+	}
+	for _, bad := range []string{"", "e1", "evc_", "evc_" + strings.Repeat("A", 32), "eva_", "eva"} {
+		if ValidOccurrenceID(bad) {
+			t.Errorf("ValidOccurrenceID(%q) = true", bad)
+		}
+	}
+}
+
+func TestDerivedArtifactIDDomainsAndOrdinals(t *testing.T) {
+	seen := map[string]bool{}
+	for _, d := range []IDDomain{IDDomainDiagnostic, IDDomainCommand, IDDomainSection} {
+		for _, ords := range [][]uint64{{0}, {1}, {0, 1}, {1, 0}, {0, 0}} {
+			id := DerivedArtifactID(d, "s1", "evc_x", ords...)
+			if !strings.HasPrefix(id, string(d)+"_") || seen[id] {
+				t.Fatalf("artifact ID %q duplicated or misprefixed", id)
+			}
+			seen[id] = true
+		}
+	}
+	if DerivedArtifactID(IDDomainCommand, "s1", "o1", 0) == DerivedArtifactID(IDDomainCommand, "s1", "o2", 0) {
+		t.Fatal("artifact ID ignores occurrence")
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("unknown domain accepted")
+		}
+	}()
+	DerivedArtifactID("itm", "s1", "o1", 0)
+}
+
+func TestDerivedTurnID(t *testing.T) {
+	a := DerivedTurnID("s1", "t1", 1)
+	if a != DerivedTurnID("s1", "t1", 1) || a == DerivedTurnID("s1", "t1", 2) || a == DerivedTurnID("s1", "t2", 1) || a == DerivedTurnID("s2", "t1", 1) {
+		t.Fatal("turn ID not stable or ignores an input")
+	}
+}
