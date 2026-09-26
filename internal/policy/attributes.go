@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 
@@ -130,4 +131,68 @@ func ValidateAttribute(section domain.DirectiveSection, authority domain.Authori
 		v.Obligation = value
 	}
 	return v, domain.ReasonNone, nil
+}
+
+// Overrides are the typed effective attribute values a parser reports for one
+// directive item; zero fields mean "not specified".
+type Overrides struct {
+	Kind       domain.Kind
+	Scope      domain.Scope
+	TTLTurns   int
+	Obligation string
+}
+
+// ErrPolicyViolation reports parser output that policy v1 forbids. It is a
+// fail-closed guard against a parser defect: ingestion rejects the event.
+var ErrPolicyViolation = errors.New("policy: directive metadata violates policy v1")
+
+// ForDirective returns the final metadata of a directive item of section
+// from a span of authority, applying the parser's already-validated
+// overrides on top of ForSection. It rechecks every override against the
+// allow-lists and fails closed with ErrPolicyViolation rather than trusting
+// the parser, so no defect there can mint a privileged kind or scope. Source
+// authority is never changed and the caller still intersects access.
+func ForDirective(section domain.DirectiveSection, authority domain.Authority, o Overrides) (Defaults, *int, error) {
+	if !authority.CanHoldLifecycleAuthority() {
+		return Defaults{}, nil, fmt.Errorf("%w: %s spans carry no directives", ErrPolicyViolation, authority)
+	}
+	d, err := ForSection(section)
+	if err != nil {
+		return Defaults{}, nil, err
+	}
+	checks := []struct {
+		name, value string
+		set         bool
+	}{
+		{"kind", string(o.Kind), o.Kind != ""},
+		{"scope", string(o.Scope), o.Scope != ""},
+		{"ttl", "", o.TTLTurns != 0},
+		{"obligation", o.Obligation, o.Obligation != ""},
+	}
+	for _, c := range checks {
+		if !c.set {
+			continue
+		}
+		if c.name == "ttl" {
+			if !AttributeAllowed(section, "ttl") || o.TTLTurns < 1 || o.TTLTurns > domain.MaxTTLTurns {
+				return Defaults{}, nil, fmt.Errorf("%w: ttl", ErrPolicyViolation)
+			}
+			continue
+		}
+		if _, reason, err := ValidateAttribute(section, authority, c.name, c.value); err != nil || reason != domain.ReasonNone {
+			return Defaults{}, nil, fmt.Errorf("%w: %s", ErrPolicyViolation, c.name)
+		}
+	}
+	if o.Kind != "" {
+		d.Kind = o.Kind
+	}
+	if o.Scope != "" {
+		d.Scope = o.Scope
+	}
+	var ttl *int
+	if o.TTLTurns != 0 {
+		n := o.TTLTurns
+		ttl = &n
+	}
+	return d, ttl, nil
 }

@@ -112,3 +112,34 @@ func TestScopeExactAndWidening(t *testing.T) {
 		}
 	}
 }
+
+func TestForDirectiveFailsClosed(t *testing.T) {
+	d, ttl, err := ForDirective(domain.SectionRemember, domain.AuthorityUser, Overrides{Kind: domain.KindDecision, Scope: domain.ScopeAgent, TTLTurns: 3})
+	if err != nil || d.Kind != domain.KindDecision || d.Scope != domain.ScopeAgent || d.Generation != domain.GenerationDurable || ttl == nil || *ttl != 3 {
+		t.Fatal(d, ttl, err)
+	}
+	if d, ttl, err := ForDirective(domain.SectionPinned, domain.AuthoritySystem, Overrides{}); err != nil || d.Kind != domain.KindConstraint || ttl != nil {
+		t.Fatal(d, ttl, err)
+	}
+	for name, c := range map[string]struct {
+		s domain.DirectiveSection
+		a domain.Authority
+		o Overrides
+	}{
+		"agent source":     {domain.SectionPinned, domain.AuthorityAgent, Overrides{}},
+		"retrieved source": {domain.SectionGoal, domain.AuthorityRetrievedContent, Overrides{}},
+		"goal kind":        {domain.SectionPinned, domain.AuthorityUser, Overrides{Kind: domain.KindGoal}},
+		"kind on goal":     {domain.SectionGoal, domain.AuthoritySystem, Overrides{Kind: domain.KindGoal}},
+		"user widening":    {domain.SectionPinned, domain.AuthorityUser, Overrides{Scope: domain.ScopeSession}},
+		"lowercase scope":  {domain.SectionPinned, domain.AuthoritySystem, Overrides{Scope: "task"}},
+		"ttl on pinned":    {domain.SectionPinned, domain.AuthoritySystem, Overrides{TTLTurns: 1}},
+		"negative ttl":     {domain.SectionWorking, domain.AuthoritySystem, Overrides{TTLTurns: -1}},
+		"obligation":       {domain.SectionWorking, domain.AuthoritySystem, Overrides{Obligation: "tests_pass"}},
+		"bad claim":        {domain.SectionPinned, domain.AuthoritySystem, Overrides{Obligation: "a b"}},
+		"no section":       {domain.SectionNone, domain.AuthoritySystem, Overrides{}},
+	} {
+		if _, _, err := ForDirective(c.s, c.a, c.o); err == nil {
+			t.Errorf("%s: policy violation accepted", name)
+		}
+	}
+}
