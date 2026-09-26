@@ -109,7 +109,9 @@ distinct from the frozen inference principal.
   `ErrVersionConflict`. `DerivedCallID`'s conversation-revision binding
   (ADR 4) and this check order are two halves of the same guarantee: the ID
   prevents *aliasing* across reservations, the order prevents a *correct*
-  ID match from skipping revalidation.
+  ID match from skipping revalidation. `internal/invocation/prepare.go`
+  implements this order directly: base version, then `semanticStale`, then
+  epoch, and only then the in-flight `ProposalHash` comparison.
 - Semantic-sequence revalidation: the check is **strict** in Phase 1; a preview is
   stale iff any sequence number in `(SemanticSeq, LastSeq]` is **not** a
   `TargetCall` lifecycle event
@@ -188,18 +190,6 @@ distinct from the frozen inference principal.
 
 ## Consequences / compatibility impact
 
-- **Known implementation gap (not yet fixed as of this ADR):** the
-  committed `internal/invocation/prepare.go` still checks the conversation's
-  in-flight held record *before* the base-version and semantic-staleness
-  checks, and its `nextCallID` still derives the call ID from
-  `(session, conversation, BaseConversationVersion, requestHash)` with a
-  generation-probing loop rather than `(session, conversation,
-  conversationRevision, CallProposalHash)`, and never populates
-  `CallRecord.ProposalHash` before `InsertCall` — which now fails
-  `CallRecord.Validate`'s `ProposalHash == CallProposalHash(c)` check. This
-  ADR's Decision is the target contract; bringing `internal/invocation` in
-  line with it (check order, `DerivedCallID` v2 call site, `ProposalHash`
-  population) is required before Phase 1's gate, not optional cleanup.
 - The strict semantic-sequence check produces more `ErrVersionConflict`
   invalidations than a relevance-aware Phase 4+ planner would; narrowing it
   later is a compatible relaxation, not a breaking change.
@@ -216,39 +206,51 @@ distinct from the frozen inference principal.
 
 ## Tests that lock the behavior
 
-- `internal/domain/call_test.go`: `ValidCallTransition` and
-  `ValidAttemptTransition` exhaustive; `CallOutcome.Validate`/`OutcomeHash`
-  per-attempt behavior (ADR 4); `CallAttempt.Validate` — open/closed
-  consistency per state, `Retryable` only valid on FAILED;
-  `CallRecord.Validate` — proposal-hash and finished-sequence agreement,
-  and now the per-state `Outcome`/`Reason` matrix (COMPLETED requires
-  Outcome; FAILED requires Outcome or a zero-attempt cancellation Reason;
-  ABANDONED requires Reason and no Outcome; `Outcome.State == State` and
-  `Outcome.Attempt == Attempts` when Outcome is present).
-- Required: `internal/store/storetest` — `UpdateCall`'s evidence gating:
-  each of `→COMPLETED`/`→FAILED`/`→PREPARED`/`→UNKNOWN`/`→ABANDONED` and
-  `PREPARED→SENT` fails `ErrInvalidTransition` when attempt `c.Attempts`
-  isn't already stored in the required closed/matching state; `PutCallAttempt`
-  rejects any field change on a closed attempt other than
-  `State`/`OutcomeHash`/`Retryable`/`FinishedSeq`/`FinishedAt`.
-- `internal/invocation` (`ledger_test.go`, `t10_test.go`, `property_test.go`,
-  `helpers_test.go`, already committed, but see the Consequences gap above):
-  retry only from a durably closed attempt; reconciling UNKNOWN never takes
-  `UNKNOWN→PREPARED`; late-outcome audit path for ABANDONED calls;
-  `semanticStale` true/false boundary at `SemanticSeq == LastSeq` and across
-  intervening non-ledger sequence numbers; lifecycle event ID determinism
-  across a simulated restart.
-- Required: an `internal/invocation` test asserting `Prepare`'s check
-  order directly — construct a conversation with an in-flight PREPARED call
-  whose `ProposalHash` matches a new request, but whose base version or
-  semantic sequence is now stale, and assert `ErrVersionConflict`, not a
-  silent idempotent return (locks the N1 fix once `prepare.go` is corrected).
-- `internal/store/storetest`: `InsertCall`/`UpdateCall` reject a second
-  reserving call for the same conversation with `ErrCallInFlight`; a
-  transition violating `ValidCallTransition` rejected at the store layer.
-- Trace T10 is the primary integration fixture; a race-detector test running
-  two goroutines' `Prepare` against the same conversation concurrently,
-  asserting exactly one succeeds.
+- `internal/domain/call_test.go`: `TestValidCallTransitionMatrix`,
+  `TestValidCallTransition_TerminalStatesHaveNoOutgoingTransition`,
+  `TestValidCallTransition_NoDirectResendToSent`,
+  `TestValidAttemptTransitionMatrix`,
+  `TestValidAttemptTransition_ClosedAttemptsAreImmutable`,
+  `TestValidAttemptTransition_NoSelfOrBackwardLoop`;
+  `TestOutcomeHashDistinguishesAttempt` and the other `TestOutcomeHash*`
+  cases (ADR 4); `TestCallAttemptValidate` (open/closed consistency per
+  state, `Retryable` only valid on FAILED); `TestCallRecordValidate` and
+  `TestCallRecordValidate_TerminalEvidenceMatrix` (proposal-hash agreement
+  and the per-state `Outcome`/`Reason` matrix).
+- `internal/store/storetest` (`storetest.Run`, exercised by both
+  `internal/store/memory:TestConformance` and `internal/store
+  /sqlite:TestConformance`): `TestConformance/CallEvidence`
+  (`storetest/calls.go:testCallEvidence`) is the exact evidence-gating test
+  — each of `→COMPLETED`/`→FAILED`/`→PREPARED`/`→UNKNOWN` from SENT, and
+  `→ABANDONED` from UNKNOWN, fails `ErrInvalidTransition` against an open or
+  wrongly-closed attempt, including the case where a *different* outcome
+  hash was recorded for the same attempt; `TestConformance/CallAttempts`
+  (`testCallAttempts`) covers dense numbering, the attempt transition table,
+  and that only `State`/`OutcomeHash`/`Retryable`/`FinishedSeq`/`FinishedAt`
+  may change once an attempt is closed; `TestConformance/CallReservation`
+  (`testCallReservation`) covers the one-reserving-call rule, including
+  across separate transactions and that other conversations are unaffected.
+- `internal/store/sqlite/durability_test.go:TestCallTransitionsRequireAttemptEvidence`
+  reconfirms the evidence-gating rule specifically against the SQLite
+  typed-column write path (ADR 3).
+- `internal/invocation`: `ledger_test.go` — `TestRetryableFailureLoop`,
+  `TestNonRetryableFailureReleases`, `TestReconciledRetryableFailureIsTerminal`
+  (`UNKNOWN→PREPARED` never taken), `TestErrLateOutcomeWrapsInvalidTransition`,
+  `TestEveryTransitionHasOneEventAndDenseSeqs`,
+  `TestCompactionDoesNotAdvanceLogicalCalls`,
+  `TestServiceActorAuthorization`; `TestStaleDuplicatePreview` is the exact
+  regression test for the required `Prepare` check order (base version →
+  semantic staleness → epoch → in-flight `ProposalHash`), confirming a
+  changed semantic sequence fails `ErrVersionConflict` even though the
+  repeated request would otherwise match the held reservation; `t10_test.go`
+  — `TestT10ConcurrentPrepare`, `TestT10CrashAndReconcile`,
+  `TestT10AbandonedLateResponse` are the Trace T10 fixtures directly;
+  `property_test.go:TestRandomizedLedgerInvariants` fuzzes the ledger's
+  invariants across randomized transition sequences.
+- `internal/invocation/sqlite_test.go`: `TestSQLiteRestartBetweenSentAndRecover`,
+  `TestSQLiteRandomizedInvariants`, `TestSQLiteConcurrentPrepare` rerun the
+  same ledger properties against the real SQLite store, not just the memory
+  store.
 
 ## Open questions
 
@@ -258,9 +260,6 @@ distinct from the frozen inference principal.
 - Whether `CallAttempt.ProviderRequestID` is sufficient for FR-CALL-004's
   reconciliation mechanism, or reconciliation needs more provider-specific
   fields decided in ADR 9.
-- Tracking item: land the `internal/invocation/prepare.go` fix described in
-  Consequences (check order; `DerivedCallID` v2 call site; populate
-  `ProposalHash`) before Phase 1's gate is claimed met.
 
 ## Review
 
@@ -288,3 +287,11 @@ in-flight `ProposalHash`) as a decided rule, and flagged in Consequences
 and Open questions that the committed `internal/invocation/prepare.go`
 does not yet implement it (N1) — this ADR's Decision is the target
 contract that package must still be brought into line with.
+
+Verified against the integrated ledger fix (commit `0c8ce40` plus tests
+`36ba4a2`/`dc49396`, full race suite green on `phase-1-foundation` at
+`ddbb53e`): `prepare.go` now checks base version, `semanticStale`, and
+epoch before comparing the in-flight record's `ProposalHash`, and
+populates `ProposalHash` before `InsertCall`. `TestStaleDuplicatePreview`
+locks the regression directly. Finding N1 is closed; the Consequences and
+Open questions tracking items above are removed accordingly.
