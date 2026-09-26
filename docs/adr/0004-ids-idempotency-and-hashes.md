@@ -71,7 +71,7 @@ New Phase 2 ID forms this ADR's original ID taxonomy does not name:
 `IDDomain` derived-artifact domains (`dgn`, `cmd`, `sec`, `ref`), and
 `DerivedTurnID`. An anonymous (no caller `EventID`) event's items also now
 get deterministic `itm_`-prefixed IDs derived from the occurrence
-(`internal/ingest/run.go:58-63,164`), not the random `IDGenerator` this
+(`internal/ingest/run.go:58-63,165`), not the random `IDGenerator` this
 ADR's Decision section describes as the anonymous-event path; the random
 generator remains available but is no longer what ingestion actually uses
 for that path.

@@ -981,7 +981,7 @@ Findings from `p2-ingest`'s own test suite, appended to
 
 - **Reserved internal ID prefixes on caller `EventID` (refines §10/§11,
   D14/D15/R16 — landed, SPEC-1.4).** `Event.Validate`
-  (`internal/domain/ingest.go:111`) now also calls `ReservedIDPrefix`: a
+  (`internal/domain/ingest.go:128`) now also calls `ReservedIDPrefix`: a
   caller-supplied `EventID` equal to or prefixed like an internally
   generated occurrence or artifact ID — `evc_`, `eva_`, any `IDDomain`
   prefix (`dgn`, `cmd`, `sec`, `ref`), `itm_`, `call_`, `turn_`, `obl_`,
@@ -1204,7 +1204,7 @@ the code at this ADR's final-pass head.
   `domain.ErrEventIDConflict`
   (`errors.New("event ID conflict")`, `internal/domain/errors.go:24`),
   returned bare with no ID, principal, or session detail
-  (`internal/ingest/ingest.go:170,177`) — `p2-contract` verifies this with
+  (`internal/ingest/ingest.go:192,199`) — `p2-contract` verifies this with
   a test. **Accepted residual risk, recorded here:** an `EventID` is a
   session-wide idempotency key, not a per-principal one; a harness that
   lets predictable, cross-principal-guessable `EventID`s reach the runtime
