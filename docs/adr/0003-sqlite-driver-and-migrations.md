@@ -63,9 +63,8 @@ preserve valid state.
   name TEXT, checksum TEXT)`; `Open` compares each applied version's stored
   checksum against the embedded file's and fails to open on any mismatch.
 - **Commit is never cancelled; context/I/O errors are returned as
-  themselves (round 1, DUR-1.2/1.4, decided in `store.go`'s contract,
-  `sqlite-worker`'s implementation in progress).** Two related failures
-  were reproduced against the pre-round-1 SQLite store. First (DUR-1.2):
+  themselves (round 1, DUR-1.2/1.4).** Two related failures were
+  reproduced against the pre-round-1 SQLite store. First (DUR-1.2):
   the final `UPDATE sessions`/`COMMIT` ran under the caller's `ctx`; if that
   context was cancelled while `COMMIT` was in flight, `modernc.org/sqlite`
   can return `ctx.Err()` even though the commit succeeded, so `Update`
@@ -106,21 +105,19 @@ preserve valid state.
   needs to nest legitimately, but no such caller exists yet to justify the
   complexity.
 - **Concurrent `Open` on a fresh database file, and interrupted-migration
-  recovery (round 1, DUR-1.6/1.7, decided; `sqlite-worker`'s implementation
-  pending).** Reproduced: several concurrent `Open` calls against a
-  brand-new file mostly fail `SQLITE_BUSY` at the `PRAGMA journal_mode=WAL`
-  step (3 of 4 failed in 5 of 6 runs) — `busy_timeout` was applied only
-  *after* that pragma, and each migration's implicit deferred transaction
-  cannot wait out a concurrent writer at the WAL switch. **Decision:**
-  apply `busy_timeout` through the connection DSN (`_pragma=busy_timeout`)
-  so it is in effect before the WAL switch, retry the WAL-mode switch on
-  `SQLITE_BUSY`, and run each migration under `BEGIN IMMEDIATE` rather than
-  a deferred transaction. Separately, ADR 3 already requires a migration
-  interrupted partway through to leave the database in a state a restart
-  can cleanly recover from (no partial `schema_migrations` row, no partial
-  `rec_*` tables) — an explicit test for this (interrupt a migration whose
-  last statement fails; assert both tables are absent, then reopen
-  successfully) does not exist yet and is still required.
+  recovery (round 1, DUR-1.6/1.7).** Reproduced: several concurrent `Open`
+  calls against a brand-new file mostly fail `SQLITE_BUSY` at the `PRAGMA
+  journal_mode=WAL` step (3 of 4 failed in 5 of 6 runs) — `busy_timeout`
+  was applied only *after* that pragma, and each migration's implicit
+  deferred transaction cannot wait out a concurrent writer at the WAL
+  switch. **Decision:** apply `busy_timeout` through the connection DSN
+  (`_pragma=busy_timeout`) so it is in effect before the WAL switch, retry
+  the WAL-mode switch on `SQLITE_BUSY`, and run each migration under
+  `BEGIN IMMEDIATE` rather than a deferred transaction. Separately, ADR 3
+  already requires a migration interrupted partway through to leave the
+  database in a state a restart can cleanly recover from (no partial
+  `schema_migrations` row, no partial `rec_*` tables); see Tests, below,
+  for the test that locks it.
 
 ## Alternatives considered
 
@@ -200,10 +197,13 @@ preserve valid state.
   such a caller must now handle context/driver errors separately, which is
   the point of the fix (they are different failure classes with different
   correct responses).
-- The DUR-1.6/1.7 SQLite implementation work is not yet landed as of this
-  ADR update; until it is, concurrent `Open` on a fresh file remains
-  unreliable and no interrupted-migration test exists, both genuine gaps
-  against this ADR's decided design.
+- DUR-1.2's fix is locked by two tests with different scopes:
+  `TestCancelledUpdateRollsBack` (an ordinary pre-commit cancellation rolls
+  back cleanly) and `TestCancellationAtCommitBoundaryReportsCommitted` (the
+  actual race — cancellation lands exactly between the pre-commit check
+  and `COMMIT` — deterministically, via a test-only `context.Context` whose
+  `Err()` returns nil once after `arm()` and `context.Canceled` on every
+  call after, rather than a timing-dependent probabilistic repro).
 
 ## Tests that lock the behavior
 
@@ -243,37 +243,53 @@ preserve valid state.
   `go test -race ./... -count=1` (measured on this branch), consistent with
   a real SQLite file per test rather than a mocked backend.
 
-### Round 1 additions (findings DUR-1.2, 1.4, 1.6, 1.7) — required, `sqlite-worker`'s fix in flight
+### Round 1 additions (findings DUR-1.2, 1.4, 1.6, 1.7) — landed
 
-None of the following exist yet; the `internal/store/sqlite` implementation
-for round 1 has not landed as of this update (the package currently does
-not compile against the merged `store.go` contract — see ADR 16/17 for the
-same blocking state in `internal/graph`/`internal/store/memory`).
+`internal/store/sqlite`'s round-1 implementation is merged and passing:
 
-- A test that cancels the context at a randomly-timed point during
-  `Update` and asserts: if an error is returned, the transaction did **not**
-  commit (`errors.Is(err, context.Canceled)` and the write is absent on
-  reopen); reproduces DUR-1.2's exact scenario (thousands of trials with
-  cancellation timed across the commit window) as a bounded, deterministic
-  test rather than a one-off experiment.
-- A test asserting a cancelled context surfaces as
-  `errors.Is(err, context.Canceled)` from `tx.Item`/`tx.Call`/etc., never
-  wrapped as `ErrIntegrity` (DUR-1.4); a genuine decode failure (corrupt
-  row bytes) still produces `ErrIntegrity`.
-- `TestSQLiteConcurrentOpen` (or similar): N goroutines calling `Open` on
-  the same fresh file path concurrently all succeed (DUR-1.6); today this
-  reproduces mostly-`SQLITE_BUSY` failures.
-- The interrupted-migration replay test ADR 3 has called for since its
-  first version (DUR-1.7): a migration whose last statement fails leaves
-  `schema_migrations` empty and no `rec_*` tables present, and a subsequent
-  `Open` on the same file succeeds cleanly.
+- `internal/store/sqlite/dur_1_2_test.go:TestCancelledUpdateRollsBack`
+  cancels the context from inside the transaction function and asserts an
+  ordinary pre-commit cancellation rolls back cleanly.
+  `TestCancellationAtCommitBoundaryReportsCommitted` (round 2) is the test
+  that actually exercises DUR-1.2's fix: a test-only `context.Context`
+  (`commitEdgeContext`) returns a nil error the first time `Err()` is
+  called after `arm()`, then `context.Canceled` on every subsequent call —
+  landing the cancellation deterministically between the pre-commit check
+  and `COMMIT`, rather than relying on a timing-dependent probabilistic
+  repro — and asserts the write is present afterward. Reverting
+  `commitCtx := context.WithoutCancel(ctx)` back to `commitCtx := ctx`
+  makes this test fail (an error is reported for the committed write);
+  `TestCancelledUpdateRollsBack` alone does not catch that regression.
+- `internal/store/sqlite/dur_1_4_test.go:TestScanCancellationIsOperationalError`
+  asserts a cancelled context surfaces as
+  `errors.Is(err, context.Canceled)` from a read, never wrapped as
+  `ErrIntegrity`; `TestEmptyAndCorruptBlob` (pre-existing) confirms a
+  genuine decode failure still produces `ErrIntegrity`.
+- `internal/store/sqlite/dur_1_6_test.go:TestConcurrentFirstOpen` runs N
+  goroutines calling `Open` on the same fresh file path concurrently and
+  asserts they all succeed — the exact DUR-1.6 regression.
+- `internal/store/sqlite/dur_1_7_test.go:TestInterruptedMigrationReplays`
+  is the interrupted-migration replay test this ADR has called for since
+  its first version: a migration whose last statement fails leaves
+  `schema_migrations` empty and no `rec_*` tables present, and a
+  subsequent `Open` on the same file succeeds cleanly.
+- `internal/store/sqlite/contract_review_test.go:TestSessionsListsCommittedRecords`
+  covers `Store.Sessions` (DUR-1.8, ADR 17) SQLite-specifically.
+
+A regression found independently during verification, not one of the four
+DUR findings above, is now also fixed: `TestConformance/DirectiveBoundaries`
+— round-1 coverage for ADR 4's boundary-keyed directive identity — briefly
+failed on `internal/store/sqlite` only (`CurrentDirective` reported a
+different-session boundary as `ErrInvalidRecord` instead of `ErrNotFound`,
+the AUTH-1.3 existence-disclosure pattern recurring in a new code path);
+fixed in `a8e895f`. Passes on both stores now.
 
 ## Open questions
 
-None remaining for this ADR's original scope; `busy_timeout` (5s default,
-`WithBusyTimeout` to override) is decided in code. Round 1 leaves four
-required tests and their implementation (DUR-1.2/1.4/1.6/1.7) outstanding,
-tracked in the section above.
+`busy_timeout` (5s default, `WithBusyTimeout` to override) is decided in
+code. None remaining for this ADR's original scope; all DUR findings and
+the independently-found `DirectiveBoundaries` regression are fixed and
+genuinely tested.
 
 ## Review
 
@@ -304,8 +320,26 @@ concurrent `Open` on a fresh file mostly fails `SQLITE_BUSY` at the WAL-mode
 switch; decided fix is DSN-level `busy_timeout`, a WAL-switch retry, and
 `BEGIN IMMEDIATE` migrations. DUR-1.7 (LOW): the interrupted-migration
 replay test this ADR has called for since its first version still doesn't
-exist. All five decisions are recorded above; DUR-1.2/1.4 have a decided
-contract in `store.go` today, while DUR-1.6/1.7's SQLite-side implementation
-and all four findings' tests are `sqlite-worker`'s in-flight round-1 fix —
-this ADR's Tests section marks them accordingly rather than claiming they
-already pass.
+exist. All five decisions are recorded above.
+
+Verified against the merged `sqlite-worker` branch: all four DUR findings
+have a passing test that genuinely exercises the fix
+(`TestScanCancellationIsOperationalError`, `TestConcurrentFirstOpen`,
+`TestInterruptedMigrationReplays`, and — after the round-2 fix below —
+`TestCancellationAtCommitBoundaryReportsCommitted`). One regression found
+independently while verifying, `TestConformance/DirectiveBoundaries`, is
+also fixed (`a8e895f`) and now passes on this package.
+
+**Round 2 review** (PR #2; TEST — Claude Sonnet, `test-review-round2.md`,
+finding TEST-2.3): `TestCancelledUpdateRollsBack` cancels synchronously
+inside the transaction function, before the transaction reaches its commit
+sequence — the pre-commit `ctx.Err()` check catches it, so the
+`context.WithoutCancel`-guarded commit path DUR-1.2 actually fixed was
+never exercised; confirmed by reverting the fix in a throwaway clone, where
+the whole package, including this test, still passed. Fixed:
+`TestCancellationAtCommitBoundaryReportsCommitted` uses a deterministic
+test-only context (`commitEdgeContext`, arms to report not-yet-cancelled
+exactly once, then cancelled on every later call) to land the cancellation
+in the exact window DUR-1.2 closes, without a probabilistic repro — I
+independently reconfirmed it fails when `context.WithoutCancel` is
+reverted. Finding closed.

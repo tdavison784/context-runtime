@@ -197,33 +197,46 @@ distinct from the frozen inference principal.
   (ADR 4, INV-09). `store.Tx.AppendLifecycleEvent`'s doc comment reserves
   `TargetCall` events for `internal/invocation` specifically, so no other
   package can forge a ledger audit entry.
+- **A `TargetCall` event's `Seq` can never be reused by a semantic write
+  (round 2, DUR-2.1).** At commit, the store rejects any transaction where
+  a sequence number allocated for a `TargetCall` lifecycle event is also
+  used by an item, relationship, event record, obligation version or
+  transition, grant, or non-`TargetCall` lifecycle event
+  (`ErrInvalidRecord`). This is the other half of the semantic-write rule
+  above: that rule guarantees a semantic write always carries *some*
+  sequenced record; this one guarantees it can't satisfy that requirement
+  by silently attaching itself to a sequence number the ledger already
+  owns for an unrelated purpose, which would let a semantic change hide
+  from `semanticStale`'s count while technically having "a sequenced
+  record." Calls and attempts (`PreparedSeq`, `SentSeq`, `FinishedSeq`) are
+  explicitly exempt: they are the ledger's own bookkeeping and legitimately
+  share a `TargetCall` event's sequence number by design (every ledger
+  transition already allocates and consumes exactly one).
 - No database transaction is held across transport: `Prepare`, `MarkSent`,
   `RecordOutcome` are separate `store.Update` calls.
-- **Service grant deferred; the owner-match floor is decided but not yet
-  applied everywhere it should be (round 1, SPEC-1.2, unassigned as of this
-  writing).** `CallRecord` freezes the inference `Principal` separately
-  from `ServiceActor`, but Phase 1 does not yet implement §8's
-  "conversation-specific service grant": `internal/invocation
-  .checkServiceActor` requires the actor's authority be SYSTEM or HARNESS,
-  and `checkActorScope` requires the actor's non-empty owner fields match
-  the call's inference principal — an owner-match check, not a grant
-  lookup. **This decision is not yet enforced on the reservation path
-  itself:** `Prepare` calls only `checkServiceActor` (authority) and never
-  `checkActorScope` (owner-match), while `MarkSent`, `RecordOutcome`,
-  `Cancel`, and `Recover` all call both. A HARNESS actor scoped to task
-  A/agent A can therefore successfully `Prepare` a reservation for task
-  B/agent B's conversation; because later methods *do* check scope, the
-  wrongly-scoped actor cannot itself drive or cancel what it reserved, so
-  the reservation is stuck until task B's correctly-scoped actor happens to
-  clear it (`ErrCallInFlight` in the meantime) — reproduced directly against
-  this worktree. This is a real Phase 1 gate blocker, not a documentation
-  gap; it is not currently assigned to a worker in the round-1 fix table
-  and needs one. The fix is mechanical: apply `checkActorScope(req
-  .ServiceActor, call)` in `Prepare` before any idempotent return or
-  reservation write, matching every other ledger method. A dedicated
-  `ActionDispatchCall` grant type (letting a narrower-scoped dispatcher
-  drive a call it doesn't directly own, replacing the owner-match floor
-  entirely) remains open for Phase 5.
+- **Service grant deferred; the owner-match floor is now applied on every
+  ledger path, including `Prepare` (round 1, SPEC-1.2).** `CallRecord`
+  freezes the inference `Principal` separately from `ServiceActor`, but
+  Phase 1 does not yet implement §8's "conversation-specific service
+  grant": `internal/invocation.checkServiceActor` requires the actor's
+  authority be SYSTEM or HARNESS, and owner-match (`actorInScope`) requires
+  the actor's non-empty owner fields match the call's inference principal —
+  an owner-match check, not a grant lookup. **`Prepare` previously skipped
+  this check** — it called only `checkServiceActor` (authority), never the
+  owner-match test, while `MarkSent`, `RecordOutcome`, `Cancel`, and
+  `Recover` all applied both (via `checkActorScope`, which wraps
+  `actorInScope` against a loaded `CallRecord`). A HARNESS actor scoped to
+  task A/agent A could therefore successfully `Prepare` a reservation for
+  task B/agent B's conversation; since later methods *did* check scope, the
+  wrongly-scoped actor could not itself drive or cancel what it reserved,
+  leaving the reservation stuck until task B's correctly-scoped actor
+  cleared it. **Fixed:** `validatePrepare` now calls `actorInScope(req
+  .ServiceActor, p)` — the same helper `checkActorScope` uses, applied
+  directly to the inference principal since no `CallRecord` exists yet at
+  that point in `Prepare` — before any idempotent return or reservation
+  write. A dedicated `ActionDispatchCall` grant type (letting a
+  narrower-scoped dispatcher drive a call it doesn't directly own,
+  replacing the owner-match floor entirely) remains open for Phase 5.
 - `CallRecord.Validate` enforces `ProposalHash == CallProposalHash(c)` and
   `State.Terminal() == (FinishedSeq != 0)`, so a record's frozen identity and
   its state/audit trail can never disagree.
@@ -266,8 +279,8 @@ distinct from the frozen inference principal.
   Rejected for Phase 1: no grant-issuance machinery for dispatch actions
   exists yet, and SYSTEM/HARNESS-plus-owner-match is a sound, conservative
   subset (never permits an unrelated dispatcher) to build the rest of the
-  ledger against — provided it is actually applied everywhere, which
-  SPEC-1.2 found `Prepare` currently is not (see above).
+  ledger against, applied consistently on every ledger path (see
+  `actorInScope` above).
 - **Constraining `next.Attempts` to equal `old.Attempts` (or +1 only on
   `PREPARED→SENT`) instead of trusting the evidence-gating rule alone.**
   Rejected as insufficient on its own (DUR-1.1): evidence-gating checks that
@@ -283,6 +296,16 @@ distinct from the frozen inference principal.
   the three instances found so far, and is the only formulation
   `semanticStale` can rely on going forward without re-auditing every
   store method again for the next one.
+- **Barring every record type from sharing a `TargetCall` event's `Seq`,
+  including calls and attempts (round 2, DUR-2.1's first proposal).**
+  Rejected: `CallRecord.PreparedSeq`/`SentSeq`/`FinishedSeq` legitimately
+  equal the `Seq` of the `TargetCall` `LifecycleEvent` recording that same
+  transition — they are two records the ledger writes atomically for the
+  *same* event, not a semantic write hiding behind a ledger sequence
+  number. Barring them too would make every ordinary ledger transition fail
+  its own commit. The rule only needs to forbid *semantic* records from
+  reusing a `TargetCall` sequence number, which is what `semanticStale`
+  actually depends on.
 
 ## Consequences / compatibility impact
 
@@ -296,14 +319,6 @@ distinct from the frozen inference principal.
   strictly narrower than §8 eventually requires (owner-match only); Phase 5
   must add the grant type without weakening the current SYSTEM/HARNESS +
   owner-match floor.
-- **SPEC-1.2 is an open Phase 1 gate blocker with no assigned owner as of
-  this writing.** Until `Prepare` applies `checkActorScope`, the owner-match
-  floor this ADR documents as decided is not actually enforced on the
-  reservation path, and a misconfigured or compromised dispatcher scoped to
-  one task/agent can reserve — though not itself complete — another
-  conversation's call slot. Flagging prominently rather than silently
-  updating the Decision text to match the code, since the code is the thing
-  that needs to change here, not the ADR.
 - `LogicalCalls` advancing only on inference completions means usage
   accounting keyed to "completed logical inference index" must read
   `LogicalCalls`, not a raw completed-call count.
@@ -340,7 +355,11 @@ distinct from the frozen inference principal.
   and that only `State`/`OutcomeHash`/`Retryable`/`FinishedSeq`/`FinishedAt`
   may change once an attempt is closed; `TestConformance/CallReservation`
   (`testCallReservation`) covers the one-reserving-call rule, including
-  across separate transactions and that other conversations are unaffected.
+  across separate transactions and that other conversations are unaffected;
+  `TestConformance/LedgerSeqIsolation` is the exact DUR-2.1 regression — a
+  semantic write reusing a `TargetCall` event's `Seq` fails
+  `ErrInvalidRecord`, while a call/attempt legitimately sharing that same
+  `Seq` commits normally.
 - `internal/store/sqlite/durability_test.go:TestCallTransitionsRequireAttemptEvidence`
   reconfirms the evidence-gating rule specifically against the SQLite
   typed-column write path (ADR 3).
@@ -363,44 +382,56 @@ distinct from the frozen inference principal.
   same ledger properties against the real SQLite store, not just the memory
   store.
 
-### Round 1 additions (findings DUR-1.1, 1.3, 1.8; SPEC-1.2)
+### Round 1 additions (findings DUR-1.1, 1.3, 1.8; SPEC-1.2) — landed
 
-The store contract changes for DUR-1.1/1.3/1.8 are merged in
-`internal/store/store.go`, but `internal/store/memory`,
-`internal/store/sqlite`, and `internal/store/storetest` do not currently
-compile against the new signatures (`PutTask`'s event now required,
-`Store.Sessions`, boundary-keyed `CurrentDirective`) — that implementation
-and its tests are `memstore-worker`/`sqlite-worker`'s in-flight fix.
-Required once landed:
+`internal/store/memory`, `internal/store/sqlite`, and
+`internal/store/storetest` now compile and pass against the round-1 store
+contract (`storetest.Run` extended with new cases; both
+`memory:TestConformance` and `sqlite:TestConformance` green under
+`go test -race`).
 
-- `internal/store/storetest`: a case rejecting `UpdateCall` where
-  `next.Attempts != old.Attempts` on any transition other than
-  `PREPARED→SENT`, and rejecting `PREPARED→SENT` unless `next.Attempts ==
-  old.Attempts+1` (the exact DUR-1.1 reproduction: citing an older attempt's
-  evidence while a newer attempt is still open must fail, not succeed); a
-  case asserting **any** `UpdateCall` against an already-terminal call fails
-  `ErrImmutable`, including a byte-identical same-state update and
-  rewriting a COMPLETED call's `Outcome` — and that memory and SQLite agree
-  (they previously didn't). A case for each of `UpdateObligationVersion`,
-  `SetCurrentDirective`, and non-status `PutTask` alone (no accompanying
-  sequenced record) failing `ErrInvalidRecord`, and passing when paired
-  with one; a ledger-only transaction (conversation/call/attempt/
-  `TargetCall` event writes alone, or a lone blob insert) succeeding
-  without one.
-- `internal/invocation`: a `TestPrepare*` regression for DUR-1.3 — seed an
-  item and an obligation, `Prepare` a preview at the current `LastSeq`,
-  change only `MaterializationDisabled` via `UpdateObligationVersion`
-  (no accompanying item/relationship/event write), then assert `MarkSent`
-  now fails `ErrVersionConflict` where it previously silently succeeded.
-  A `TestRecoverAll*` suite: recovers SENT calls across multiple sessions
-  from one `Store.Sessions` listing; a mismatched `actorFor` session is
-  reported in the joined error and does not stop other sessions'
-  recovery; an empty store recovers nothing without error.
-- **Required, unassigned:** an `internal/invocation` test for SPEC-1.2 —
-  `Prepare` with a `ServiceActor` scoped to a different task/agent than
-  the conversation's inference principal must fail (matching what
-  `MarkSent`/`Cancel`/`RecordOutcome` already enforce via `checkActorScope`),
-  and must leave no reservation held afterward.
+- `internal/store/storetest/calls.go:testCallAttemptBinding`
+  (`TestConformance/CallAttemptBinding`) is the exact DUR-1.1 regression:
+  citing an older attempt's evidence while a newer attempt is open fails;
+  `next.Attempts` must equal `old.Attempts` except `PREPARED→SENT`
+  (`old.Attempts+1`); any `UpdateCall` against an already-terminal call
+  fails `ErrImmutable`, including a same-state update and rewriting a
+  COMPLETED call's `Outcome` — and memory and SQLite now agree.
+- `internal/store/storetest/rules.go:testSemanticWriteRule`
+  (`TestConformance/SemanticWriteRule`) is the exact DUR-1.3 regression at
+  the store-contract level: `UpdateObligationVersion`, `SetCurrentDirective`,
+  and non-status `PutTask` alone (no accompanying sequenced record) each
+  fail `ErrInvalidRecord`, and each passes when paired with one; a
+  ledger-only transaction and a lone blob insert both succeed without one
+  (the exemption). This is the assumption `semanticStale` depends on, now
+  guaranteed at the point where it could otherwise be violated.
+- `internal/store/storetest/rules.go:testSessions`
+  (`TestConformance/Sessions`) covers `Store.Sessions`' ascending listing.
+  `internal/store/sqlite/contract_review_test.go:TestSessionsListsCommittedRecords`
+  reconfirms it SQLite-specifically.
+- `internal/invocation/ledger_test.go:TestPrepareRejectsOutOfScopeServiceActor`
+  is the exact SPEC-1.2 regression: a `ServiceActor` scoped to a different
+  task/agent than the conversation's inference principal fails `Prepare`,
+  matching what `MarkSent`/`Cancel`/`RecordOutcome` already enforced.
+- `internal/invocation/recover_all_test.go:TestObligationChangeStalesPreview`
+  is the exact `internal/invocation`-level end-to-end regression for
+  DUR-1.3 this ADR previously called a missing gap: it prepares a call,
+  changes an obligation's `MaterializationDisabled` (confirming the
+  store's semantic-write rule refuses the change without an audit event),
+  then asserts `MarkSent` fails `ErrVersionConflict` on the now-stale
+  preview, and that a fresh `Prepare` at the old sequence also fails while
+  one at the current sequence succeeds.
+  `TestRecoverAllVisitsEverySession` is the exact `Ledger.RecoverAll` suite:
+  it recovers SENT calls across three sessions (including one with
+  semantic state but no calls) from one `Store.Sessions` listing in a
+  single call, and confirms a mismatched `actorFor` session is reported in
+  the joined error without stopping the other sessions' recovery.
+- `TestConformance/DirectiveBoundaries` (new in round 1, covering ADR 4's
+  boundary-keyed directive identity) briefly failed on
+  `internal/store/sqlite` only — `CurrentDirective` reported a
+  different-session boundary as `ErrInvalidRecord` instead of `ErrNotFound`,
+  the same AUTH-1.3 existence-disclosure pattern applied to the new
+  boundary parameter. Fixed in `a8e895f`; passes on both stores now.
 
 ## Open questions
 
@@ -410,11 +441,6 @@ Required once landed:
 - Whether `CallAttempt.ProviderRequestID` is sufficient for FR-CALL-004's
   reconciliation mechanism, or reconciliation needs more provider-specific
   fields decided in ADR 9.
-- **Needs an owner: SPEC-1.2** (`Prepare` doesn't apply `checkActorScope`).
-  Round-1 fix assignments didn't name a worker for this finding; it should
-  be picked up alongside `internal/invocation`'s other round-1 work
-  (`ledger-worker`) since it's the same package and the same actor-scope
-  helper the DUR-1.1/1.8 fixes already touch.
 
 ## Review
 
@@ -463,13 +489,32 @@ an outcome-rewrite that the two stores even disagreed on; fixed by pinning
 was false for three store methods; fixed by a store-wide semantic-write
 rule instead of patching each one. DUR-1.8 (LOW): startup recovery had no
 way to discover which sessions to recover; fixed by `Store.Sessions` +
-`Ledger.RecoverAll`. **SPEC-1.2 (HIGH, newly found, currently unassigned):**
-`Prepare` never applies the owner-match check (`checkActorScope`) this ADR
-documents as the Phase 1 floor, unlike every other ledger method — I
-reproduced this directly against the merged worktree (a HARNESS actor
-scoped to task A/agent A can `Prepare` task B/agent B's reservation) and
-recorded it in the Decision, Consequences, and Open questions rather than
-silently editing the Decision text to match the unfixed code. DUR-1.2,
-1.4, 1.5, 1.6, 1.7 (commit-cancellation semantics, error mapping,
-re-entrancy, concurrent `Open`, interrupted migration) are ADR 3's scope,
-not this ADR's.
+`Ledger.RecoverAll`. **SPEC-1.2 (HIGH):** `Prepare` never applied the
+owner-match check this ADR documents as the Phase 1 floor, unlike every
+other ledger method — I reproduced this directly against the merged
+worktree before `ledger-worker`'s fix landed (a HARNESS actor scoped to
+task A/agent A could `Prepare` task B/agent B's reservation) and initially
+recorded it as unassigned in the round-1 fix table (it had in fact been
+assigned to `ledger-worker` by direct message, not the table); it is fixed
+(`336ae38`; `actorInScope` applied in `validatePrepare` before any
+reservation write, `TestPrepareRejectsOutOfScopeServiceActor` locks it), so
+this ADR's Decision/Consequences/Open-questions text now describes it as
+landed. DUR-1.2, 1.4, 1.5, 1.6, 1.7 (commit-cancellation semantics, error
+mapping, re-entrancy, concurrent `Open`, interrupted migration) are ADR 3's
+scope, not this ADR's. Also found while verifying this round's tests (not
+a numbered finding): `TestConformance/DirectiveBoundaries` briefly failed
+on `internal/store/sqlite` only — fixed in `a8e895f`, passes on both
+stores now.
+
+**Round 2 review** (PR #2; DUR — Claude Opus, `dur-review-round2.md`, DUR-2.1
+LOW, verdict NO FURTHER WORK NEEDED beyond it). Locking every ledger
+transition to allocate a fresh `Seq` (recorded in this ADR since round 1)
+still left one gap: nothing stopped a semantic write from reusing a
+`TargetCall` event's own `Seq`, which would satisfy the semantic-write
+rule's "carries a sequenced record" test without actually being counted by
+`semanticStale`. Fixed by barring semantic records (not calls/attempts,
+which legitimately share it) from a `TargetCall` `Seq`;
+`TestConformance/LedgerSeqIsolation` locks both halves. SPEC — Codex GPT-6,
+`spec-pr-comment-round2.md`, finding SPEC-2.3 (LOW): reconfirmed this ADR's
+SPEC-1.2 account already read correctly as of the round-1 reconciliation
+pass — no further change needed here.
