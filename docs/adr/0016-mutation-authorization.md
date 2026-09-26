@@ -144,6 +144,15 @@ performs a Resolve in V1.
   never sees `To`, so nothing connected "what was authorized" to "what got
   written." Binding `Action` to the table closes that gap at the record
   level, where `AuthorizeMutation` cannot reach.
+- **A `Matcher`-attributed transition must also record its `GrantID`
+  (round 2, AUTH-2.3).** FR-AUTH-002 requires a matcher to run "under that
+  recorded grant"; round 1's fix bound the transition's `Action` to
+  `ActionAssertObligation` for a matcher, but nothing yet required the
+  transition to name *which* grant authorized it. `ObligationTransition
+  .Validate` now additionally requires `GrantID != ""` whenever `Matcher !=
+  nil` — a matcher transition with no recorded grant is now structurally
+  impossible to store, closing the gap between "the action is right" and
+  "there was actually a grant behind it."
 - **`LifecycleEvent.Validate` requires `Actor.SessionID == SessionID`
   (round 1, AUTH-1.7).** `EventRecord` and `MutationGrant` already enforced
   this; `LifecycleEvent` — the append-only audit record every other
@@ -193,6 +202,58 @@ performs a Resolve in V1.
   leaks which of several IDs exists, and (b) normalizes any not-found from
   the store to bare `domain.ErrNotFound`, with no item ID or store-specific
   text attached.
+- **`internal/graph.ReplaceDirective`/first-version rejects a write that
+  would smuggle a boundary change through visible ID reuse (round 2,
+  AUTH-2.1; decided, `graph-worker` implementing).** Boundary-keyed
+  identity (ADR 4) means an actor can legally create a new current version
+  of a directive ID in a boundary where none currently exists — but if that
+  same actor can *also* access a current version of the identical ID in a
+  *different* boundary, writing the new one is not "a fresh directive," it
+  is the boundary change FR-DIR-002 requires go through "an explicit
+  authorized replacement policy," attempted through ID reuse instead. The
+  decided check: call `store.ReadTx.CurrentDirectives(taskID, directiveID)`
+  (ADR 4), filter to the versions the writing actor can access, and reject
+  the write (`ErrInvalidAuthorityPromotion`) if any accessible version
+  exists in a boundary other than the one being written — while versions
+  the actor cannot see never enter the decision or the error, preserving
+  round 1's non-disclosure property.
+- **`ResolveLifecycleTarget(tx, actor, taskID, id) (itemID string, err
+  error)` resolves a Resolve/Unpin target unambiguously (round 2, SPEC-2.2;
+  decided, `graph-worker` implementing).** `id` may name an item directly
+  (resolved if accessible and current) or a directive ID; in the latter
+  case the function filters `CurrentDirectives` to the actor's accessible
+  versions and requires **exactly one** — zero is `ErrNotFound` (matching
+  the existing unknown-ID diagnostic), and more than one is the new
+  exported `ErrAmbiguousDirective` (SDD v0.8, §8), mutating nothing in
+  either case. This is the FR-DIR-005 amendment's exact target-resolution
+  rule, given its own function so Resolve/Unpin (and any future lifecycle
+  command over the same identity space) share one implementation rather
+  than each reimplementing the accessible-current-version filter.
+- **`SupersedeSnapshot` rejects any new item whose `Section != SectionWorking`
+  before writing anything (round 2, SPEC-2.1; decided, `graph-worker`
+  implementing).** Round 1 fixed *which old items* the selector could
+  retire (by `Section`, not `Kind` — see the FR-DIR-007 bullet above), but
+  left the *new* item's own `Section` unchecked: a new item with
+  `SectionNone` could still be passed to `SupersedeSnapshot` and retire
+  every current Working item it matched, even though it was never itself
+  ingested as part of a Working section. FR-DIR-007 authorizes this
+  operation specifically for "ingesting a Working section" — the precondition
+  the `Section` field now lets the helper actually enforce. The check runs
+  before any candidate scan or edge write, so a non-Working new item leaves
+  every existing Working snapshot untouched and the call fails outright
+  rather than partially retiring state.
+- **`LinkDerived` requires `derived.EventID != "" && derived.EventID ==
+  eventID` (round 2, AUTH-2.4; decided, `graph-worker` implementing).**
+  AUTH-1.1 (round 1) restricted *who* may call `LinkDerived`; this
+  restricts *when*, closing a residual version of the same laundering risk:
+  without it, an authorized actor could attach `DERIVED_FROM` provenance to
+  an item at any later point, from any event, not only the event that
+  created it — letting provenance be backfilled or reassigned well after
+  the fact, which is a form of the same "rewrite this item's basis
+  retroactively" problem AUTH-1.1 restricted by authority alone. Requiring
+  the derived item's own recorded `EventID` to equal the event under which
+  `LinkDerived` is being called means provenance can only ever be attached
+  by the one event that brought the item into existence.
 
 ## SDD amendment (applied in v0.6)
 
@@ -217,6 +278,15 @@ amending FR-DIR-007: "supersedes every current Working-**section** item
 (identified by its recorded directive section, whatever its kind)" replaces
 kind-based selection. FR-DIR-004 is amended to name the recorded directive
 section as parser output (commit `4329e29`).
+
+## SDD amendment (applied in v0.8)
+
+FR-DIR-002 (visible-boundary ID reuse) and FR-DIR-005 (`ErrAmbiguousDirective`
+for a Resolve/Unpin target with several accessible current versions) are
+amended per round-2 findings AUTH-2.1/SPEC-2.2 (commit `eaf3b98`); full text
+and rationale are recorded in ADR 4, which owns directive identity. This
+ADR implements the authorization/resolution consequences —
+`ReplaceDirective`'s reuse rejection and `ResolveLifecycleTarget` — above.
 
 ## Alternatives considered
 
@@ -281,8 +351,21 @@ section as parser output (commit `4329e29`).
   error a *tool result*, i.e. text the model reads directly — `errors.Is`
   equivalence doesn't stop a distinguishable message string from leaking
   which of two IDs exists.
-
-## Consequences / compatibility impact
+- **Requiring an explicit boundary qualifier in Resolve/Unpin syntax
+  instead of `ResolveLifecycleTarget`'s ambiguity diagnostic (round 2).**
+  Rejected: see ADR 4's SDD v0.8 amendment section — changing the directive
+  grammar for every caller to guard a rare multi-boundary collision is more
+  disruptive than detecting and refusing the rare ambiguous case.
+- **Silently picking the SYSTEM/HARNESS-authored version when
+  `ResolveLifecycleTarget` finds several accessible current versions,
+  instead of failing ambiguous.** Rejected: authority ordering answers "who
+  outranks whom for a mutation," not "which of several *equally legitimate,
+  independently-authored* current versions the caller meant." A USER goal
+  in TASK scope and the same USER's goal in TURN scope are both fully
+  valid, current, USER-authority versions with no ranking between them;
+  silently preferring one is a policy decision this ADR has no basis to
+  make on the caller's behalf, and would resolve or unpin state the caller
+  never named.
 
 - `AuthorizeGrantIssuance` and `AuthorizeGrantRevocation` are required call
   sites for every grant-issuing/revoking path; any Phase 3+ code that calls
@@ -315,6 +398,29 @@ section as parser output (commit `4329e29`).
   diagnostics loses that detail; this is intentional (the detail was the
   leak) but is a user-visible behavior change for any Phase 1 tooling that
   logged the richer message.
+- `ResolveLifecycleTarget` is now the single required entry point for
+  translating a Resolve/Unpin `id` into an item ID; any future Phase 2
+  directive-command handler that resolves a target by querying
+  `CurrentDirective`/`CurrentDirectives` directly instead of calling it
+  would silently reintroduce SPEC-2.2's ambiguity gap.
+- The `Section != SectionWorking` precondition on `SupersedeSnapshot` and
+  the `EventID` check on `LinkDerived` are both breaking changes to their
+  existing call sites and test fixtures: any caller/test constructing a
+  new item for `SupersedeSnapshot` without `Section = SectionWorking`, or
+  calling `LinkDerived` under an event ID that doesn't match the derived
+  item's own `EventID`, must be updated once these land.
+- AUTH-2.2 (`Section` requires `CanHoldLifecycleAuthority()`, ADR 4) is a
+  precondition every round-1 `internal/graph` test fixture that constructs
+  a Working/directive item under an AGENT/TOOL/RETRIEVED_CONTENT authority
+  must now also satisfy merely to call `InsertItem` — this broke at least
+  one existing round-1 test (`TestReplaceDirective_FirstVersionAuthorization`'s
+  `ToolActorRejected`/`AgentRejectedForNonKeyedItem` subtests, which
+  constructed a TOOL/AGENT item with a `Section` set specifically to reach
+  the authorization check under test) as of this update; those fixtures
+  need to stop setting `Section` on non-trusted-authority test items (the
+  authorization behavior itself is unaffected — only the test's setup step
+  now fails one layer earlier, at `InsertItem`, before the behavior under
+  test ever runs).
 
 ## Tests that lock the behavior
 
@@ -441,7 +547,43 @@ green).
   RETRIEVED_CONTENT actor. Required: a
   `TestLinkDerived_ActorAuthorityBelowDerived`-shaped case reproducing the
   original finding directly (a SYSTEM item, a low-authority actor,
-  asserting `ErrInvalidAuthorityPromotion`).
+  asserting `ErrInvalidAuthorityPromotion`). Assigned to `graph-worker` for
+  round 2 (TEST-2.2).
+
+### Round 2 additions (findings AUTH-2.1, 2.3; SPEC-2.1, 2.2; AUTH-2.4; TEST-2.2)
+
+`internal/domain`'s round-2 fixes and tests are merged and passing
+(`ObligationTransition.Validate`'s `GrantID` requirement, `ContextItem
+.Validate`'s `Section`-authority requirement):
+
+- `internal/domain/obligation_test.go`: `TestObligationTransitionValidate`'s
+  cases "matcher satisfaction with evidence and a grant ID ok," "matcher
+  transition without a grant ID rejected, even with evidence," "direct
+  assertion (no matcher) needs no grant ID," and "direct assertion may
+  still carry a grant ID" lock AUTH-2.3 exactly.
+- `internal/domain/item_test.go`:
+  `TestContextItemValidate_SectionRequiresLifecycleAuthority` and
+  `TestContextItemValidate_NonDirectiveItemAllowsAnyAuthority` lock
+  AUTH-2.2 (ADR 4 owns the decision; cited here too since ADR 16's
+  `SupersedeSnapshot` selector depends on `Section` being trustworthy).
+- `internal/store/memory`/`internal/store/sqlite` implement
+  `CurrentDirectives`; `TestConformance/CurrentDirectivesOrder` (memory and
+  SQLite) and `internal/store/sqlite/current_directives_test.go
+  :TestCurrentDirectivesAcrossBoundaries` lock it (ADR 4 owns the
+  decision). `TestConformance/MatcherTransition` reconfirms AUTH-2.3 at the
+  store level: `AppendObligationTransition` rejects a matcher transition
+  with no `GrantID` (`ErrInvalidRecord`) and accepts it once one is set.
+  `TestConformance/LedgerSeqIsolation` is ADR 17's DUR-2.1 regression.
+- **Not yet landed, `graph-worker` assigned:** `internal/graph`'s own
+  round-2 fixes (AUTH-2.1's `ReplaceDirective` reuse rejection, SPEC-2.2's
+  `ResolveLifecycleTarget`, SPEC-2.1's `SupersedeSnapshot` `Section`
+  precondition, AUTH-2.4's `LinkDerived` `EventID` check) and their tests,
+  and TEST-2.2's AUTH-1.1 regression tests, do not exist yet as of this
+  update — `go test -race ./internal/graph/...` currently fails on
+  `TestReplaceDirective_FirstVersionAuthorization`'s `ToolActorRejected`/
+  `AgentRejectedForNonKeyedItem` subtests for the reason recorded in
+  Consequences above (their fixtures need updating for AUTH-2.2, a
+  separate, already-merged round-2 change).
 
 ## Open questions
 
@@ -521,3 +663,22 @@ subsection. `TestConformance/DirectiveBoundaries`'s brief SQLite-only
 failure is fixed (`a8e895f`; see ADR 17). One exception remains
 intentionally open: AUTH-1.1 (`LinkDerived` actor-authority gate) has the
 code fix but no direct test — assigned to `graph-worker` for round 2.
+
+**Round 2 review** (PR #2; AUTH — Claude Opus, `auth-review-round2.md`;
+SPEC — Codex GPT-6, `spec-pr-comment-round2.md`). AUTH-2.1: boundary-keyed
+directive identity (ADR 4, v0.7) opened a new gap — an actor visible in
+two boundaries could smuggle a boundary change through ID reuse; decided
+fix is `ReplaceDirective`'s `CurrentDirectives`-based reuse rejection.
+AUTH-2.3: a matcher transition could omit which grant authorized it; fixed
+by requiring `GrantID` whenever `Matcher != nil`. AUTH-2.4: `LinkDerived`'s
+round-1 actor-authority gate didn't constrain *when* provenance could be
+attached; fixed by requiring the derived item's own `EventID`. SPEC-2.1:
+`SupersedeSnapshot`'s round-1 fix checked only old items' `Section`, not
+the new item's; decided fix rejects a non-Working new item outright.
+SPEC-2.2: boundary-keyed identity let one principal see two simultaneously-
+current same-ID directives with no defined Resolve/Unpin target; fixed by
+`ResolveLifecycleTarget` plus the SDD v0.8 amendment. Domain-level findings
+(AUTH-2.3, and AUTH-2.2 which ADR 4 owns) are merged and tested; the
+`internal/graph` findings (AUTH-2.1, 2.4; SPEC-2.1, 2.2) and TEST-2.2 are
+decided in this ADR's Decision section above but not yet implemented —
+`graph-worker`'s round-2 work in progress as of this update.
