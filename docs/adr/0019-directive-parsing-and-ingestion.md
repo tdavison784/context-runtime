@@ -464,9 +464,15 @@ bytes, attribute tokens/length, and generated relationships, since
 thousands of small spans could otherwise evade a per-span cap and force
 repeated scans of an unbounded prior graph. Limits are checked with
 overflow-safe arithmetic before allocating/copying or committing; exceeding
-any limit rejects the entire event, changing no task/turn/item/
-relationship/obligation/receipt. Diagnostic emission stops at the cap
-without stopping suppression-state tracking or semantic validation. Limits
+most limits rejects the entire event, changing no task/turn/item/
+relationship/obligation/receipt. **Two limits truncate instead of
+rejecting, a recorded deviation from a literal reading of FR-DIR-003, SPEC-2.4:**
+diagnostic emission stops at the cap (`MaxDiagnosticsPerSpan`/
+`MaxEventDiagnostics`) without stopping suppression-state tracking or
+semantic validation, and `MaxReferenceLinks` stops creating further
+REFERENCES edges for the rest of the event with a
+`ReferenceLinksTruncated` diagnostic rather than rejecting the event —
+full mechanism and rationale in the SEC-1.4 paragraph below (§28). Limits
 are trusted configuration, never directive attributes. Fuzzing covers
 panics, valid offsets, deterministic output, source gating, and
 structural/allocation bounds via scaling benchmarks or instrumented
@@ -1340,7 +1346,17 @@ each with its own fix and test.
   REFERENCES edges one event may create; exceeding it stops adding
   optional edges and reports `ReferenceLinksTruncated`
   (`internal/ingest/references.go`), a new `DiagnosticCode` alongside
-  `ItemUnverified` (DUR-1.4, §26); `Diagnostic.Validate` now mechanically
+  `ItemUnverified` (DUR-1.4, §26). **This truncate-rather-than-reject
+  behavior is a recorded departure from §13's general "exceeding any
+  limit rejects the entire event" rule and from a literal reading of
+  FR-DIR-003 ("a matching name gets a REFERENCES edge" / "is linked," with
+  no truncation clause), SPEC-2.4: rejecting the whole event once a
+  session has already accumulated 256 reference links would make an
+  otherwise-ordinary event increasingly likely to fail for reasons outside
+  the caller's control, so the ruling truncates the optional edges instead
+  and preserves everything else the event does — the same trusted-limit
+  rationale as diagnostic truncation (§13), extended to this one semantic
+  (non-diagnostic) output.** `Diagnostic.Validate` now mechanically
   enforces every reason-to-code pairing through a `reasonCode` map
   (`internal/domain/diagnostic.go:145-151`:
   `ReasonBoundaryConflict→ErrMalformedDirective`,
