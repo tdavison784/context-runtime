@@ -35,8 +35,9 @@ func TestConcurrentIdenticalInvocationsProduceOneEffect(t *testing.T) {
 		return nil
 	})
 	missing := i
-	missing.ToolCallID = "unregistered"
-	_, err := Execute(testContext, st, missing, func(tx store.Tx) (domain.ToolResult, error) { return s.Remember(tx, missing, intent) })
+	missing.CallID = "missing-call"
+	other := keyed("r-missing", "db", "postgres")
+	_, err := Execute(testContext, st, missing, func(tx store.Tx) (domain.ToolResult, error) { return s.Remember(tx, missing, other) })
 	if err == nil || err.Error() != domain.ToolErrorNotFound.Message() {
 		t.Fatalf("outer error: %v", err)
 	}
