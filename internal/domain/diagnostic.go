@@ -284,6 +284,10 @@ const (
 	// TargetMismatch names an accessible current target of the wrong kind or
 	// state for the action (R14), for example Resolve on a non-OPEN goal.
 	TargetMismatch TargetResolution = "MISMATCH"
+	// TargetWithheld is what a viewer outside a record's DetailAccess reads
+	// in place of its resolution (SEC-3.2). It names no item and never
+	// depends on the target; ingestion never stores it.
+	TargetWithheld TargetResolution = "WITHHELD"
 )
 
 // LifecycleCommandSchemaVersion versions the persisted command record.
@@ -298,13 +302,20 @@ const LifecycleCommandSchemaVersion = "lifecycle-command/v1"
 // revalidate access, source authorization, and target currentness, and
 // historical records are never executed automatically.
 type LifecycleCommandRecord struct {
-	ID              string
-	SessionID       string
-	OccurrenceID    string
-	EventID         string
-	Ordinal         int // position among the event's commands, in event order
-	Actor           Principal
-	Access          AccessBoundary // source span boundary
+	ID           string
+	SessionID    string
+	OccurrenceID string
+	EventID      string
+	Ordinal      int // position among the event's commands, in event order
+	Actor        Principal
+	Access       AccessBoundary // transcript boundary: who may read the record
+	// DetailAccess bounds who may read the resolution (Resolution,
+	// ResolvedItemID, ResolvedVersion): the record's boundary narrowed to
+	// what the resolution depends on (SEC-3.2). Anyone else reads the record
+	// through Redacted, with a WITHHELD resolution, so every command has one
+	// record whose existence and visible fields never depend on the target.
+	// The zero value means Access (records stored before SEC-3.2).
+	DetailAccess    AccessBoundary
 	ParserVersion   string
 	SchemaVersion   string
 	Status          CommandStatus
@@ -317,6 +328,23 @@ type LifecycleCommandRecord struct {
 // LifecycleCommandRecordID derives a record ID from its key.
 func LifecycleCommandRecordID(sessionID, occurrenceID string, ordinal int) string {
 	return DerivedArtifactID(IDDomainCommand, sessionID, occurrenceID, uint64(ordinal))
+}
+
+// Redacted returns the record as viewer may read it (SEC-3.2): unchanged
+// when its DetailAccess permits viewer, otherwise with the resolution
+// replaced by WITHHELD, no item, and no detail boundary, so the copy is the
+// same whether the target is hidden from viewer or does not exist.
+func (r LifecycleCommandRecord) Redacted(viewer Principal) LifecycleCommandRecord {
+	detail := r.DetailAccess
+	if detail == (AccessBoundary{}) {
+		detail = r.Access
+	}
+	if detail.Permits(viewer) {
+		return r
+	}
+	r.Resolution, r.ResolvedItemID, r.ResolvedVersion = TargetWithheld, "", 0
+	r.DetailAccess = r.Access
+	return r
 }
 
 // Validate checks the record's key, source actor, status, and resolution.
@@ -345,12 +373,20 @@ func (r LifecycleCommandRecord) Validate() error {
 	if r.Status != CommandParsedNotExecuted {
 		return invalid("lifecycle command record: commands are never executed in this phase")
 	}
+	if r.DetailAccess != (AccessBoundary{}) {
+		if err := r.DetailAccess.Validate(); err != nil {
+			return err
+		}
+		if !r.DetailAccess.Permits(r.Actor) || !r.DetailAccess.Within(r.Access) {
+			return invalid("lifecycle command record: detail boundary must permit the actor and lie within the record's")
+		}
+	}
 	switch r.Resolution {
 	case TargetResolved, TargetMismatch:
 		if r.ResolvedItemID == "" || r.ResolvedVersion == 0 {
 			return invalid("lifecycle command record: a resolved target needs its item version")
 		}
-	case TargetNotFound, TargetAmbiguous:
+	case TargetNotFound, TargetAmbiguous, TargetWithheld:
 		if r.ResolvedItemID != "" || r.ResolvedVersion != 0 {
 			return invalid("lifecycle command record: an unresolved target names no item")
 		}
