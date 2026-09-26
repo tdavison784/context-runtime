@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -14,6 +15,21 @@ import (
 // Deliberately hides the optional semantic facet; all actual writes and
 // rollback remain the real memory transaction, not a semantic persistence stub.
 type legacyOnly struct{ store.Tx }
+
+func TestApplyBoundsPrincipalBeforePersistence(t *testing.T) {
+	mem := memory.New()
+	t.Cleanup(func() { mem.Close() })
+	s, _ := New(mem, testPolicy())
+	p := storetest.NewPrincipal("s", domain.AuthorityUser)
+	p.WorkflowID = strings.Repeat("w", domain.MaxOwnerIDBytes+1)
+	err := mem.Update(context.Background(), "s", func(tx store.Tx) error {
+		_, err := s.ApplyResolve(legacyOnly{tx}, p, domain.ResolveIntent{RequestID: "r", ItemID: "goal", ExpectedVersion: 1}, tx.NextSeq())
+		return err
+	})
+	if !errors.Is(err, domain.ErrInvalidRecord) {
+		t.Fatalf("principal reached persistence: %v", err)
+	}
+}
 
 func TestApplyWithoutReceiptStoragePoisonsIgnoredFailure(t *testing.T) {
 	mem := memory.New()

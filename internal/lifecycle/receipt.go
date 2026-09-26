@@ -29,7 +29,10 @@ func checkReplay(r domain.MutationReceipt, p domain.Principal, family domain.Mut
 }
 
 func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationFamily, method, requestID string, intent any) (store.SemanticTx, []byte, *domain.MutationReceipt, error) {
-	if err := p.Validate(); err != nil {
+	// The frozen request encoder validates bounded authenticated owner IDs
+	// before hashing. Validate the header before any persistence lookup or effect;
+	// the real argument hash is generated only when committing a fresh receipt.
+	if _, err := domain.MutationRequestHash(p, family, method, []byte{0}); err != nil {
 		return nil, nil, nil, err
 	}
 	if p.SessionID != tx.SessionID() {
