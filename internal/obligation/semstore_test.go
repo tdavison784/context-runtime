@@ -712,3 +712,173 @@ func (b *semBackend) SetCurrentVersion(itemID, expectedPrior string) error {
 		return b.tx.Tx.SetCurrentVersion(itemID)
 	})
 }
+
+// --- resource fan-out and subjects ---
+
+func (b *semBackend) ResourceUpdates(resourceID string, p store.Page) (store.ResultPage[domain.ResourceUpdate], error) {
+	var out []domain.ResourceUpdate
+	for _, u := range b.st.resUpdates {
+		if u.ResourceID == resourceID {
+			out = append(out, u.Clone())
+		}
+	}
+	return page(out, func(u domain.ResourceUpdate) store.Cursor { return store.Cursor{Seq: u.Seq, ID: u.ID} }, p)
+}
+
+func (b *semBackend) CurrentProofsByDependency(resourceID, pathKey string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	var out []domain.ApplicabilityProof
+	for _, pr := range b.st.proofs {
+		if b.st.caches[pr.Target].proof != pr.ID {
+			continue
+		}
+		o, err := b.ExactObligation(pr.Target)
+		if err != nil || !o.Current || o.Status != domain.ObligationSatisfied {
+			continue
+		}
+		for _, d := range b.st.deps[pr.ID] {
+			key := ""
+			if d.Locator != nil {
+				key, _ = d.Locator.Key()
+			}
+			if d.ResourceID == resourceID && (pathKey == "" || d.Kind == domain.DependencyWorkspace || key == pathKey) {
+				out = append(out, pr.Clone())
+				break
+			}
+		}
+	}
+	return page(out, func(pr domain.ApplicabilityProof) store.Cursor { return store.Cursor{Seq: pr.Seq, ID: pr.ID} }, p)
+}
+
+func subjectKeyOf(subject, task string, a domain.AccessBoundary) string {
+	return subject + "\x00" + task + "\x00" + string(a.Scope) + "\x00" + a.WorkflowID + "\x00" + a.TaskID + "\x00" + a.AgentID
+}
+
+func (b *semBackend) SubjectState(subject, task string, a domain.AccessBoundary) (domain.SubjectState, error) {
+	s, ok := b.st.subjects[subjectKeyOf(subject, task, a)]
+	if !ok {
+		return domain.SubjectState{}, domain.ErrNotFound
+	}
+	return s, nil
+}
+
+func (b *semBackend) SubjectStatesByResource(resourceID string, p store.Page) (store.ResultPage[domain.SubjectState], error) {
+	var out []domain.SubjectState
+	for _, s := range b.st.subjects {
+		if o, ok := b.st.observations[s.ObservationID]; ok {
+			if run, ok := b.st.runs[o.RunID]; ok && targetResource(run.Subject.Target) == resourceID {
+				out = append(out, s)
+			}
+		}
+	}
+	return page(out, func(s domain.SubjectState) store.Cursor { return store.Cursor{Seq: s.Seq, ID: s.ID} }, p)
+}
+
+func (b *semBackend) PutSubjectState(s domain.SubjectState, expected uint64, cause string) (domain.SubjectState, error) {
+	err := b.write(&s.SemanticMeta, func() error {
+		k := subjectKeyOf(s.SubjectKey, s.TaskID, s.Access)
+		cur := b.st.subjects[k]
+		if cur.Revision != expected {
+			return domain.ErrVersionConflict
+		}
+		s.Revision = expected + 1
+		if err := s.Validate(); err != nil {
+			return err
+		}
+		_, obs := b.st.observations[cause]
+		_, upd := b.st.resUpdates[cause]
+		if !obs && !upd {
+			return domain.ErrInvalidRecord
+		}
+		o, ok := b.st.observations[s.ObservationID]
+		if !ok || o.SubjectKey != s.SubjectKey {
+			return domain.ErrInvalidRecord
+		}
+		if _, err := b.rtx.Item(s.CurrentItemID); err != nil {
+			return domain.ErrInvalidRecord
+		}
+		if expected > 0 && s.AcceptedOrdinal < cur.AcceptedOrdinal {
+			return domain.ErrInvalidTransition
+		}
+		b.st.subjects[k] = s
+		return nil
+	})
+	if err != nil {
+		return domain.SubjectState{}, err
+	}
+	return s, nil
+}
+
+// --- runs and observations ---
+
+func (b *semBackend) ObservationRun(id string) (domain.ObservationRun, error) {
+	r, ok := b.st.runs[id]
+	if !ok {
+		return domain.ObservationRun{}, domain.ErrNotFound
+	}
+	return r.Clone(), nil
+}
+
+func (b *semBackend) InsertObservationRun(r domain.ObservationRun) error {
+	return b.write(&r.SemanticMeta, func() error {
+		if err := r.Validate(); err != nil {
+			return err
+		}
+		if _, ok := b.st.runs[r.ID]; ok {
+			return domain.ErrImmutable
+		}
+		if _, ok := b.st.wsBindings[r.Binding]; !ok {
+			return domain.ErrInvalidRecord
+		}
+		b.st.runs[r.ID] = r.Clone()
+		return nil
+	})
+}
+
+func (b *semBackend) RunsBySubject(subject string, p store.Page) (store.ResultPage[domain.ObservationRun], error) {
+	var out []domain.ObservationRun
+	for _, r := range b.st.runs {
+		if r.SubjectKey == subject {
+			out = append(out, r.Clone())
+		}
+	}
+	return page(out, func(r domain.ObservationRun) store.Cursor { return store.Cursor{Seq: r.Seq, ID: r.ID} }, p)
+}
+
+func (b *semBackend) Observation(id string) (domain.ObservationRecord, error) {
+	o, ok := b.st.observations[id]
+	if !ok {
+		return domain.ObservationRecord{}, domain.ErrNotFound
+	}
+	return o, nil
+}
+
+func (b *semBackend) ObservationsByRun(runID string, p store.Page) (store.ResultPage[domain.ObservationRecord], error) {
+	var out []domain.ObservationRecord
+	for _, o := range b.st.observations {
+		if o.RunID == runID {
+			out = append(out, o)
+		}
+	}
+	return page(out, func(o domain.ObservationRecord) store.Cursor { return store.Cursor{Seq: o.Seq, ID: o.ID} }, p)
+}
+
+func (b *semBackend) InsertObservation(o domain.ObservationRecord) error {
+	return b.write(&o.SemanticMeta, func() error {
+		if err := o.Validate(); err != nil {
+			return err
+		}
+		if _, ok := b.st.observations[o.ID]; ok {
+			return domain.ErrImmutable
+		}
+		run, ok := b.st.runs[o.RunID]
+		if !ok || run.ExecutionID != o.ExecutionID || run.SubjectKey != o.SubjectKey || run.Binding != o.Binding || run.Reporter != o.Reporter || run.Access != o.Access {
+			return domain.ErrInvalidRecord
+		}
+		ev, err := b.rtx.Item(o.EvidenceItemID)
+		if err != nil || ev.Authority != domain.AuthorityTool || ev.Access != o.Access {
+			return domain.ErrInvalidRecord
+		}
+		b.st.observations[o.ID] = o
+		return nil
+	})
+}
