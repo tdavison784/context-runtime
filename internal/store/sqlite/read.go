@@ -3,16 +3,32 @@ package sqlite
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
+// verifyItemContent fails with domain.ErrIntegrity when a stored item's
+// parts no longer match its content hash, as for a row whose text 0001
+// altered before migration 0002 (R8). Such an item is never returned.
+func verifyItemContent(v domain.ContextItem) error {
+	if domain.ContentHash(v.Parts) != v.ContentHash || domain.SemanticBytes(v.Parts) != v.SemanticBytes {
+		return fmt.Errorf("%w: item %s content does not match its hash", domain.ErrIntegrity, v.ID)
+	}
+	return nil
+}
+
 func (t *transaction) Item(id string) (domain.ContextItem, error) {
 	var v domain.ContextItem
-	err := t.get("item", id, 0, &v)
-	return v, err
+	if err := t.get("item", id, 0, &v); err != nil {
+		return domain.ContextItem{}, err
+	}
+	if err := verifyItemContent(v); err != nil {
+		return domain.ContextItem{}, err
+	}
+	return v, nil
 }
 func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 	items, err := listRecords[domain.ContextItem](t, "item")
@@ -21,6 +37,9 @@ func (t *transaction) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 	}
 	out := make([]domain.ContextItem, 0)
 	for _, v := range items {
+		if err := verifyItemContent(v); err != nil {
+			return nil, err
+		}
 		if f.TaskID != "" && f.TaskID != v.TaskID || f.AgentID != "" && f.AgentID != v.AgentID || f.Residency != "" && f.Residency != v.Residency || f.DirectiveID != "" && f.DirectiveID != v.DirectiveID || f.EventID != "" && f.EventID != v.EventID || v.Seq < f.MinSeq || f.MaxSeq != 0 && v.Seq > f.MaxSeq {
 			continue
 		}

@@ -50,8 +50,10 @@
 //   - domain.ErrVersionConflict: compare-and-swap mismatch, and an obligation
 //     version that is not one more than the latest.
 //   - domain.ErrIntegrity: stored bytes or records fail verification (a blob
-//     whose bytes no longer match its hash, a row that cannot be decoded).
-//     It is never used for operational failures.
+//     whose bytes no longer match its hash, an item whose parts no longer
+//     match its ContentHash or SemanticBytes, a row that cannot be decoded).
+//     Such a record is never returned. It is never used for operational
+//     failures.
 //   - Context and I/O errors are returned as themselves (wrapped at most),
 //     so errors.Is(err, context.Canceled) and similar checks hold.
 //
