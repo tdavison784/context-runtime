@@ -40,6 +40,7 @@ func (t *tx) commit(st *state) bool {
 	t.supersededBy.commit()
 	t.relsFrom.commit()
 	t.itemsByBlob.commit()
+	t.duplicates.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
 	t.events.commit()
@@ -157,6 +158,7 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 			t.itemsByBlob.add(p.BlobHash, it.ID)
 		}
 	}
+	t.duplicates.add(itemDuplicateKey(it), it.ID)
 	t.markSequenced()
 	return nil
 }

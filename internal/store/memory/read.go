@@ -44,6 +44,7 @@ type readTx struct {
 	envelopes    table[string, domain.EventEnvelope]
 	references   table[string, domain.UnresolvedReference]
 	itemsByBlob  index[string]
+	duplicates   index[duplicateKey]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -75,6 +76,7 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		envelopes:    newTable(st.envelopes, writable, domain.EventEnvelope.Clone),
 		references:   newTable(st.references, writable, domain.UnresolvedReference.Clone),
 		itemsByBlob:  newIndex(st.itemsByBlob, writable),
+		duplicates:   newIndex(st.duplicates, writable),
 	}
 }
 
@@ -566,8 +568,25 @@ func (r *readTx) ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, 
 	if limit <= 0 || !domain.ValidHash(blobHash) {
 		return nil, invalid("items by blob: positive limit and valid hash required")
 	}
+	return r.indexedItems(r.itemsByBlob.lookup(blobHash), limit)
+}
+
+func (r *readTx) DuplicateCandidates(f store.DuplicateFilter) ([]domain.ContextItem, error) {
+	if err := r.check(); err != nil {
+		return nil, err
+	}
+	if err := f.Validate(); err != nil {
+		return nil, err
+	}
+	key := duplicateKey{f.TaskID, f.Section, f.Role, f.Authority, f.Access, f.ContentHash}
+	return r.indexedItems(r.duplicates.lookup(key), f.Limit)
+}
+
+// indexedItems loads at most limit indexed items, ordered by Seq then ID;
+// more fail with store.ErrLimitExceeded.
+func (r *readTx) indexedItems(ids iter.Seq[string], limit int) ([]domain.ContextItem, error) {
 	out := []domain.ContextItem{}
-	for id := range r.itemsByBlob.lookup(blobHash) {
+	for id := range ids {
 		if len(out) == limit {
 			return nil, store.ErrLimitExceeded
 		}

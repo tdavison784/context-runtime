@@ -65,6 +65,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
@@ -160,6 +161,30 @@ type CommandFilter struct {
 	OccurrenceID string
 }
 
+// DuplicateFilter selects duplicate candidates (R19, D10, FR-ING-005):
+// items of this session whose task, directive section (which fixes the
+// directive namespace), role, authority, exact access boundary, and content
+// hash all equal the filter's. Every field is compared exactly, including
+// empty ones, so a candidate never crosses task, section, role, authority,
+// or boundary. Limit is required as in ReferenceFilter.
+type DuplicateFilter struct {
+	TaskID      string
+	Section     domain.DirectiveSection
+	Role        domain.ItemRole
+	Authority   domain.Authority
+	Access      domain.AccessBoundary
+	ContentHash string
+	Limit       int
+}
+
+// Validate checks the filter's enums, boundary, hash, and limit.
+func (f DuplicateFilter) Validate() error {
+	if f.Limit <= 0 || !domain.ValidHash(f.ContentHash) || !f.Section.Valid() || !f.Role.Valid() || !f.Authority.Valid() {
+		return fmt.Errorf("%w: duplicate filter: positive limit and valid hash, section, role, and authority required", domain.ErrInvalidRecord)
+	}
+	return f.Access.Validate()
+}
+
 // ReferenceFilter selects unresolved references (M5, R2). Empty
 // LocatorKey or RuleVersion does not filter; both compare exact bytes.
 // Limit is required: it must be positive (domain.ErrInvalidRecord
@@ -201,6 +226,10 @@ type ReadTx interface {
 	// fail with ErrLimitExceeded. Callers filter by access: possession of a
 	// hash authorizes nothing.
 	ItemsByBlob(blobHash string, limit int) ([]domain.ContextItem, error)
+	// DuplicateCandidates returns the items f selects, ordered by Seq then
+	// ID; more than f.Limit fail with ErrLimitExceeded. Callers apply the
+	// remaining duplicate rules (directive ID, metadata, currentness, D10).
+	DuplicateCandidates(f DuplicateFilter) ([]domain.ContextItem, error)
 	Relationships(f RelationshipFilter) ([]domain.Relationship, error)
 	Event(eventID string) (domain.EventRecord, error)
 	// Blob returns the blob with the given hash after verifying its bytes;

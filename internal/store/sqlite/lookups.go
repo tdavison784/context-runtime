@@ -58,3 +58,21 @@ func (t *transaction) itemsByID(ids []string) ([]domain.ContextItem, error) {
 	})
 	return out, nil
 }
+
+func (t *transaction) DuplicateCandidates(f store.DuplicateFilter) ([]domain.ContextItem, error) {
+	if err := f.Validate(); err != nil {
+		return nil, err
+	}
+	a := f.Access
+	ids, err := t.boundedIDs(f.Limit, duplicateSQL, t.session, f.ContentHash, f.TaskID, f.Section, f.Role, f.Authority,
+		a.Scope, a.SessionID, a.WorkflowID, a.TaskID, a.AgentID, f.Limit+1)
+	if err != nil {
+		return nil, err
+	}
+	return t.itemsByID(ids)
+}
+
+// duplicateSQL matches the item_duplicate index (migration 0010) column for
+// column.
+const duplicateSQL = "SELECT id FROM rec_item WHERE session_id=? AND f_content_hash=? AND f_task_id=? AND f_section=? AND f_role=? AND f_authority=?" +
+	" AND f_access_scope=? AND f_access_session_id=? AND f_access_workflow_id=? AND f_access_task_id=? AND f_access_agent_id=? AND subkey=0 LIMIT ?"

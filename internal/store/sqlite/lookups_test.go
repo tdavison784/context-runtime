@@ -72,3 +72,27 @@ func TestUpgradeItemBlobIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDuplicateCandidatesUseIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	assertIndexed(t, s, duplicateSQL, "s", "h", "task", "", "", "USER", "TASK", "s", "", "task", "", 2)
+}
+
+// TestUpgradeDuplicateIndex checks that items stored before migration 0004
+// (NULL role) are duplicate candidates after 0010.
+func TestUpgradeDuplicateIndex(t *testing.T) {
+	l := openLegacy(t, 3)
+	it := storetest.NewItem("s", "legacy", 1, "same")
+	l.insert("item", it, nil)
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		got, err := tx.DuplicateCandidates(store.DuplicateFilter{TaskID: it.TaskID, Section: it.Section, Role: domain.RoleSemantic,
+			Authority: it.Authority, Access: it.Access, ContentHash: it.ContentHash, Limit: 1})
+		if err != nil || len(got) != 1 || got[0].ID != "legacy" {
+			t.Errorf("DuplicateCandidates after upgrade = %v, %v", got, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

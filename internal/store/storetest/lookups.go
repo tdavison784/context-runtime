@@ -1,6 +1,7 @@
 package storetest
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -72,6 +73,86 @@ func testItemsByBlob(t *testing.T, s store.Store) {
 		again, err := tx.ItemsByBlob(y.Hash, 2)
 		noErr(t, err)
 		assertEqual(t, "after mutating a result", again, []domain.ContextItem{c, d})
+		return nil
+	})
+}
+
+// dupFilter selects NewItem-shaped items with content hash of text.
+func dupFilter(sess, text string, limit int) store.DuplicateFilter {
+	it := NewItem(sess, "probe", 1, text)
+	return store.DuplicateFilter{TaskID: it.TaskID, Section: it.Section, Role: it.Role, Authority: it.Authority,
+		Access: it.Access, ContentHash: it.ContentHash, Limit: limit}
+}
+
+// testDuplicateCandidates checks the bounded duplicate-candidate lookup
+// (R19, D10, FR-ING-005): items with exactly the given task, section, role,
+// authority, access boundary, and content hash, in (Seq, ID) order. Any
+// difference in one of them, or another session, is never a candidate.
+func testDuplicateCandidates(t *testing.T, s store.Store) {
+	update(t, s, sessB, func(tx store.Tx) error {
+		return tx.InsertItem(NewItem(sessB, "foreign", tx.NextSeq(), "same"))
+	})
+	var a, b domain.ContextItem
+	update(t, s, sessA, func(tx store.Tx) error {
+		seq := tx.NextSeq()
+		b = NewItem(sessA, "b", seq, "same")
+		a = NewItem(sessA, "a", seq, "same")
+		noErr(t, tx.InsertItem(b))
+		noErr(t, tx.InsertItem(a))
+		near := []func(it *domain.ContextItem){
+			func(it *domain.ContextItem) { // other content
+				it.Parts[0].Text = "other"
+				it.ContentHash, it.SemanticBytes = domain.ContentHash(it.Parts), domain.SemanticBytes(it.Parts)
+			},
+			func(it *domain.ContextItem) { it.TaskID, it.Access.TaskID = "task2", "" },
+			func(it *domain.ContextItem) { it.Authority = domain.AuthoritySystem },
+			func(it *domain.ContextItem) { // narrower boundary, same scope family
+				it.Scope, it.Access = domain.ScopeAgent, domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: sessA, AgentID: "agent"}
+			},
+			func(it *domain.ContextItem) { it.DirectiveID, it.Section = "d", domain.SectionRemember },
+			func(it *domain.ContextItem) {
+				it.Role, it.Kind = domain.RoleTranscript, domain.KindUserMessage
+			},
+		}
+		for i, mutate := range near {
+			it := NewItem(sessA, "near-"+string(rune('0'+i)), tx.NextSeq(), "same")
+			mutate(&it)
+			noErr(t, tx.InsertItem(it))
+		}
+		got, err := tx.DuplicateCandidates(dupFilter(sessA, "same", 2))
+		noErr(t, err)
+		assertEqual(t, "own writes", got, []domain.ContextItem{a, b})
+		return nil
+	})
+	var later domain.ContextItem
+	update(t, s, sessA, func(tx store.Tx) error {
+		later = NewItem(sessA, "0-later", tx.NextSeq(), "same")
+		return tx.InsertItem(later)
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		got, err := tx.DuplicateCandidates(dupFilter(sessA, "same", 3))
+		noErr(t, err)
+		assertEqual(t, "candidates", got, []domain.ContextItem{a, b, later})
+		got, err = tx.DuplicateCandidates(dupFilter(sessA, "absent", 1))
+		noErr(t, err)
+		assertEqual(t, "absent", got, []domain.ContextItem{})
+		_, err = tx.DuplicateCandidates(dupFilter(sessA, "same", 2))
+		wantErr(t, err, store.ErrLimitExceeded)
+		for name, mutate := range map[string]func(f *store.DuplicateFilter){
+			"zero limit":    func(f *store.DuplicateFilter) { f.Limit = 0 },
+			"bad hash":      func(f *store.DuplicateFilter) { f.ContentHash = "x" },
+			"bad boundary":  func(f *store.DuplicateFilter) { f.Access = domain.AccessBoundary{} },
+			"bad authority": func(f *store.DuplicateFilter) { f.Authority = "ROOT" },
+			"bad section":   func(f *store.DuplicateFilter) { f.Section = "Bogus" },
+			"bad role":      func(f *store.DuplicateFilter) { f.Role = "BOGUS" },
+		} {
+			f := dupFilter(sessA, "same", 3)
+			mutate(&f)
+			_, err := tx.DuplicateCandidates(f)
+			if !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Errorf("%s: error = %v, want ErrInvalidRecord", name, err)
+			}
+		}
 		return nil
 	})
 }
