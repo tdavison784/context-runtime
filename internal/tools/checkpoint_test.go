@@ -157,4 +157,14 @@ func TestCheckpointChainCarriesOnlyTheValidatedPrior(t *testing.T) {
 		}
 		return nil
 	})
+	// The superseded first checkpoint is no longer the prior: a generation
+	// input that carries it forward is not a validated chain.
+	i4, manifest4 := nextRound(t, st, i3, "4", true, firstItem)
+	err := FixedError(st.Update(testContext, "s", func(tx store.Tx) error {
+		_, err := s.CreateCheckpoint(tx, dispatcher(i4), Request[domain.CheckpointIntent]{i4, summary("c3", manifest4, "third")}, tx.NextSeq())
+		return err
+	}))
+	if err == nil || err.Error() != domain.ToolErrorUnavailable.Message() {
+		t.Fatalf("stale chain accepted: %v", err)
+	}
 }
