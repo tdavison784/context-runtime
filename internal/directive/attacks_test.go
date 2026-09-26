@@ -180,3 +180,40 @@ func TestAdversarialFatalLimits(t *testing.T) {
 		}
 	}
 }
+
+// TestSuppressedListContent (SPEC-1.1, D5, R17): a bullet inside a fence,
+// comment or quote within a list body never becomes a directive. A
+// suppressed line can never start an item or lifecycle target, and a
+// column-0 fence, quote or comment line in a list body drops every item and
+// target of that section (R17: the whole section is malformed, not
+// tolerated). Indented fences and quotes inside an item stay its text.
+func TestSuppressedListContent(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"column-0 fence", "## Pinned\n- a\n```\n- [evil] fenced\n```\n- b\n", nil},
+		{"indented fence opener", "## Pinned\n- a\n  ```\n- [evil2] fenced\n  ```\n", nil},
+		{"comment opened after bullet", "## Pinned\n- a <!--\n- [evil3] commented\n  -->\n", nil},
+		{"lifecycle target in fence", "## Unpin\n- [a]\n```\n- [evil]\n```\n", nil},
+		{"column-0 quote", "## Pinned\n- a\n> - [evil4] quoted\n", nil},
+		{"column-0 comment line", "## Pinned\n- a\n<!-- - [evil6] -->\n- b\n", nil},
+		{"tilde fence", "## Working\n- a\n~~~\n- [evil7]\n~~~\n", nil},
+		{"control: indented fence inside item", "## Pinned\n- a\n  ```\n  - [x] code\n  ```\n- b\n", []string{"PINNED:a\n```\n- [x] code\n```", "PINNED:b"}},
+		{"control: indented quote inside item", "## Pinned\n- a\n  > quoted\n- b\n", []string{"PINNED:a\n> quoted", "PINNED:b"}},
+		{"control: closed inline comment", "## Pinned\n- a <!-- note -->\n- b\n", []string{"PINNED:a <!-- note -->", "PINNED:b"}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseUnits(t, []unit{sys(tt.input)})
+			if err != nil || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("got %q (err %v), want %q", got, err, tt.want)
+			}
+			r := Parse([]byte(tt.input), Options{Authority: domain.AuthoritySystem})
+			if tt.want == nil && (len(r.Sections) != 1 || !r.Sections[0].Malformed) {
+				t.Fatalf("section not malformed: %+v", r.Sections)
+			}
+		})
+	}
+}
