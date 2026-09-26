@@ -1,0 +1,9 @@
+{
+  "description": "T18 step 2, W1: one Working section with two members (the snapshot ingestion supersedes later).",
+  "requirements": [
+    "T18",
+    "FR-DIR-007"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

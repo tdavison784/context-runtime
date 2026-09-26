@@ -1,0 +1,10 @@
+{
+  "description": "The finite parser-v1 unsupported lifecycle vocabulary yields ErrUnsupportedDirective, mutates nothing, and suppresses deeper headings; look-alike words are ordinary headings (M4, FR-DIR-005).",
+  "requirements": [
+    "FR-DIR-006",
+    "FR-DIR-005",
+    "M4"
+  ],
+  "authority": "USER",
+  "directive_capable": true
+}

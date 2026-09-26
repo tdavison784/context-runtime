@@ -1,0 +1,58 @@
+{
+  "parser_version": "directive/v1",
+  "sections": [
+    {
+      "keyword": "WORKING",
+      "level": 2,
+      "range": [
+        0,
+        50
+      ],
+      "heading_range": [
+        0,
+        11
+      ],
+      "body_range": [
+        11,
+        50
+      ],
+      "items": [
+        0
+      ]
+    }
+  ],
+  "items": [
+    {
+      "section": "WORKING",
+      "section_index": 0,
+      "directive_id": "working-7e9a7914dcba5ea9e93c4a500b757df08aa1ffe8fde0476d271b45ddbdb81426",
+      "authority": "USER",
+      "text": "TestLegacyClient fixed; now on docs.",
+      "content_hash": "sha256:7e9a7914dcba5ea9e93c4a500b757df08aa1ffe8fde0476d271b45ddbdb81426",
+      "range": [
+        11,
+        50
+      ],
+      "text_ranges": [
+        [
+          13,
+          49
+        ]
+      ]
+    }
+  ],
+  "lifecycle": [],
+  "diagnostics": [
+    {
+      "index": 0,
+      "code": "DirectiveIDDerived",
+      "reason": "derived_id",
+      "section": "WORKING",
+      "directive_id": "working-7e9a7914dcba5ea9e93c4a500b757df08aa1ffe8fde0476d271b45ddbdb81426",
+      "range": [
+        11,
+        50
+      ]
+    }
+  ]
+}
