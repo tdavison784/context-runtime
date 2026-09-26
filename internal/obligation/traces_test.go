@@ -263,3 +263,92 @@ func TestTraceT02Obligation(t *testing.T) {
 		t.Error("retired version waived")
 	}
 }
+
+// TestTraceT07PublicAPI drives T07 only through the public *Tx entry points
+// W7 wires: register the resource, resync a baseline, bind the workspace,
+// declare, grant, register and report runs, report the edit.
+func TestTraceT07PublicAPI(t *testing.T) {
+	s := newTestService(t)
+	st := newTestStore(t)
+	harness, system := actorOf(domain.AuthorityHarness), actorOf(domain.AuthoritySystem)
+	reporter := sessionReporter()
+	seedTask(t, st, "task")
+	do := func(fn func(tx store.Tx, seq uint64) (domain.MutationResult, error)) domain.MutationResult {
+		t.Helper()
+		var res domain.MutationResult
+		mustUpdate(t, st, func(tx store.Tx) error {
+			var err error
+			res, err = fn(tx, tx.NextSeq())
+			return err
+		})
+		return res
+	}
+	session := domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: testSession}
+	do(func(tx store.Tx, seq uint64) (domain.MutationResult, error) {
+		return s.RegisterResourceTx(tx, reporter, domain.RegisterResourceIntent{RequestID: "reg", ResourceID: "repo1", Reporter: reporter, Access: session}, seq)
+	})
+	report := func(req string, expRev, auth uint64, fp string, resync bool) {
+		do(func(tx store.Tx, seq uint64) (domain.MutationResult, error) {
+			return s.ReportResourceChangeTx(tx, reporter, domain.ReportResourceChangeIntent{RequestID: req, ResourceID: "repo1", ExpectedRevision: expRev,
+				ExpectedAuthoritativeRevision: auth, ResultingAuthoritativeRevision: auth + 1, WorkspaceFingerprint: fp, Resynchronization: resync, AllPaths: !resync}, seq)
+		})
+	}
+	report("baseline", 0, 0, hashOf("W1"), true)
+	do(func(tx store.Tx, seq uint64) (domain.MutationResult, error) {
+		return s.BindWorkspaceTx(tx, system, bindIntent("ws1", 1, domain.WorkspaceSourceContext{Kind: domain.WorkspaceTask, ID: "task"}), seq)
+	})
+	var ref *domain.ObligationRef
+	mustUpdate(t, st, func(tx store.Tx) error {
+		it := seedItemTx(tx, "p", "tests", domain.AuthoritySystem, "All tests must pass.")
+		if err := tx.InsertItem(it); err != nil {
+			return err
+		}
+		if err := tx.SetCurrentVersion(it.ID); err != nil {
+			return err
+		}
+		var err error
+		ref, err = s.DeclarePinnedTx(tx, system, it.ID, "", tx.NextSeq())
+		return err
+	})
+	mustUpdate(t, st, func(tx store.Tx) error {
+		m := TestsPassV1
+		return tx.InsertGrant(domain.MutationGrant{ID: "g", SessionID: testSession, Action: domain.ActionAssertObligation,
+			Targets: []domain.GrantTarget{ref.Target()}, Issuer: system, Matcher: &m, IssuedSeq: tx.NextSeq()})
+	})
+	ev := seedEvidence(t, st, "ev", taskBoundary())
+	run := func(n, fp string) {
+		res := do(func(tx store.Tx, seq uint64) (domain.MutationResult, error) {
+			return s.RegisterRunTx(tx, harness, runIntent("run-"+n, "exec-"+n, testsTarget(nil)), seq)
+		})
+		var r domain.ObservationRun
+		_ = st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			sem, _ := store.ReadSemantic(tx)
+			r, _ = sem.ObservationRun(res.Records.IDs[0])
+			return nil
+		})
+		do(func(tx store.Tx, seq uint64) (domain.MutationResult, error) {
+			return s.ReportObservationTx(tx, harness, obsIntent("obs-"+n, r, ev.ID, domain.OutcomePass, fp), seq)
+		})
+	}
+	status := func() domain.ObligationStatus {
+		var o domain.ObligationVersion
+		_ = st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			sem, _ := store.ReadSemantic(tx)
+			o, _ = sem.ExactObligation(*ref)
+			return nil
+		})
+		return o.Status
+	}
+	run("1", hashOf("W1"))
+	if got := status(); got != domain.ObligationSatisfied {
+		t.Fatalf("TEST1 at W1: %s", got)
+	}
+	report("edit", 1, 1, hashOf("W2"), false)
+	if got := status(); got != domain.ObligationUnresolved {
+		t.Fatalf("after W2 report: %s", got)
+	}
+	run("2", hashOf("W2"))
+	if got := status(); got != domain.ObligationSatisfied {
+		t.Errorf("TEST2 at W2: %s", got)
+	}
+}

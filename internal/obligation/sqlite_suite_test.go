@@ -94,6 +94,9 @@ func TestSQLiteSuite(t *testing.T) {
 		{"TraceT06", TestTraceT06, true},
 		{"TraceT07", TestTraceT07, true},
 		{"TraceT02Obligation", TestTraceT02Obligation, true},
+		{"TraceT07PublicAPI", TestTraceT07PublicAPI, true},
+		{"RunAndObservationReceipts", TestRunAndObservationReceipts, true},
+		{"RegisterResourceReceipt", TestRegisterResourceReceipt, false},
 		{"ConcurrentINV16", TestConcurrentINV16, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
