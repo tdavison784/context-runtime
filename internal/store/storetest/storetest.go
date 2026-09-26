@@ -70,6 +70,7 @@ var suite = []testCase{
 	// Semantic state.
 	{"ItemRichRoundTrip", testItemRichRoundTrip},
 	{"ItemLosslessText", testItemLosslessText},
+	{"ByteExactStringLists", testByteExactStringLists},
 	{"ItemInsertRules", testItemInsertRules},
 	{"ItemBlobIntegrity", testItemBlobIntegrity},
 	{"ItemsFilterOrder", testItemsFilterOrder},

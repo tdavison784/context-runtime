@@ -89,3 +89,84 @@ func testLosslessTextAcrossRestart(t *testing.T, open Opener) {
 		return nil
 	})
 }
+
+// Distinct IDs that a lossy encoding would merge: "a\xffb" and "a\xfeb"
+// both become "a�b", the third ID. A string list that references one
+// of them (grant targets, coverage, evidence) must never come back naming
+// another.
+var confusableIDs = []string{"a\xfeb", "a\xffb", "a�b"}
+
+func testByteExactStringLists(t *testing.T, s store.Store) {
+	var wantItem domain.ContextItem
+	var wantRel domain.Relationship
+	var wantEvent domain.EventRecord
+	var wantGrant domain.MutationGrant
+	var wantTransition domain.ObligationTransition
+	var wantObligation domain.ObligationVersion
+	update(t, s, sessA, func(tx store.Tx) error {
+		for _, id := range confusableIDs {
+			noErr(t, tx.InsertItem(NewItem(sessA, id, tx.NextSeq(), id)))
+		}
+		wantItem = NewItem(sessA, "tagged", tx.NextSeq(), "x")
+		wantItem.Tags = []string{"t\xff", "t�"}
+		noErr(t, tx.InsertItem(wantItem))
+		wantRel = NewRelationship(sessA, "r", domain.RelDerivedFrom, "tagged", confusableIDs[1], tx.NextSeq())
+		wantRel.Coverage = &domain.Coverage{ConversationID: "c", FromSeq: 1, ToSeq: 3, ItemIDs: []string{confusableIDs[0], confusableIDs[1]}}
+		noErr(t, tx.InsertRelationship(wantRel))
+		wantEvent = NewEvent(sessA, "e", tx.NextSeq(), "p")
+		wantEvent.ItemIDs = []string{confusableIDs[1]}
+		stored, _, err := tx.InsertEvent(wantEvent)
+		noErr(t, err)
+		wantEvent = stored
+		wantGrant = NewGrant(sessA, "g", tx.NextSeq(), confusableIDs[1])
+		noErr(t, tx.InsertGrant(wantGrant))
+		noErr(t, tx.InsertObligationVersion(NewObligation(sessA, "o", 1, tx.NextSeq(), "tagged")))
+		wantTransition = NewTransition(sessA, "tr", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied)
+		wantTransition.EvidenceIDs = []string{confusableIDs[1]}
+		wantTransition.Fingerprints = []string{"fp\xff"}
+		wantObligation, err = tx.AppendObligationTransition(wantTransition, 1)
+		noErr(t, err)
+		return nil
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		it, err := tx.Item("tagged")
+		noErr(t, err)
+		assertBytes(t, "item tags", it.Tags, wantItem.Tags)
+		rels, err := tx.Relationships(store.RelationshipFilter{FromID: "tagged"})
+		noErr(t, err)
+		if len(rels) != 1 || rels[0].Coverage == nil {
+			t.Fatalf("Relationships = %+v", rels)
+		}
+		assertBytes(t, "coverage item IDs", rels[0].Coverage.ItemIDs, wantRel.Coverage.ItemIDs)
+		ev, err := tx.Event("e")
+		noErr(t, err)
+		assertBytes(t, "event item IDs", ev.ItemIDs, wantEvent.ItemIDs)
+		g, err := tx.Grant("g")
+		noErr(t, err)
+		assertBytes(t, "grant target IDs", g.TargetIDs, wantGrant.TargetIDs)
+		trs, err := tx.ObligationTransitions("o")
+		noErr(t, err)
+		if len(trs) != 1 {
+			t.Fatalf("ObligationTransitions = %d records, want 1", len(trs))
+		}
+		assertBytes(t, "transition evidence IDs", trs[0].EvidenceIDs, wantTransition.EvidenceIDs)
+		assertBytes(t, "transition fingerprints", trs[0].Fingerprints, wantTransition.Fingerprints)
+		o, err := tx.Obligation("o")
+		noErr(t, err)
+		assertBytes(t, "obligation evidence IDs", o.EvidenceIDs, wantObligation.EvidenceIDs)
+		return nil
+	})
+}
+
+// assertBytes fails unless got and want hold the same strings byte for byte.
+func assertBytes(t *testing.T, what string, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s = %q, want %q", what, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("%s[%d] = % x, want % x", what, i, got[i], want[i])
+		}
+	}
+}
