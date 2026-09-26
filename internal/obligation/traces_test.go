@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -181,5 +182,76 @@ func TestConcurrentINV16(t *testing.T) {
 	wg.Wait()
 	if satisfied == 0 {
 		t.Error("no interleaving produced a satisfaction; the property was not exercised")
+	}
+}
+
+// TestTraceT02Obligation is T02's repeat with a satisfied obligation attached
+// to the old pin: replacement retires the old version with its status and
+// proof intact; the new version starts UNRESOLVED with no inherited grant or
+// proof and is satisfied only through its own grant and explicit revalidation.
+func TestTraceT02Obligation(t *testing.T) {
+	f := newFixture(t)
+	var r repo1
+	r.set(t, f, hashOf("W1"), true)
+	// A SYSTEM task binding so replacements of a SYSTEM pin stay bound.
+	if _, err := f.s.bindWS(t, f.st, f.system, bindIntent("ws-sys", 1, domain.WorkspaceSourceContext{Kind: domain.WorkspaceTask, ID: "task"})); err != nil {
+		t.Fatal(err)
+	}
+	pin := func(id string) *domain.ObligationRef {
+		var ref *domain.ObligationRef
+		mustUpdate(t, f.st, func(tx store.Tx) error {
+			it := seedItemTx(tx, id, "t2", domain.AuthoritySystem, "All tests must pass.")
+			it.Namespace = domain.NamespaceDirective
+			if err := tx.InsertItem(it); err != nil {
+				return err
+			}
+			if _, err := graph.ReplaceDirective(tx, f.system, "task", "t2", it.ID, "evt-"+id); err != nil {
+				return err
+			}
+			var err error
+			ref, err = f.s.DeclarePinnedTx(tx, f.system, it.ID, "", tx.NextSeq())
+			return err
+		})
+		return ref
+	}
+	v1 := pin("P1")
+	ef := &evalFixture{fixture: f, target: testsTarget(nil), sysTests: *v1, r: r}
+	ef.matcherGrant(t, "g-v1", *v1, TestsPassV1, f.system)
+	ef.observeTests(t, ef.target, domain.OutcomePass, hashOf("W1"), nil)
+	old := f.status(t, *v1)
+	if old.Status != domain.ObligationSatisfied {
+		t.Fatalf("v1 = %+v", old)
+	}
+
+	v2 := pin("P2")
+	if v2 == nil || v2.ObligationID != v1.ObligationID || v2.Version != 2 {
+		t.Fatalf("replacement = %v", v2)
+	}
+	retired := f.status(t, *v1)
+	if retired.Current || retired.Status != domain.ObligationSatisfied || retired.CurrentProofID != old.CurrentProofID {
+		t.Errorf("retired v1 lost its audit state: %+v", retired)
+	}
+	cur := f.status(t, *v2)
+	if !cur.Current || cur.Status != domain.ObligationUnresolved || cur.CurrentProofID != "" {
+		t.Fatalf("v2 = %+v", cur)
+	}
+	// The v1 grant never carries over; nor does evidence alone.
+	ef.sysTests = *v2
+	if _, err := ef.reevaluate(t, f.harness, *v2, cur.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.status(t, *v2); got.Status != domain.ObligationUnresolved {
+		t.Fatalf("v2 satisfied under the v1 grant: %+v", got)
+	}
+	ef.matcherGrant(t, "g-v2", *v2, TestsPassV1, f.system)
+	if _, err := ef.reevaluate(t, f.harness, *v2, cur.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.status(t, *v2); got.Status != domain.ObligationSatisfied || got.CurrentProofID == old.CurrentProofID {
+		t.Errorf("revalidated v2 = %+v", got)
+	}
+	// Retired versions never transition again.
+	if _, err := f.s.transition(t, f.st, f.system, intent(*v1, retired.Revision, domain.ObligationWaived)); err == nil {
+		t.Error("retired version waived")
 	}
 }
