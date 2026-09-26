@@ -1,13 +1,15 @@
 package directive
 
 import (
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
-func parsedCore(data string) *coreParser { p := scanner(data, true); p.extract(nil); return p }
+func parsedCore(data string) *coreParser { p := scanner(data, true); p.extract(); return p }
 func TestItemExtraction(t *testing.T) {
 	cases := []struct {
 		name, input string
@@ -50,17 +52,102 @@ func TestItemExtraction(t *testing.T) {
 		})
 	}
 }
-func TestItemAttributesAndValidationHook(t *testing.T) {
-	p := scanner("## Pinned kind=constraint scope=TASK\n- [a] {kind=instruction scope=SESSION} text\n- [b] second", true)
-	p.extract(func(_ string, a rawAttribute) bool { return a.name != "scope" || a.value != "SESSION" })
-	if len(p.items) != 2 {
-		t.Fatal(p.items)
+func TestItemAttributePrecedence(t *testing.T) {
+	// M4: first valid occurrence per level wins; a valid item value overrides
+	// the section value; an invalid override leaves the inherited value intact.
+	r := Parse([]byte("## Pinned kind=instruction kind=constraint scope=TASK\n- [a] {kind=constraint scope=SESSION} text\n- [b] {kind=goal scope=TURN} second\n- [c] third"), Options{Authority: domain.AuthorityUser, DirectiveCapable: true})
+	if r.Err != nil || len(r.Items) != 3 {
+		t.Fatal(r)
 	}
-	for i, want := range []string{"instruction", "constraint"} {
-		attrs := p.items[i].attrs
-		if len(attrs) != 2 || attrs[0].value != want || attrs[1].value != "TASK" {
-			t.Fatal(attrs)
+	want := [][2]string{{"constraint", "TASK"}, {"instruction", "TURN"}, {"instruction", "TASK"}}
+	for i, w := range want {
+		attrs := map[string]string{}
+		for _, a := range r.Items[i].Attributes {
+			attrs[a.Name] = a.Value
 		}
+		if len(attrs) != 2 || attrs["kind"] != w[0] || attrs["scope"] != w[1] {
+			t.Fatalf("item %d: %+v", i, r.Items[i].Attributes)
+		}
+	}
+	var reasons []domain.DiagnosticReason
+	for _, d := range r.Diagnostics {
+		reasons = append(reasons, d.Reason)
+	}
+	if !reflect.DeepEqual(reasons, []domain.DiagnosticReason{domain.ReasonDuplicateAttribute, domain.ReasonScopeWidening, domain.ReasonInvalidAttribute}) {
+		t.Fatal(reasons)
+	}
+}
+func TestAttributeValidation(t *testing.T) {
+	cases := []struct {
+		section, attr string
+		authority     domain.Authority
+		reason        domain.DiagnosticReason
+	}{
+		{"Pinned", "kind=instruction", domain.AuthorityUser, ""},
+		{"Pinned", "kind=Instruction", domain.AuthorityUser, domain.ReasonInvalidAttribute},
+		{"Pinned", "Kind=instruction", domain.AuthorityUser, domain.ReasonUnknownAttribute},
+		{"Pinned", "kind=task_state", domain.AuthorityUser, domain.ReasonInvalidAttribute},
+		{"Working", "kind=task_state", domain.AuthorityUser, ""},
+		{"Working", "kind=conversation", domain.AuthorityUser, ""},
+		{"Remember", "kind=summary", domain.AuthorityUser, ""},
+		{"Ephemeral", "kind=tool_result", domain.AuthorityUser, ""},
+		{"Goal", "kind=goal", domain.AuthorityUser, domain.ReasonDisallowedAttribute},
+		{"References", "kind=reference", domain.AuthorityUser, domain.ReasonDisallowedAttribute},
+		{"Goal", "scope=TASK", domain.AuthorityUser, ""},
+		{"Goal", "scope=task", domain.AuthorityUser, domain.ReasonInvalidAttribute},
+		{"Goal", "scope=AGENT", domain.AuthorityUser, ""},
+		{"Goal", "scope=TURN", domain.AuthorityUser, ""},
+		{"Goal", "scope=SESSION", domain.AuthorityUser, domain.ReasonScopeWidening},
+		{"Goal", "scope=WORKFLOW", domain.AuthorityUser, domain.ReasonScopeWidening},
+		{"Goal", "scope=SESSION", domain.AuthorityHarness, ""},
+		{"Goal", "scope=WORKFLOW", domain.AuthoritySystem, ""},
+		{"Goal", "ttl=2", domain.AuthorityUser, domain.ReasonDisallowedAttribute},
+		{"Pinned", "ttl=2", domain.AuthorityUser, domain.ReasonDisallowedAttribute},
+		{"Working", "ttl=2", domain.AuthorityUser, ""},
+		{"References", "ttl=0002", domain.AuthorityUser, ""},
+		{"Ephemeral", "ttl=2147483647", domain.AuthorityUser, ""},
+		{"Remember", "ttl=0", domain.AuthorityUser, domain.ReasonInvalidAttribute},
+		{"Remember", "ttl=000", domain.AuthorityUser, domain.ReasonInvalidAttribute},
+		{"Remember", "ttl=-1", domain.AuthorityUser, domain.ReasonInvalidAttribute},
+		{"Remember", "ttl=1e3", domain.AuthorityUser, domain.ReasonInvalidAttribute},
+		{"Remember", "ttl=99999999999x", domain.AuthorityUser, domain.ReasonInvalidAttribute},
+		{"Pinned", "obligation=tests_pass", domain.AuthorityUser, ""},
+		{"Working", "obligation=tests_pass", domain.AuthorityUser, domain.ReasonDisallowedAttribute},
+		{"Pinned", "ttl=99999999999", domain.AuthorityUser, domain.ReasonDisallowedAttribute},
+	}
+	for _, tt := range cases {
+		for _, input := range []string{"## " + tt.section + " " + tt.attr + "\ntext", "## " + tt.section + "\n- {" + tt.attr + "} text"} {
+			r := Parse([]byte(input), Options{Authority: tt.authority, DirectiveCapable: true})
+			if r.Err != nil || len(r.Items) != 1 {
+				t.Fatalf("%q: %+v", input, r)
+			}
+			var got domain.DiagnosticReason
+			for _, d := range r.Diagnostics {
+				if d.Code == domain.ErrMalformedDirective {
+					got = d.Reason
+				}
+			}
+			if got != tt.reason || (tt.reason == "") != (len(r.Items[0].Attributes) == 1) {
+				t.Fatalf("%q: reason %q, attributes %+v", input, got, r.Items[0].Attributes)
+			}
+		}
+	}
+}
+func TestTTLRepresentationLimit(t *testing.T) {
+	for _, input := range []string{"## Working ttl=2147483648\n- a", "## Remember\n- {ttl=000099999999999999999999} a", "## Ephemeral ttl=2 ttl=2147483648\n- a"} {
+		r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem})
+		if !errors.Is(r.Err, ErrRepresentationLimit) || !errors.Is(r.Err, domain.ErrInvalidRecord) || len(r.Items) != 0 {
+			t.Fatalf("%q: %+v", input, r)
+		}
+	}
+	// Suppressed or non-capable text never reaches validation.
+	for _, input := range []string{"```\n## Working ttl=2147483648\n- a", "## Goal\n### Working ttl=2147483648"} {
+		if r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem}); r.Err != nil {
+			t.Fatalf("%q: %v", input, r.Err)
+		}
+	}
+	if r := Parse([]byte("## Working ttl=2147483648\n- a"), Options{Authority: domain.AuthorityTool}); r.Err != nil {
+		t.Fatal(r.Err)
 	}
 }
 func TestMalformedItemsAndLifecycle(t *testing.T) {
@@ -84,42 +171,21 @@ func TestDerivedIDsAndItemLimit(t *testing.T) {
 	}
 	p = scanner("## Working\n- one\n- two\n- three", true)
 	p.limits.maxItems = 2
-	p.extract(nil)
+	p.extract()
 	if len(p.items) != 2 || p.diagnostics[len(p.diagnostics)-1].reason != "item limit reached" {
 		t.Fatal(p)
 	}
 }
 
 func TestHeadingAttributesValidatedOnce(t *testing.T) {
-	p := scanner("## Working scope=SESSION\n- one\n- two\n- three", true)
-	calls := 0
-	p.extract(func(_ string, _ rawAttribute) bool { calls++; return false })
-	if calls != 1 || len(p.items) != 3 {
-		t.Fatalf("validation calls=%d items=%d", calls, len(p.items))
-	}
-}
-
-func TestSectionMalformedFlag(t *testing.T) {
-	cases := []struct {
-		input     string
-		malformed []bool
-	}{
-		{"## Working\n- a\n- b\n## Remember\nx", []bool{false, false}},
-		{"## Working\n- a\nprose\n## Remember\nx", []bool{true, false}},
-		{"## Working\n- a\n- [bad/id] b", []bool{true}},
-		{"## Working\n\n## Goal [bad/id]\nx", []bool{true, true}},
-		{"## Working\n- a\n- {ttl=+1} b", []bool{true}},
-		{"## Unpin\n- [a]\n- [b] text", []bool{true}},
-	}
-	for _, tt := range cases {
-		r := Parse([]byte(tt.input), Options{Authority: domain.AuthoritySystem})
-		if r.Err != nil || len(r.Sections) != len(tt.malformed) {
-			t.Fatalf("%q: %+v", tt.input, r)
+	r := Parse([]byte("## Working scope=SESSION\n- one\n- two\n- three"), Options{Authority: domain.AuthorityUser, DirectiveCapable: true})
+	diagnosed := 0
+	for _, d := range r.Diagnostics {
+		if d.Reason == domain.ReasonScopeWidening {
+			diagnosed++
 		}
-		for i, want := range tt.malformed {
-			if s := r.Sections[i]; s.Malformed != want || s.Malformed && s.DirectiveID != "" && len(s.ItemIndexes) == 0 {
-				t.Fatalf("%q section %d: %+v", tt.input, i, s)
-			}
-		}
+	}
+	if diagnosed != 1 || len(r.Items) != 3 || len(r.Items[0].Attributes) != 0 {
+		t.Fatalf("diagnostics=%+v items=%d", r.Diagnostics, len(r.Items))
 	}
 }

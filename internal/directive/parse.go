@@ -1,6 +1,7 @@
 package directive
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,7 +24,7 @@ func Parse(input []byte, opts Options) Result {
 		return parseFailure("span exceeds byte limit")
 	}
 	capable := opts.Authority == domain.AuthoritySystem || opts.Authority == domain.AuthorityHarness || opts.Authority == domain.AuthorityUser && opts.DirectiveCapable
-	p := &coreParser{data: input, limits: scanLimits{limits.MaxSpanBytes, limits.MaxItemsPerSpan, min(limits.MaxDiagnosticsPerSpan, 256), limits.MaxSpanBytes}}
+	p := &coreParser{authority: opts.Authority, data: input, limits: scanLimits{limits.MaxSpanBytes, limits.MaxItemsPerSpan, min(limits.MaxDiagnosticsPerSpan, 256), limits.MaxSpanBytes}}
 	p.scan(capable)
 	for _, s := range p.sections {
 		if s.heading.level > limits.MaxHeadingLevel {
@@ -33,9 +34,12 @@ func Parse(input []byte, opts Options) Result {
 			return parseFailure("directive ID exceeds byte limit")
 		}
 	}
-	p.extract(nil)
+	p.extract()
 	if p.itemLimitHit {
 		return parseFailure("span exceeds item limit")
+	}
+	if p.ttlOverflow {
+		return Result{Err: fmt.Errorf("%w: %w: directive parser: ttl exceeds %d turns", domain.ErrInvalidRecord, ErrRepresentationLimit, MaxTTLTurns)}
 	}
 	var result Result
 	for _, s := range p.sections {
@@ -80,6 +84,12 @@ func Parse(input []byte, opts Options) Result {
 	}
 	return result
 }
+
+// ErrRepresentationLimit marks a syntactically valid value that cannot be
+// represented (R1). It always accompanies domain.ErrInvalidRecord and rejects
+// the event; it is distinct from a malformed attribute, which is ignored.
+var ErrRepresentationLimit = errors.New("representation limit exceeded")
+
 func parseFailure(reason string) Result {
 	return Result{Err: fmt.Errorf("%w: directive parser: %s", domain.ErrInvalidRecord, reason)}
 }
@@ -123,6 +133,14 @@ func diagnosticReason(reason string) domain.DiagnosticReason {
 		return domain.ReasonHeadingIDOnList
 	case "unknown attribute":
 		return domain.ReasonUnknownAttribute
+	case "disallowed attribute":
+		return domain.ReasonDisallowedAttribute
+	case "invalid attribute":
+		return domain.ReasonInvalidAttribute
+	case "scope widening":
+		return domain.ReasonScopeWidening
+	case "duplicate attribute":
+		return domain.ReasonDuplicateAttribute
 	case "derived directive ID":
 		return domain.ReasonDerivedID
 	case "heading exceeds length limit", "item limit reached", "diagnostic limit reached":

@@ -67,7 +67,7 @@ func FuzzParse(f *testing.F) {
 		// Deterministic work accounting avoids scheduler-sensitive timing assertions
 		// during parallel fuzzing; benchmark scaling separately measures wall time.
 		p := scanner(string(input), true)
-		p.extract(nil)
+		p.extract()
 		if p.work > 3*len(input)+1 {
 			t.Fatalf("nonlinear work: %d for %d bytes", p.work, len(input))
 		}

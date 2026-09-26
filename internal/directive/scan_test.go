@@ -3,10 +3,12 @@ package directive
 import (
 	"strings"
 	"testing"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
 func scanner(data string, capable bool) *coreParser {
-	p := &coreParser{data: []byte(data), limits: scanLimits{8 << 20, 4096, 256, 4096}}
+	p := &coreParser{authority: domain.AuthoritySystem, data: []byte(data), limits: scanLimits{8 << 20, 4096, 256, 4096}}
 	p.scan(capable)
 	return p
 }

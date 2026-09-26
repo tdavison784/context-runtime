@@ -1,7 +1,11 @@
 // Package directive implements the source-gated directive grammar (FR-DIR-006).
 package directive
 
-import "bytes"
+import (
+	"bytes"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+)
 
 type byteRange struct{ start, end int }
 type sourceLine struct {
@@ -41,7 +45,9 @@ type rawItem struct {
 }
 
 type coreParser struct {
+	authority    domain.Authority
 	itemLimitHit bool
+	ttlOverflow  bool
 	data         []byte
 	limits       scanLimits
 	diagnostics  []parseDiagnostic

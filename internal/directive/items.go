@@ -7,11 +7,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
-// Attribute validation is injected by the API adapter. Keeping it a hook lets
-// this package remain independent of the policy package (section 6).
-type attributeValidator func(section string, attribute rawAttribute) bool
-
-func (p *coreParser) extract(validate attributeValidator) {
+func (p *coreParser) extract() {
 	for si := range p.sections {
 		s := &p.sections[si]
 		h := s.heading
@@ -19,8 +15,6 @@ func (p *coreParser) extract(validate attributeValidator) {
 			s.malformed = true
 			continue
 		}
-		s.heading.attrs = p.validated(h.section, h.attrs, validate)
-		h.attrs = s.heading.attrs
 		lines := s.body
 		for len(lines) > 0 && blank(p.lineBytes(lines[0])) {
 			lines = lines[1:]
@@ -40,7 +34,7 @@ func (p *coreParser) extract(validate attributeValidator) {
 				for j < len(lines) && continuation(p.lineBytes(lines[j])) {
 					j++
 				}
-				p.listItem(si, lines[i:j], validate)
+				p.listItem(si, lines[i:j])
 				k := j
 				for k < len(lines) && bulletPrefix(p.lineBytes(lines[k])) == 0 {
 					k++
@@ -98,16 +92,7 @@ func bulletPrefix(b []byte) int {
 	}
 	return 0
 }
-func (p *coreParser) validated(section string, attrs []rawAttribute, validate attributeValidator) []rawAttribute {
-	var out []rawAttribute
-	for _, a := range attrs {
-		if validate == nil || validate(section, a) {
-			out = append(out, a)
-		}
-	}
-	return out
-}
-func (p *coreParser) listItem(si int, lines []sourceLine, validate attributeValidator) {
+func (p *coreParser) listItem(si int, lines []sourceLine) {
 	h := p.sections[si].heading
 	first := lines[0]
 	b := p.lineBytes(first)
@@ -146,17 +131,12 @@ func (p *coreParser) listItem(si int, lines []sourceLine, validate attributeVali
 			p.reject(si, "invalid attribute syntax", item.byteRange)
 			return
 		}
-		own := p.validated(h.section, lexed, validate)
-		for _, a := range own {
-			found := false
-			for i := range attrs {
-				if attrs[i].name == a.name {
-					attrs[i] = a
-					found = true
-					break
-				}
-			}
-			if !found {
+		// A valid item-level value overrides the inherited section value; an
+		// invalid override was dropped by lexAttributes, keeping the inherited one.
+		for _, a := range lexed {
+			if i := attributeIndex(attrs, a.name); i >= 0 {
+				attrs[i] = a
+			} else {
 				attrs = append(attrs, a)
 			}
 		}
