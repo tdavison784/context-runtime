@@ -2,7 +2,7 @@
 
 Status: proposed
 
-Version: 0.7
+Version: 0.8
 
 Date: 2026-09-25
 
@@ -122,7 +122,7 @@ Requirement IDs are stable and are part of the test contract. New requirements t
 Directives are parsed by the runtime. They are lifecycle instructions to the runtime, not text suggestions to the model.
 
 - FR-DIR-001: V1 recognizes the content sections Goal, Pinned, Working, Remember, References, and Ephemeral, and the lifecycle commands Resolve and Unpin.
-- FR-DIR-002: Directive IDs use [id] syntax and are stored independently from display text. Each (session, task, access boundary, directive ID) has one current version; versions in different boundaries are independent directives, so a boundary a principal cannot access never blocks or reveals itself through a shared ID. An item without an ID receives a derived ID (the lowercased keyword, a hyphen, and the 64 lowercase hex digits of its content hash), reported in diagnostics and inspection. Reusing an ID creates a new item and atomically SUPERSEDES the current version, subject to FR-AUTH-001 and FR-REL-006. Only the current version may impose requirements. Scope or access-boundary changes require an explicit authorized replacement policy; they cannot be smuggled through ID reuse.
+- FR-DIR-002: Directive IDs use [id] syntax and are stored independently from display text. Each (session, task, access boundary, directive ID) has one current version. A version in a boundary the writing principal cannot access neither blocks nor reveals itself through a shared ID; but a write that reuses an ID while the writer can access a current version of it in a different boundary is rejected, because boundary changes cannot be made through ID reuse (below). An item without an ID receives a derived ID (the lowercased keyword, a hyphen, and the 64 lowercase hex digits of its content hash), reported in diagnostics and inspection. Reusing an ID creates a new item and atomically SUPERSEDES the current version, subject to FR-AUTH-001 and FR-REL-006. Only the current version may impose requirements. Scope or access-boundary changes require an explicit authorized replacement policy; they cannot be smuggled through ID reuse.
 - FR-DIR-003: Defaults are:
   - Goal: goal kind, durable generation, task scope, GoalStatus=OPEN, PROTECTED retention and mandatory while current and eligible.
   - Pinned: constraint kind (instruction via kind=), pinned generation, task scope, PROTECTED retention, mandatory.
@@ -132,7 +132,7 @@ Directives are parsed by the runtime. They are lifecycle instructions to the run
   - Ephemeral: evidence kind (tool_result via kind=), ephemeral generation, TURN scope, LOW retention.
   New content is RESIDENT by default; residency changes do not change semantic status.
 - FR-DIR-004: Parser output includes source spans, the directive section, directive ID, source authority, parsed scope, parsed TTL, and diagnostics. Malformed directives do not discard unrelated content.
-- FR-DIR-005: Resolve sets the current goal's GoalStatus to RESOLVED, stops its mandatory status, and drops its retention to HIGH without changing residency. Unpin moves the current pinned version to DURABLE with HIGH retention; it does not waive an attached obligation. Both follow FR-AUTH-001, are audited, and produce a diagnostic for an unknown ID. Reopening a resolved goal requires an authorized replacement with a new OPEN version. Other lifecycle words produce ErrUnsupportedDirective diagnostics rather than ambiguous mutations.
+- FR-DIR-005: Resolve sets the current goal's GoalStatus to RESOLVED, stops its mandatory status, and drops its retention to HIGH without changing residency. Unpin moves the current pinned version to DURABLE with HIGH retention; it does not waive an attached obligation. Both follow FR-AUTH-001, are audited, and produce a diagnostic for an unknown ID. A target is an item ID, or a directive ID that resolves to exactly one current version the principal can access; a directive ID with several accessible current versions (possible when they were written by principals who could not see each other) produces an ErrAmbiguousDirective diagnostic and mutates nothing, and the principal must name the item ID. Reopening a resolved goal requires an authorized replacement with a new OPEN version. Other lifecycle words produce ErrUnsupportedDirective diagnostics rather than ambiguous mutations.
 - FR-DIR-006: Directives follow this grammar (ABNF):
 
       section    = marker SP keyword [SP "[" id "]"] *(SP attr) EOL body
@@ -510,7 +510,7 @@ The first public API is Go methods in package contextruntime; a wire protocol is
 
 The embedding process constructs principals and authenticates ownership claims. Plan and Assemble are previews. The trusted harness/dispatcher drives PrepareCall, MarkCallSent, RecordCallOutcome, and RecoverCall under a conversation-specific service grant; these methods are not agent tools. The ledger freezes the inference principal separately from that service actor. Resource changes arrive as authenticated Ingest events. Resolve/Unpin arrive as directives and CompleteTask follows FR-AUTH-003. Tools returns the semantic state and retrieval tool definitions (FR-TOOL-001) with a handler; the harness routes the model's tool calls to it with AGENT authority and the principal it supplies, never model-authored session/agent IDs.
 
-Machine-checkable errors include ErrMandatoryContextExceedsBudget, ErrUnboundedTokenEstimate, ErrInvalidBudget, ErrNotFound, ErrInvalidAuthorityPromotion, ErrMissingProvenance, ErrDanglingRelationship, ErrSupersessionCycle, ErrInvalidTransition, ErrUnfinishedObligations, ErrIncompleteToolRound, ErrInvalidProviderRequest, ErrUnsupportedCapability, ErrReasoningContinuityRequired, ErrCompactionNoProgress, ErrEventIDConflict, ErrCallInFlight, ErrCallOutcomeConflict, ErrOutcomeUnknown, and ErrVersionConflict. ErrUnsupportedDirective and ErrMalformedDirective are diagnostic codes. Unauthorized lookups return ErrNotFound so callers cannot probe for existence; security events retain the internal denial reason. Mutation errors must not disclose inaccessible target contents.
+Machine-checkable errors include ErrMandatoryContextExceedsBudget, ErrUnboundedTokenEstimate, ErrInvalidBudget, ErrNotFound, ErrInvalidAuthorityPromotion, ErrMissingProvenance, ErrDanglingRelationship, ErrSupersessionCycle, ErrInvalidTransition, ErrUnfinishedObligations, ErrIncompleteToolRound, ErrInvalidProviderRequest, ErrUnsupportedCapability, ErrReasoningContinuityRequired, ErrCompactionNoProgress, ErrEventIDConflict, ErrCallInFlight, ErrCallOutcomeConflict, ErrOutcomeUnknown, and ErrVersionConflict. ErrUnsupportedDirective, ErrMalformedDirective, and ErrAmbiguousDirective are diagnostic codes. Unauthorized lookups return ErrNotFound so callers cannot probe for existence; security events retain the internal denial reason. Mutation errors must not disclose inaccessible target contents.
 
 ## 9. Security specification
 
