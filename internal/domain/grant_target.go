@@ -83,3 +83,39 @@ const (
 )
 
 func (a Action) Delegable() bool { return a.Valid() && a != ActionCompleteTask }
+
+func (t MutationTarget) AuthorizationID() string {
+	if t.Ref != (GrantTarget{}) {
+		return t.Ref.AuthorizationKey
+	}
+	return t.ID
+}
+
+func grantNamesTarget(g MutationGrant, t MutationTarget) bool {
+	if t.Ref != (GrantTarget{}) {
+		if t.Ref.Validate() != nil {
+			return false
+		}
+		for _, target := range g.Targets {
+			if target == t.Ref {
+				return true
+			}
+		}
+		// Legacy occurrence grants retain meaning; stable obligation IDs do not.
+		if t.Ref.Kind != GrantTargetItem {
+			return false
+		}
+		for _, id := range g.TargetIDs {
+			if id == t.Ref.ItemID {
+				return true
+			}
+		}
+		return false
+	}
+	for _, id := range g.TargetIDs {
+		if id == t.ID {
+			return true
+		}
+	}
+	return false
+}

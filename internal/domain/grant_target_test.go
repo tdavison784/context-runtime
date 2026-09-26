@@ -25,3 +25,30 @@ func TestGrantTargetCanonicalIsolation(t *testing.T) {
 		t.Fatal("accepted latest alias")
 	}
 }
+
+func TestTypedGrantNeverFollowsLatestVersion(t *testing.T) {
+	p := Principal{SessionID: "s", Authority: AuthoritySystem}
+	actor := Principal{SessionID: "s", Authority: AuthorityHarness}
+	ref := ObligationGrantTarget("s", "o", 1)
+	g := MutationGrant{ID: "g", SessionID: "s", Action: ActionAssertObligation, Targets: []GrantTarget{ref}, Issuer: p, Grantee: &actor, IssuedSeq: 1}
+	target := MutationTarget{Ref: ref, Authority: AuthoritySystem, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}
+	r := MutationRequest{Actor: actor, Action: g.Action, Targets: []MutationTarget{target}, Grants: []MutationGrant{g}, Seq: 1}
+	if _, err := AuthorizeMutation(r); err != nil {
+		t.Fatal(err)
+	}
+	r.Targets[0].Ref = ObligationGrantTarget("s", "o", 2)
+	if _, err := AuthorizeMutation(r); err == nil {
+		t.Fatal("v1 grant authorized v2")
+	}
+	r.Targets[0] = target
+	r.Grants[0].Targets = nil
+	r.Grants[0].TargetIDs = []string{"o"}
+	if _, err := AuthorizeMutation(r); err == nil {
+		t.Fatal("legacy grant authorized typed obligation")
+	}
+	copy := g.Clone()
+	copy.Targets[0].Version = 3
+	if g.Targets[0].Version != 1 {
+		t.Fatal("clone aliases targets")
+	}
+}
