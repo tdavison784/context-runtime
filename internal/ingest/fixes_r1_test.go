@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 // TestRetryAfterLimitsChange_F3 is SPEC-1.7/DUR-1.2 (F3): an exact retry of
@@ -55,5 +56,54 @@ func TestRelationshipLimitOnReplaceAndDuplicate_DUR16(t *testing.T) {
 				t.Errorf("%s: err = %v, want the relationship limit", name, err)
 			}
 		}
+	})
+}
+
+// TestRecordsAtNarrowerBoundary_F6 is SEC-1.3 (F6): diagnostic and
+// lifecycle-command records carry the narrower of the span boundary and the
+// boundary of what they describe, so a reader who cannot see the content or
+// target cannot read its derived ID, range, or resolution either.
+func TestRecordsAtNarrowerBoundary_F6(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		f.mustIngest(user, userEvent("u0", "hi", false))
+
+		// A USER span may legally carry SESSION access; its directive is
+		// narrowed to the task, and so must its derived-ID notice be.
+		wide := textSpan(domain.AuthorityUser, true, "## Pinned\n- acquisition target is Contoso at $40/share\n")
+		wide.Access = domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: sess}
+		f.mustIngest(user, domain.Event{EventID: "s1", Kind: domain.EventUser, Spans: []domain.Span{wide}})
+		other := domain.Principal{SessionID: sess, WorkflowID: "wf2", TaskID: "T2", AgentID: "Z", Authority: domain.AuthorityUser}
+		f.view(func(tx store.ReadTx) error {
+			ds, err := tx.Diagnostics(store.DiagnosticFilter{Viewer: other})
+			if err != nil {
+				return err
+			}
+			for _, d := range ds {
+				if d.DirectiveID != "" {
+					t.Errorf("another task reads derived ID %s", d.DirectiveID)
+				}
+			}
+			return nil
+		})
+
+		// Agent A's private pin resolved by an Unpin in a task-wide span:
+		// agent B must not read the resolution.
+		f.mustIngest(user, userEvent("a1", "## Pinned [plan] scope=AGENT\nPrivate plan.\n", true))
+		f.mustIngest(user, userEvent("a2", "## Unpin [plan]\n", true))
+		agentB := user
+		agentB.AgentID = "B"
+		f.view(func(tx store.ReadTx) error {
+			cs, err := tx.LifecycleCommands(store.CommandFilter{Viewer: agentB})
+			if err != nil {
+				return err
+			}
+			for _, c := range cs {
+				if c.ResolvedItemID != "" {
+					t.Errorf("agent B reads resolution %s of an agent-A-private target", c.ResolvedItemID)
+				}
+			}
+			return nil
+		})
 	})
 }
