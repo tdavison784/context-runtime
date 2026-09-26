@@ -53,6 +53,7 @@ func (r *run) declareReference(c unitCtx, ref domain.ContextItem) error {
 				return err
 			}
 			if stop {
+				r.truncatedLinks(c.si, c.pi, ref.SourceRanges[0].Range, ref.Access)
 				more = false
 				break
 			}
@@ -143,8 +144,12 @@ func (r *run) linkPendingReferences(si int, actor domain.Principal, target domai
 				return err
 			}
 			stop, err := r.linkReference(actor, it, target)
-			if err != nil || stop {
+			if err != nil {
 				return err
+			}
+			if stop {
+				r.truncatedLinks(si, 0, domain.ByteRange{}, target.Access)
+				return nil
 			}
 		}
 		if !more {
@@ -158,7 +163,7 @@ func (r *run) linkPendingReferences(si int, actor domain.Principal, target domai
 // the reference's boundary is within the target's; otherwise it writes
 // nothing and reports nothing.
 func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextItem) (stop bool, err error) {
-	if r.rels >= r.limits.MaxRelationships {
+	if r.refLinks >= r.g.maxReferenceLinks() {
 		return true, nil
 	}
 	if !ref.Access.Permits(actor) || !target.Access.Permits(actor) || !ref.Access.Within(target.Access) {
@@ -169,7 +174,15 @@ func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextIt
 		return false, nil
 	}
 	if err == nil {
-		r.rels++
+		r.refLinks++
 	}
 	return false, err
+}
+
+// truncatedLinks records that an event stopped adding optional REFERENCES
+// edges at its budget (ruling 1), on the span and range where it stopped,
+// readable at access.
+func (r *run) truncatedLinks(si, pi int, rng domain.ByteRange, access domain.AccessBoundary) {
+	r.diags.add(domain.Diagnostic{SpanIndex: si, PartIndex: pi, Code: domain.ReferenceLinksTruncated,
+		Reason: domain.ReasonReferenceLinksTruncated, Range: rng}, access)
 }

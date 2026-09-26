@@ -26,10 +26,11 @@ type run struct {
 	hasTask    bool
 	openedTurn uint64
 
-	items   []domain.ContextItem
-	rels    int
-	refs    int         // unresolved references declared so far (ordinals)
-	derived map[int]int // derived items per span (MaxItemsPerSpan across parts)
+	items    []domain.ContextItem
+	rels     int
+	refs     int         // unresolved references declared so far (ordinals)
+	refLinks int         // optional REFERENCES edges written (ruling 1)
+	derived  map[int]int // derived items per span (MaxItemsPerSpan across parts)
 
 	// Per parse unit: ingestion diagnostics are reported after the
 	// parser's, and a parser notice about an item survives only if that

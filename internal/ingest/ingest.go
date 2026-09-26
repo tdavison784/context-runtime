@@ -38,6 +38,23 @@ type Ingester struct {
 	// bound is unreachable in routine use; exceeding it still rejects the
 	// event (store.ErrLimitExceeded) rather than deciding on a partial set.
 	LookupLimit int
+	// MaxReferenceLinks is the event's separate budget for optional
+	// REFERENCES edges (ruling 1); zero means DefaultMaxReferenceLinks.
+	// Reaching it stops linking with a reference_links_truncated diagnostic;
+	// reference links never consume MaxRelationships, so they can never
+	// make an essential edge reject the event. It is trusted ingester
+	// configuration, not yet part of the receipt's recorded Limits.
+	MaxReferenceLinks int
+}
+
+// DefaultMaxReferenceLinks is the default per-event reference-link budget.
+const DefaultMaxReferenceLinks = 256
+
+func (g Ingester) maxReferenceLinks() int {
+	if g.MaxReferenceLinks > 0 {
+		return g.MaxReferenceLinks
+	}
+	return DefaultMaxReferenceLinks
 }
 
 // DefaultLookupLimit is the default bound on one indexed lookup.

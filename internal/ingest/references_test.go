@@ -160,7 +160,11 @@ func TestReferenceLinkBudget_Ruling1(t *testing.T) {
 		user := principal(domain.AuthorityUser)
 		f.mustIngest(user, userEvent("u0", "hi", false))
 		for i := range 4 {
-			f.mustIngest(user, sourceEvent(fmt.Sprintf("s%d", i), "a.md", taskAccess()))
+			// Distinct content: identical re-reads would be duplicates of
+			// the first read, not separate live sources.
+			e := sourceEvent(fmt.Sprintf("s%d", i), "a.md", taskAccess())
+			e.Spans[0].Parts[0].Text = fmt.Sprintf("a.md revision %d", i)
+			f.mustIngest(user, e)
 		}
 
 		f.in.MaxReferenceLinks = 2
