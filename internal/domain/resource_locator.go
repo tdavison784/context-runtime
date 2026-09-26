@@ -66,6 +66,7 @@ func (r WorkspaceBindingRef) Validate() error {
 }
 
 type WorkspaceBinding struct {
+	Context WorkspaceSourceContext
 	SemanticMeta
 	Version                                           uint64
 	ResourceID, SourceItemID, TaskID, ConversationID  string
@@ -75,6 +76,12 @@ type WorkspaceBinding struct {
 }
 
 func (b WorkspaceBinding) Validate() error {
+	if err := b.Context.Validate(); err != nil {
+		return err
+	}
+	if !b.Context.Matches(b.SourceItemID, b.TaskID, b.ConversationID) {
+		return invalid("workspace binding: context fields disagree")
+	}
 	if err := b.SemanticMeta.Validate(); err != nil {
 		return err
 	}

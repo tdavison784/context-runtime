@@ -47,6 +47,7 @@ func (i ReportResourceChangeIntent) Validate() error {
 }
 
 type WorkspaceBindingIntent struct {
+	Context                                                                WorkspaceSourceContext
 	RequestID, BindingID, ResourceID, SourceItemID, TaskID, ConversationID string
 	Version                                                                uint64
 	BaseDir, EnvironmentSpec, SuiteSpec, CoverageSpec                      string
@@ -54,6 +55,12 @@ type WorkspaceBindingIntent struct {
 }
 
 func (i WorkspaceBindingIntent) Validate() error {
+	if err := i.Context.Validate(); err != nil {
+		return err
+	}
+	if !i.Context.Matches(i.SourceItemID, i.TaskID, i.ConversationID) {
+		return invalid("workspace binding: context fields disagree")
+	}
 	if !semanticID(i.RequestID) || !semanticID(i.BindingID) || !semanticID(i.ResourceID) || i.Version == 0 || i.SourceItemID == "" && i.TaskID == "" && i.ConversationID == "" || !semanticID(i.EnvironmentSpec) {
 		return invalid("workspace intent: context and exact binding required")
 	}

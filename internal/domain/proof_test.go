@@ -3,7 +3,7 @@ package domain
 import "testing"
 
 func TestProofRequiresBackedDependencyIdentity(t *testing.T) {
-	p := ApplicabilityProof{SemanticMeta: semanticMeta("p"), Target: ObligationRef{SessionID: "s", ObligationID: "o", Version: 1}, TargetSpecHash: HashBytes(nil), TransitionID: "tr", EvidenceCoverageID: "coverage", Matcher: &MatcherRef{Name: "tests_pass", Version: "1"}, RuleVersion: "rule", ObservationID: "obs", DependencyIDs: []string{"dep"}, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}
+	p := ApplicabilityProof{ResourceID: "r", Fingerprint: HashBytes(nil), ResourceRevision: 1, EvidenceIDs: []string{"evidence"}, SemanticMeta: semanticMeta("p"), Target: ObligationRef{SessionID: "s", ObligationID: "o", Version: 1}, TargetSpecHash: HashBytes(nil), TransitionID: "tr", EvidenceCoverageID: "coverage", Matcher: &MatcherRef{Name: "tests_pass", Version: "1"}, RuleVersion: "rule", ObservationID: "obs", DependencyIDs: []string{"dep"}, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,9 @@ const (
 )
 
 type ApplicabilityProof struct {
+	EvidenceIDs                              []string
+	ResourceID, Fingerprint, PathContentHash string
+	ResourceRevision                         uint64
 	SemanticMeta
 	Target                                           ObligationRef
 	TargetSpecHash, TransitionID, EvidenceCoverageID string
@@ -22,6 +25,7 @@ type ApplicabilityProof struct {
 
 func (p ApplicabilityProof) Clone() ApplicabilityProof {
 	p.DependencyIDs = slices.Clone(p.DependencyIDs)
+	p.EvidenceIDs = slices.Clone(p.EvidenceIDs)
 	if p.Matcher != nil {
 		v := *p.Matcher
 		p.Matcher = &v
@@ -29,6 +33,17 @@ func (p ApplicabilityProof) Clone() ApplicabilityProof {
 	return p
 }
 func (p ApplicabilityProof) Validate() error {
+	if !semanticID(p.ResourceID) || !sortedUnique(p.EvidenceIDs) || p.Fingerprint == "" && p.PathContentHash == "" {
+		return invalid("proof: resource applicability required")
+	}
+	for _, h := range []string{p.Fingerprint, p.PathContentHash} {
+		if h != "" && !ValidHash(h) {
+			return invalid("proof: malformed applicability hash")
+		}
+	}
+	if p.Matcher != nil && len(p.EvidenceIDs) == 0 {
+		return invalid("proof: matcher evidence required")
+	}
 	if err := p.SemanticMeta.Validate(); err != nil {
 		return err
 	}

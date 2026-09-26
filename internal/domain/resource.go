@@ -1,5 +1,7 @@
 package domain
 
+import "slices"
+
 // Resource reporting authority is independent of task ownership and lifecycle.
 type ResourceBinding struct {
 	SemanticMeta
@@ -71,7 +73,7 @@ type ResourceUpdate struct {
 }
 
 func (u ResourceUpdate) Clone() ResourceUpdate {
-	u.ChangedPaths = append([]string(nil), u.ChangedPaths...)
+	u.ChangedPaths = slices.Clone(u.ChangedPaths)
 	return u
 }
 func (u ResourceUpdate) Validate() error {

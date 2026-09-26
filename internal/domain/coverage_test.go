@@ -3,7 +3,7 @@ package domain
 import "testing"
 
 func TestCoverageIdentityAndClone(t *testing.T) {
-	m := CoverageMember{SessionID: "s", CoverageID: "c", Source: &ItemContentRef{ItemID: "i", ContentHash: HashBytes(nil)}}
+	m := CoverageMember{SemanticMeta: semanticMeta("member"), CoverageID: "c", Source: &ItemContentRef{ItemID: "i", ContentHash: HashBytes(nil)}}
 	copy := m.Clone()
 	copy.Source.ItemID = "j"
 	if m.Source.ItemID != "i" {

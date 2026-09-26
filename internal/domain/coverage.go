@@ -32,7 +32,8 @@ func (r ItemContentRef) Validate() error {
 // CoverageMember is an indexed normalized row, not copied onto each edge.
 // Exactly one member form is set. Lease members always preserve source identity.
 type CoverageMember struct {
-	SessionID, CoverageID                 string
+	SemanticMeta
+	CoverageID                            string
 	Source                                *ItemContentRef
 	LeaseID, NestedCoverageID, ExchangeID string
 }
@@ -70,7 +71,13 @@ func (m CoverageMember) Key() (string, error) {
 	}
 	return e.String(m.LeaseID).String(m.NestedCoverageID).String(m.ExchangeID).Hash(), nil
 }
-func (m CoverageMember) Validate() error { _, err := m.Key(); return err }
+func (m CoverageMember) Validate() error {
+	if err := m.SemanticMeta.Validate(); err != nil {
+		return err
+	}
+	_, err := m.Key()
+	return err
+}
 
 type CoverageRecord struct {
 	SemanticMeta
@@ -106,6 +113,12 @@ func CoverageSignature(c CoverageRecord, members []CoverageMember) (string, erro
 	e.String(c.ConversationID).Uint(c.MembershipRevision).Uint(c.ClosedFrontier).Uint(c.MemberCount)
 	prior := ""
 	for _, m := range members {
+		if err := m.Validate(); err != nil {
+			return "", err
+		}
+		if m.Seq != c.Seq {
+			return "", invalid("coverage: member sequence mismatch")
+		}
 		key, err := m.Key()
 		if err != nil {
 			return "", err
