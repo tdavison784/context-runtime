@@ -10,10 +10,24 @@
 //
 // Stores enforce integrity rules that must hold regardless of caller:
 // structural validation, immutability of items/blobs/relationships/events,
-// dangling-relationship rejection, supersession acyclicity, the obligation
-// and call transition tables, and compare-and-swap on mutable records.
-// Authorization is the caller's job (internal/domain.AuthorizeMutation);
-// stores do not know who is asking.
+// blob availability for item parts, dangling-relationship rejection,
+// supersession acyclicity, the obligation and call transition tables, one
+// reserving call per conversation, audit records written atomically with the
+// changes they describe, and compare-and-swap on mutable records.
+//
+// Sequence rule: every sequence-valued field a write introduces (an inserted
+// record's Seq, a transition's Seq, a call's FinishedSeq, ...) must have been
+// allocated by NextSeq in the same transaction; otherwise the write fails
+// with domain.ErrInvalidRecord. This keeps commit order and audit order equal.
+//
+// Compare-and-swap rule: every Update*/Put* method takes the expected current
+// Version or Revision (0 to create). On success the store itself writes
+// expected+1, ignoring the Version/Revision value in the argument, and
+// returns the stored record; a mismatch fails with domain.ErrVersionConflict.
+//
+// Authorization is the caller's job (domain.AuthorizeMutation,
+// domain.AuthorizeGrantIssuance, domain.AuthorizeSupersession); stores do not
+// know who is asking.
 package store
 
 import (
@@ -25,9 +39,11 @@ import (
 // Store is a transactional, session-partitioned store.
 type Store interface {
 	// Update runs fn in a read-write transaction for one session. Writers to
-	// the same session are serialized; writers to different sessions may run
-	// concurrently. If fn returns an error, nothing it wrote is committed and
-	// Update returns that error unchanged (so errors.Is works).
+	// the same session are serialized. Writers to different sessions are
+	// independent logically but may be serialized by the implementation (the
+	// SQLite store has a single writer). If fn returns an error, nothing it
+	// wrote is committed and Update returns that error unchanged (so
+	// errors.Is works).
 	Update(ctx context.Context, sessionID string, fn func(Tx) error) error
 	// View runs fn against a consistent committed snapshot of one session.
 	View(ctx context.Context, sessionID string, fn func(ReadTx) error) error
@@ -125,13 +141,17 @@ type Tx interface {
 	InsertEvent(e domain.EventRecord) (stored domain.EventRecord, existed bool, err error)
 
 	// InsertItem stores a new immutable item. Its Version must be 1 and its
-	// Seq must have been allocated by this session. Reusing an ID fails with
-	// domain.ErrImmutable.
+	// Seq must be allocated in this transaction. Every image or document part
+	// must reference a blob already stored in this session whose length
+	// equals the part's BlobSize (domain.ErrIntegrity otherwise). Reusing an
+	// ID fails with domain.ErrImmutable.
 	InsertItem(it domain.ContextItem) error
-	// UpdateItem applies a lifecycle change if the stored Version equals
-	// expectedVersion, otherwise it fails with domain.ErrVersionConflict. It
-	// returns the updated item. Callers record the matching LifecycleEvent.
-	UpdateItem(id string, expectedVersion uint64, change domain.ItemChange) (domain.ContextItem, error)
+	// UpdateItem applies a lifecycle change and appends its audit event
+	// atomically. The stored Version must equal expectedVersion
+	// (domain.ErrVersionConflict otherwise); the event must target this item
+	// (TargetItem, TargetID == id) with a Seq allocated in this transaction.
+	// It returns the updated item.
+	UpdateItem(id string, expectedVersion uint64, change domain.ItemChange, event domain.LifecycleEvent) (domain.ContextItem, error)
 
 	// InsertRelationship stores an edge. Both endpoints must be items in
 	// this session (domain.ErrDanglingRelationship otherwise). A SUPERSEDES
@@ -140,7 +160,7 @@ type Tx interface {
 	InsertRelationship(r domain.Relationship) error
 
 	// SetCurrentDirective points (task, directive ID) at an item, which must
-	// exist in this session and carry that directive ID.
+	// exist in this session, belong to taskID, and carry that directive ID.
 	SetCurrentDirective(taskID, directiveID, itemID string) error
 
 	// InsertBlob stores an immutable blob after verifying its hash.
@@ -148,36 +168,50 @@ type Tx interface {
 	InsertBlob(b domain.Blob) error
 
 	// InsertObligationVersion stores a new obligation version. Its Version
-	// must be one more than the latest stored version (or 1) and Revision 1.
+	// must be one more than the latest stored version (or 1), its Revision 1,
+	// its Status UNRESOLVED, and its CreatedSeq allocated in this transaction.
 	InsertObligationVersion(o domain.ObligationVersion) error
-	// UpdateObligationVersion replaces a stored version's mutable fields
-	// (Status, Current, RetiredSeq, EvidenceIDs, MaterializationDisabled) if
-	// its Revision equals expectedRevision, then increments Revision.
+	// UpdateObligationVersion replaces a stored version's non-status mutable
+	// fields (Current, RetiredSeq, MaterializationDisabled) under
+	// compare-and-swap. Status and EvidenceIDs change only through
+	// AppendObligationTransition; a differing Status fails with
+	// domain.ErrInvalidTransition.
 	UpdateObligationVersion(o domain.ObligationVersion, expectedRevision uint64) (domain.ObligationVersion, error)
-	// AppendObligationTransition records a transition; its From must equal
-	// the version's current status.
-	AppendObligationTransition(t domain.ObligationTransition) error
+	// AppendObligationTransition records a transition and applies it to the
+	// version atomically: From must equal the version's current status, the
+	// version must be current, and the version's Status becomes To, its
+	// EvidenceIDs become the transition's evidence (for SATISFIED) or empty,
+	// and its Revision increments. It returns the updated version.
+	AppendObligationTransition(t domain.ObligationTransition) (domain.ObligationVersion, error)
 
+	// InsertGrant stores a grant. Callers must first check
+	// domain.AuthorizeGrantIssuance against the grant's targets.
 	InsertGrant(g domain.MutationGrant) error
 	// RevokeGrant sets RevokedSeq on a grant that is not already revoked.
 	RevokeGrant(id string, seq uint64) error
 
-	// PutTask creates a task (expectedVersion 0, Version 1) or replaces it
-	// if the stored Version equals expectedVersion; Version must then be
-	// expectedVersion+1.
-	PutTask(t domain.TaskState, expectedVersion uint64) error
+	// PutTask creates a task (expectedVersion 0) or replaces it under
+	// compare-and-swap on Version.
+	PutTask(t domain.TaskState, expectedVersion uint64) (domain.TaskState, error)
 
+	// AppendLifecycleEvent appends an audit event. TargetCall events are
+	// reserved for the call ledger (internal/invocation).
 	AppendLifecycleEvent(e domain.LifecycleEvent) error
 
-	// PutConversation creates (expectedRevision 0, Revision 1) or replaces a
+	// PutConversation creates (expectedRevision 0) or replaces a
 	// conversation under compare-and-swap on Revision.
-	PutConversation(c domain.Conversation, expectedRevision uint64) error
-	// InsertCall stores a new call record with Revision 1.
+	PutConversation(c domain.Conversation, expectedRevision uint64) (domain.Conversation, error)
+	// InsertCall stores a new call record (Revision 1). A call in a
+	// reserving state fails with domain.ErrCallInFlight if the conversation
+	// already has another reserving call (FR-CALL-005).
 	InsertCall(c domain.CallRecord) error
 	// UpdateCall replaces a call record under compare-and-swap on Revision.
 	// The state change must satisfy domain.ValidCallTransition (or leave the
-	// state unchanged), and immutable request fields cannot change.
-	UpdateCall(c domain.CallRecord, expectedRevision uint64) error
+	// state unchanged), frozen proposal fields cannot change, and the
+	// one-reserving-call rule of InsertCall holds.
+	UpdateCall(c domain.CallRecord, expectedRevision uint64) (domain.CallRecord, error)
 	// PutCallAttempt inserts or updates an attempt keyed by (call, attempt).
+	// Attempts are numbered densely from 1. Once an attempt has an
+	// OutcomeHash, its state and OutcomeHash are immutable.
 	PutCallAttempt(a domain.CallAttempt) error
 }
