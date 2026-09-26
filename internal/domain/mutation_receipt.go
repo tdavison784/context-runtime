@@ -15,13 +15,8 @@ const (
 	MutationMembership  MutationFamily = "MEMBERSHIP"
 )
 
-func (f MutationFamily) Valid() bool {
-	switch f {
-	case MutationLifecycle, MutationObligation, MutationGrantFamily, MutationResource, MutationTool, MutationRetrieval, MutationCollection, MutationMembership:
-		return true
-	}
-	return false
-}
+func (f MutationFamily) Valid() bool { return f.HashDomain() != "" }
+
 func MutationRequestHash(principal Principal, family MutationFamily, method string, args []byte) (string, error) {
 	if err := validateIngestPrincipal(principal); err != nil {
 		return "", err
@@ -29,7 +24,7 @@ func MutationRequestHash(principal Principal, family MutationFamily, method stri
 	if !family.Valid() || !semanticID(method) || len(args) == 0 {
 		return "", invalid("mutation identity: family, method, and canonical arguments required")
 	}
-	e := NewCanonicalEncoder("context-runtime/mutation-request/v3")
+	e := NewCanonicalEncoder(family.HashDomain())
 	encodePrincipal(e, principal)
 	return e.String(string(family)).String(method).Bytes(args).Hash(), nil
 }
