@@ -76,6 +76,7 @@ type semState struct {
 	res          resState
 	proof        proofState
 	ret          retState
+	gc           gcState
 }
 
 func newSemState() *semState {
@@ -115,6 +116,7 @@ func newSemState() *semState {
 		res:          newResState(),
 		proof:        newProofState(),
 		ret:          newRetState(),
+		gc:           newGCState(),
 	}
 }
 
@@ -163,6 +165,7 @@ type semView struct {
 	res          resView
 	proof        proofView
 	ret          retView
+	gc           gcView
 }
 
 func newSemView(st *semState, w bool) semView {
@@ -202,6 +205,7 @@ func newSemView(st *semState, w bool) semView {
 		res:          newResView(&st.res, w),
 		proof:        newProofView(&st.proof, w),
 		ret:          newRetView(&st.ret, w),
+		gc:           newGCView(&st.gc, w),
 	}
 }
 
@@ -211,7 +215,7 @@ func (v *semView) dirty() bool {
 	return v.owners.dirty() || v.coverages.dirty() || v.exchanges.dirty() || v.members.dirty() ||
 		v.acks.dirty() || v.admissions.dirty() || v.membership.dirty() || v.checkpoints.dirty() ||
 		v.mutReceipts.dirty() || v.toolReceipts.dirty() || v.decls.dirty() || v.snapshots.dirty() ||
-		v.changes.dirty() || v.res.dirty() || v.proof.dirty() || v.ret.dirty()
+		v.changes.dirty() || v.res.dirty() || v.proof.dirty() || v.ret.dirty() || v.gc.dirty()
 }
 
 func (v *semView) commit() {
@@ -250,6 +254,7 @@ func (v *semView) commit() {
 	v.res.commit()
 	v.proof.commit()
 	v.ret.commit()
+	v.gc.commit()
 }
 
 // semRead implements store.SemanticReader over a transaction's view.

@@ -165,6 +165,7 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 	t.items.put(it.ID, it)
 	t.indexLookups(it)
 	t.itemsByTask.add(it.TaskID, it.ID)
+	t.noteItem(domain.ContextItem{}, it)
 	t.markSequenced()
 	return nil
 }
@@ -189,6 +190,7 @@ func (t *tx) UpdateItem(id string, expectedVersion uint64, change domain.ItemCha
 		return domain.ContextItem{}, err
 	}
 	t.items.put(id, next)
+	t.noteItem(cur, next)
 	t.putLifecycle(event)
 	t.markSequenced()
 	return next, nil
@@ -236,8 +238,10 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	switch r.Type {
 	case domain.RelSupersedes:
 		t.retireLookups(r.ToID, false)
+		t.retireOpenGoal(r.ToID)
 	case domain.RelDuplicateOf:
 		t.retireLookups(r.FromID, true)
+		t.retireOpenGoal(r.FromID)
 	}
 	t.markSequenced()
 	return nil
