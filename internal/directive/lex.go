@@ -87,12 +87,16 @@ func (p *coreParser) lexAttributes(section string, b []byte, offset int) ([]rawA
 	if len(b) == 0 {
 		return nil, false
 	}
-	for rest := b; ; {
+	for rest, count := b, 1; ; count++ {
 		n := bytes.IndexByte(rest, ' ')
 		if n < 0 {
 			n = len(rest)
 		}
 		token := rest[:n]
+		if count > p.limits.maxAttributes || n > p.limits.maxAttributeBytes {
+			p.fail("attribute limit exceeded")
+			return nil, false
+		}
 		eq := bytes.IndexByte(token, '=')
 		if eq < 1 || !asciiValue(token[:eq]) || !asciiValue(token[eq+1:]) {
 			return nil, false

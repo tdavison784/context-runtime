@@ -36,7 +36,7 @@ func Parse(input []byte, opts Options) Result {
 		return parseFailure("span exceeds byte limit")
 	}
 	capable := domain.Span{Authority: opts.Authority, DirectiveCapable: opts.DirectiveCapable}.ParsesDirectives()
-	p := &coreParser{authority: opts.Authority, data: input, limits: scanLimits{limits.MaxSpanBytes, limits.MaxItemsPerSpan, min(limits.MaxDiagnosticsPerSpan, 256), limits.MaxSpanBytes}}
+	p := &coreParser{authority: opts.Authority, data: input, limits: unitLimits(limits)}
 	p.scan(capable)
 	for _, s := range p.sections {
 		if s.heading.level > limits.MaxHeadingLevel {
@@ -47,8 +47,8 @@ func Parse(input []byte, opts Options) Result {
 		}
 	}
 	p.extract()
-	if p.itemLimitHit {
-		return parseFailure("span exceeds item limit")
+	if p.fatal != "" {
+		return parseFailure(p.fatal)
 	}
 	if p.ttlOverflow {
 		return Result{Err: fmt.Errorf("%w: %w: directive parser: ttl exceeds %d turns", domain.ErrInvalidRecord, ErrRepresentationLimit, MaxTTLTurns)}
@@ -172,7 +172,7 @@ func diagnosticReason(reason string) domain.DiagnosticReason {
 		return domain.ReasonDuplicateAttribute
 	case "derived directive ID", "reserved derived ID":
 		return domain.ReasonDerivedID
-	case "heading exceeds length limit", "item limit reached", "diagnostic limit reached":
+	case "diagnostic limit reached":
 		return domain.ReasonLimit
 	default:
 		return domain.ReasonInvalidSyntax

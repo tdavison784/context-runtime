@@ -55,7 +55,15 @@ func before(a, b parseDiagnostic) bool {
 	return a.start < b.start || a.start == b.start && a.seq < b.seq
 }
 
-type scanLimits struct{ maxBytes, maxItems, maxDiagnostics, maxHeading int }
+type scanLimits struct {
+	maxItems, maxDiagnostics, maxHeading, maxAttributes, maxAttributeBytes int
+}
+
+func unitLimits(l domain.Limits) scanLimits {
+	l = l.Effective()
+	return scanLimits{l.MaxItemsPerSpan, l.MaxDiagnosticsPerSpan, l.MaxHeadingBytes, l.MaxAttributes, l.MaxAttributeBytes}
+}
+
 type rawItem struct {
 	section, id, text   string
 	explicit, lifecycle bool
@@ -67,18 +75,18 @@ type rawItem struct {
 }
 
 type coreParser struct {
-	authority    domain.Authority
-	itemLimitHit bool
-	ttlOverflow  bool
-	data         []byte
-	limits       scanLimits
-	diagnostics  []parseDiagnostic // source-ordered output of finish
-	pending      diagnosticHeap
-	emitted      int
-	truncated    bool
-	sections     []rawSection
-	items        []rawItem
-	work         int // deterministic work accounting used by adversarial tests
+	authority   domain.Authority
+	fatal       string // first per-unit resource limit exceeded (D17)
+	ttlOverflow bool
+	data        []byte
+	limits      scanLimits
+	diagnostics []parseDiagnostic // source-ordered output of finish
+	pending     diagnosticHeap
+	emitted     int
+	truncated   bool
+	sections    []rawSection
+	items       []rawItem
+	work        int // deterministic work accounting used by adversarial tests
 }
 
 func (p *coreParser) diagnostic(code, reason, section, id string, r byteRange) {
@@ -95,6 +103,14 @@ func (p *coreParser) diagnostic(code, reason, section, id string, r byteRange) {
 	if len(p.pending) > 0 && before(d, p.pending[0]) {
 		p.pending[0] = d
 		heap.Fix(&p.pending, 0)
+	}
+}
+
+// fail records the first fatal per-unit limit; Parse then returns an error
+// and no partial result. Scanning may continue but its output is discarded.
+func (p *coreParser) fail(reason string) {
+	if p.fatal == "" {
+		p.fatal = reason
 	}
 }
 
@@ -229,6 +245,11 @@ func (p *coreParser) scan(capable bool) {
 				active = -1
 			}
 			inert = 0
+			if (section != "" || unsupportedLifecycle(word)) && len(b) > p.limits.maxHeading {
+				// D17: an interpreted heading beyond the limit rejects the
+				// unit; it is never truncated or reinterpreted as prose.
+				p.fail("heading exceeds byte limit")
+			}
 			if section == "" && unsupportedLifecycle(word) {
 				// M4: a finite parser-v1 vocabulary is diagnosed rather than
 				// treated as prose; its body gets no directive semantics until
@@ -239,12 +260,7 @@ func (p *coreParser) scan(capable bool) {
 			}
 			if section != "" {
 				h := rawHeading{section: section, level: level, byteRange: byteRange{start, end}, valid: true}
-				if len(b) > p.limits.maxHeading {
-					h.valid = false
-					p.diagnostic("ErrMalformedDirective", "heading exceeds length limit", section, "", h.byteRange)
-				} else {
-					p.headingMetadata(&h, rest, end-len(rest))
-				}
+				p.headingMetadata(&h, rest, end-len(rest))
 				p.sections = append(p.sections, rawSection{heading: h, end: len(p.data)})
 				active = len(p.sections) - 1
 				continue

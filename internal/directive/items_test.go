@@ -237,7 +237,7 @@ func TestDerivedIDsAndItemLimit(t *testing.T) {
 	p.limits.maxItems = 2
 	p.extract()
 	p.finish()
-	if len(p.items) != 2 || p.diagnostics[len(p.diagnostics)-1].reason != "item limit reached" {
+	if len(p.items) != 2 || p.fatal != "span exceeds item limit" {
 		t.Fatal(p)
 	}
 }

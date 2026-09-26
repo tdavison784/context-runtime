@@ -1,8 +1,11 @@
 package directive
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
 )
 
 func TestUnclosedGatesAndFenceRules(t *testing.T) {
@@ -52,9 +55,35 @@ func TestPathologicalLinearScan(t *testing.T) {
 		}
 	}
 }
-func TestHeadingLengthLimit(t *testing.T) {
-	p := parsedCore("## Pinned obligation=" + strings.Repeat("x", 4096) + "\nignored\n## Working [ok]\nretained")
-	if len(p.items) != 1 || p.items[0].id != "ok" || len(p.diagnostics) != 1 {
-		t.Fatalf("%+v", p)
+func TestPerUnitMetadataLimits(t *testing.T) {
+	limits := domain.DefaultLimits()
+	fatal := []string{
+		"## Pinned obligation=" + strings.Repeat("x", 4096) + "\nignored",
+		"## Pinned [p]" + strings.Repeat(" ", 2000) + "x\nbody",
+		"## Waive " + strings.Repeat("x", limits.MaxHeadingBytes),
+		"## Pinned" + strings.Repeat(" kind=constraint", limits.MaxAttributes+1) + "\nx",
+		"## Pinned\n- {obligation=" + strings.Repeat("o", limits.MaxAttributeBytes) + "} x",
+		"## Pinned\n- {" + strings.TrimSpace(strings.Repeat("kind=constraint ", limits.MaxAttributes+1)) + "} x",
+	}
+	for _, input := range fatal {
+		if r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem}); !errors.Is(r.Err, domain.ErrInvalidRecord) || len(r.Items)+len(r.Diagnostics)+len(r.Sections) != 0 {
+			t.Fatalf("%.40q: %+v", input, r.Err)
+		}
+	}
+	// At the limits, and wherever the parser interprets nothing, input is fine.
+	ok := []string{
+		"## Pinned" + strings.Repeat(" kind=constraint", limits.MaxAttributes) + "\nx",
+		"## Pinned\n- {obligation=" + strings.Repeat("o", limits.MaxAttributeBytes-len("obligation=")) + "} x",
+		"## Notes " + strings.Repeat("x", 4096) + "\n## Pinned\n- x",
+		"```\n## Pinned " + strings.Repeat("x", 4096) + "\n```",
+		"## Goal\n### Pinned " + strings.Repeat("x", 4096),
+	}
+	for _, input := range ok {
+		if r := Parse([]byte(input), Options{Authority: domain.AuthoritySystem}); r.Err != nil {
+			t.Fatalf("%.40q: %v", input, r.Err)
+		}
+	}
+	if r := Parse([]byte(fatal[0]), Options{Authority: domain.AuthorityTool}); r.Err != nil {
+		t.Fatal("non-capable units are not interpreted")
 	}
 }
