@@ -52,6 +52,7 @@ type readTx struct {
 	working      liveIndex[workingKey]
 	sources      liveIndex[sourceKey]
 	refOwners    index[sourceKey]
+	itemsByTask  index[string]
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -91,6 +92,7 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 		working:      newLiveIndex(st.working, writable),
 		sources:      newLiveIndex(st.sources, writable),
 		refOwners:    newIndex(st.refOwners, writable),
+		itemsByTask:  newIndex(st.itemsByTask, writable),
 	}
 }
 
@@ -131,9 +133,19 @@ func (r *readTx) Items(f store.ItemFilter) ([]domain.ContextItem, error) {
 		return nil, err
 	}
 	var out []domain.ContextItem
-	for _, it := range r.items.all() {
+	add := func(it domain.ContextItem) {
 		if matchItem(f, it) {
 			out = append(out, it.Clone())
+		}
+	}
+	if f.TaskID != "" { // a task filter reads the task's index entry (SPEC-1.3)
+		for id := range r.itemsByTask.lookup(f.TaskID) {
+			it, _ := r.items.peek(id)
+			add(it)
+		}
+	} else {
+		for _, it := range r.items.all() {
+			add(it)
 		}
 	}
 	slices.SortFunc(out, func(a, b domain.ContextItem) int {

@@ -48,6 +48,7 @@ func (t *tx) commit(st *state) bool {
 	t.working.commit()
 	t.sources.commit()
 	t.refOwners.commit()
+	t.itemsByTask.commit()
 	t.relsTo.commit()
 	t.relsByType.commit()
 	t.events.commit()
@@ -167,6 +168,7 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 	}
 	t.duplicates.add(itemDuplicateKey(it), it.ID)
 	t.indexLookups(it)
+	t.itemsByTask.add(it.TaskID, it.ID)
 	if it.Source != nil {
 		if key, ok := domain.LocatorKey(it.Source.Kind, it.Source.Locator); ok {
 			t.itemsByKey.add(key, it.ID)

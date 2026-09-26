@@ -113,3 +113,20 @@ func TestLegacyUnverifiedNeverBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestGraphReadsUseIndex locks the reads ingest and graph issue per item
+// to index probes (SPEC-1.3): relationships by (type, source) or (type,
+// target), and items by task.
+func TestGraphReadsUseIndex(t *testing.T) {
+	s, _ := openTemp(t)
+	for _, f := range []store.RelationshipFilter{
+		{Type: domain.RelSupersedes, ToID: "x"},
+		{Type: domain.RelDuplicateOf, FromID: "x"},
+		{Type: domain.RelDerivedFrom, FromID: "x"},
+	} {
+		q, args := relationshipQuery("s", f)
+		assertIndexed(t, s, q, args...)
+	}
+	q, args := itemQuery("s", store.ItemFilter{TaskID: "task"})
+	assertIndexed(t, s, q, args...)
+}
