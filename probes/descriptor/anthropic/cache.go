@@ -18,13 +18,14 @@ var docMinCacheable = map[string]int{
 	"claude-sonnet-5": 1024,
 }
 
-// filler is deterministic ledger text. The nonce line makes each run's prefix
+// filler is deterministic garden-note text. (An earlier ledger filler about
+// accounts moving units tripped the cyber refusal classifier on Opus 5.5.) The nonce line makes each run's prefix
 // unique so a cache write is observed rather than an earlier run's entry.
 func filler(nonce string, lines int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Probe ledger %s.\n", nonce)
+	fmt.Fprintf(&b, "Garden notebook %s.\n", nonce)
 	for i := 0; i < lines; i++ {
-		fmt.Fprintf(&b, "Ledger line %04d: account %04d moved %d units to bucket %c.\n", i, (i*37)%9973, (i*13)%97, 'A'+rune(i%26))
+		fmt.Fprintf(&b, "Garden note %04d: row %d has %d tulips and %d daisies in bed %c.\n", i, (i*37)%101, (i*13)%97, (i*7)%53, 'A'+rune(i%26))
 	}
 	return b.String()
 }
@@ -75,55 +76,67 @@ func probeCache(ctx context.Context, rec *Recorder, model string, flagship bool)
 	rec.Note(Observation{ID: pre + "C1-calibration", Model: model, Status: 200,
 		Note: fmt.Sprintf("count_tokens: request without system=%d, system(0 lines)=%d, %.2f tokens/line", noSys, t0, perLine)})
 
-	// C1: bracket the minimum. Each point uses a fresh nonce.
-	min := docMinCacheable[model]
-	if min == 0 {
-		min = 1024
+	// sysText reaches a target system size at token granularity: whole filler
+	// lines, then single-token words for the remainder.
+	sysText := func(nonce string, target int) string {
+		lines := linesFor(target)
+		rest := target - int(t0) - int(float64(lines)*perLine)
+		return filler(nonce, lines) + strings.Repeat(" rose", max(0, rest))
+	}
+
+	// C1: bisect the minimum. Each point uses a fresh nonce, so a write (not an
+	// earlier entry) decides "cached".
+	minTok := docMinCacheable[model]
+	if minTok == 0 {
+		minTok = 1024
 	}
 	type point struct {
-		target, lines int
-		sys           int64
-		cached        bool
+		target int
+		billed int64 // total input tokens billed (uncached + read + write)
+		cached bool
 	}
 	try := func(target int, ttl anthropic.BetaCacheControlEphemeralTTL, tag string) (point, *anthropic.BetaMessage, anthropic.BetaMessageNewParams, error) {
-		lines := linesFor(target)
-		st, err := sysTokens(lines)
-		if err != nil {
-			return point{}, nil, anthropic.BetaMessageNewParams{}, err
-		}
 		cc := anthropic.NewBetaCacheControlEphemeralParam()
 		if ttl != "" {
 			cc.TTL = ttl
 		}
-		p := cacheParams(model, []anthropic.BetaTextBlockParam{{Text: filler(run+"-"+tag, lines), CacheControl: cc}}, []anthropic.BetaMessageParam{askOK})
-		m, _, err := rec.Send(ctx, fmt.Sprintf("%sC1-prefix-%s", pre, tag), fmt.Sprintf("C1 system prefix ~%d tokens (count_tokens system=%d)", target, st), p)
+		p := cacheParams(model, []anthropic.BetaTextBlockParam{{Text: sysText(run+"-"+tag, target), CacheControl: cc}}, []anthropic.BetaMessageParam{askOK})
+		m, _, err := rec.Send(ctx, fmt.Sprintf("%sC1-prefix-%s", pre, tag), fmt.Sprintf("C1 system prefix target ~%d tokens", target), p)
 		if err != nil || m == nil {
 			return point{}, m, p, err
 		}
-		return point{target: target, lines: lines, sys: st, cached: m.Usage.CacheCreationInputTokens > 0 || m.Usage.CacheReadInputTokens > 0}, m, p, nil
+		return point{target: target, billed: billedTotal(m), cached: m.Usage.CacheCreationInputTokens > 0 || m.Usage.CacheReadInputTokens > 0}, m, p, nil
 	}
-	below, _, _, err := try(min-48, "", fmt.Sprintf("%d", min-48))
+	lo, _, _, err := try(minTok/2, "", fmt.Sprintf("%d", minTok/2))
 	if err != nil {
 		return err
 	}
-	above, aboveMsg, aboveParams, err := try(min+48, "", fmt.Sprintf("%d", min+48))
+	hi, hiMsg, hiParams, err := try(minTok*2+48, "", fmt.Sprintf("%d", minTok*2+48))
 	if err != nil {
 		return err
 	}
-	// Widen once in each direction if the documented bracket does not hold.
-	if below.cached {
-		if below, _, _, err = try(min/2, "", fmt.Sprintf("%d", min/2)); err != nil {
+	if lo.cached || !hi.cached {
+		rec.Note(Observation{ID: pre + "C1-bracket", Model: model,
+			Note: fmt.Sprintf("bracket did not hold: %d cached=%v, %d cached=%v", lo.billed, lo.cached, hi.billed, hi.cached)})
+		return nil
+	}
+	for i := 0; hi.target-lo.target > 4 && i < 10; i++ {
+		mid := (lo.target + hi.target) / 2
+		pt, m, p, err := try(mid, "", fmt.Sprintf("%d", mid))
+		if err != nil {
 			return err
 		}
-	}
-	if !above.cached {
-		if above, aboveMsg, aboveParams, err = try(min*2+48, "", fmt.Sprintf("%d", min*2+48)); err != nil {
-			return err
+		if pt.cached {
+			hi, hiMsg, hiParams = pt, m, p
+		} else {
+			lo = pt
 		}
 	}
 	rec.Note(Observation{ID: pre + "C1-bracket", Model: model,
-		Note: fmt.Sprintf("not cached at system=%d tokens (cached=%v); cached at system=%d tokens (cached=%v); documented minimum %d",
-			below.sys, below.cached, above.sys, above.cached, min)})
+		Note: fmt.Sprintf("largest uncached request: billed input %d; smallest cached: billed input %d (cache write %d, uncached tail %d); documented minimum %d",
+			lo.billed, hi.billed, hiMsg.Usage.CacheCreationInputTokens, hiMsg.Usage.InputTokens, minTok)})
+	aboveMsg, aboveParams := hiMsg, hiParams
+	above := hi
 
 	// C2: identical prefix again.
 	if aboveMsg != nil && above.cached {
@@ -137,7 +150,7 @@ func probeCache(ctx context.Context, rec *Recorder, model string, flagship bool)
 	}
 
 	// C3: append-only continuation vs early edit, with top-level auto caching.
-	ledger := filler(run+"-C3", linesFor(min*2)) + "Remember this ledger."
+	ledger := filler(run+"-C3", linesFor(minTok*2)) + "Remember this notebook."
 	u0 := userText(ledger)
 	auto := func(msgs ...anthropic.BetaMessageParam) anthropic.BetaMessageNewParams {
 		p := cacheParams(model, nil, msgs)
@@ -145,7 +158,7 @@ func probeCache(ctx context.Context, rec *Recorder, model string, flagship bool)
 		return p
 	}
 	a0 := assistantText("Noted.")
-	u1 := userText("How many ledger lines are there? Answer with a number.")
+	u1 := userText("How many garden notes are there? Answer with a number.")
 	steps := []struct {
 		id, q string
 		p     anthropic.BetaMessageNewParams
@@ -162,7 +175,7 @@ func probeCache(ctx context.Context, rec *Recorder, model string, flagship bool)
 	}
 
 	// C4: 1-hour TTL write reports the ephemeral_1h split.
-	if _, _, _, err := try(min+48, anthropic.BetaCacheControlEphemeralTTLTTL1h, fmt.Sprintf("%d-ttl1h", min+48)); err != nil {
+	if _, _, _, err := try(above.target+8, anthropic.BetaCacheControlEphemeralTTLTTL1h, fmt.Sprintf("%d-ttl1h", above.target+8)); err != nil {
 		return err
 	}
 	return nil
