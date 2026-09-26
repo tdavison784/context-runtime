@@ -11,8 +11,8 @@ func semanticPolicy() Phase3Policy {
 func TestV3HashOrdersOperationsAndConflictsWithV2Identity(t *testing.T) {
 	p := Principal{SessionID: "s", Authority: AuthorityHarness}
 	e := Event{EventID: "event", Kind: EventHarness, Control: true, Operations: []SemanticOperation{
-		{Kind: OperationRegisterResource, RegisterResource: &RegisterResourceIntent{RequestID: "register", ResourceID: "repo", Reporter: p, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}},
-		{Kind: OperationReportResource, ReportResource: &ReportResourceChangeIntent{RequestID: "report", ResourceID: "repo", ResultingAuthoritativeRevision: 1, WorkspaceFingerprint: HashBytes(nil), AllPaths: true}},
+		{Kind: OperationRegisterResource, RegisterResource: &RegisterResourceIntent{ResourceID: "repo", Reporter: p, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}},
+		{Kind: OperationReportResource, ReportResource: &ReportResourceChangeIntent{ResourceID: "repo", ResultingAuthoritativeRevision: 1, WorkspaceFingerprint: HashBytes(nil), AllPaths: true}},
 	}}
 	policy := semanticPolicy()
 	h, err := e.PayloadHashFor(RequestHashV3, p, Limits{}, policy)
@@ -43,7 +43,7 @@ func TestV3SpanCoverageAndSourceAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := 0
-	e.Operations = append(e.Operations, SemanticOperation{Kind: OperationRegisterResource, SourceSpanIndex: &source, RegisterResource: &RegisterResourceIntent{RequestID: "r", ResourceID: "repo", Reporter: p, Access: access}})
+	e.Operations = append(e.Operations, SemanticOperation{Kind: OperationRegisterResource, SourceSpanIndex: &source, RegisterResource: &RegisterResourceIntent{ResourceID: "repo", Reporter: p, Access: access}})
 	if !errors.Is(e.ValidateV3(), ErrInvalidAuthorityPromotion) {
 		t.Fatal("TOOL source promoted by envelope")
 	}
@@ -79,7 +79,7 @@ func TestV3EnvelopeVerifiesRecordedSchemaAndClonesPolicy(t *testing.T) {
 
 func TestV3LocalAliasesCannotBeRebound(t *testing.T) {
 	p := Principal{SessionID: "s", Authority: AuthorityHarness}
-	op := SemanticOperation{Kind: OperationRegisterResource, Alias: "repo", RegisterResource: &RegisterResourceIntent{RequestID: "r", ResourceID: "resource", Reporter: p, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}}
+	op := SemanticOperation{Kind: OperationRegisterResource, Alias: "repo", RegisterResource: &RegisterResourceIntent{ResourceID: "resource", Reporter: p, Access: AccessBoundary{Scope: ScopeSession, SessionID: "s"}}}
 	e := Event{Kind: EventHarness, Control: true, Operations: []SemanticOperation{op, op}}
 	if e.ValidateV3() == nil {
 		t.Fatal("alias rebound")
