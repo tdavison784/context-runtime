@@ -566,9 +566,14 @@ FR-DIR-003, FR-REL-002/007, §9, INV-05/07.
 R2 confirms M5's References half is in Phase 2: lookup of accessible
 same-session targets runs in the declared scope, filtered before any
 ID/count or ambiguity is disclosed; a source locator is matched under a
-documented, versioned lexical identity rule that includes
-repository/resource namespace and a relevant base directory, with no
-filesystem or network access. Matching authorized targets link
+documented, versioned lexical identity rule, with no filesystem or
+network access. **(SPEC-2.2, corrected)** V1's rule has no
+repository/resource namespace component or base-directory scoping — R19
+(§23) confirms this explicitly, and `domain.LocatorKey` takes no such
+argument; two same-named locators from different conceptual repositories
+within one session are therefore the same target until multi-repository
+support exists (tracked in Open questions below, not designed
+speculatively now). Matching authorized targets link
 deterministically, preserving each immutable reference and target
 snapshot; an inaccessible target stays indistinguishable from an absent
 one. Later path ingestion may add `REFERENCES` edges only under both the
@@ -839,10 +844,14 @@ Answers to `p2-contract`'s implementation questions, appended to
   /reference.go`) carries session, occurrence, span, and item IDs; lexical
   locator key and rule version; owner access boundary and authority;
   `Seq`; an ID derived from occurrence plus ordinal. Migration
-  `0008_unresolved_references.sql` persists it as `rec_reference`, indexed
-  on `(session_id, locator_key, rule_version, seq, id)`, so an unresolved
-  References item survives restart for later linking (§16's "unresolved
-  references persist" requirement).
+  `0008_unresolved_references.sql` persists it as `rec_reference`, so an
+  unresolved References item survives restart for later linking (§16's
+  "unresolved references persist" requirement). **(SPEC-2.2, current state,
+  not 0008's original)** 0008's own `reference_locator` index on
+  `(session_id, locator_key, rule_version, seq, id)` was dropped by
+  migration 0013 once superseded; the index the table is actually read
+  through today is 0012's owner-column-qualified `reference_visible`
+  (`internal/store/sqlite/access_lookups.go`, §26).
 - **`domain.TTLLive`'s zero-creation-turn guard (refines §19, M8 —
   landed, SPEC-1.4).** `TTLLive(created, current uint64, n int) bool`
   (`internal/domain/item.go`) now reads `n > 0 && created > 0 && current
