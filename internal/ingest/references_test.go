@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -156,6 +157,45 @@ func TestReferenceLookupBound_R19(t *testing.T) {
 		f.in.LookupLimit = 3
 		if _, err := f.ingest(user, sourceEvent("t1", "go.mod", taskAccess())); err != nil {
 			t.Errorf("within the bound: %v", err)
+		}
+	})
+}
+
+// TestReferencesByItemID_F4 is SPEC-1.2 (FR-DIR-003): a References item
+// naming an accessible same-session item ID links to it; a missing and an
+// inaccessible ID link nothing and produce identical receipts (apart from
+// IDs), so references never probe existence; a target narrower than the
+// reference is never linked.
+func TestReferencesByItemID_F4(t *testing.T) {
+	eachStore(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		target := f.mustIngest(user, userEvent("u0", "hello", false)).Items[0]
+		r := f.mustIngest(user, userEvent("u1", "## References\n- "+target.ID+"\n", true))
+		if got := f.references(semantic(r)[0].ID); len(got) != 1 || got[0] != target.ID {
+			t.Errorf("item-ID reference links = %v, want [%s]", got, target.ID)
+		}
+
+		private := domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: sess, TaskID: "T", AgentID: "A"}
+		priv := textSpan(domain.AuthorityUser, false, "private note")
+		priv.Access = private
+		hidden := f.mustIngest(user, domain.Event{EventID: "p0", Kind: domain.EventUser, Spans: []domain.Span{priv}}).Items[0]
+
+		agentB := user
+		agentB.AgentID = "B"
+		shape := func(r domain.IngestReceipt) string {
+			return fmt.Sprintf("items=%d dups=%d diags=%d links=%d", len(r.Items), len(r.Duplicates), len(r.Diagnostics), len(f.references(semantic(r)[0].ID)))
+		}
+		hid := f.mustIngest(agentB, userEvent("b1", "## References\n- "+hidden.ID+"\n", true))
+		miss := f.mustIngest(agentB, userEvent("b2", "## References\n- itm_00000000000000000000000000000000\n", true))
+		if shape(hid) != shape(miss) || len(f.references(semantic(hid)[0].ID)) != 0 {
+			t.Errorf("inaccessible %s vs missing %s", shape(hid), shape(miss))
+		}
+
+		// Agent A can see its private note, but a task-wide reference must
+		// not disclose it to the rest of the task.
+		wide := f.mustIngest(user, userEvent("a1", "## References\n- "+hidden.ID+"\n", true))
+		if got := f.references(semantic(wide)[0].ID); len(got) != 0 {
+			t.Errorf("task-wide reference linked a private item: %v", got)
 		}
 	})
 }
