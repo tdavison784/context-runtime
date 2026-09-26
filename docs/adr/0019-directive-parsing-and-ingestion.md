@@ -2054,6 +2054,136 @@ isn't covered), that is called out explicitly rather than left silent.
   lookup, fenced/quoted/comment smuggling, Unicode look-alike keywords,
   CRLF/BOM tricks, over-long IDs, attribute injection).
 
+### 29. PR #5 review round 2: SEC-2.1/2.2, DUR-2.1/2.2/2.3, further SPEC-2.x fixes (all landed; recorded here per SPEC-3.3)
+
+A second external review of the PR (`r5-sec2.md`, `r5-dur2.md`,
+`r5-spec2.md`) found further gaps in the final-pass head §26-§28 recorded;
+all are now fixed and landed, but — per SPEC-3.3 — none of the rulings,
+mechanisms, or new tests below had been recorded in this ADR until now.
+
+- **SEC-2.1: an over-limit new event never enters the write transaction,
+  copies, or hashes its payload (refines §13, D17/F3).** The prior
+  admission path validated sizes only after `Clone`/`PayloadHash`, so a
+  large new event still paid that cost before rejection.
+  `internal/ingest/sizes.go`'s `checkSizes`/`hardSizes` now run first,
+  from lengths alone, outside any write transaction: a hard,
+  non-configurable ceiling (`hardMaxSpans`, `hardMaxParts`,
+  `hardMaxEventBytes`) is checked unconditionally, even against a retry of
+  a known `EventID`; then the configured limits are checked, and an
+  over-limit event proceeds past them only as the retry of a known
+  `EventID`, established by a cheap `View` read of its receipt (never a
+  full `Clone`/hash) — a new or anonymous over-limit event is rejected
+  right there (`internal/ingest/ingest.go:83-124,155-176`). Item and
+  attribute limits are still checked inside the transaction, after
+  `PayloadHash`, as before — this gate covers only span/part counts and
+  span/blob/event byte totals, the ones cheap to check from lengths
+  alone. An over-limit event whose `EventID` matches a Phase-1-era record
+  with no receipt now fails the limit check, not `ErrEventIDConflict` (the
+  limit check runs first). Tests:
+  `TestOverLimitNewEventsStayOutOfWriteTx_SEC21` (a counting store wrapper
+  asserts zero `Update` calls for an over-limit new/anonymous event, and
+  that a known retry still succeeds even over the limits, and that the
+  hard ceiling rejects even a retry before any transaction),
+  `TestSizeGateMatchesValidateFor_SEC21` (`checkSizes` accepts exactly what
+  `Event.ValidateFor`'s limit accounting accepts, at the edge, on both
+  sides) — both `internal/ingest/fixes_r1_test.go`.
+- **SEC-2.2: an ambiguous lifecycle record and a boundary-conflict
+  diagnostic are readable only where their causes are (completes SEC-1.3,
+  refines §7/§1/§20, D10/D1/R13/R14).** `graph.AuthorizeLifecycleCommand`
+  now reports the access boundaries of the accessible current versions
+  that made a target ambiguous, and `graph.CheckBoundaryConflict` returns
+  the conflicting version's boundary alongside `ErrBoundaryConflict`
+  (`internal/graph/graph.go`, `internal/graph/lifecycle.go`). Ingest
+  stamps the `AMBIGUOUS` command record, its diagnostic, and a
+  `boundary_conflict` diagnostic at the base (transcript) boundary
+  intersected with every cause boundary, rather than the base boundary
+  alone — so another agent can no longer learn that a version it cannot
+  see exists, merely because it caused an ambiguity or conflict the agent
+  *can* see the outcome of; the source actor whose write caused it still
+  reads both records normally. Test:
+  `TestRecordsNeverRevealHiddenVersions_SEC22`
+  (`internal/ingest/fixes_r1_test.go`) — reproduces both cases (an
+  agent-private `[plan]` making a task-wide `[plan]` ambiguous; an
+  agent-private `[q]` boundary-conflicting with a task-wide restatement)
+  and asserts a different agent's `LifecycleCommands`/`Diagnostics` read
+  shows neither record.
+- **DUR-2.1: bounded-lookup and bounded-cursor work, addressing part of
+  SPEC-2.1's remaining store-side gaps (refines §26, F1).** Two of three
+  fixes in this batch: (1) `internal/store/sqlite/access_lookups.go`'s
+  lookups now read `(seq, item_id)` rows in `LIMIT`-bounded batches
+  resumed from a cursor and load full items only until they have what they
+  need (one blob referrer, `limit+1` candidates, one page plus one),
+  instead of loading every matching row before stopping; each lookup's SQL
+  comes from a named builder the plan guard runs, requiring an exact-key
+  index search *and* a `LIMIT`. (2) `internal/store/memory/index.go`'s
+  `orderedIndex.commit` now merges a commit's overlay against each touched
+  key's list via a cursor instead of the prior full-list rebuild it did on
+  every touched key. **This ADR does not yet claim (2) achieves bounded
+  work independent of a key's existing size** — a later round found
+  `orderedIndex.commit` still does per-key work proportional to that key's
+  existing entry count in at least one shape, to be recorded once its fix
+  lands. (3) `internal/ingest/references.go`'s
+  `linkPageLimit()` sizes one reference-lookup page by
+  `min(lookupLimit, MaxReferenceLinks-refLinks+1)` — the remaining budget
+  plus one, never the full `LookupLimit` — so a dropped linkable
+  candidate is still seen and reported as truncation, and a page never
+  loads thousands of items to write a handful of edges. Tests:
+  `TestLookupsDoBoundedWork` (memory and SQLite — finding one blob
+  referrer and one page of sources loads a handful of items regardless of
+  session size, and a duplicate leaves the blob index);
+  `TestSourcePageSizedByBudget_DUR21` (`internal/ingest/references_test.go`
+  — a `MaxReferenceLinks: 5` event linking 3 sources then querying for more
+  requests exactly `[6, 3]` items per page, the remaining budget plus one,
+  not the full lookup limit).
+- **DUR-2.2: truncation is reported only for a candidate that could
+  actually have been linked (refines §16/§13, ruling 1).** `linkReference`
+  checked the `MaxReferenceLinks` budget before the access/`Within`
+  checks, so once the budget was spent, *any* further candidate reported a
+  spurious truncation — even one that was never linkable in the first
+  place (missing, inaccessible, or out of boundary). It now checks
+  linkability first and only reports truncation when a linkable candidate
+  meets an exhausted budget. Test:
+  `TestReferenceLinkTruncationReporting_SPEC23_DUR22`
+  (`internal/ingest/references_test.go`) — covers this alongside SPEC-2.3
+  below, since both bugs are in the same budget-vs-truncation path.
+- **DUR-2.3: the `MaxReferenceLinks` field comment now says "per event"
+  (refines §13).** Reworded from "per References entry or new source" to
+  match `run.refLinks`, which is event-wide and never reset, and ADR 19
+  §13/§28's own description of the ruling.
+- **SPEC-2.3 (completing the F4/item-ID reference path): a truncated
+  item-ID reference is diagnosed too (refines §16, F4).**
+  `referenceItemID` discarded the `stop` result `linkReference` returned,
+  so an item-ID reference dropped at the budget reported no
+  `ReferenceLinksTruncated` diagnostic, unlike the locator path. It now
+  reports on `stop`, the same as every other path. Test: covered by
+  `TestReferenceLinkTruncationReporting_SPEC23_DUR22` above (an item-ID
+  case alongside the locator case).
+- **SPEC-2.5 (confirms F5, ADR 3's migration-0011 Go-step recording): the
+  registered function itself is now pinned, not only the step ID.**
+  `TestCommittedStepsUnchanged` (`internal/store/sqlite/steps_test.go`)
+  now also asserts the registered step's function name via
+  `runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()` and the SHA-256
+  of `steps_0011.go`, closing the gap where step 11's registry entry could
+  be repointed at a different function without failing any test.
+- **Regression guards added alongside the fixes above, so a future
+  revert of any bounded-read property fails a test, not only a manual
+  timing probe:** `TestKeyedReadsDoNotScan`
+  (`internal/store/memory/scan_test.go` — `CurrentVersions` and
+  `ObligationsBySource` read only their key's index entry, never a
+  whole-table iteration, with hundreds of unrelated pointers/obligations
+  present); `TestObligationReadsUseIndex`
+  (`internal/store/sqlite/access_lookups_test.go` — `ObligationVersions`
+  plans on `(session_id, id)`, `ObligationsBySource` on `(session_id,
+  f_source_item_id)`); `TestHotReadsUseTheirBuilders`
+  (`internal/store/sqlite/hotreads_test.go` — the reads graph/ingest issue
+  per item run exactly the plan-guarded named builders, so reverting one
+  to an ad hoc session-wide query fails here even if the plan test alone
+  would not catch it); `TestSupersessionCycleCheckIsLocal`
+  (`internal/store/sqlite/supersession_test.go` — a new version with no
+  incoming `SUPERSEDES` edge visits nothing however many unrelated chains
+  the session holds, and a real cycle is still found after visiting only
+  its own chain).
+
 ## Open questions
 
 Five open questions, all resolved by commander ruling:
