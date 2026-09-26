@@ -1334,9 +1334,11 @@ reconciles exact names in a later round.
   the new migrations land.
 - **§20 (round 2 rulings, R9-R15):** `internal/graph`/`internal/store` —
   retiring obligations bound to a replaced source uses the obligations-
-  by-source lookup and stays bounded under a large-fan-out source (R9);
-  `internal/graph` returns `ErrNamespaceConflict` for an ambiguous
-  pre-migration lookup rather than guessing a namespace (R10);
+  by-source lookup and stays bounded under a large-fan-out source (R9).
+  **R10's `ErrNamespaceConflict` transitional rule (SPEC-1.4: removed
+  here) never needed a test:** the typed namespace switch (M6/R6) landed
+  directly, with no gap for a transitional fail-closed rule to cover, so
+  no such symbol exists and none should be expected.
   `SameDirectiveSemantics` includes creation turn, TTL origin, and
   obligation declaration in its comparison, both in `internal/graph` unit
   tests and as the single comparison `internal/ingest` calls (R11); the
@@ -1376,14 +1378,15 @@ reconciles exact names in a later round.
   confirming R1); every persisted item/diagnostic/receipt records parser
   version `directive/v1` (R17). `internal/store/storetest` —
   `ObligationsBySource` with a `limit` lower than the bound source's
-  obligation count returns exactly `limit` versions, deterministically
-  ordered (R18). Deferred until landed: once `internal/graph`/
-  `internal/ingest` switch to `CurrentVersion`/`CurrentVersions`, a static
-  check asserts no remaining call site uses the deprecated
-  `CurrentDirective`/`CurrentDirectives`/`SetCurrentDirective` (R18); once
-  landed, `domain.TTLLive(0, current, n)` is `false` for every
-  `current`/`n` (R18); once landed, `domain.UnresolvedReference`
-  round-trips through migration 0008 and survives restart (R18).
+  obligation count fails `store.ErrLimitExceeded` (SPEC-1.4: corrected —
+  not "returns exactly `limit` versions"; R9/D17's bounded-scan discipline
+  rejects an oversized request outright rather than silently truncating
+  it), `bysource.go:61-62` (R9/R18). Landed and covered: no remaining
+  `internal/graph` call site uses the deleted `CurrentDirective`/
+  `CurrentDirectives`/`SetCurrentDirective` (R18); `domain.TTLLive(0,
+  current, n)` is `false` for every `current`/`n` (R18); `domain
+  .UnresolvedReference` round-trips through migration 0008 and survives
+  restart (R18).
 - **§23 (round 5 ruling, R19):** `internal/domain` — a derived item's
   `SourceRanges` alone reconstructs its transcript coverage, with no
   companion section record to keep consistent (R19); an `IngestReceipt`
@@ -1397,29 +1400,30 @@ reconciles exact names in a later round.
   References locator match never considers a repository/namespace
   component, so two same-named locators in different conceptual
   repositories within one session are treated as the same target (R19,
-  until multi-repo support exists). Deferred until `p2-store` lands the
-  indexes: blob-reference lookup, duplicate-candidate lookup, and
-  reference matching each run in bounded time independent of session
-  size, not as a linear scan (R19).
-- **§24 (round 6 ruling, R20):** `internal/domain` — once landed, an
-  `EventID` equal to or prefixed like `evc_`, `eva_`, or any `IDDomain`
-  prefix fails `Event.Validate` (R20). `internal/ingest` — once landed, a
-  `DirectiveIDDerived` diagnostic for an item whose section ingest refused
-  is absent from the receipt, not merely present-but-orphaned (R20); a
-  residual instruction is never created for a leading-BOM-only residue,
-  matching the existing whitespace-only case (R20); a residual
-  instruction's content includes leading and trailing whitespace exactly
-  as it appeared in the transcript, once the trim-for-emptiness and
-  trim-for-content paths are split (R20); a malformed section inside a
-  SYSTEM or HARNESS span still produces a residual instruction item from
-  its bytes, so the malformed-heading-drops-a-trusted-requirement case has
-  a regression test (R20). Already passing: `workingSection` creates zero
-  items for a `Malformed` section or one with no items, confirmed as the
-  correct (stricter) reading of D11 (R20); a boundary conflict on any
-  Working-section member aborts the whole section's write with
-  `ErrMalformedDirective`/`ReasonBoundaryConflict`, never a partial commit
-  (R20, confirming §23's pinning).
-- **§25 (round 7 ruling, R21):** `internal/ingest` (once R20 lands) — a
+  until multi-repo support exists). Landed (SPEC-1.4): blob-reference
+  lookup (`ItemsByBlob`), duplicate-candidate lookup
+  (`DuplicateCandidates`), reference matching (`UnresolvedReferences`),
+  and source-key lookup (`ItemsBySourceKey`) each run in bounded time via
+  `assertIndexed`-locked indexes, independent of session size, not as a
+  linear scan (R19) — see ADR 3.
+- **§24 (round 6 ruling, R20 — all landed, SPEC-1.4):** `internal/domain
+  /ingest_test.go:TestEventIDRejectsReservedPrefixes` — an `EventID` equal
+  to or prefixed like `evc_`, `eva_`, any `IDDomain` prefix, or `lce_`
+  fails `Event.Validate`. `internal/ingest` — a `DirectiveIDDerived`
+  diagnostic for an item whose section ingest refused is absent from the
+  receipt (the `!r.written[d.Range]` filter, `derive.go`); a residual
+  instruction is never created for a leading-BOM-only or whitespace-only
+  residue (`blankResidue`); a residual instruction's content includes
+  leading and trailing whitespace exactly as it appeared in the
+  transcript (`residue` keeps bytes exactly, no separate trim-for-content
+  step); a malformed section inside a SYSTEM or HARNESS span still
+  produces a residual instruction item from its bytes. Also confirmed:
+  `workingSection` creates zero items for a `Malformed` section or one
+  with no items, the correct (stricter) reading of D11; a boundary
+  conflict on any Working-section member aborts the whole section's write
+  with `ErrMalformedDirective`/`ReasonBoundaryConflict`, never a partial
+  commit, confirming §23's pinning.
+- **§25 (round 7 ruling, R21 — landed with R20, SPEC-1.4):** `internal/ingest` — a
   unit whose only residue is a bare malformed heading with no body creates
   no residual instruction item (R21); a malformed Resolve/Unpin/
   unsupported-lifecycle-word section in a SYSTEM or HARNESS span never
@@ -1516,9 +1520,21 @@ This ADR records the commander's disposition of an adversarial decision
 review (Codex gpt-6-astra xhigh) of the Phase 2 brief against the merged
 Phase 1 codebase and SDD v0.8: D2/D4/D9 agreed as written; D1, D3, D5-D8,
 D10-D19 amended; M1-M8 added as missing decisions; all accepted, with
-commander rulings R1-R8 (`phase2-amendments.md`) overriding eight of them
-as recorded above. No Phase 2 code exists yet against which to re-verify
-these decisions; that verification is this ADR's own gate (the tests in
-the section above) once `p2-contract`, `p2-parser`, `p2-store`, `p2-graph`,
-and `p2-ingest` land their work, and it is expected to move this ADR from
-Proposed to Accepted at Phase 2 exit, not before.
+commander rulings R1-R8 (`phase2-amendments.md`) overriding eight of them,
+followed by seven further rounds of worker questions and rulings (R9-R21)
+as recorded above.
+
+**(SPEC-1.4, 2026-09-27) Phase 2 code has since landed** across
+`internal/domain`, `internal/policy`, `internal/directive`,
+`internal/store` (memory and SQLite), `internal/graph`, and
+`internal/ingest`, and the decision groups above have been re-verified and
+corrected against it in place (each correction marked "SPEC-1.4" or
+"landed" inline) rather than left describing a pre-implementation state.
+A first external review of the resulting PR (`round1-p5-fixes.md`, §26-§27
+above) found further gaps — some already fixed and reconciled here (F2,
+F5, SPEC-1.5, SPEC-1.8, SPEC-1.9, SPEC-1.10, SPEC-1.11, SPEC-1.13), others
+(F1, F3, F4, F6, SPEC-1.3, SPEC-1.6, SPEC-1.11's parser fix) still landing
+on other workers' branches as of this revision. This ADR's status remains
+Proposed; it moves to Accepted once a final reconciliation pass confirms
+every statement in it matches the code at Phase 2's actual exit head, not
+before.
