@@ -18,6 +18,8 @@ func (p *coreParser) extract(validate attributeValidator) {
 		if !h.valid {
 			continue
 		}
+		s.heading.attrs = p.validated(h.section, h.attrs, validate)
+		h.attrs = s.heading.attrs
 		lines := s.body
 		for len(lines) > 0 && blank(p.lineBytes(lines[0])) {
 			lines = lines[1:]
@@ -40,7 +42,7 @@ func (p *coreParser) extract(validate attributeValidator) {
 		} else {
 			text := p.bodyText(lines, false)
 			r := byteRange{h.start, s.end}
-			p.addItem(rawItem{section: h.section, id: h.id, explicit: h.id != "", text: text, attrs: p.validated(h.section, h.attrs, validate), byteRange: r, headingRange: h.byteRange, sectionIndex: si})
+			p.addItem(rawItem{section: h.section, id: h.id, explicit: h.id != "", text: text, attrs: h.attrs, byteRange: r, headingRange: h.byteRange, sectionIndex: si})
 		}
 	}
 }
@@ -95,7 +97,7 @@ func (p *coreParser) listItem(si int, lines []sourceLine, validate attributeVali
 			offset++
 		}
 	}
-	attrs := p.validated(h.section, h.attrs, validate)
+	attrs := append([]rawAttribute(nil), h.attrs...)
 	if len(b) > 0 && b[0] == '{' {
 		end := bytes.IndexByte(b, '}')
 		if end < 0 {

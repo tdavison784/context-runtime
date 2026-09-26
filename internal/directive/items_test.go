@@ -79,3 +79,12 @@ func TestDerivedIDsAndItemLimit(t *testing.T) {
 		t.Fatal(p)
 	}
 }
+
+func TestHeadingAttributesValidatedOnce(t *testing.T) {
+	p := scanner("## Working scope=SESSION\n- one\n- two\n- three", true)
+	calls := 0
+	p.extract(func(_ string, _ rawAttribute) bool { calls++; return false })
+	if calls != 1 || len(p.items) != 3 {
+		t.Fatalf("validation calls=%d items=%d", calls, len(p.items))
+	}
+}
