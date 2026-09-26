@@ -949,7 +949,7 @@ Answers to `p2-ingest`'s implementation questions, appended to
   replaced item that carries an obligation
   (`internal/ingest/directives.go:130` → `graph.go:222` →
   `graph/obligation.go:43`) and once per lifecycle command
-  (`derive.go:356` → `graph/lifecycle.go:122`) — so it is deferred as a
+  (`derive.go:357` → `graph/lifecycle.go:122`) — so it is deferred as a
   performance-only item precisely *despite* running on that path, not
   because it doesn't (§13 records the full ruling: a grant can only be
   created by an authorized issuer, so the read discloses nothing and only
@@ -1139,7 +1139,7 @@ the code at this ADR's final-pass head.
   `VisibleReferenceFilter` — each carrying a `Viewer domain.Principal`.
   The `ReadTx` methods `BlobReferrer`, `CanonicalCandidates`,
   `CurrentWorking`, `SourceItems`, and `VisibleReferences`
-  (`store.go:184-195`) replace the deleted `ItemsByBlob`/
+  (`store.go:186-197`) replace the deleted `ItemsByBlob`/
   `DuplicateCandidates`/`ItemsBySourceKey`/`UnresolvedReferences` and the
   `freezePartitions` task scan; SQLite filters by owner columns on new
   tables (migration 0012's `lookup_blob`/`lookup_canonical`/
@@ -1155,7 +1155,7 @@ the code at this ADR's final-pass head.
   the same write that retires it, so repeated identical content never
   grows them (DUR-1.1). **(SPEC-3.3, corrected) `lookup_blob` is not the
   same:** `retireLookups(itemID, duplicate bool)`
-  (`internal/store/sqlite/access_lookups.go:54-58`) removes its own rows
+  (`internal/store/sqlite/access_lookups.go:56-60`) removes its own rows
   only when the retiring item is itself classified a duplicate
   (`duplicate == true`) — a superseded (non-duplicate) item's `lookup_blob`
   row is deliberately kept, since the canonical item's exact content and
@@ -1166,7 +1166,7 @@ the code at this ADR's final-pass head.
   removed retroactively. Ingest call
   sites: `internal/ingest/directives.go:269` (`CanonicalCandidates`),
   `references.go:42` (`SourceItems`), `references.go:137`
-  (`VisibleReferences`), `run.go:304` (`BlobReferrer`). Separately,
+  (`VisibleReferences`), `run.go:306` (`BlobReferrer`). Separately,
   SPEC-1.3 found that `internal/ingest`'s *other* per-item reads —
   `Relationships` filtered by type/from/to, `Items` filtered by task — were
   not indexed even though the three named R19 lookups were; the key-only
@@ -1256,7 +1256,7 @@ the code at this ADR's final-pass head.
   `domain.ErrEventIDConflict`
   (`errors.New("event ID conflict")`, `internal/domain/errors.go:24`),
   returned bare with no ID, principal, or session detail
-  (`internal/ingest/ingest.go:242,249`) — `p2-contract` verifies this with
+  (`internal/ingest/ingest.go:233,240`) — `p2-contract` verifies this with
   a test. **Accepted residual risk, recorded here:** an `EventID` is a
   session-wide idempotency key, not a per-principal one; a harness that
   lets predictable, cross-principal-guessable `EventID`s reach the runtime
@@ -1369,7 +1369,7 @@ each with its own fix and test.
 - **DUR-1.3: the poison primitive (refines §10, D14).** `Apply`/`apply`
   (`internal/ingest/ingest.go`) is failure-atomic: once the core has
   started writing, any error calls `tx.Poison(err)`
-  (`store.Tx.Poison(err error)`, `store.go:263-272`) before returning, so
+  (`store.Tx.Poison(err error)`, `store.go:274`) before returning, so
   the caller's `Update` rolls back everything the transaction wrote even
   if the caller ignores the returned error — no partial ingestion result
   can ever commit. `store.Guard` (`internal/store/guard.go`) implements
