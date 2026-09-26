@@ -386,47 +386,64 @@ section as parser output (commit `4329e29`).
   core at the domain-function level, but the full multi-actor trace across
   Resolve/CompleteTask/Block/Waive remains a Phase 3 integration gap.
 
-### Round 1 additions (findings AUTH-1.1, 1.3, 1.4, 1.5, 1.6; SPEC-1.1)
+### Round 1 additions (findings AUTH-1.1, 1.3, 1.4, 1.5, 1.6; SPEC-1.1) — landed
 
-As of this update, `internal/domain`'s new record-shape rules
-(`ObligationTransition.Action`, the AGENT same-task rule, `LifecycleEvent`
-session check) are merged in `internal/domain`, but `internal/domain`'s own
-test suite does not yet build against them (`domain-tests-worker`'s fix is
-in flight: existing `obligation_test.go` fixtures predate the `Action`
-field and currently fail `TestObligationTransitionValidate`). The
-`internal/graph` fixes (AUTH-1.1, 1.3, 1.5; SPEC-1.1's `SupersedeSnapshot`
-selector) and their tests are `graph-worker`'s in-flight fix; `internal/graph`
-does not currently compile against the new `store.ReadTx.CurrentDirective`
-signature. Required once landed:
+`internal/domain` and `internal/graph`'s round-1 fixes and tests are now
+merged and passing (`go test -race ./internal/domain/... ./internal/graph/...`
+green).
 
-- `internal/domain/obligation_test.go`: `ObligationTransition.Validate`
-  rejecting a transition whose `Action` disagrees with
-  `TransitionAction(From, To)`; a matcher-attributed transition with
-  `Action != ActionAssertObligation` rejected; an actor from another
-  session rejected; an AGENT/TOOL/RETRIEVED_CONTENT actor rejected
-  regardless of `Action`/`Matcher`. `TestValidObligationTransitionMatrix`
-  and friends above need updating to supply a valid `Action` per case, not
-  just new cases added.
-- `internal/domain/authz_test.go` or `records_test.go`: the AGENT-same-task
-  regression for `AuthorizeSupersession` (equal key, equal boundary,
-  *different* `TaskID` → `ErrInvalidAuthorityPromotion`); `LifecycleEvent
-  .Validate` rejecting a cross-session actor.
-- `internal/graph/graph_test.go`: `LinkDerived` rejecting an AGENT/TOOL/
-  RETRIEVED_CONTENT actor whose authority is below the derived item's (the
-  exact AUTH-1.1 reproduction: a SYSTEM instruction must not accept a TOOL
-  item as `DERIVED_FROM` source under a low-authority actor);
-  `ReplaceDirective`'s first-version path rejecting a RETRIEVED_CONTENT/TOOL
-  actor and an actor below the new item's authority (AUTH-1.5); a
-  same-string-comparison test asserting `Provenance`/`LinkDerived`/
-  `Supersede` return byte-identical error text for a missing ID and an
-  inaccessible one, on both stores (AUTH-1.3); `SupersedeSnapshot` with a
-  `kind=conversation` Working item (must still be superseded) and an
-  unrelated `task_state` item sharing task/authority/boundary (must NOT be
-  superseded) — the exact SPEC-1.1 reproduction cases.
-- `internal/store/storetest`: once `CurrentDirective`/`SetCurrentDirective`
-  callers adopt the boundary parameter (blocking `internal/graph` and
-  `internal/store/storetest` compilation as of this update), a case for the
-  boundary-keyed directive pointer (ADR 4 covers the decision).
+- `internal/domain/obligation_test.go`: `TestTransitionActionMatrix` and
+  `TestTransitionAction_InvalidStatusesRejected` lock `TransitionAction`
+  exhaustively (AUTH-1.4); the existing transition-validation tests were
+  updated in place to supply a valid `Action` per case rather than gaining
+  new standalone cases.
+- `internal/domain/authz_test.go`: `TestAuthorizeSupersession_AgentSameKeySameTaskOK`
+  and `TestAuthorizeSupersession_AgentSameKeyDifferentTaskFails` lock the
+  AUTH-1.6 regression exactly (equal key, equal boundary, differing
+  `TaskID` → `ErrInvalidAuthorityPromotion`).
+- `internal/domain/records_test.go`: `TestLifecycleEventValidate`'s "actor
+  belongs to another session" case locks AUTH-1.7.
+- `internal/domain/item_test.go`: `TestDirectiveSectionValid`,
+  `TestContextItemValidate_SectionNoneWithoutDirectiveIDPasses`,
+  `TestContextItemValidate_EachSectionWithDirectiveIDPasses` lock
+  `DirectiveSection`/`Section` validation (SPEC-1.1's supporting field).
+- `internal/graph/graph_test.go`: `TestReplaceDirective_MismatchedNewItem`
+  (subtests `WrongDirectiveID`, `WrongTask`) and
+  `TestReplaceDirective_InaccessibleNewItem` are TEST-1.1's required
+  `ErrDirectiveMismatch` coverage; `TestSupersedeSnapshot_TaskMismatch` is
+  its `ErrSnapshotTaskMismatch` counterpart.
+  `TestSupersede_MissingAndInaccessibleErrorsAreIndistinguishable` locks
+  AUTH-1.3's byte-identical error text (both stores).
+  `TestReplaceDirective_FirstVersionAuthorization` (subtests
+  `ToolActorRejected`, `AgentRejectedForNonKeyedItem`,
+  `AgentAllowedForItsOwnKeyedItem`, `UserActorInsufficientAuthorityRejected`)
+  locks AUTH-1.5 exactly.
+  `TestSupersedeSnapshot_ConversationKindAndIndependentTaskState` is
+  SPEC-1.1's exact reproduction: a `kind=conversation` Working item is
+  still superseded, and an unrelated `task_state` item sharing task/
+  authority/boundary is not.
+- `internal/store/storetest`: `TestConformance/DirectiveBoundaries` covers
+  the boundary-keyed directive pointer end-to-end (ADR 4's decision) — two
+  versions of the same `(task, directiveID)` in different boundaries
+  resolve independently, and every boundary field (`AgentID`, `WorkflowID`,
+  `Scope`, `SessionID`, `TaskID`) is part of the key. **This subtest
+  currently fails on `internal/store/sqlite` only** — see ADR 17's Tests
+  section for the reproduction; it is a store-implementation gap, not a
+  gap in this ADR's decision or in the test itself (the memory store
+  passes the identical test).
+- **Genuine remaining gap, not blocked on anything:** no test directly
+  exercises `LinkDerived` rejecting an AGENT/TOOL/RETRIEVED_CONTENT actor
+  whose authority is below the derived item's — the code fix for AUTH-1.1
+  is landed (`internal/graph/graph.go`: `actor.Authority
+  .CanHoldLifecycleAuthority() || actor.Authority == AuthorityAgent`, plus
+  `actor.Authority.AtLeast(derived.Authority)`), and one existing test
+  comment (`graph_test.go:987`) notes in passing that a case deliberately
+  sets `derived.Authority = AuthorityAgent` "to pass the actor-authority
+  gate (AUTH-1.1)" while testing something else, but no test asserts the
+  gate itself rejects an under-authority or TOOL/RETRIEVED_CONTENT actor.
+  Required: a `TestLinkDerived_ActorAuthorityBelowDerived`-shaped case
+  reproducing the original finding directly (a SYSTEM item, a low-authority
+  actor, asserting `ErrInvalidAuthorityPromotion`).
 
 ## Open questions
 
@@ -493,7 +510,17 @@ cross-task agent key collision through; fixed by requiring equal `TaskID`.
 AUTH-1.7 (LOW): `LifecycleEvent.Validate` didn't require the actor's
 session match the event's; fixed to match `EventRecord`/`MutationGrant`.
 TEST-1.1 (MEDIUM, tracked for `internal/graph`, not this ADR directly):
-flagged `ErrDirectiveMismatch`/`ErrSnapshotTaskMismatch` as untested; the
-required-test list above includes the graph-side cases once landed.
+flagged `ErrDirectiveMismatch`/`ErrSnapshotTaskMismatch` as untested; now
+locked by `TestReplaceDirective_MismatchedNewItem`/
+`TestSupersedeSnapshot_TaskMismatch`.
 Findings 1, 2, 4, N2-N4 from earlier passes were re-verified FIXED and are
 unchanged by this round.
+
+Verified against the merged `graph-worker`/`domain-tests-worker` branches
+(`go test -race ./internal/domain/... ./internal/graph/...` green): every
+finding above has a passing test, cited in the "Round 1 additions"
+subsection, with two exceptions flagged there rather than silently
+claimed done — AUTH-1.1 (`LinkDerived` actor-authority gate) has the code
+fix but no direct test, and `TestConformance/DirectiveBoundaries` fails on
+`internal/store/sqlite` only (a `sqlite-worker` implementation gap, cited
+in full in ADR 17).
