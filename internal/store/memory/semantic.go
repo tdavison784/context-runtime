@@ -74,6 +74,7 @@ type semState struct {
 	changes      map[string]domain.SemanticChange
 	chByTarget   map[string][]seqRef // target authorization key -> changes
 	res          resState
+	proof        proofState
 }
 
 func newSemState() *semState {
@@ -111,6 +112,7 @@ func newSemState() *semState {
 		changes:      map[string]domain.SemanticChange{},
 		chByTarget:   map[string][]seqRef{},
 		res:          newResState(),
+		proof:        newProofState(),
 	}
 }
 
@@ -157,6 +159,7 @@ type semView struct {
 	changes      table[string, domain.SemanticChange]
 	chByTarget   orderedIndex[string]
 	res          resView
+	proof        proofView
 }
 
 func newSemView(st *semState, w bool) semView {
@@ -194,6 +197,7 @@ func newSemView(st *semState, w bool) semView {
 		changes:      newTable(st.changes, w, domain.SemanticChange.Clone),
 		chByTarget:   newOrderedIndex(st.chByTarget, w),
 		res:          newResView(&st.res, w),
+		proof:        newProofView(&st.proof, w),
 	}
 }
 
@@ -203,7 +207,7 @@ func (v *semView) dirty() bool {
 	return v.owners.dirty() || v.coverages.dirty() || v.exchanges.dirty() || v.members.dirty() ||
 		v.acks.dirty() || v.admissions.dirty() || v.membership.dirty() || v.checkpoints.dirty() ||
 		v.mutReceipts.dirty() || v.toolReceipts.dirty() || v.decls.dirty() || v.snapshots.dirty() ||
-		v.changes.dirty() || v.res.dirty()
+		v.changes.dirty() || v.res.dirty() || v.proof.dirty()
 }
 
 func (v *semView) commit() {
@@ -240,6 +244,7 @@ func (v *semView) commit() {
 	v.changes.commit()
 	v.chByTarget.commit()
 	v.res.commit()
+	v.proof.commit()
 }
 
 // semRead implements store.SemanticReader over a transaction's view.

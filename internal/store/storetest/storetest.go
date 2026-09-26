@@ -112,6 +112,12 @@ var suite = []testCase{
 	{"SemanticResourcePaths", testSemanticResourcePaths},
 	{"SemanticWorkspaceBindings", testSemanticWorkspaceBindings},
 	{"SemanticObservations", testSemanticObservations},
+	{"SemanticObligationDeclarations", testSemanticObligationDeclarations},
+	{"SemanticMatcherProof", testSemanticMatcherProof},
+	{"SemanticProofReferences", testSemanticProofReferences},
+	{"SemanticInvalidation", testSemanticInvalidation},
+	{"SemanticAttestation", testSemanticAttestation},
+	{"SemanticMaterialization", testSemanticMaterialization},
 
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},
