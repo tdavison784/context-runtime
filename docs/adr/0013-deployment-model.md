@@ -1,6 +1,6 @@
 # 13. Deployment model
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
 ## Context
@@ -86,15 +86,23 @@ requires the SQLite file be owned by one process (0600 permissions).
 
 ## Open questions
 
+### Resolved at acceptance (2026-09-26)
+
 - What the eventual sidecar's authentication mechanism will be (mTLS,
   Unix-socket peer credentials, a bearer token minted by the embedding
   process) — deferred, but worth flagging now since `Principal` construction
   (`internal/domain/principal.go`) already assumes a trusted caller and
   will need a distinct "who constructed this principal, and do we trust
   them" story once a process boundary exists.
+  **Decision:** sidecar authentication is out of V1 scope and will get its
+  own ADR if a sidecar is built; the embedded library trusts its embedding
+  process to construct principals (SDD section 8).
 - Whether `cmd/context-runtime` ships in this module or a separate `tools/`
   module (also raised in ADR 1) — relevant here because a sidecar
   executable, if built later, would likely also live under `cmd/`.
+  **Decision:** same as ADR 1: `cmd/context-runtime` ships in this module as
+  long as it imports only this module's packages and the standard library;
+  any command needing third-party dependencies goes in a nested module.
 
 ## Review
 

@@ -1,0 +1,147 @@
+{
+  "betas": [
+    "compact-2026-09-04"
+  ],
+  "model": "claude-sonnet-5",
+  "probe": "compaction/claude-sonnet-5/K1-on-demand-summarize",
+  "question": "K1 on-demand compaction with custom instructions",
+  "request": {
+    "compaction": {
+      "instructions": "Summarize this conversation for continuation. Preserve every key looked up, every returned value, every computed result and the user's open request. Do not call tools; respond with the summary text only.",
+      "type": "summarize"
+    },
+    "max_tokens": 4096,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "First work out the key: it is the lowercase English name of the Greek letter whose 1-based position in the Greek alphabet equals the number of primes below 20. Then call the lookup tool with that key. Afterwards compute (value * 17 + 3) mod 23, showing the arithmetic in one line.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "signature": "EoUDCpABCBIYAipA…[len=528 sha256=f3acbbae61840cb5]",
+            "thinking": "Counting primes below 20 gives 8 of them, and the 8th letter of the Greek alphabet is theta, so the key is \"theta\".\n\n",
+            "type": "thinking"
+          },
+          {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "toolu_013TspxzwCBk5DUjMHppykzX",
+            "input": {
+              "key": "theta"
+            },
+            "name": "lookup",
+            "type": "tool_use"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "41",
+                "type": "text"
+              }
+            ],
+            "is_error": false,
+            "tool_use_id": "toolu_013TspxzwCBk5DUjMHppykzX",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 700 - 30*23(690) = 10\n\n**Result: 10**",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "effort": "medium"
+    },
+    "system": [
+      {
+        "text": "You are a terse probe assistant. When asked for a key's value, call the lookup tool; never guess values.",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "display": "summarized",
+      "type": "adaptive"
+    },
+    "tools": [
+      {
+        "description": "Look up the integer value stored under a key.",
+        "input_schema": {
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "lookup"
+      }
+    ]
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "content": "Summary:\n- Task: Determine the key as the lowercase English name of the Greek letter whose 1-based position equals the number of primes below 20.\n- Computation: Primes below 20 = {2,3,5,7,11,13,17,19} → 8 primes. The 8th Greek letter is \"theta\".\n- Key looked up: \"theta\"\n- Returned value: 41\n- Final computation requested: (value * 17 + 3) mod 23\n- Arithmetic shown: (41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 10\n- Final result: 10\n- Status: Request fully completed; no further action pending unless user asks for more.",
+        "signature": "CAIS1gMKHggSGALy…[len=636 sha256=ef960297ed3a19d8]",
+        "type": "compaction"
+      }
+    ],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "model": "claude-sonnet-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "compaction",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 0,
+      "iterations": [
+        {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 832,
+          "output_tokens": 230,
+          "type": "compaction"
+        }
+      ],
+      "output_tokens": 0,
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}

@@ -1,0 +1,22 @@
+{
+  "endpoint": "/responses/input_tokens",
+  "name": "gpt_6_luna_c1_75_count",
+  "request": {
+    "input": [
+      {
+        "content_length": 4950,
+        "role": "developer"
+      },
+      {
+        "content": "Reply OK.",
+        "content_length": 9,
+        "role": "user"
+      }
+    ],
+    "model": "gpt-6-luna"
+  },
+  "response": {
+    "input_tokens": 914,
+    "object": "response.input_tokens"
+  }
+}

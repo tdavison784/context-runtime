@@ -1,0 +1,2370 @@
+[
+  {
+    "cost_usd": 0,
+    "id": "models/claude-opus-5-5",
+    "model": "claude-opus-5-5",
+    "note": "Claude Opus 5.5 created=2026-09-21 max_input=1000000 max_output=128000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-fable-5-1",
+    "model": "claude-fable-5-1",
+    "note": "Claude Fable 5.1 created=2026-08-28 max_input=1000000 max_output=128000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-opus-5",
+    "model": "claude-opus-5",
+    "note": "Claude Opus 5 created=2026-07-24 max_input=1000000 max_output=128000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-sonnet-5",
+    "model": "claude-sonnet-5",
+    "note": "Claude Sonnet 5 created=2026-06-29 max_input=1000000 max_output=128000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-fable-5",
+    "model": "claude-fable-5",
+    "note": "Claude Fable 5 created=2026-06-07 max_input=1000000 max_output=128000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-opus-4-8",
+    "model": "claude-opus-4-8",
+    "note": "Claude Opus 4.8 created=2026-05-28 max_input=1000000 max_output=128000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-opus-4-7",
+    "model": "claude-opus-4-7",
+    "note": "Claude Opus 4.7 created=2026-04-14 max_input=1000000 max_output=128000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-sonnet-4-6",
+    "model": "claude-sonnet-4-6",
+    "note": "Claude Sonnet 4.6 created=2026-02-17 max_input=1000000 max_output=128000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-opus-4-6",
+    "model": "claude-opus-4-6",
+    "note": "Claude Opus 4.6 created=2026-02-04 max_input=1000000 max_output=128000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-opus-4-5-20251101",
+    "model": "claude-opus-4-5-20251101",
+    "note": "Claude Opus 4.5 created=2025-11-24 max_input=200000 max_output=64000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-haiku-4-5-20251001",
+    "model": "claude-haiku-4-5-20251001",
+    "note": "Claude Haiku 4.5 created=2025-10-15 max_input=200000 max_output=64000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "models/claude-sonnet-4-5-20250929",
+    "model": "claude-sonnet-4-5-20250929",
+    "note": "Claude Sonnet 4.5 created=2025-09-29 max_input=1000000 max_output=64000",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=91 sig=860)",
+      "text(\"Primes below 20: 2, 3, 5, 7, 11, 13, 17, 19. That makes 8, and the 8th Greek let…\")",
+      "tool_use(lookup map[key:theta])"
+    ],
+    "cost_usd": 0.005472,
+    "id": "reasoning/claude-opus-5-5/A-tool-call-0",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "setup: first tool round with thinking",
+    "status": 200,
+    "stop_reason": "tool_use",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 498,
+      "Output": 174,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "count/claude-opus-5-5/A",
+    "model": "claude-opus-5-5",
+    "note": "count_tokens=498 billed_input_total=498 delta=0",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=77 sig=868)",
+      "text(\"The key is \\\"theta\\\" and its value is 41.\\n\\n41 × 17 + 3 = 697 + 3 = 700; 700 mod 2…\")"
+    ],
+    "cost_usd": 0.004572,
+    "id": "reasoning/claude-opus-5-5/R1-replay-unchanged",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R1 replay prior reasoning unchanged",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 678,
+      "Output": 93,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "count/claude-opus-5-5/R1",
+    "model": "claude-opus-5-5",
+    "note": "count_tokens=678 billed_input_total=678 delta=0",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=72 sig=868)",
+      "text(\"The key is \\\"theta\\\" and the lookup returned **41**.\\n\\n(41 × 17 + 3) mod 23 = (697…\")"
+    ],
+    "cost_usd": 0.004812,
+    "id": "reasoning/claude-opus-5-5/R1-replay-unchanged-header",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R1 replay unchanged; binding header, field unset",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 678,
+      "Output": 105,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=70 sig=784)",
+      "text(\"The key is \\\"theta\\\" and lookup returned 41.\\n\\n41 × 17 + 3 = 697 + 3 = 700; 700 mo…\")"
+    ],
+    "cost_usd": 0.004316,
+    "id": "reasoning/claude-opus-5-5/R2-drop-reasoning",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R2 drop open-round reasoning (DROP_ALL_REASONING)",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 604,
+      "Output": 95,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=72 sig=784)",
+      "text(\"The key is \\\"theta\\\", and it holds the value 41.\\n\\n(41 × 17 + 3) mod 23 = (697 + 3…\")"
+    ],
+    "cost_usd": 0.004476,
+    "id": "reasoning/claude-opus-5-5/R2-drop-reasoning-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R2 drop open-round reasoning under drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 604,
+      "Output": 103,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=73 sig=868)",
+      "text(\"The key is \\\"theta\\\" and its value is 41.\\n\\n(41 × 17 + 3) mod 23 = (697 + 3) mod 2…\")"
+    ],
+    "cost_usd": 0.004732,
+    "id": "reasoning/claude-opus-5-5/R3-modify-thinking-text",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R3 modify summarized thinking text",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 678,
+      "Output": 101,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "error": "invalid_request_error: messages.1.content.0: Invalid `signature` in `thinking` block",
+    "id": "reasoning/claude-opus-5-5/R3-tamper-signature",
+    "model": "claude-opus-5-5",
+    "question": "R3 modify signature",
+    "status": 400,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "cost_usd": 0,
+    "error": "invalid_request_error: messages.1.content.0: Invalid `signature` in `thinking` block",
+    "id": "reasoning/claude-opus-5-5/R3-tamper-signature-dropblock",
+    "model": "claude-opus-5-5",
+    "question": "R3 modify signature under drop_block",
+    "status": 400,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=66 sig=868)",
+      "text(\"The lookup for \\\"theta\\\" returned 41, so the answer is **10**.\\n\\n41 × 17 + 3 = 697…\")"
+    ],
+    "cost_usd": 0.004772,
+    "id": "reasoning/claude-opus-5-5/R4-rewrite-u0-noheader",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R4 edit earlier user message; no header (account enforcement default)",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 683,
+      "Output": 102,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=71 sig=868)",
+      "text(\"The lookup for **theta** returned 41.\\n\\n(41 × 17 + 3) mod 23 = (697 + 3) mod 23 …\")"
+    ],
+    "cost_usd": 0.004752,
+    "id": "reasoning/claude-opus-5-5/R4-rewrite-u0-header-unset",
+    "input_transformations": [
+      "[{\"type\":\"thinking_mismatch_allowed\",\"path\":\"messages.1.content.0\",\"reason\":\"prefix_binding_mismatch\"}]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R4 edit earlier user message; header, field unset (monitor)",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 683,
+      "Output": 101,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "cost_usd": 0,
+    "error": "invalid_request_error: messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to \"drop_block\". Content before this block differs from when it was created, first at `messages.0.content.0`.",
+    "id": "reasoning/claude-opus-5-5/R4-rewrite-u0-error",
+    "model": "claude-opus-5-5",
+    "question": "R4 edit earlier user message; prefix_mismatch_behavior=error",
+    "status": 400,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=80 sig=784)",
+      "text(\"The key is **theta**, and its value is 41.\\n\\n(41 × 17 + 3) mod 23 = 700 mod 23 =…\")"
+    ],
+    "cost_usd": 0.004056,
+    "id": "reasoning/claude-opus-5-5/R4-rewrite-u0-dropblock",
+    "input_transformations": [
+      "[{\"type\":\"thinking_dropped\",\"path\":\"messages.1.content.0\",\"reason\":\"prefix_binding_mismatch\"}]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R4 edit earlier user message; prefix_mismatch_behavior=drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 609,
+      "Output": 81,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=67 sig=784)",
+      "text(\"The key is **theta**, and its value is **41**.\\n\\n(41 × 17 + 3) mod 23 = (697 + 3…\")"
+    ],
+    "cost_usd": 0.0045,
+    "id": "reasoning/claude-opus-5-5/R4-rewrite-system-dropblock",
+    "input_transformations": [
+      "[{\"type\":\"thinking_dropped\",\"path\":\"messages.1.content.0\",\"reason\":\"prefix_binding_mismatch\"}]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R4 edit top-level system prompt; drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 610,
+      "Output": 103,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=65 sig=784)",
+      "text(\"The key is **theta**, and its value is 41.\\n\\n(41 × 17 + 3) mod 23 = (697 + 3) mo…\")"
+    ],
+    "cost_usd": 0.004492,
+    "id": "reasoning/claude-opus-5-5/R4-rewrite-tools-dropblock",
+    "input_transformations": [
+      "[{\"type\":\"thinking_dropped\",\"path\":\"messages.1.content.0\",\"reason\":\"prefix_binding_mismatch\"}]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R4 edit a tool description; drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 613,
+      "Output": 102,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=79 sig=868)",
+      "text(\"The key is `theta`, and the lookup returned **41**.\\n\\n(41 × 17 + 3) mod 23 = (69…\")"
+    ],
+    "cost_usd": 0.004832,
+    "id": "reasoning/claude-opus-5-5/edit-APPEND-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "APPEND baseline under drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 678,
+      "Output": 106,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=215 sig=1108)",
+      "text(\"The key \\\"theta\\\" has the value 41.\\n\\n(41 × 17 + 3) mod 23 = 700 mod 23 = **10**\")"
+    ],
+    "cost_usd": 0.00536,
+    "id": "reasoning/claude-opus-5-5/edit-APPEND_SYSTEM-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "APPEND_SYSTEM mid-conversation system message",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 695,
+      "Output": 129,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"The key is **theta**, and its value is **41**.\\n\\n(41 × 17 + 3) mod 23 = (697 + 3…\")"
+    ],
+    "cost_usd": 0.004092,
+    "id": "reasoning/claude-opus-5-5/edit-MOVE_CACHE_MARKERS-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "MOVE_CACHE_MARKERS add cache_control on earlier block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 678,
+      "Output": 69,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=72 sig=868)",
+      "text(\"The key is **theta**, and the lookup returned **41**.\\n\\n41 × 17 + 3 = 697 + 3 = …\")"
+    ],
+    "cost_usd": 0.005044,
+    "id": "reasoning/claude-opus-5-5/edit-ADD_DEFERRED_TOOL-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "ADD_DEFERRED_TOOL add defer_loading tool",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 771,
+      "Output": 98,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "tool_use(lookup map[key:beta])"
+    ],
+    "cost_usd": 0.004132,
+    "id": "reasoning/claude-opus-5-5/R5-prior-turn-reasoning-replayed",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R5 earlier-turn reasoning replayed after new user turn",
+    "status": 200,
+    "stop_reason": "tool_use",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 793,
+      "Output": 48,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "count/claude-opus-5-5/R5-replayed",
+    "model": "claude-opus-5-5",
+    "note": "count_tokens=793 billed_input_total=793 delta=0",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "tool_use(lookup map[key:beta])"
+    ],
+    "cost_usd": 0.0037,
+    "id": "reasoning/claude-opus-5-5/R5-prior-turn-reasoning-stripped",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "R5 earlier-turn reasoning stripped after new user turn",
+    "status": 200,
+    "stop_reason": "tool_use",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 685,
+      "Output": 48,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "reasoning/claude-opus-5-5/R5-compare",
+    "model": "claude-opus-5-5",
+    "note": "billed input replayed=793 stripped=685 delta=108 (thinking blocks replayed: 2)",
+    "question": "",
+    "status": 0,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=78 sig=864)",
+      "text(\"The value for \\\"beta\\\" is 7.\\n\\n7 × 17 + 3 = 119 + 3 = 122; 122 mod 23 = 122 − 11…\")"
+    ],
+    "cost_usd": 0.004592,
+    "id": "reasoning/claude-opus-5-5/edit-DROP_LEADING_REASONING-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "DROP_LEADING_REASONING remove oldest thinking only",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 773,
+      "Output": 75,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 4\")"
+    ],
+    "cost_usd": 0.00177,
+    "id": "reasoning/claude-opus-5-5/model-switch-to-claude-sonnet-5",
+    "input_transformations": [
+      "[{\"type\":\"thinking_dropped\",\"path\":\"messages.1.content.0\",\"reason\":\"model_binding_mismatch\"}]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "model binding: replay blocks on another model",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 670,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "cache/claude-opus-5-5/C1-calibration",
+    "model": "claude-opus-5-5",
+    "note": "count_tokens: request without system=18, system(0 lines)=15, 32.10 tokens/line",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0.00118,
+    "id": "cache/claude-opus-5-5/C1-prefix-256",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~256 tokens",
+    "status": 200,
+    "stop_reason": "refusal",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 295,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.005689,
+    "id": "cache/claude-opus-5-5/C1-prefix-1072",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~1072 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 1109,
+      "Input": 16,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.003524,
+    "id": "cache/claude-opus-5-5/C1-prefix-664",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~664 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 676,
+      "Input": 16,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.002116,
+    "id": "cache/claude-opus-5-5/C1-prefix-460",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~460 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 509,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.002994,
+    "id": "cache/claude-opus-5-5/C1-prefix-562",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~562 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 570,
+      "Input": 16,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.002799,
+    "id": "cache/claude-opus-5-5/C1-prefix-511",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~511 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 531,
+      "Input": 16,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.002188,
+    "id": "cache/claude-opus-5-5/C1-prefix-485",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~485 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 527,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.002164,
+    "id": "cache/claude-opus-5-5/C1-prefix-498",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~498 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 521,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.002729,
+    "id": "cache/claude-opus-5-5/C1-prefix-504",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~504 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 517,
+      "Input": 16,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.002188,
+    "id": "cache/claude-opus-5-5/C1-prefix-501",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~501 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 527,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "cache/claude-opus-5-5/C1-bracket",
+    "model": "claude-opus-5-5",
+    "note": "largest uncached request: billed input 527; smallest cached: billed input 533 (cache write 517, uncached tail 16); documented minimum 512",
+    "question": "",
+    "status": 0,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.0002474,
+    "id": "cache/claude-opus-5-5/C2-identical-repeat",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C2 identical prefix sent twice",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 517,
+      "CacheWrite": 0,
+      "Input": 16,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "count/claude-opus-5-5/C2",
+    "model": "claude-opus-5-5",
+    "note": "count_tokens=533 billed_input_total=533 delta=0",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=0 sig=880)",
+      "text(\"I've got it. Notebook **20260926T130130-\")"
+    ],
+    "cost_usd": 0.006421,
+    "id": "cache/claude-opus-5-5/C3-1-write",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C3 first request writes the conversation prefix (auto caching)",
+    "status": 200,
+    "stop_reason": "max_tokens",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 1025,
+      "Input": 4,
+      "Output": 64,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=0 sig=736)",
+      "text(\"**31**\")"
+    ],
+    "cost_usd": 0.000801,
+    "id": "cache/claude-opus-5-5/C3-2-append",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C3 append-only continuation reads the earlier prefix",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 1025,
+      "CacheWrite": 24,
+      "Input": 4,
+      "Output": 23,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=0 sig=736)",
+      "text(\"31\")"
+    ],
+    "cost_usd": 0.005686,
+    "id": "cache/claude-opus-5-5/C3-3-edit-early",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C3 edit the first message; cache read expected to drop",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 1050,
+      "Input": 4,
+      "Output": 21,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=0 sig=740)",
+      "text(\"31\")"
+    ],
+    "cost_usd": 0.0007128000000000001,
+    "id": "cache/claude-opus-5-5/C3-4-append-system",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C3 append a mid-conversation system message after C3-2",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 1049,
+      "CacheWrite": 15,
+      "Input": 2,
+      "Output": 21,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.004456,
+    "id": "cache/claude-opus-5-5/C1-prefix-512-ttl1h",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "C1 system prefix target ~512 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 539,
+      "Input": 16,
+      "Output": 4,
+      "Write1h": 539
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-09-04"
+    ],
+    "blocks": [
+      "compaction(content=647 encrypted=0 sig=1736)"
+    ],
+    "cost_usd": 0.009192,
+    "id": "compaction/claude-opus-5-5/K1-on-demand-summarize",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "K1 on-demand compaction with custom instructions",
+    "status": 200,
+    "stop_reason": "compaction",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 828,
+      "Iterations": "[{\"input_tokens\":828,\"output_tokens\":294,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"type\":\"compaction\"}]",
+      "Output": 294,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-09-04"
+    ],
+    "blocks": [
+      "thinking(text=269 sig=1144)",
+      "text(\"The lookup for \\\"theta\\\" returned **41 (0x29)**, and the final result is **10 (0xA…\")"
+    ],
+    "cost_usd": 0.007508,
+    "id": "compaction/claude-opus-5-5/K2-adopt-restore-user",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "K2 adopt block; restoration as user text before next inference",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 762,
+      "Iterations": "[{\"input_tokens\":762,\"output_tokens\":223,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}]",
+      "Output": 223,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-09-04"
+    ],
+    "blocks": [
+      "thinking(text=196 sig=1236)",
+      "text(\"The lookup for \\\"theta\\\" returned **41 (0x29)**, and the final result is **10 (0xA…\")"
+    ],
+    "cost_usd": 0.007428,
+    "id": "compaction/claude-opus-5-5/K2-adopt-restore-system",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "K2 adopt block; restoration as appended system message",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 762,
+      "Iterations": "[{\"input_tokens\":762,\"output_tokens\":219,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}]",
+      "Output": 219,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-09-04"
+    ],
+    "cost_usd": 0,
+    "error": "invalid_request_error: messages.0.content.0: `compaction` block `content` does not match its `signature` details={\"error_code\":\"compaction_content_mismatch\"}",
+    "id": "compaction/claude-opus-5-5/K3-tamper-summary",
+    "model": "claude-opus-5-5",
+    "question": "K3 edit compaction summary text before resending",
+    "status": 400,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-09-04",
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=35 sig=888)",
+      "text(\"The lookup for \\\"beta\\\" returned 7, and the formula gives **7**.\\n\\n(7 × 17 + 3) mo…\")"
+    ],
+    "cost_usd": 0.005352,
+    "id": "compaction/claude-opus-5-5/K-kept-turns-thinking-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "kept turns after on-demand block: thinking still valid?",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 773,
+      "Iterations": "[{\"input_tokens\":773,\"output_tokens\":113,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}]",
+      "Output": 113,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-01-12"
+    ],
+    "cost_usd": 0,
+    "error": "invalid_request_error: context_management.edits.0.compact_20260112: trigger.value must be at least 50000",
+    "id": "compaction/claude-opus-5-5/T1-threshold-trigger-1000",
+    "model": "claude-opus-5-5",
+    "question": "threshold trigger below documented 50000 minimum",
+    "status": 400,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-01-12"
+    ],
+    "blocks": [
+      "compaction(content=942 encrypted=0 sig=0)"
+    ],
+    "cost_usd": 0.219736,
+    "id": "compaction/claude-opus-5-5/T2-threshold-pause",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "threshold compaction with pause_after_compaction",
+    "status": 200,
+    "stop_reason": "compaction",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 51924,
+      "Iterations": "[{\"input_tokens\":51924,\"output_tokens\":602,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"type\":\"compaction\"}]",
+      "Output": 602,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-01-12"
+    ],
+    "blocks": [
+      "thinking(text=319 sig=920)",
+      "text(\"**62** (0x3E)\\n\\nBed letters run A to Z in order of note number, so there are 61 f…\")"
+    ],
+    "cost_usd": 0.006236,
+    "id": "compaction/claude-opus-5-5/T3-threshold-continue-restored",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "after paused threshold compaction: restoration appended, then inference",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 919,
+      "Iterations": "[{\"input_tokens\":919,\"output_tokens\":128,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}]",
+      "Output": 128,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "context-management-2025-06-27",
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=97 sig=864)",
+      "text(\"The value for \\\"beta\\\" is 7.\\n\\n7 × 17 + 3 = 119 + 3 = 122; 122 mod 23 = 122 − 11…\")"
+    ],
+    "cost_usd": 0.004948,
+    "id": "compaction/claude-opus-5-5/CE1-clear-tool-uses",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "context editing: clear old tool results (trigger 100, keep 1)",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 847,
+      "Output": 78,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "compaction/claude-opus-5-5/CE1-applied-edits",
+    "model": "claude-opus-5-5",
+    "note": "{\"applied_edits\":[]}",
+    "question": "",
+    "status": 0,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "context-management-2025-06-27",
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=73 sig=880)",
+      "text(\"The key \\\"beta\\\" has the value 7.\\n\\n7 × 17 + 3 = 119 + 3 = 122; 122 mod 23 = 122 \\xe2…\")"
+    ],
+    "cost_usd": 0.004688,
+    "id": "compaction/claude-opus-5-5/CE2-clear-thinking",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "context editing: clear thinking except last turn",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 737,
+      "Output": 87,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "compaction/claude-opus-5-5/CE2-applied-edits",
+    "model": "claude-opus-5-5",
+    "note": "{\"applied_edits\":[{\"type\":\"clear_thinking_20251015\",\"cleared_thinking_turns\":2,\"cleared_input_tokens\":44}]}",
+    "question": "",
+    "status": 0,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=117 sig=528)",
+      "tool_use(lookup map[key:theta])"
+    ],
+    "cost_usd": 0.002558,
+    "id": "reasoning/claude-sonnet-5/A-tool-call-0",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "setup: first tool round with thinking",
+    "status": 200,
+    "stop_reason": "tool_use",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 564,
+      "Output": 143,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "count/claude-sonnet-5/A",
+    "model": "claude-sonnet-5",
+    "note": "count_tokens=564 billed_input_total=564 delta=0",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 700 - 30*23(690) = 10\\n\\n**…\")"
+    ],
+    "cost_usd": 0.002054,
+    "id": "reasoning/claude-sonnet-5/R1-replay-unchanged",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R1 replay prior reasoning unchanged",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 712,
+      "Output": 63,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "count/claude-sonnet-5/R1",
+    "model": "claude-sonnet-5",
+    "note": "count_tokens=712 billed_input_total=712 delta=0",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 22\")"
+    ],
+    "cost_usd": 0.001854,
+    "id": "reasoning/claude-sonnet-5/R1-replay-unchanged-header",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R1 replay unchanged; binding header, field unset",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 712,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "thinking(text=177 sig=520)",
+      "text(\"Key: theta (8th Greek letter, since there are 8 primes below 20) → value = 41\\n…\")"
+    ],
+    "cost_usd": 0.002856,
+    "id": "reasoning/claude-sonnet-5/R2-drop-reasoning",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R2 drop open-round reasoning (DROP_ALL_REASONING)",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 618,
+      "Output": 162,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=149 sig=520)",
+      "text(\"Number of primes below 20 = 8 (2,3,5,7,11,13,17,19) → 8th Greek letter = theta…\")"
+    ],
+    "cost_usd": 0.003066,
+    "id": "reasoning/claude-sonnet-5/R2-drop-reasoning-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R2 drop open-round reasoning under drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 618,
+      "Output": 183,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 8\")"
+    ],
+    "cost_usd": 0.001854,
+    "id": "reasoning/claude-sonnet-5/R3-modify-thinking-text",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R3 modify summarized thinking text",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 712,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "error": "invalid_request_error: messages.1.content.0: Invalid `signature` in `thinking` block",
+    "id": "reasoning/claude-sonnet-5/R3-tamper-signature",
+    "model": "claude-sonnet-5",
+    "question": "R3 modify signature",
+    "status": 400,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "cost_usd": 0,
+    "error": "invalid_request_error: messages.1.content.0: Invalid `signature` in `thinking` block",
+    "id": "reasoning/claude-sonnet-5/R3-tamper-signature-dropblock",
+    "model": "claude-sonnet-5",
+    "question": "R3 modify signature under drop_block",
+    "status": 400,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 8\")"
+    ],
+    "cost_usd": 0.001864,
+    "id": "reasoning/claude-sonnet-5/R4-rewrite-u0-noheader",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R4 edit earlier user message; no header (account enforcement default)",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 717,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 8\")"
+    ],
+    "cost_usd": 0.001864,
+    "id": "reasoning/claude-sonnet-5/R4-rewrite-u0-header-unset",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R4 edit earlier user message; header, field unset (monitor)",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 717,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 8\")"
+    ],
+    "cost_usd": 0.001864,
+    "id": "reasoning/claude-sonnet-5/R4-rewrite-u0-error",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R4 edit earlier user message; prefix_mismatch_behavior=error",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 717,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 5\")"
+    ],
+    "cost_usd": 0.001864,
+    "id": "reasoning/claude-sonnet-5/R4-rewrite-u0-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R4 edit earlier user message; prefix_mismatch_behavior=drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 717,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 10\")"
+    ],
+    "cost_usd": 0.001866,
+    "id": "reasoning/claude-sonnet-5/R4-rewrite-system-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R4 edit top-level system prompt; drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 718,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 700 - 30*23(690) = 10\\n\\n**…\")"
+    ],
+    "cost_usd": 0.002072,
+    "id": "reasoning/claude-sonnet-5/R4-rewrite-tools-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R4 edit a tool description; drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 721,
+      "Output": 63,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 4\")"
+    ],
+    "cost_usd": 0.001854,
+    "id": "reasoning/claude-sonnet-5/edit-APPEND-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "APPEND baseline under drop_block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 712,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 8.\")"
+    ],
+    "cost_usd": 0.001898,
+    "id": "reasoning/claude-sonnet-5/edit-APPEND_SYSTEM-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "APPEND_SYSTEM mid-conversation system message",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 729,
+      "Output": 44,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 700 - 30*23(690) = 10\\n\\n**…\")"
+    ],
+    "cost_usd": 0.002054,
+    "id": "reasoning/claude-sonnet-5/edit-MOVE_CACHE_MARKERS-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "MOVE_CACHE_MARKERS add cache_control on earlier block",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 712,
+      "Output": 63,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(41 * 17 + 3) mod 23 = (697 + 3) mod 23 = 700 mod 23 = 8\")"
+    ],
+    "cost_usd": 0.00204,
+    "id": "reasoning/claude-sonnet-5/edit-ADD_DEFERRED_TOOL-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "ADD_DEFERRED_TOOL add defer_loading tool",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 805,
+      "Output": 43,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "thinking(text=44 sig=356)",
+      "tool_use(lookup map[key:beta])"
+    ],
+    "cost_usd": 0.00217,
+    "id": "reasoning/claude-sonnet-5/R5-prior-turn-reasoning-replayed",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R5 earlier-turn reasoning replayed after new user turn",
+    "status": 200,
+    "stop_reason": "tool_use",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 795,
+      "Output": 58,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "count/claude-sonnet-5/R5-replayed",
+    "model": "claude-sonnet-5",
+    "note": "count_tokens=795 billed_input_total=795 delta=0",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "tool_use(lookup map[key:beta])"
+    ],
+    "cost_usd": 0.001882,
+    "id": "reasoning/claude-sonnet-5/R5-prior-turn-reasoning-stripped",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "R5 earlier-turn reasoning stripped after new user turn",
+    "status": 200,
+    "stop_reason": "tool_use",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 701,
+      "Output": 48,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "reasoning/claude-sonnet-5/R5-compare",
+    "model": "claude-sonnet-5",
+    "note": "billed input replayed=795 stripped=701 delta=94 (thinking blocks replayed: 1)",
+    "question": "",
+    "status": 0,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "thinking-binding-controls-2026-08-01"
+    ],
+    "blocks": [
+      "text(\"(7 * 17 + 3) mod 23 = (119 + 3) mod 23 = 122 mod 23 = 122 - 5*23(115) = 7\\n\\n**Res…\")"
+    ],
+    "cost_usd": 0.002158,
+    "id": "reasoning/claude-sonnet-5/edit-DROP_LEADING_REASONING-dropblock",
+    "input_transformations": [
+      "[]"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "DROP_LEADING_REASONING remove oldest thinking only",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 764,
+      "Output": 63,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "cache/claude-sonnet-5/C1-calibration",
+    "model": "claude-sonnet-5",
+    "note": "count_tokens: request without system=16, system(0 lines)=15, 32.10 tokens/line",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.001134,
+    "id": "cache/claude-sonnet-5/C1-prefix-512",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~512 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 547,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.005393,
+    "id": "cache/claude-sonnet-5/C1-prefix-2096",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~2096 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 2130,
+      "Input": 14,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.0033555,
+    "id": "cache/claude-sonnet-5/C1-prefix-1304",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~1304 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 1315,
+      "Input": 14,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.001952,
+    "id": "cache/claude-sonnet-5/C1-prefix-908",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~908 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 956,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.0029305,
+    "id": "cache/claude-sonnet-5/C1-prefix-1106",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~1106 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 1145,
+      "Input": 14,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.0026755,
+    "id": "cache/claude-sonnet-5/C1-prefix-1007",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~1007 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 1043,
+      "Input": 14,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.00202,
+    "id": "cache/claude-sonnet-5/C1-prefix-957",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~957 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 990,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.002052,
+    "id": "cache/claude-sonnet-5/C1-prefix-982",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~982 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 1006,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.0021,
+    "id": "cache/claude-sonnet-5/C1-prefix-994",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~994 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 1030,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.0026405,
+    "id": "cache/claude-sonnet-5/C1-prefix-1000",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~1000 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 1029,
+      "Input": 14,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.002112,
+    "id": "cache/claude-sonnet-5/C1-prefix-997",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~997 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 1036,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "cache/claude-sonnet-5/C1-bracket",
+    "model": "claude-sonnet-5",
+    "note": "largest uncached request: billed input 1036; smallest cached: billed input 1043 (cache write 1029, uncached tail 14); documented minimum 1024",
+    "question": "",
+    "status": 0,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.0002738,
+    "id": "cache/claude-sonnet-5/C2-identical-repeat",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C2 identical prefix sent twice",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 1029,
+      "CacheWrite": 0,
+      "Input": 14,
+      "Output": 4,
+      "Write1h": 0
+    }
+  },
+  {
+    "cost_usd": 0,
+    "id": "count/claude-sonnet-5/C2",
+    "model": "claude-sonnet-5",
+    "note": "count_tokens=1043 billed_input_total=1043 delta=0",
+    "question": "",
+    "status": 200,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"I've reviewed and stored the details of Garden notebook 20260926T130313-C3, cont…\")"
+    ],
+    "cost_usd": 0.005774,
+    "id": "cache/claude-sonnet-5/C3-1-write",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C3 first request writes the conversation prefix (auto caching)",
+    "status": 200,
+    "stop_reason": "max_tokens",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 2052,
+      "Input": 2,
+      "Output": 64,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"63\")"
+    ],
+    "cost_usd": 0.0005044,
+    "id": "cache/claude-sonnet-5/C3-2-append",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C3 append-only continuation reads the earlier prefix",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 2052,
+      "CacheWrite": 24,
+      "Input": 2,
+      "Output": 3,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"There are **63** garden notes (numbered 0000 through 0062).\")"
+    ],
+    "cost_usd": 0.0054365,
+    "id": "cache/claude-sonnet-5/C3-3-edit-early",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C3 edit the first message; cache read expected to drop",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 2077,
+      "Input": 2,
+      "Output": 24,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"63\")"
+    ],
+    "cost_usd": 0.00048420000000000006,
+    "id": "cache/claude-sonnet-5/C3-4-append-system",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C3 append a mid-conversation system message after C3-2",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 2076,
+      "CacheWrite": 14,
+      "Input": 2,
+      "Output": 3,
+      "Write1h": 0
+    }
+  },
+  {
+    "blocks": [
+      "text(\"OK\")"
+    ],
+    "cost_usd": 0.004272,
+    "id": "cache/claude-sonnet-5/C1-prefix-1008-ttl1h",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "C1 system prefix target ~1008 tokens",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 1051,
+      "Input": 14,
+      "Output": 4,
+      "Write1h": 1051
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-09-04"
+    ],
+    "blocks": [
+      "compaction(content=533 encrypted=0 sig=636)"
+    ],
+    "cost_usd": 0.003964,
+    "id": "compaction/claude-sonnet-5/K1-on-demand-summarize",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-sonnet-5",
+    "question": "K1 on-demand compaction with custom instructions",
+    "status": 200,
+    "stop_reason": "compaction",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 832,
+      "Iterations": "[{\"input_tokens\":832,\"output_tokens\":230,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"type\":\"compaction\"}]",
+      "Output": 230,
+      "Write1h": 0
+    }
+  }
+]

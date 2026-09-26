@@ -1,0 +1,66 @@
+{
+  "betas": [],
+  "model": "claude-sonnet-5",
+  "probe": "cache/claude-sonnet-5/C1-prefix-512",
+  "question": "C1 system prefix target ~512 tokens",
+  "request": {
+    "max_tokens": 64,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Reply with the single word OK.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "effort": "low"
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "Garden notebook 20260926T130313-512.\nGarden note 0000: row 0 has 0 tulips and 0 daisies in bed A.\nGarden note 0001: row 37 has 13 tulips and 7 daisies in bed B.\nGarden note 0002: row 74 has 26 tulips and 14 daisies in bed C.\nGarden note 0003: row 10 has 39 tulips and 21 daisies in bed D.\nGarden note 0004: row 47 has 52 tulips and 28 daisies in bed E.\nGarden note 0005: row 84 has 65 tulips and 35 daisies in bed F.\nGarden note 0006: row 20 has 78 tulips and 42 daisies in bed G.\nGarden note 0007: row 57 has 91 tulips and 49 daisies in bed H.\nGarden note 0008: row 94 has 7 tulips and 3 daisies in bed I.\nGarden note 0009: row 30 has 20 tulips and 10 daisies in bed J.\nGarden note 0010: row 67 has 33 tulips and 17 daisies in bed K.\nGarden note 0011: row 3 has 46 tulips and 24 daisies in bed L.\nGarden note 0012: row 40 has 59 tulips and 31 daisies in bed M.\nGarden note 0013: row 77 has 72 tulips and 38 daisies in bed N.\nGarden note 0014: row 13 has 85 tulips and 45 daisies in bed O.\n rose rose rose rose rose rose rose rose rose rose rose rose rose rose rose rose",
+        "type": "text"
+      }
+    ]
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "text": "OK",
+        "type": "text"
+      }
+    ],
+    "diagnostics": null,
+    "id": "msg_<redacted>",
+    "model": "claude-sonnet-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 547,
+      "output_tokens": 4,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "service_tier": "standard"
+    }
+  },
+  "status": 200
+}

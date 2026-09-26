@@ -28,3 +28,11 @@ jobs:
         run: go vet ./...
       - name: test
         run: go test -race -count=1 ./...
+      - name: probe module vet and test
+        # The nested module is outside the root module's ./... (SEC-1.7). Its
+        # tests are offline; empty keys ensure nothing can reach a provider API.
+        working-directory: probes/descriptor
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+        run: go vet ./... && go test -race -count=1 ./...

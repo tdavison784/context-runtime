@@ -1,0 +1,46 @@
+[
+  {
+    "betas": [
+      "compact-2026-01-12"
+    ],
+    "cost_usd": 0,
+    "error": "invalid_request_error: messages.1.content.0: `compaction` blocks require a `compact_20260112` strategy in `context_management.edits`.",
+    "id": "compaction/claude-opus-5-5/T4a-threshold-block-without-strategy",
+    "model": "claude-opus-5-5",
+    "question": "resend threshold block without compact_20260112 edit",
+    "status": 400,
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 0,
+      "Output": 0,
+      "Write1h": 0
+    }
+  },
+  {
+    "betas": [
+      "compact-2026-01-12"
+    ],
+    "blocks": [
+      "thinking(text=166 sig=1116)",
+      "text(\"Sixty-two\")"
+    ],
+    "cost_usd": 0.005632,
+    "id": "compaction/claude-opus-5-5/T4-threshold-block-edited",
+    "input_transformations": [
+      "<absent>"
+    ],
+    "model": "claude-opus-5-5",
+    "question": "K3 edit the unsigned threshold compaction summary and resend",
+    "status": 200,
+    "stop_reason": "end_turn",
+    "usage": {
+      "CacheRead": 0,
+      "CacheWrite": 0,
+      "Input": 888,
+      "Iterations": "[{\"input_tokens\":888,\"output_tokens\":104,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}]",
+      "Output": 104,
+      "Write1h": 0
+    }
+  }
+]
