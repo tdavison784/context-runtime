@@ -119,7 +119,8 @@ const maxItemIDBytes = 256
 // silently, so the event learns nothing about references it cannot see.
 // The references are paged from the store's exact-key index, filtered to
 // the source actor inside the query (F1, SEC-1.1); linking stops, without
-// failing the event, once the event's relationship budget is spent (D17).
+// failing the event, once the event's reference-link budget
+// (MaxReferenceLinks, D17, ruling 1) is spent.
 func (r *run) linkPendingReferences(si int, actor domain.Principal, target domain.ContextItem) error {
 	if target.Source == nil {
 		return nil
