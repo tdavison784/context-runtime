@@ -396,3 +396,18 @@ func TestSPEC112EvidenceBoundToExecution(t *testing.T) {
 		t.Errorf("the run's own evidence: %v", err)
 	}
 }
+
+// SEC-1.7/DUR-1.2 (G2, obligation half): path-content currency reads only
+// the updates after the path's content was recorded, so earlier history
+// beyond the work bound cannot wedge file_read evaluation.
+func TestSEC17PathCurrencyIgnoresEarlierHistory(t *testing.T) {
+	f := newEvalFixture(t)
+	for i := range 70 {
+		f.resourceReport(t, fmt.Sprintf("old%d", i), false, false, []string{"docs/b.md"})
+	}
+	ref := f.fileObligation(t, "12")
+	f.resourceReport(t, "W-now", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	if err := f.assertPath(t, ref, f.r.auth, "H1"); err != nil {
+		t.Fatalf("path currency wedged by earlier update history: %v", err)
+	}
+}

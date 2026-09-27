@@ -121,6 +121,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"DUR12ReevaluateScalesWithLiveState", TestDUR12ReevaluateScalesWithLiveState, true},
 		{"DUR112OneBudgetPerTransaction", TestDUR112OneBudgetPerTransaction, false},
 		{"SPEC112EvidenceBoundToExecution", TestSPEC112EvidenceBoundToExecution, true},
+		{"SEC17PathCurrencyIgnoresEarlierHistory", TestSEC17PathCurrencyIgnoresEarlierHistory, false},
 		{"ObservationStateChain", TestObservationStateChain, true},
 		{"ObservationStateGating", TestObservationStateGating, true},
 		{"MatcherGrantT06", TestMatcherGrantT06, true},
