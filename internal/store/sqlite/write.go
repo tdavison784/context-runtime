@@ -469,6 +469,9 @@ func (t *transaction) RevokeGrant(id string, event domain.LifecycleEvent) (domai
 		if err := t.put("grant", id, 0, v, true); err != nil {
 			return err
 		}
+		if err := t.reindexRevokedGrant(v); err != nil {
+			return err
+		}
 		return t.AppendLifecycleEvent(event)
 	})
 	return v.Clone(), err

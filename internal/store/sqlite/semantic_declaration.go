@@ -148,8 +148,8 @@ func typedGrantKey(authorizationKey string) string {
 }
 func legacyGrantKey(itemID string) string { return "legacy-item:" + hex.EncodeToString([]byte(itemID)) }
 
-// indexGrant adds g under every exact target it names.
-func (t *transaction) indexGrant(g domain.MutationGrant) error {
+// grantKeys are g's distinct lookup_grant_target keys.
+func grantKeys(g domain.MutationGrant) []string {
 	var keys []string
 	for _, target := range g.Targets {
 		keys = append(keys, typedGrantKey(target.AuthorizationKey))
@@ -158,9 +158,27 @@ func (t *transaction) indexGrant(g domain.MutationGrant) error {
 		keys = append(keys, legacyGrantKey(id))
 	}
 	slices.Sort(keys)
-	for _, k := range slices.Compact(keys) {
-		if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_grant_target(session_id,action,target_key,issued_seq,grant_id) VALUES(?,?,?,?,?)",
-			t.session, string(g.Action), k, g.IssuedSeq, g.ID); err != nil {
+	return slices.Compact(keys)
+}
+
+// indexGrant adds g under every exact target it names, with its liveness
+// columns (migration 0031).
+func (t *transaction) indexGrant(g domain.MutationGrant) error {
+	for _, k := range grantKeys(g) {
+		if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_grant_target(session_id,action,target_key,issued_seq,grant_id,revoked_seq,expires_at_seq) VALUES(?,?,?,?,?,?,?)",
+			t.session, string(g.Action), k, g.IssuedSeq, g.ID, g.RevokedSeq, g.ExpiresAtSeq); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reindexRevokedGrant records g's revocation on each of its index rows,
+// addressed by full primary key.
+func (t *transaction) reindexRevokedGrant(g domain.MutationGrant) error {
+	for _, k := range grantKeys(g) {
+		if _, err := t.conn.ExecContext(t.ctx, "UPDATE lookup_grant_target SET revoked_seq=? WHERE session_id=? AND action=? AND target_key=? AND issued_seq=? AND grant_id=?",
+			g.RevokedSeq, t.session, string(g.Action), k, g.IssuedSeq, g.ID); err != nil {
 			return err
 		}
 	}
@@ -170,6 +188,18 @@ func (t *transaction) indexGrant(g domain.MutationGrant) error {
 // GrantsFor returns every grant naming action on exactly target, in
 // (IssuedSeq, ID) order, or store.ErrLimitExceeded beyond limit.
 func (s semRead) GrantsFor(action domain.Action, target domain.GrantTarget, limit int) ([]domain.MutationGrant, error) {
+	return s.grantsFor(action, target, limit, "", nil)
+}
+
+// LiveGrantsFor is GrantsFor over the grants in force at seq only, so
+// revoked and expired history never counts toward limit (G2, SEC-1.5,
+// DUR-1.4). The predicate is store.GrantLiveAt over migration 0031's
+// columns.
+func (s semRead) LiveGrantsFor(action domain.Action, target domain.GrantTarget, seq uint64, limit int) ([]domain.MutationGrant, error) {
+	return s.grantsFor(action, target, limit, " AND issued_seq<=? AND (revoked_seq=0 OR revoked_seq>?) AND (expires_at_seq=0 OR expires_at_seq>=?)", []any{seq, seq, seq})
+}
+
+func (s semRead) grantsFor(action domain.Action, target domain.GrantTarget, limit int, live string, liveArgs []any) ([]domain.MutationGrant, error) {
 	t := s.t
 	if limit <= 0 {
 		return nil, invalid("grant lookup limit must be positive")
@@ -186,15 +216,17 @@ func (s semRead) GrantsFor(action domain.Action, target domain.GrantTarget, limi
 	} else {
 		keys = append(keys, keys[0])
 	}
-	rows, err := t.query("SELECT grant_id FROM lookup_grant_target WHERE session_id=? AND action=? AND target_key IN (?,?) ORDER BY issued_seq, grant_id LIMIT ?",
-		t.session, string(action), keys[0], keys[1], limit+1)
+	args := append([]any{t.session, string(action), keys[0], keys[1]}, liveArgs...)
+	rows, err := t.query("SELECT DISTINCT grant_id, issued_seq FROM lookup_grant_target WHERE session_id=? AND action=? AND target_key IN (?,?)"+live+" ORDER BY issued_seq, grant_id LIMIT ?",
+		append(args, limit+1)...)
 	if err != nil {
 		return nil, err
 	}
 	var ids []string
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var issued uint64
+		if err := rows.Scan(&id, &issued); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -293,9 +325,4 @@ func (s semRead) SemanticChanges(viewer domain.Principal, target domain.GrantTar
 	return pageQuery(s.t, "semantic_change", "f_target_authorization_key=?", []any{target.AuthorizationKey}, "f_seq", p, false, func(c domain.SemanticChange) (bool, error) {
 		return c.Access.Permits(viewer), nil
 	})
-}
-
-// LiveGrantsFor implements store.DeclarationReader.
-func (s semRead) LiveGrantsFor(action domain.Action, target domain.GrantTarget, seq uint64, limit int) ([]domain.MutationGrant, error) {
-	return nil, domain.ErrUnsupportedSchema
 }

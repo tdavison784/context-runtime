@@ -50,3 +50,11 @@ func DistinctGrantTargets(g domain.MutationGrant) error {
 	}
 	return nil
 }
+
+// GrantLiveAt reports whether g is in force at seq: issued by it, not
+// expired before it, and not revoked at or before it. It is the rule
+// domain.AuthorizeMutation applies, so a live-only read never drops a
+// grant authorization would honour.
+func GrantLiveAt(g domain.MutationGrant, seq uint64) bool {
+	return g.IssuedSeq <= seq && (g.ExpiresAtSeq == 0 || seq <= g.ExpiresAtSeq) && (g.RevokedSeq == 0 || seq < g.RevokedSeq)
+}

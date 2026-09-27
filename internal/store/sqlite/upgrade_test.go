@@ -562,6 +562,12 @@ func TestUpgradeGrantTargetIndex(t *testing.T) {
 	l.insert("grant", item, nil)
 	l.insert("grant", obl, nil)
 	l.insert("grant", dup, nil)
+	// A revoked Phase 2 grant is backfilled with its revocation (0031), so
+	// it never counts against a live grant on the same target (G2).
+	revoked := storetest.NewGrant("s", "g-revoked", 4, "i3")
+	revoked.RevokedSeq = 5
+	l.insert("grant", revoked, nil)
+	l.insert("grant", storetest.NewGrant("s", "g-live", 6, "i3"), nil)
 	s := l.upgrade()
 	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
 		r, err := store.ReadSemantic(tx)
@@ -575,6 +581,14 @@ func TestUpgradeGrantTargetIndex(t *testing.T) {
 		gs, err = r.GrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i2"), 1)
 		if err != nil || len(gs) != 1 || gs[0].ID != "g-dup" {
 			t.Errorf("GrantsFor(resolve, i2) = %v, %v; want the duplicated legacy grant once", gs, err)
+		}
+		gs, err = r.LiveGrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i3"), 10, 1)
+		if err != nil || len(gs) != 1 || gs[0].ID != "g-live" {
+			t.Errorf("LiveGrantsFor(resolve, i3, 10) = %v, %v; want only the live grant", gs, err)
+		}
+		gs, err = r.LiveGrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i3"), 4, 5)
+		if err != nil || len(gs) != 1 || gs[0].ID != "g-revoked" {
+			t.Errorf("LiveGrantsFor(resolve, i3, 4) = %v, %v; want the grant before its revocation", gs, err)
 		}
 		gs, err = r.GrantsFor(domain.ActionAssertObligation, domain.ObligationGrantTarget("s", "o1", 1), 5)
 		if err != nil || len(gs) != 0 {
