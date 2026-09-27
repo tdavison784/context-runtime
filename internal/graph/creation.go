@@ -62,7 +62,7 @@ func DeclareCreation(tx store.Tx, item domain.ContextItem, accepted CreationAcce
 		if err != nil {
 			return result, err
 		}
-		if id == stored.ID || source.SessionID != stored.SessionID || source.Role == domain.RoleTranscript || !stored.Access.Within(source.Access) {
+		if id == stored.ID || source.SessionID != stored.SessionID || !source.QualifiesAsEvidenceSupport() || !stored.Access.Within(source.Access) {
 			return result, domain.ErrInvalidAuthorityPromotion
 		}
 	}
