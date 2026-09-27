@@ -68,7 +68,7 @@ func TestAgentRetrievalAdmitsOnceAndRegistersTheProjection(t *testing.T) {
 		t.Fatalf("replay: %+v, %v", again, err)
 	}
 	update(t, st, func(tx store.Tx) error {
-		if tx.LastSeq() != before+1 { // only the replay's own operation sequence
+		if tx.LastSeq() != before { // a replay consumes no sequence (FR-ING-006)
 			t.Fatalf("replay wrote records: %d -> %d", before, tx.LastSeq())
 		}
 		return nil

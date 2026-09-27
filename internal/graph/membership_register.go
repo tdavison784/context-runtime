@@ -36,6 +36,7 @@ func (s *MembershipService) RegisterExchange(tx store.Tx, actor domain.Principal
 	if replay {
 		return receipt.Result.Records.Clone(), nil
 	}
+	seq = operationSeq(tx, seq)
 	if err = intent.Validate(); err != nil {
 		return result, err
 	}

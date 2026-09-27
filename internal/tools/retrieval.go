@@ -76,7 +76,7 @@ func (s *Service) RunRetrieval(ctx context.Context, st store.Store, dispatcher d
 	var result domain.ToolResult
 	err := st.Update(ctx, i.SessionID, func(tx store.Tx) error {
 		var err error
-		result, err = s.retrieval(tx, dispatcher, r, tx.NextSeq(), method)
+		result, err = s.retrieval(tx, dispatcher, r, 0, method)
 		return err
 	})
 	if err == nil {
