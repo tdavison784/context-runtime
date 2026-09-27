@@ -533,6 +533,70 @@ gate checklist (`phase3-decisions.md`):
 Serialized U delta/rebase, actual inherited-request removal, and rebase
 omission/order are explicitly Phase 5 and are not part of this gate.
 
+## Outstanding required tests (SPEC-1.23)
+
+P3-42 requires every decision above to map to its named required tests.
+PR #6 review round 1 (`r6-spec1.md`, SPEC-1.23) searched every package and
+found no real counterpart for the following required-test bullets; this ADR
+records the gap honestly here rather than implying complete coverage
+elsewhere in this document. Three are already being closed as part of a
+different finding's fix, cited below; the rest remain open and are not
+owned by this ADR's own package (`internal/obligation`) unless marked.
+
+- **P3-1** "TargetCall sequence reuse rejected" for Phase 3 record families
+  — closing alongside SPEC-1.4 (W2b: three SQLite row types gain
+  `SemanticSeq()`).
+- **P3-3** "old-key migration" (an agent updates its own pre-upgrade key) —
+  closing alongside SPEC-1.5 (W1: migration backfill or namespace fallback
+  for legacy `Namespace ""`).
+- **P3-4** "legacy unknown declaration fails closed" on the ingest path —
+  closing alongside SPEC-1.3 (W1: `SameDirective` must not fall through to
+  replacement when a declaration is unknown).
+- **P3-1** "Prepare/MarkSent stale after every new semantic record family" —
+  still only the Phase 2 `TestObligationChangeStalesPreview`; no Phase
+  3-record-family case exists (`internal/invocation`).
+- **P3-2** "failed attempt then valid retry" at the Phase 3 service level —
+  no test found in `internal/obligation`, `internal/tools`, or
+  `internal/lifecycle`.
+- **P3-3** "same textual key in all three namespaces" — OBSERVATION is
+  missing from the existing DIRECTIVE/AGENT_KEY case (`internal/domain`).
+- **P3-7** "B's task-visible transcript is not A's membership" — no test
+  found in `internal/graph`'s membership package.
+- **P3-15** "mode-conflicting retry" and "migration without invented
+  exemption/proof" — no test found in `internal/obligation`.
+- **P3-20** "no filesystem/network reads during replay" (only
+  `imports_test.go`'s package-import restriction exists, which is a weaker
+  guarantee) and "uncertain aliases invalidate conservatively" — no test
+  found in `internal/obligation`.
+- **P3-24** "same invocation with a different method/principal conflicts"
+  — no test found in `internal/tools`.
+- **P3-27** "cross-turn semantic summary versus raw leased copy" (the
+  `LeaseID` skip at `internal/tools/checkpoint.go`) — untested.
+- **P3-29** "source usage update does not expire [a lease]" — no test
+  found in `internal/retrieve` or `internal/policy`.
+- **P3-34** "malformed operation rollback includes turns" (existing
+  `TestOps_MissingHandlerFailsClosed` uses a SYSTEM event, which opens no
+  turn) and "semantic writes invalidate unsent previews" — no test found
+  in `internal/ingest`.
+- **P3-35** "mismatch/ambiguity cause boundaries" — no `DetailAccess`
+  assertion on a MISMATCH/AMBIGUOUS outcome specifically.
+- **P3-36** "after further mutations/restart" (`TestP336_ReplacementHistoryReconstructible`
+  never reopens the store) and "checkpoint never retires a requirement"
+  (`gate_t16_test.go` checks facts only, not a requirement) — both in
+  `internal/ingest`.
+- **P3-38** "expired lease releases only lease protection," "superseded
+  SYSTEM instruction collectible with proper actor" (pure matrix only, no
+  service-level case), and "no `LastUsedCall==0` heuristic" — no test found
+  in `internal/policy` or `internal/lifecycle` beyond the pure decision
+  matrix (`TestCollectDecisionMatrix`).
+- **P3-10** Promote/Demote "expired origin unchanged" and a CAS conflict —
+  no test found in `internal/lifecycle`.
+
+This list is not this ADR's package's obligation to close by itself; it is
+recorded so the Phase 3 gate's own claim of completeness is accurate. Adding
+each test, or recording an explicit ruling that a bullet is satisfied
+another way, closes this section.
+
 ## Residual risks and limits
 
 - **Accepted harness-trust limit.** An authorized but compromised resource
