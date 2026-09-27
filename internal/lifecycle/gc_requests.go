@@ -158,6 +158,10 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 	done, attempts := 0, 0
 	var failures []error
 	var after store.Cursor
+	if saved, ok := s.gcQueueCursors.Load(session); ok {
+		after = saved.(store.Cursor)
+	}
+	defer func() { s.gcQueueCursors.Store(session, after) }()
 	for pages := 0; attempts < max && pages < maxGCPagesPerCall; pages++ {
 		if err := ctx.Err(); err != nil {
 			return done, errors.Join(append(failures, err)...)
@@ -174,10 +178,10 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 			return done, errors.Join(append(failures, err)...)
 		}
 		for _, r := range page.Records {
-			after = store.Cursor{Seq: r.Seq, ID: r.ID}
 			if attempts == max {
-				break
+				return done, errors.Join(failures...)
 			}
+			after = store.Cursor{Seq: r.Seq, ID: r.ID}
 			if err := ctx.Err(); err != nil {
 				return done, errors.Join(append(failures, err)...)
 			}
@@ -212,6 +216,7 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 			}
 		}
 		if !page.More {
+			after = store.Cursor{} // wrap; previously skipped requests get another opportunity
 			break
 		}
 		if len(page.Records) == 0 {

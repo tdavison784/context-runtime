@@ -353,3 +353,70 @@ func TestJ5ConfigurationErrorsLeaveRequestsPending(t *testing.T) {
 		})
 	}
 }
+
+// J6 / XREV-3.3: terminal history is absent from pending pages; skipped
+// pending prefixes also cannot starve a runnable tail across repeated calls.
+func TestJ6QueuePrefixCannotHideRunnableTail(t *testing.T) {
+	for _, kind := range []string{"terminal", "declined", "disabled"} {
+		t.Run(kind, func(t *testing.T) {
+			eachStore(t, func(t *testing.T, db store.Store) {
+				pol := testPolicy()
+				pol.MaxPageSize = 1
+				if kind == "disabled" {
+					pol.GCTriggers = []domain.GCTrigger{domain.GCManual, domain.GCSupersession}
+				}
+				s, _ := New(db, pol)
+				seedEphemeral(t, db, 0, 0)
+				tail := ""
+				if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+					sem, err := store.Semantic(tx)
+					if err != nil {
+						return err
+					}
+					for n := 0; n < maxGCPagesPerCall+2; n++ {
+						id := fmt.Sprintf("gcq-prefix-%03d", n)
+						trigger := domain.GCSupersession
+						if kind == "disabled" && n <= maxGCPagesPerCall {
+							trigger = domain.GCTaskCompletion
+						}
+						req := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: id, SessionID: "s", SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()}, CollectIntent: domain.CollectIntent{RequestID: fmt.Sprintf("gc-prefix-%d", n), Scope: domain.CollectTask, TaskID: "task", Trigger: trigger}, Origin: storetest.NewPrincipal("s", domain.AuthoritySystem), PolicyVersion: pol.Version}
+						if err := sem.InsertGCRequest(req); err != nil {
+							return err
+						}
+						if kind == "terminal" && n <= maxGCPagesPerCall {
+							result := domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: "result-" + id, SessionID: "s", SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()}, GCRequestID: id, Outcome: domain.GCFailed, Reason: domain.GCFailureInvalidRequest}
+							if n%2 == 0 {
+								c := domain.CollectReceipt{SemanticMeta: domain.SemanticMeta{ID: "receipt-" + id, SessionID: "s", SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()}, RequestID: req.RequestID, GCRequestID: id, PolicyVersion: pol.Version, Principal: req.Origin}
+								if err := sem.InsertCollectReceipt(c); err != nil {
+									return err
+								}
+								result.Outcome, result.Reason, result.CollectReceiptID = domain.GCCollected, "", c.ID
+							}
+							if err := sem.InsertGCResult(result); err != nil {
+								return err
+							}
+						}
+						tail = id
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "terminal" && len(pendingGC(t, db)) != 1 {
+					t.Fatal("terminal prefix remains pending")
+				}
+				for range 3 {
+					_, err := s.CollectPending(context.Background(), "s", func(r domain.GCRequest) (domain.Principal, bool) {
+						return storetest.NewPrincipal("s", domain.AuthoritySystem), kind != "declined" || r.ID == tail
+					}, 1)
+					if err != nil && kind != "disabled" {
+						t.Fatal(err)
+					}
+				}
+				if r, ok := gcResult(t, db, tail); !ok || r.Outcome != domain.GCCollected {
+					t.Fatal("runnable tail starved")
+				}
+			})
+		})
+	}
+}
