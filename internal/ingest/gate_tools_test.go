@@ -110,13 +110,26 @@ func TestGateT17_AgentToolsThroughPipeline(t *testing.T) {
 			return notFoundOrFixed(err)
 		})
 
-		// context_resolve(G1) citing evidence records a claim; G1 and O1
-		// are untouched. (A TOOL result as evidence is covered by
-		// TestGateT17_ToolResultAsEvidence.)
+		// context_resolve(G1) citing the agent's own keyed state is refused:
+		// agent-authored state is never evidence support (SEC-1.3), and
+		// nothing is written.
 		x9 := second.Keyed.ItemID
+		before := f.lastSeq()
+		_, err = tools.Execute(ctx, f.s, sess, func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
+			return svc.RecordCompletionClaim(tx, dispatcher, tools.Request[domain.CompletionClaimIntent]{Invocation: invocation("resolve"),
+				Intent: domain.CompletionClaimIntent{RequestID: "req-resolve-self-evidence", GoalItemID: g1.ID, EvidenceIDs: []string{x9}}}, seq)
+		})
+		if te := (*tools.Error)(nil); !errors.As(err, &te) || te.Code() != domain.ToolErrorInvalidArgument || f.lastSeq() != before {
+			t.Fatalf("context_resolve citing the agent's own state: %v (seq %d -> %d); want INVALID_ARGUMENT, nothing written", err, before, f.lastSeq())
+		}
+
+		// The refused call wrote nothing, so its tool call is still
+		// unanswered. context_resolve(G1) records a claim; G1 and O1 are
+		// untouched. (A TOOL result as evidence is covered by
+		// TestGateT17_ToolResultAsEvidence.)
 		claim, err := tools.Execute(ctx, f.s, sess, func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
 			return svc.RecordCompletionClaim(tx, dispatcher, tools.Request[domain.CompletionClaimIntent]{Invocation: invocation("resolve"),
-				Intent: domain.CompletionClaimIntent{RequestID: "req-resolve", GoalItemID: g1.ID, EvidenceIDs: []string{x9}}}, seq)
+				Intent: domain.CompletionClaimIntent{RequestID: "req-resolve", GoalItemID: g1.ID}}, seq)
 		})
 		if err != nil {
 			t.Fatalf("context_resolve: %v", err)

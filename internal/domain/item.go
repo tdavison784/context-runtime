@@ -285,16 +285,25 @@ func (it ContextItem) Validate() error {
 	return nil
 }
 
-// QualifiesAsEvidenceSupport reports whether it may be cited as evidence
-// SUPPORT (keyed writes, completion claims, EVIDENCE_SUPPORT coverage).
-// Non-transcript items may. Among transcripts only a TOOL-authority
-// tool_result is evidence (FR-DOM-006); USER, AGENT, SYSTEM, HARNESS and any
-// other transcript is provenance-only and never supports truth.
+// QualifiesAsEvidenceSupport is the structural precondition for citing it
+// as evidence SUPPORT (keyed writes, completion claims, EVIDENCE_SUPPORT
+// coverage). It is necessary, not sufficient: internal/graph also requires
+// a projection's source to qualify and a TOOL tool_result transcript to
+// carry trusted provenance (SEC-1.3). It admits only evidence-category kinds
+// (FR-DOM-006), never AGENT or RETRIEVED_CONTENT authority, never a
+// checkpoint, and among transcripts only a TOOL tool_result; USER, AGENT,
+// SYSTEM and HARNESS conversation transcripts stay provenance-only.
 func (it ContextItem) QualifiesAsEvidenceSupport() bool {
-	if it.Role != RoleTranscript {
-		return true
+	if it.Kind.Category() != CategoryEvidence || it.Role == RoleCheckpoint || !it.Role.Valid() {
+		return false
 	}
-	return it.Authority == AuthorityTool && it.Kind == KindToolResult
+	if it.Authority == AuthorityAgent || it.Authority == AuthorityRetrievedContent || !it.Authority.Valid() {
+		return false
+	}
+	if it.Role == RoleTranscript {
+		return it.Authority == AuthorityTool && it.Kind == KindToolResult
+	}
+	return true
 }
 
 // validateRole fails closed on a transcript that could pose as a

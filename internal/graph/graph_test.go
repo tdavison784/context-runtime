@@ -172,7 +172,7 @@ func mustCreateWith(t *testing.T, tx store.Tx, accepted CreationAcceptance, item
 func mustFile(t *testing.T, tx store.Tx, items ...domain.ContextItem) {
 	t.Helper()
 	for _, it := range items {
-		if err := tx.SetCurrentVersion(it.ID); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 			t.Fatalf("SetCurrentVersion(%s): %v", it.ID, err)
 		}
 	}

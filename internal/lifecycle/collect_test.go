@@ -45,10 +45,10 @@ func seedCollection(t *testing.T, mem store.Store) *facets {
 				return err
 			}
 		}
-		if err := tx.SetCurrentVersion("old"); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, "old"); err != nil {
 			return err
 		}
-		return tx.SetCurrentVersion("new")
+		return storetest.UncheckedSetCurrentVersion(tx, "new")
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package obligation
 
 import (
 	"fmt"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 	"sync"
 	"testing"
 
@@ -213,6 +214,11 @@ func TestTraceT02Obligation(t *testing.T) {
 			if err := tx.InsertItem(it); err != nil {
 				return err
 			}
+			// Producers declare creation, so the identical-text P2 replaces a
+			// known P1; an undeclared prior would fail closed (SPEC-1.3).
+			if _, err := graph.DeclareCreation(tx, it, graph.CreationAcceptance{PolicyVersion: "trace-t02/1"}); err != nil {
+				return err
+			}
 			if _, err := graph.ReplaceDirective(tx, f.system, "task", "t2", it.ID, "evt-"+id); err != nil {
 				return err
 			}
@@ -303,7 +309,7 @@ func TestTraceT07PublicAPI(t *testing.T) {
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		if err := tx.SetCurrentVersion(it.ID); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 			return err
 		}
 		var err error

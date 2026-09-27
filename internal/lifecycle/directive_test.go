@@ -28,7 +28,7 @@ func TestDirectiveEffectsPreserveObligationAndResidency(t *testing.T) {
 				if err := tx.InsertItem(it); err != nil {
 					return err
 				}
-				if err := tx.SetCurrentVersion(it.ID); err != nil {
+				if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 					return err
 				}
 				return tx.InsertObligationVersion(storetest.NewObligation("s", "obligation", 1, tx.NextSeq(), it.ID))

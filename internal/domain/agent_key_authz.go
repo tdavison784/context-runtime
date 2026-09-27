@@ -18,3 +18,18 @@ func AuthorizeAgentKeyWrite(actor Principal, item ContextItem) error {
 	}
 	return nil
 }
+
+// authorizeAgentKeyPrior is AuthorizeAgentKeyWrite for the version an agent
+// write supersedes. A pre-upgrade key decodes with no explicit namespace; it
+// is the agent's key only if the frozen legacy classification makes it
+// AGENT_KEY and every exact owner check passes (SPEC-1.5, P3-3/41). The new
+// version must always carry the explicit namespace.
+func authorizeAgentKeyPrior(actor Principal, prior ContextItem) error {
+	if prior.Namespace == "" {
+		if ns, ok := prior.DirectiveNamespace(); !ok || ns != NamespaceAgentKey {
+			return ErrInvalidAuthorityPromotion
+		}
+		prior.Namespace = NamespaceAgentKey
+	}
+	return AuthorizeAgentKeyWrite(actor, prior)
+}

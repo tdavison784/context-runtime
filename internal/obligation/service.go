@@ -68,7 +68,7 @@ func replay(r store.SemanticReader, actor domain.Principal, req request) (domain
 
 // recordReceipt stores the immutable receipt of a committed mutation.
 func (s *Service) recordReceipt(sem store.SemanticTx, actor domain.Principal, req request, seq uint64, result domain.MutationResult) error {
-	id, err := domain.MutationReceiptID(actor.SessionID, req.family, req.id)
+	id, err := domain.MutationReceiptID(actor, req.family, req.id)
 	if err != nil {
 		return err
 	}

@@ -21,7 +21,7 @@ func pinAndDeclare(t *testing.T, s *Service, st store.Store, id, dirID string, a
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		if err := tx.SetCurrentVersion(it.ID); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 			return err
 		}
 		var err error
@@ -144,7 +144,7 @@ func TestDeclarePinnedRejects(t *testing.T) {
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		if err := tx.SetCurrentVersion(it.ID); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 			return err
 		}
 		_, err := s.DeclarePinnedTx(tx, actorOf(domain.AuthorityUser), it.ID, "", tx.NextSeq())

@@ -74,7 +74,7 @@ func (s *Service) executeRecord(tx store.Tx, p domain.Principal, method, request
 	if err = s.finish(tx, sem, p, domain.MutationGrantFamily, method, requestID, args, out.Result); err != nil {
 		return out, err
 	}
-	out.MutationReceiptID, err = domain.MutationReceiptID(p.SessionID, domain.MutationGrantFamily, requestID)
+	out.MutationReceiptID, err = domain.MutationReceiptID(p, domain.MutationGrantFamily, requestID)
 	return out, err
 }
 

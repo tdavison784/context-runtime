@@ -38,7 +38,7 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 	if p.SessionID != tx.SessionID() {
 		return nil, nil, nil, domain.ErrNotFound
 	}
-	if _, err := domain.MutationReceiptID(p.SessionID, family, requestID); err != nil {
+	if _, err := domain.MutationReceiptID(p, family, requestID); err != nil {
 		return nil, nil, nil, err
 	}
 	sem, err := store.Semantic(tx)
@@ -61,7 +61,7 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 }
 
 func (s *Service) finish(tx store.Tx, sem store.SemanticTx, p domain.Principal, family domain.MutationFamily, method, requestID string, args []byte, result domain.MutationResult) error {
-	id, err := domain.MutationReceiptID(p.SessionID, family, requestID)
+	id, err := domain.MutationReceiptID(p, family, requestID)
 	if err != nil {
 		return err
 	}

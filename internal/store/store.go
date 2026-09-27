@@ -339,12 +339,9 @@ type TxBase interface {
 	// Reusing an ID fails with domain.ErrImmutable.
 	InsertRelationship(r domain.Relationship) error
 
-	// SetCurrentVersion points the item's current-version key
-	// (domain.ContextItem.CurrentKey: its task, access boundary, namespace,
-	// and directive ID) at the item. The item must exist in this session
-	// (domain.ErrNotFound) and have a valid key (domain.ErrInvalidRecord). It
-	// is a semantic write.
-	SetCurrentVersion(itemID string) error
+	// The current-version pointer is written only through the semantic
+	// facet's expected-prior CAS, SemanticTx.SetCurrentVersion (P3-3,
+	// SPEC-1.21); there is no unconditional pointer write on Tx.
 
 	// InsertBlob stores an immutable blob after verifying its hash.
 	// Inserting identical bytes again is a no-op.

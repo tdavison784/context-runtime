@@ -136,7 +136,7 @@ func (s semTx) SetCurrentVersion(itemID, expectedPriorItemID string) error {
 	if cur != expectedPriorItemID {
 		return fmt.Errorf("current version of %s: pointer names %q, expected %q: %w", key.ID, cur, expectedPriorItemID, domain.ErrVersionConflict)
 	}
-	return t.SetCurrentVersion(itemID)
+	return t.setCurrentVersion(itemID)
 }
 
 // grantTargetKeys are the lookup_grant_target keys of a grant (migration

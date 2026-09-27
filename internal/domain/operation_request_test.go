@@ -41,7 +41,7 @@ func TestSubmittedAndResolvedOperationIdentityAreDistinct(t *testing.T) {
 	if op.ValidateResolved() == nil {
 		t.Fatal("service accepted missing derived request identity")
 	}
-	derived, err := OperationRequestID("s", CallerOccurrenceID("s", "event"), 1, 0)
+	derived, err := OperationRequestID(Principal{SessionID: "s", Authority: AuthorityUser}, CallerOccurrenceID("s", "event"), 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"errors"
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"testing"
@@ -57,7 +58,7 @@ func TestDeclarationDedupSurvivesLifecycleAndPolicyChanges(t *testing.T) {
 		}
 	}
 	delete(f.declarations, prior.ID)
-	if same, err := SameDirective(f, fresh, "", prior); err != nil || same {
-		t.Fatal("unknown legacy declaration matched", err)
+	if same, err := SameDirective(f, fresh, "", prior); same || !errors.Is(err, ErrUnknownDeclaration) {
+		t.Fatal("unknown legacy declaration must fail closed, never match or silently differ (SPEC-1.3)", same, err)
 	}
 }
