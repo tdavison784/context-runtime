@@ -55,3 +55,44 @@ func testIngestionV3RoundTrip(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// testIngestionV3BackfilledPolicyReplays stores a v3 envelope whose recorded
+// policy carries the 0046-backfilled MaxLiveProofDependents (0) under a work
+// budget the old fan-out coupling would have forbidden, and reads it back
+// exactly: K1 derives validity at read, so the recorded policy validates and
+// replays (K1 A6, GLM-2, DUR-4.6).
+func testIngestionV3BackfilledPolicyReplays(t *testing.T, s store.Store) {
+	occ := domain.CallerOccurrenceID(sessA, "evt-v3-bf")
+	policy := SemanticPolicy()
+	policy.MaxTransactionWork = 9
+	policy.MaxLiveProofDependents = 0
+	noErr(t, policy.Validate())
+	var env domain.EventEnvelope
+	var r domain.IngestReceipt
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertBlob(richBlob(sessA)))
+		it := ingestedItem(sessA, "itm-bf", "evt-v3-bf", tx.NextSeq())
+		noErr(t, tx.InsertItem(it))
+		v1env, v1 := NewIngestion(sessA, "evt-v3-bf", occ, tx.NextSeq(), it)
+		event := v1env.Event
+		event.Spans[1].Parts[0].Data = richBlob(sessA).Data
+		var err error
+		env, err = domain.NewSemanticEventEnvelope(v1env.Principal, occ, event, domain.DefaultLimits(), policy)
+		noErr(t, err)
+		r = v1
+		r.PayloadHash, r.RequestHashVersion, r.SchemaVersion = env.PayloadHash, domain.RequestHashV3, domain.IngestReceiptSchemaV2
+		p := policy.Clone()
+		r.Versions.Semantic = &p
+		return tx.InsertIngestion(env, r)
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		gotEnv, err := tx.Envelope(occ)
+		noErr(t, err)
+		assertEqual(t, "backfilled policy", *gotEnv.SemanticPolicy, policy)
+		noErr(t, gotEnv.SemanticPolicy.Validate())
+		got, err := tx.Receipt(occ)
+		noErr(t, err)
+		assertEqual(t, "v3 receipt", got, r)
+		return nil
+	})
+}

@@ -172,9 +172,7 @@ func TestResourceGapBecomesUnknown(t *testing.T) {
 	if rs := f.state(t); rs.Freshness != domain.ResourceUnknown || rs.WorkspaceFingerprint != "" || rs.AuthoritativeRevision != 4 {
 		t.Errorf("gap state = %+v", rs)
 	}
-	if o := f.status(t, f.user); o.Status != domain.ObligationUnresolved || o.CurrentProofID != "" {
-		t.Errorf("gap kept satisfaction: %+v", o)
-	}
+	f.wantInvalidated(t, f.user, "repo2", "gap kept satisfaction")
 	// A consecutive report does not restore KNOWN; only a resync does.
 	f.edit(t, hashOf("W5"))
 	if rs := f.state(t); rs.Freshness != domain.ResourceUnknown {
@@ -208,22 +206,26 @@ func TestResourceInvalidationT07(t *testing.T) {
 	if res.Records == nil || len(res.Records.IDs) != 1 || res.Obligation != nil {
 		t.Errorf("reporter result exposes more than the update: %+v", res)
 	}
-	o := f.status(t, f.user)
-	if o.Status != domain.ObligationUnresolved || o.CurrentProofID != "" {
-		t.Fatalf("after W2: %+v", o)
-	}
+	f.wantInvalidated(t, f.user, "repo2", "after W2")
 	var trs []domain.ObligationTransition
 	var detail domain.TransitionDetail
 	var proof domain.ApplicabilityProof
+	var cause domain.ResourceUpdate
 	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
 		trs, _ = tx.ObligationTransitions(f.user.ObligationID)
 		r, _ := store.ReadSemantic(tx)
 		detail, _ = r.TransitionDetail(trs[len(trs)-1].ID)
 		proof, _ = r.ApplicabilityProof(sat.ProofID)
+		cause, _ = r.ResourceUpdate(res.Records.IDs[0])
 		return nil
 	})
 	last := trs[len(trs)-1]
-	if last.Cause != domain.CauseResourceInvalidation || last.GrantID != "" || last.Actor != f.reporter || last.PriorProofID != sat.ProofID ||
+	// K1 A4: the settlement's actor is the session SYSTEM runtime; the
+	// actual reporter is recorded separately, on the causing update.
+	if cause.Reporter != f.reporter {
+		t.Errorf("causing update reporter = %+v, want %+v", cause.Reporter, f.reporter)
+	}
+	if last.Cause != domain.CauseResourceInvalidation || last.GrantID != "" || last.Actor != runtimeActor(testSession) || last.PriorProofID != sat.ProofID ||
 		last.CauseRecordID != res.Records.IDs[0] || last.OriginAuthorizationRef == nil || last.OriginAuthorizationRef.TransitionID != sat.TransitionIDs[0] || last.OriginAuthorizationRef.Actor != f.system {
 		t.Errorf("invalidation transition = %+v", last)
 	}
@@ -262,10 +264,7 @@ func TestResourceInvalidationScope(t *testing.T) {
 		return err
 	})
 	f.edit(t, hashOf("W2"))
-	o := f.status(t, f.sysTests)
-	if o.Status != domain.ObligationUnresolved {
-		t.Fatalf("revoked-grant proof survived: %+v", o)
-	}
+	f.wantInvalidated(t, f.sysTests, "repo2", "revoked-grant proof survived")
 	var trs []domain.ObligationTransition
 	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
 		trs, _ = tx.ObligationTransitions(f.sysTests.ObligationID)
@@ -289,34 +288,29 @@ func TestResourceInvalidationPagingAndLimit(t *testing.T) {
 	for _, ref := range refs {
 		f.assertBound(t, ref, f.system)
 	}
-	// Five proofs span three pages of two. A policy whose work bound cannot
-	// cover them rejects the whole report: state and every status unchanged.
-	// The budget is shrunk after New: a valid policy needs room for its
-	// live-proof dependents, a work bound of 6 does not.
+	// K1a: five proofs span three pages of two, yet a report under a work
+	// bound far smaller than its dependents is accepted, because a report
+	// never fans out. Every proof is invalid at read the moment it commits,
+	// and settlement then pages through all of them.
 	small, err := New(testPolicy(), DefaultRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
 	small.policy.MaxTransactionWork = 6
-	before := f.state(t)
 	in := domain.ReportResourceChangeIntent{RequestID: "big", ResourceID: "repo2", ExpectedRevision: f.rev, ExpectedAuthoritativeRevision: f.auth, ResultingAuthoritativeRevision: f.auth + 1, WorkspaceFingerprint: hashOf("W2")}
-	if _, err := small.report(t, f.st, f.reporter, in); !errors.Is(err, domain.ErrResourceLimit) {
-		t.Fatalf("over-limit report: %v", err)
+	if _, err := small.report(t, f.st, f.reporter, in); err != nil {
+		t.Fatalf("report under a bound smaller than its dependents: %v", err)
 	}
-	if after := f.state(t); after != before {
-		t.Errorf("rejected report changed state: %+v", after)
-	}
+	f.rev++
+	f.auth++
 	for _, ref := range refs {
-		if o := f.status(t, ref); o.Status != domain.ObligationSatisfied {
-			t.Errorf("rejected report invalidated %s", ref.ObligationID)
+		if st, pending := f.effective(t, ref); st != domain.ObligationUnresolved || !pending {
+			t.Errorf("%s effective %s pending=%v after the report", ref.ObligationID, st, pending)
 		}
 	}
-	// Within the bound, every page is processed.
-	f.edit(t, hashOf("W2"))
-	for _, ref := range refs {
-		if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
-			t.Errorf("proof beyond first page survived: %s %+v", ref.ObligationID, o.Status)
-		}
+	f.wantInvalidated(t, refs[0], "repo2", "proof on the first page survived")
+	for _, ref := range refs[1:] {
+		f.wantSettled(t, ref, "repo2", "proof beyond first page survived")
 	}
 }
 

@@ -39,8 +39,8 @@ type testStore struct {
 	// counting routes every Update through the wrapper so wholeReads and
 	// workspaceReads count the report's whole-resource and workspace proof
 	// reads (DUR-3.1 (A)).
-	counting                   atomic.Bool
-	wholeReads, workspaceReads atomic.Int64
+	counting                              atomic.Bool
+	wholeReads, workspaceReads, pathReads atomic.Int64
 }
 
 func newTestStore(t *testing.T) *testStore {
@@ -93,6 +93,14 @@ func (s *faultSem) CurrentProofsByDependency(resourceID, pathKey string, p store
 		s.tx.store.wholeReads.Add(1)
 	}
 	return s.SemanticTx.CurrentProofsByDependency(resourceID, pathKey, p)
+}
+
+// LiveProofsByPath counts path-keyed live proof reads.
+func (s *faultSem) LiveProofsByPath(resourceID, path string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	if s.tx.store != nil {
+		s.tx.store.pathReads.Add(1)
+	}
+	return s.SemanticTx.LiveProofsByPath(resourceID, path, p)
 }
 
 // LiveWorkspaceProofs counts workspace-dependency reads.

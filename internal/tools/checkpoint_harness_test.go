@@ -83,6 +83,9 @@ func TestHarnessCheckpointDerivedRequestIDIsNoExistenceOracle(t *testing.T) {
 	if !errors.Is(err, domain.ErrInvalidRecord) {
 		t.Fatalf("owner registered a checkpoint under a runtime request ID: %v", err)
 	}
+	// A real runtime receipt exists for registered (SEC-4.11), so the probes
+	// compare an existing receipt against an absent one.
+	insertRuntimeReceipt(t, st, owner, registered)
 	b := seedAgentInvocation(t, st, "b")
 	probe := func(requestID string) error {
 		return st.Update(testContext, "s", func(tx store.Tx) error {

@@ -165,8 +165,20 @@ func TestSQLiteSuite(t *testing.T) {
 		{"DUR31SubjectApplicabilityIsDerived", TestDUR31SubjectApplicabilityIsDerived, true},
 		{"DUR38HistorySatisfiesPages", TestDUR38HistorySatisfiesPages, true},
 		{"DUR31ReportsReadOnlyAffectedProofs", TestDUR31ReportsReadOnlyAffectedProofs, true},
-		{"DUR31AssertionRespectsDependentCap", TestDUR31AssertionRespectsDependentCap, false},
-		{"DUR31MatcherRespectsDependentCap", TestDUR31MatcherRespectsDependentCap, true},
+		{"SEC410BindingVersionIsNoOracle", TestSEC410BindingVersionIsNoOracle, false},
+		{"EffectiveStatusPassThrough", TestEffectiveStatusPassThrough, true},
+		{"SPEC410ReevaluationSelectsOnlyCurrentEvidence", TestSPEC410ReevaluationSelectsOnlyCurrentEvidence, true},
+		{"K1ReportsNeverFanOut", TestK1ReportsNeverFanOut, false},
+		{"K1ValidityIsMonotone", TestK1ValidityIsMonotone, true},
+		{"K1DependencySemantics", TestK1DependencySemantics, true},
+		{"K1InlineSettleBeforeTransition", TestK1InlineSettleBeforeTransition, true},
+		{"K1ReadsUseEffectiveStatus", TestK1ReadsUseEffectiveStatus, true},
+		{"K1MultiResourceProofsNeverWedgeReports_DUR42", TestK1MultiResourceProofsNeverWedgeReports_DUR42, false},
+		{"K1StableLiveProofsNeverBlockSatisfaction_DUR43", TestK1StableLiveProofsNeverBlockSatisfaction_DUR43, true},
+		{"K1PropertyEffectiveSatisfactionIsValid", TestK1PropertyEffectiveSatisfactionIsValid, true},
+		{"K1SettlementWorker", TestK1SettlementWorker, false},
+		{"K1SettleBeforeRetire", TestK1SettleBeforeRetire, true},
+		{"K1ReplacementSettlesPendingBeforeRetirement", TestK1ReplacementSettlesPendingBeforeRetirement, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {
