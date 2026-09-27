@@ -113,12 +113,28 @@ Principal, occurrence string, operation, command uint64)` derives it only
 after acceptance, so no caller can forge or predict one — its current
 signature binds a full principal, not just a session ID (PR #6 round 1,
 G3/SEC-1.2, fixing the stale `(session, occurrence, opIndex, ordinal)`
-signature this ADR previously described). **Which principal it binds is
-still an open question as of PR #6 round 2 (SEC-2.2/SEC-2.6, H5, assigned
-W1):** `internal/ingest/ops.go`'s `typedOperation` currently passes the
-operation's lowered *source actor*, not the authenticated caller principal
-H5 requires; this ADR's text will need a further correction once that
-lands. **An empty, non-nil `Operations` is rejected at validation, never
+signature this ADR previously described). **H5 landed in this
+reconciliation (PR #6 round 2, SEC-2.2/SEC-2.6, commit `a1d734f`, W1):
+`OperationRequestID` now binds both principals explicitly, not one.** Its
+current signature is `OperationRequestID(authenticated, owner Principal,
+occurrence string, eventSeq, operation, command uint64)`: `authenticated`
+is the ingesting principal H5 requires (`internal/ingest/ops.go`'s
+`typedOperation` now passes `r.p`, the authenticated caller, not the
+lowered source actor it passed before), and `owner` is the receipt owner
+(the lowered actor or dispatcher) the request is filed under — the ID also
+now binds the event's own sequence (`req_<eventSeq>_<inner>.<tag>`), so a
+caller cannot name a future or past event's request. `MutationReceiptID`
+runs before any receipt lookup and accepts a `req_` ID only for its exact
+owner and only when its event sequence was allocated in the current
+transaction: no principal, including one sharing every field with the
+lowered actor, can name another principal's runtime request. GC runtime
+IDs follow the same rule from `domain` directly:
+`GCTriggerRequestID` binds the authenticated origin (`gc-trigger/v2`) and
+`GCRequestRecordID` names the queued request; `gc_` and `gcq_` join `req_`
+as reserved prefixes callers may never supply, checked by
+`ValidateCallerRequestID` before every standalone lifecycle mutation
+(item, grant, `CompleteTask`, `ReplaceDirective`) and manual `Collect`.
+**An empty, non-nil `Operations` is rejected at validation, never
 silently treated as "no operations" (G4 = SEC-1.11 = SPEC-1.2).**
 `Event.ValidateV3` (`internal/domain/ingest_v3.go`) requires `Operations`
 to be either `nil` (every span ingests in the frozen per-span order) or a
