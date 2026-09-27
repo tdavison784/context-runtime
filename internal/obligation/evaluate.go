@@ -51,9 +51,9 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	if err != nil {
 		return nil, err
 	}
-	// The watermark is the subject's accepted high-water mark, not just the
+	// The watermark is the subject's run-order high-water mark, not just the
 	// current proof's run: an older run is stale whatever the obligation's
-	// status (G1: SEC-1.1/SPEC-1.1/DUR-1.1, P3-16/22).
+	// status or the fingerprint the newer run observed (H1, G1, P3-16/22).
 	watermark, err := s.subjectWatermark(sem, work, run, o)
 	if err != nil {
 		return nil, err
@@ -110,26 +110,26 @@ func failCovers(proof domain.AccessBoundary, obs domain.ObservationRecord, run d
 	return proof.Within(obs.Access) && proof.Within(run.Access)
 }
 
-// subjectWatermark is the highest accepted ordinal among subject states that
-// still describe the current resource state (Applicability CURRENT) in the
-// run's own partition and in every partition whose evidence could back the
-// obligation. Each is one indexed lookup, independent of run history.
+// subjectWatermark is the subject's run-order high-water mark (H1, SEC-2.1,
+// SPEC-2.1, DUR-2.1): the highest ordinal of any complete PASS/FAIL run in
+// the run's own partition and in every partition whose evidence could back
+// the obligation, whatever fingerprint it observed and whatever its subject
+// state's applicability. The store maintains each mark at write time; each
+// is one keyed read, independent of run history.
 func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run domain.ObservationRun, o domain.ObligationVersion) (uint64, error) {
 	var high uint64
 	for _, p := range candidatePartitions(run, o) {
 		if err := work.spend(1); err != nil {
 			return 0, err
 		}
-		st, err := r.SubjectState(run.SubjectKey, p.TaskID, p)
+		mark, err := r.SubjectHighWater(run.SubjectKey, p.TaskID, p)
 		if errors.Is(err, domain.ErrNotFound) {
 			continue
 		}
 		if err != nil {
 			return 0, err
 		}
-		if st.Applicability == domain.ApplicabilityCurrent && st.AcceptedOrdinal > high {
-			high = st.AcceptedOrdinal
-		}
+		high = max(high, mark)
 	}
 	return high, nil
 }
