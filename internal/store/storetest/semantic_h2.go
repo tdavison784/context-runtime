@@ -427,3 +427,50 @@ func testSemanticCurrentWorkspaceBindings(t *testing.T, s store.Store) {
 		t.Errorf("CurrentWorkspaceBindingsByContext(src) = %v, want [wb3/2]", got)
 	}
 }
+
+// testSemanticLatestWorkspaceBinding: LatestWorkspaceBinding is the latest
+// version of a binding ID by its write-time pointer, whatever the context
+// or the length of its history, visible to later reads of the same
+// transaction, and ErrNotFound for an ID that was never bound (SEC-4.10,
+// SPEC-4.8).
+func testSemanticLatestWorkspaceBinding(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		return semantic(t, tx).InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq()))
+	})
+	latest := func(id string) (domain.WorkspaceBinding, error) {
+		var b domain.WorkspaceBinding
+		var err error
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			b, err = readSemantic(t, tx).LatestWorkspaceBinding(id)
+			return nil
+		})
+		return b, err
+	}
+	_, err := latest("wb1")
+	wantErr(t, err, domain.ErrNotFound)
+	for v := uint64(1); v <= 12; v++ {
+		update(t, s, sessA, func(tx store.Tx) error {
+			return semantic(t, tx).InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb1", "repo", v, tx.NextSeq()))
+		})
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		b := NewWorkspaceBinding(sessA, "wb1", "repo", 13, tx.NextSeq())
+		b.Context, b.SourceItemID, b.TaskID = domain.WorkspaceSourceContext{Kind: domain.WorkspaceSource, ID: "src"}, "src", ""
+		if err := semantic(t, tx).InsertWorkspaceBinding(b); err != nil {
+			return err
+		}
+		got, err := semantic(t, tx).LatestWorkspaceBinding("wb1")
+		noErr(t, err)
+		if got.Version != 13 {
+			t.Errorf("LatestWorkspaceBinding in the writing tx = v%d, want v13", got.Version)
+		}
+		return nil
+	})
+	got, err := latest("wb1")
+	noErr(t, err)
+	if got.ID != "wb1" || got.Version != 13 || got.SourceItemID != "src" {
+		t.Errorf("LatestWorkspaceBinding(wb1) = %s/v%d source %q, want wb1/v13 source src", got.ID, got.Version, got.SourceItemID)
+	}
+	_, err = latest("wb2")
+	wantErr(t, err, domain.ErrNotFound)
+}

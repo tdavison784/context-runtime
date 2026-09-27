@@ -32,6 +32,10 @@ type ResourceReader interface {
 	// order of that version: a write-time pointer, so pages count live
 	// bindings, not versions (H2).
 	CurrentWorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
+	// LatestWorkspaceBinding is the latest version of binding ID id by its
+	// write-time pointer, whatever its context or history, ErrNotFound when
+	// the ID was never bound: one exact-key read (SEC-4.10, SPEC-4.8).
+	LatestWorkspaceBinding(id string) (domain.WorkspaceBinding, error)
 	Observation(id string) (domain.ObservationRecord, error)
 	ObservationRun(id string) (domain.ObservationRun, error)
 	// Run ordinal is the allocated registration Seq (W4 Q-5), so Page's
