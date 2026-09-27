@@ -84,3 +84,37 @@ func PathAffectKeys(p string) ([]string, error) {
 	}
 	return append(keys, p), nil
 }
+
+// Partition is one (task, access) subject partition of a subject key.
+type Partition struct {
+	TaskID string
+	Access domain.AccessBoundary
+}
+
+// ProofRankPartitions are the subject partitions whose high-water marks
+// can outrank a proof resting on run for obligation o (H1, SEC-2.9): the
+// run's own partition, and each TASK partition of o's task (workflow in
+// {"", o's}, agent in {"", o's}) whose boundary covers o's, so a result
+// private to another agent never outranks a proof it does not cover.
+func ProofRankPartitions(run domain.ObservationRun, o domain.ObligationVersion) []Partition {
+	out := []Partition{{run.TaskID, run.Access}}
+	if o.TaskID == "" {
+		return out
+	}
+	for _, wf := range uniqueOf("", o.Access.WorkflowID) {
+		for _, agent := range uniqueOf("", o.Access.AgentID) {
+			p := Partition{o.TaskID, domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: o.SessionID, TaskID: o.TaskID, WorkflowID: wf, AgentID: agent}}
+			if o.Access.Within(p.Access) && p != out[0] {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+func uniqueOf(a, b string) []string {
+	if a == b {
+		return []string{a}
+	}
+	return []string{a, b}
+}

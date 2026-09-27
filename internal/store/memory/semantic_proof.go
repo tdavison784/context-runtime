@@ -670,10 +670,10 @@ func (t *semTx) AppendSemanticObligationTransition(tr domain.ObligationTransitio
 	return next.Clone(), nil
 }
 
-// checkProofNotStale is the commit-time half of G1 (INV-16, P3-16/22): if
-// the version still rests on proofID at commit and that proof rests on an
-// observation, no CURRENT subject state of the run's own partition may
-// have accepted a newer run.
+// checkProofNotStale is the commit-time half of G1/H1 (INV-16, P3-16/22):
+// if the version still rests on proofID at commit and that proof rests on
+// an observation, no partition that can outrank it may have a complete
+// PASS or FAIL from a newer run (store.ProofRankPartitions).
 func (r *readTx) checkProofNotStale(ref domain.ObligationRef, proofID string) error {
 	if proofID == "" {
 		return nil
@@ -694,10 +694,13 @@ func (r *readTx) checkProofNotStale(ref domain.ObligationRef, proofID string) er
 	if !ok {
 		return invalid("proof %s: run %s is not stored", proofID, obs.RunID)
 	}
-	st, ok := r.sem.res.subjects.peek(subjectKey{run.SubjectKey, run.TaskID, run.Access})
-	if ok && st.Applicability == domain.ApplicabilityCurrent && st.AcceptedOrdinal > run.Ordinal {
-		return fmt.Errorf("proof %s: run ordinal %d is older than the subject's accepted ordinal %d: %w",
-			proofID, run.Ordinal, st.AcceptedOrdinal, domain.ErrInvalidTransition)
+	// Ordering is by run ordinal over every complete result, whatever its
+	// applicability (H1); a partition that does not cover o never counts.
+	for _, part := range store.ProofRankPartitions(run, o) {
+		if hw, _ := r.sem.res.highWater.peek(subjectKey{run.SubjectKey, part.TaskID, part.Access}); hw > run.Ordinal {
+			return fmt.Errorf("proof %s: run ordinal %d is older than the subject's high-water mark %d: %w",
+				proofID, run.Ordinal, hw, domain.ErrInvalidTransition)
+		}
 	}
 	return nil
 }

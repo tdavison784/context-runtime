@@ -564,10 +564,10 @@ func (s semTx) SetObligationMaterialization(target domain.ObligationRef, disable
 	return next.Clone(), err
 }
 
-// checkProofNotStale is the commit-time half of G1 (INV-16, P3-16/22): if
-// the version still rests on proofID at commit and that proof rests on an
-// observation, no CURRENT subject state of the run's own partition may
-// have accepted a newer run.
+// checkProofNotStale is the commit-time half of G1/H1 (INV-16, P3-16/22):
+// if the version still rests on proofID at commit and that proof rests on
+// an observation, no partition that can outrank it may have a complete
+// PASS or FAIL from a newer run (store.ProofRankPartitions).
 func (t *transaction) checkProofNotStale(ref domain.ObligationRef, proofID string) error {
 	if proofID == "" {
 		return nil
@@ -580,7 +580,9 @@ func (t *transaction) checkProofNotStale(ref domain.ObligationRef, proofID strin
 		return nil
 	}
 	var p domain.ApplicabilityProof
-	if err := t.get("proof", proofID, 0, &p); err != nil || p.ObservationID == "" {
+	if err := t.get("proof", proofID, 0, &p); errors.Is(err, domain.ErrNotFound) || err == nil && p.ObservationID == "" {
+		return nil // a missing proof is the other deferred check's error, as in memory
+	} else if err != nil {
 		return err
 	}
 	var obs domain.ObservationRecord
@@ -591,17 +593,20 @@ func (t *transaction) checkProofNotStale(ref domain.ObligationRef, proofID strin
 	if err := t.get("observation_run", obs.RunID, 0, &run); err != nil {
 		return notStored(err, "proof %s: run %s is not stored", proofID, obs.RunID)
 	}
-	var row subjectStateRow
-	err := t.get("subject_state", subjectPartitionKey(run.SubjectKey, run.TaskID, run.Access), 0, &row)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if st := row.State; st.Applicability == domain.ApplicabilityCurrent && st.AcceptedOrdinal > run.Ordinal {
-		return fmt.Errorf("proof %s: run ordinal %d is older than the subject's accepted ordinal %d: %w",
-			proofID, run.Ordinal, st.AcceptedOrdinal, domain.ErrInvalidTransition)
+	// Ordering is by run ordinal over every complete result, whatever its
+	// applicability (H1); a partition that does not cover o never counts.
+	for _, part := range store.ProofRankPartitions(run, o) {
+		hw, err := semRead{t}.SubjectHighWater(run.SubjectKey, part.TaskID, part.Access)
+		if errors.Is(err, domain.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if hw > run.Ordinal {
+			return fmt.Errorf("proof %s: run ordinal %d is older than the subject's high-water mark %d: %w",
+				proofID, run.Ordinal, hw, domain.ErrInvalidTransition)
+		}
 	}
 	return nil
 }
