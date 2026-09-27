@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\xda00")
+string("\x10")
+string(".")

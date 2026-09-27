@@ -1,0 +1,10 @@
+go test fuzz v1
+byte('/')
+bool(false)
+bool(false)
+uint64(82)
+uint64(3)
+bool(true)
+byte('P')
+byte('\x00')
+bool(false)
