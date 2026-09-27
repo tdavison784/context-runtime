@@ -151,6 +151,9 @@ func TestSQLiteSuite(t *testing.T) {
 		{"DeferredSeqAllocatedAfterReplay_DUR214", TestDeferredSeqAllocatedAfterReplay_DUR214, false},
 		{"ObservationStateSupersessionEnqueuesGC_SPEC23", TestObservationStateSupersessionEnqueuesGC_SPEC23, true},
 		{"PrivateFailNeverRejectsTaskProof_SEC29", TestPrivateFailNeverRejectsTaskProof_SEC29, true},
+		{"H1StalePassAfterRevert", TestH1StalePassAfterRevert, true},
+		{"H1StalePassAfterInapplicableFail", TestH1StalePassAfterInapplicableFail, true},
+		{"H1PrivateFailDoesNotOutrankTaskPass", TestH1PrivateFailDoesNotOutrankTaskPass, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {

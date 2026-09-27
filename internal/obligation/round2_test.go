@@ -129,3 +129,48 @@ func TestPrivateFailNeverRejectsTaskProof_SEC29(t *testing.T) {
 		t.Errorf("task-wide FAIL did not reject: %+v", o)
 	}
 }
+
+// H1 (SEC-2.1 = SPEC-2.1 = DUR-2.1): ordering is by run ordinal per subject,
+// never by fingerprint equality or subject-state freshness. A newer complete
+// FAIL defeats an older PASS after the workspace moves away and reverts
+// (the FAIL's state is STALE) ...
+func TestH1StalePassAfterRevert(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	older, newer := f.newRun(t), f.newRun(t)
+	f.report(t, newer, domain.OutcomeFail, hashOf("W1"), nil)
+	f.r.set(t, f.fixture, hashOf("W2"), false)
+	f.r.set(t, f.fixture, hashOf("W1"), false)
+	f.report(t, older, domain.OutcomePass, hashOf("W1"), nil)
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("older PASS satisfied after a newer FAIL and a revert: %+v", o)
+	}
+}
+
+// ... and when the newer FAIL was never applicable (it observed another
+// fingerprint, so it filed no state).
+func TestH1StalePassAfterInapplicableFail(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	older, newer := f.newRun(t), f.newRun(t)
+	f.r.set(t, f.fixture, hashOf("W2"), false)
+	f.report(t, newer, domain.OutcomeFail, hashOf("W1"), nil)
+	f.r.set(t, f.fixture, hashOf("W1"), false)
+	f.report(t, older, domain.OutcomePass, hashOf("W1"), nil)
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("older PASS satisfied after a newer inapplicable FAIL: %+v", o)
+	}
+}
+
+// H1/SEC-2.9: a newer FAIL private to another agent is not applicable to a
+// TASK-wide obligation, so an older task-wide PASS still satisfies it.
+func TestH1PrivateFailDoesNotOutrankTaskPass(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	older := f.newRun(t)
+	f.reportPrivate(t, "b-newer-fail", domain.OutcomeFail, hashOf("W1"))
+	f.report(t, older, domain.OutcomePass, hashOf("W1"), nil)
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Fatalf("agent-private FAIL outranked the task-wide PASS: %+v", o)
+	}
+}
