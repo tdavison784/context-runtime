@@ -32,6 +32,15 @@ type ReceiptReader interface {
 	GCResult(requestID string) (domain.GCResult, error)
 	CollectReceipt(id string) (domain.CollectReceipt, error)
 	PendingGCRequests(page Page) (ResultPage[domain.GCRequest], error)
+	// PendingGCRequestsByTrigger pages pending requests (no GCResult) whose
+	// trigger is in triggers, in (Seq, ID) order after page.After, through a
+	// per-trigger pending index, so disabled triggers never fill a page
+	// (DUR-3.2). triggers must satisfy domain.ValidGCTriggerSet, otherwise
+	// domain.ErrInvalidRecord.
+	PendingGCRequestsByTrigger(triggers []domain.GCTrigger, page Page) (ResultPage[domain.GCRequest], error)
+	// GCQueueCursor is the session's exact-key GC queue scan position
+	// (DUR-3.2); domain.ErrNotFound before its first put.
+	GCQueueCursor() (domain.GCQueueCursor, error)
 	// GCProgress is the exact-key read of one GC request's batch progress
 	// (H3); domain.ErrNotFound before its first batch claim.
 	GCProgress(gcRequestID string) (domain.GCProgress, error)
@@ -52,6 +61,13 @@ type ReceiptWriter interface {
 	// substitutes for a batch CollectReceipt or the request's GCResult.
 	PutGCProgress(p domain.GCProgress, expectedRevision uint64) (domain.GCProgress, error)
 	InsertCollectReceipt(domain.CollectReceipt) error
+	// PutGCQueueCursor CAS-writes the session's GC queue cursor (DUR-3.2):
+	// expectedRevision is the stored Revision (0 to create), the stored
+	// Revision becomes expectedRevision+1 and is returned, and a mismatch is
+	// domain.ErrVersionConflict with nothing written. c.SessionID must be the
+	// transaction's session. Like GCProgress it is unsequenced operational
+	// state and never evidence of a collection.
+	PutGCQueueCursor(c domain.GCQueueCursor, expectedRevision uint64) (domain.GCQueueCursor, error)
 }
 
 // CollectReceiptOf reports whether a collect receipt's requestID belongs to
