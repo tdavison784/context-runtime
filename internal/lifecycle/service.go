@@ -9,8 +9,9 @@ import (
 )
 
 type Service struct {
-	store  store.Store
-	policy domain.Phase3Policy
+	store       store.Store
+	policy      domain.Phase3Policy
+	obligations ReplacementObligations // nil: claim-bearing replacement fails closed
 }
 
 // New freezes the execution policy by value; no zero/unlimited defaults exist.

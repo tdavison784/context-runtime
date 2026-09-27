@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -14,6 +15,22 @@ import (
 // RecordResult family for an explicit replacement. IDs are, in order, the new
 // occurrence, its creation declaration and the superseded occurrence.
 const recordReplacement = "REPLACEMENT"
+
+// ReplacementObligations is W4's in-transaction declaration of a replacement
+// occurrence's claim (obligation.Service.DeclareForReplacementTx). It reads
+// the claim from the occurrence's creation declaration, after the prior
+// version's obligations were retired; nil means no obligation was declared.
+type ReplacementObligations interface {
+	DeclareForReplacementTx(tx store.Tx, actor domain.Principal, sourceID string, seq uint64) (*domain.ObligationRef, error)
+}
+
+// WithReplacementObligations returns a copy of s that declares claim-bearing
+// replacements through o. The receiver is unchanged.
+func (s *Service) WithReplacementObligations(o ReplacementObligations) *Service {
+	c := *s
+	c.obligations = o
+	return &c
+}
 
 // ReplaceDirective executes the explicit typed replacement (C-1): CAS on the
 // expected current DIRECTIVE occurrence and version, an idempotent request
@@ -26,9 +43,11 @@ const recordReplacement = "REPLACEMENT"
 // boundary, authority, owner, section, kind, scope, TTL) and restarts from the
 // prior's declared creation defaults, so Unpin/Resolve/Archive state never
 // carries over and a goal reopens as a new OPEN version. TURN/TTL origin is
-// the owning task's current turn. Identity-changing attributes, legacy
-// sources without a creation declaration, and obligation-declaring sources
-// (whose new UNRESOLVED version is W4's declaration) fail closed.
+// the owning task's current turn. Identity-changing attributes and legacy
+// sources without a creation declaration fail closed. A claim-bearing source
+// (an accepted obligation= attribute) needs W4's declaration hook, which
+// declares the new UNRESOLVED version after the prior's retirement; without
+// the hook, or if the hook declares nothing, the whole replacement fails.
 func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.ReplaceDirectiveIntent, seq uint64) (out MutationOutcome, err error) {
 	defer func() {
 		if err != nil {
@@ -69,7 +88,8 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 		return out, err
 	}
 	was := decl.AcceptedSemantics
-	if was.ObligationDeclarationHash != "" {
+	claim := was.ObligationDeclarationHash != "" || slices.ContainsFunc(was.AcceptedAttributes, func(a string) bool { return strings.HasPrefix(a, "obligation=") })
+	if claim && s.obligations == nil {
 		return out, domain.ErrUnsupportedSchema
 	}
 	attrs := slices.Clone(i.AcceptedAttributes)
@@ -94,6 +114,15 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 	}
 	if previous != old.ID {
 		return out, domain.ErrVersionConflict
+	}
+	if claim {
+		ref, err := s.obligations.DeclareForReplacementTx(tx, p, fresh.ID, tx.NextSeq())
+		if err != nil {
+			return out, err
+		}
+		if ref == nil {
+			return out, domain.ErrIntegrity
+		}
 	}
 	out.Result.Records = &domain.RecordResult{Kind: recordReplacement, IDs: []string{fresh.ID, created.ID, old.ID}}
 	if out.GrantID, err = supersessionGrant(sem, p, old.ID, fresh.ID); err != nil {
