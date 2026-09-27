@@ -181,8 +181,9 @@ Codex's cross-check required an explicit mode chosen at assertion time.
 
 ### 6. Rejected proof and proof refresh use legal transitions (§P3-16, §W4-18..20)
 
-`obligation.evaluateOne`/`satisfy`/`invalidateProof` (`internal/obligation/evaluate.go`)
-implement the restricted `PROOF_REJECTED` and atomic `PROOF_REFRESH` paths.
+`obligation.evaluateOne`/`satisfy` (`internal/obligation/evaluate.go`) and
+`invalidateProof` (`internal/obligation/invalidate.go`) implement the
+restricted `PROOF_REJECTED` and atomic `PROOF_REFRESH` paths.
 Ratified refinements beyond the frozen text:
 
 - **Cross-boundary rejection (§W4-18):** a newer complete FAIL may reject a
@@ -457,7 +458,10 @@ FROZEN "Required normative amendments at freeze" table approved them
   SUPERSEDES, DEPENDS_ON, REFERENCES and DUPLICATE_OF edges. SATISFIES is a
   typed derived relation from authoritative obligation-transition and proof
   records to an obligation version; it is not a separately persisted
-  item-to-item edge."
+  item-to-item edge. Items do not duplicate an item-to-item edge's data." —
+  the last sentence preserves the replaced text's own "items do not
+  duplicate them" clause, scoped to the item-to-item edges FR-REL-001 still
+  covers, and is the actual SDD.md v0.10 text in full (`SDD.md:217`).
 - **FR-AUTH-002 / FR-OBL-002.** Add: "Positive matcher transitions require a
   live exact-obligation-version grant. Runtime invalidation of an already
   accepted resource-bound proof is a restricted audited consequence of the
