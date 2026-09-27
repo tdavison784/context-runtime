@@ -30,7 +30,9 @@ func DefaultPhase3Policy() domain.Phase3Policy {
 		MaxCheckpointSemanticBytes: domain.DefaultMaxCheckpointSemanticBytes,
 		CheckpointGeneration:       domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh,
 		DefaultLeaseCalls: 2, MaxLeaseCalls: 8,
-		// Every registered trigger; embedders narrow the set explicitly.
-		GCTriggers: domain.DefaultGCTriggers(),
+		// Only triggers with a producer on every path (SPEC-1.6, FR-GC-004):
+		// SUPERSESSION, TTL and POLICY join once ingest produces them too.
+		// Sorted, as the manifest requires.
+		GCTriggers: []domain.GCTrigger{domain.GCManual, domain.GCTaskCompletion},
 	}
 }

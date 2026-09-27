@@ -133,6 +133,11 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 			return out, domain.ErrIntegrity
 		}
 	}
+	// The supersession is a durable GC trigger (P3-39, SPEC-1.6); its
+	// identity is the new occurrence, so the trigger fires exactly once.
+	if _, err = s.enqueueGC(tx, sem, p, domain.GCSupersession, domain.CollectTask, old.TaskID, fresh.ID); err != nil {
+		return out, err
+	}
 	out.Result.Records = &domain.RecordResult{Kind: recordReplacement, IDs: []string{fresh.ID, created.ID, old.ID}}
 	if out.GrantID, err = supersessionGrant(sem, p, old.ID, fresh.ID); err != nil {
 		return out, err
