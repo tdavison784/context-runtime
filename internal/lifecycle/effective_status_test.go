@@ -149,6 +149,49 @@ func TestGCProtectionUsesEffectiveStatus_K1A2(t *testing.T) {
 	}
 }
 
+// K1 A2: the status-selected selectors behind the lifecycle reads
+// (ObligationsByTaskOwner for CompleteTask/X8, ObligationsBySource for GC
+// and Archive protection) must return stored-SATISFIED resource-bound
+// versions too: neither index may filter on stored status, or the helper
+// would never see the versions whose effective status it must decide.
+func TestStatusSelectorsReadStoredSatisfiedVersions_K1A2(t *testing.T) {
+	eachStore(t, func(t *testing.T, db store.Store) {
+		seedEphemeral(t, db, 1, 0)
+		assertSatisfied(t, db, "eph-000")
+		byOwner, bySource := 0, 0
+		if err := db.View(context.Background(), "s", func(tx store.ReadTx) error {
+			sem, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			owned, err := sem.ObligationsByTaskOwner("task", store.Page{Limit: 16})
+			if err != nil {
+				return err
+			}
+			for _, o := range owned.Records {
+				if o.Current && o.Status == domain.ObligationSatisfied && o.BindingState == domain.BindingBound {
+					byOwner++
+				}
+			}
+			src, err := tx.ObligationsBySource("eph-000", 16)
+			if err != nil {
+				return err
+			}
+			for _, o := range src {
+				if o.Current && o.Status == domain.ObligationSatisfied && o.BindingState == domain.BindingBound {
+					bySource++
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if byOwner != 1 || bySource != 1 {
+			t.Errorf("selectors dropped the stored-SATISFIED bound version: owner=%d source=%d", byOwner, bySource)
+		}
+	})
+}
+
 // K1 A2: explicit Archive discloses removing the source of an effectively
 // UNRESOLVED obligation, and fails closed when validity is unreadable.
 func TestArchiveProtectionUsesEffectiveStatus_K1A2(t *testing.T) {
