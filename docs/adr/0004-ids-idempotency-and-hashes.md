@@ -532,9 +532,18 @@ cannot name a runtime request, even a principal whose fields equal the
 lowered actor's. They are refused identically whether or not the owner's
 receipt exists, so there is neither an oracle nor a squat.
 
-`req_`, `gc_` and `gcq_` are reserved prefixes: no caller EventID can
-name them. Standalone requests (`*Standalone`, manual `Collect`) must pass
-`ValidateCallerRequestID`. Stores derive keys with
+`req_`, `gc_`, `gcq_`, and `outcome-` (`domain.OutcomeEventID`/
+`ToolOutcomeEventID`, above) are reserved prefixes: no caller EventID can
+name them. **The check runs after the exact-replay lookup, not before
+(DUR-2.8, PR #6 round 2; SEC-3.3/3.4, PR #6 round 3, added at
+`internal/ingest`/`internal/lifecycle`'s own receipt-lookup entry points):**
+rejecting a reserved namespace before checking for an existing receipt
+would refuse to replay a Phase 2 event whose caller EventID happens to
+collide with a namespace reserved only starting at Phase 3; both `ingest`'s
+`lookupReceipt` and `lifecycle`'s `begin` (ADR 19's Phase 3 amendment) look
+up an exact match first and apply the reserved-namespace/ownership check
+only once no receipt is found. Standalone requests (`*Standalone`, manual
+`Collect`) must pass `ValidateCallerRequestID`. Stores derive keys with
 `MutationReceiptKey(session, family, requestID)` and check ownership with
 `RuntimeRequestOwnedBy`. Receipt ID values stay a hash of (session, family,
 requestID). `operation-request-id/v1..v2` and `operation-request-binding/v1`
