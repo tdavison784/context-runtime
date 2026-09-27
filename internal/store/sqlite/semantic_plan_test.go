@@ -189,7 +189,7 @@ func TestLiveReadsUseLiveIndexes(t *testing.T) {
 			_, err := r.SubjectStatesByResource("repo", store.Page{Limit: 5})
 			return err
 		}},
-		{"lookup_grant_target_live", func(r store.SemanticReader) error {
+		{"lookup_grant_target_liveness", func(r store.SemanticReader) error {
 			_, err := r.LiveGrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i"), 9, 5)
 			return err
 		}},
@@ -229,5 +229,95 @@ func TestLiveReadsUseLiveIndexes(t *testing.T) {
 		if !strings.Contains(strings.Join(plan, "\n"), c.index) {
 			t.Errorf("%q does not use %s\nplan: %v", q, c.index, plan)
 		}
+	}
+}
+
+// TestH2LatestReadsAreKeyed checks the H2 exact-key reads: each searches
+// an index on its full key and never sorts, so a newest-first LIMIT 1 or a
+// keyed lookup costs the same however long the history is.
+func TestH2LatestReadsAreKeyed(t *testing.T) {
+	s, _ := openTemp(t)
+	for _, c := range []struct {
+		index string
+		keys  []string
+		q     string
+	}{
+		{"", []string{"session_id", "context_kind", "context_id"}, currentBindingPage},
+		{"", []string{"session_id", "item_id", "conversation_id"}, "SELECT exchange_id FROM lookup_item_exchange WHERE session_id=? AND item_id=? AND conversation_id=? ORDER BY ordinal, exchange_id LIMIT 1"},
+		{"", []string{"session_id", "resource_id", "path_key"}, "SELECT seq, update_id FROM lookup_resource_update_path WHERE session_id=? AND resource_id=? AND path_key=? ORDER BY seq DESC, update_id DESC LIMIT 1"},
+		// The closing lookup must use 0030's one-row-per-run partial index,
+		// never the by-run index over every partial report.
+		{"observation_run_closing", []string{"session_id", "f_run_id"}, "SELECT id FROM rec_observation WHERE session_id=? AND f_run_id=? AND " + closingObservation},
+	} {
+		args := make([]any, strings.Count(c.q, "?"))
+		for i := range args {
+			args[i] = "x"
+		}
+		assertIndexed(t, s, c.keys, c.q, args...)
+		assertNoSort(t, s, c.q, args...)
+		if c.index != "" {
+			assertUsesIndex(t, s, c.index, c.q, args...)
+		}
+	}
+}
+
+// assertUsesIndex fails unless q's plan searches index.
+func assertUsesIndex(t *testing.T, s *Store, index, q string, args ...any) {
+	t.Helper()
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if !strings.Contains(strings.Join(plan, "\n"), "INDEX "+index) {
+		t.Errorf("%q does not search %s\nplan: %v", q, index, plan)
+	}
+}
+
+// assertNoSort fails when q's plan builds a temporary B-tree: a sort or
+// DISTINCT over every matching row.
+func assertNoSort(t *testing.T, s *Store, q string, args ...any) {
+	t.Helper()
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(detail, "TEMP B-TREE") {
+			t.Errorf("query sorts every matching row: %q\nstep: %s", q, detail)
+		}
+	}
+}
+
+// TestLiveGrantRangesSkipDeadRows checks DUR-2.10 (H2): each range read
+// behind LiveGrantsFor searches 0036's liveness index on its full key and
+// never sorts, so revoked and expired rows are not visited.
+func TestLiveGrantRangesSkipDeadRows(t *testing.T) {
+	s, _ := openTemp(t)
+	for _, q := range liveGrantRanges {
+		args := make([]any, strings.Count(q, "?"))
+		for i := range args {
+			args[i] = 1
+		}
+		assertIndexed(t, s, []string{"session_id", "action", "target_key"}, q, args...)
+		assertNoSort(t, s, q, args...)
+		// The search itself bounds revoked_seq (=0 or >seq), so revoked
+		// history is never visited.
+		assertUsesIndex(t, s, "lookup_grant_target_liveness (session_id=? AND action=? AND target_key=? AND revoked_seq", q, args...)
 	}
 }

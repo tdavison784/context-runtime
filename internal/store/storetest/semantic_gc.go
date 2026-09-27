@@ -60,7 +60,7 @@ func testSemanticGCRequests(t *testing.T, s store.Store) {
 			CandidateRefs: []domain.ItemRevisionRef{ref}, Decisions: []domain.GCDecision{{Target: ref, Code: domain.GCProtected}}}
 	}
 	result := func(seq uint64, receiptID string) domain.GCResult {
-		return domain.GCResult{SemanticMeta: Meta(sessA, "gr-gc1", seq), GCRequestID: "gc1", CollectReceiptID: receiptID}
+		return domain.GCResult{SemanticMeta: Meta(sessA, "gr-gc1", seq), GCRequestID: "gc1", CollectReceiptID: receiptID, Outcome: domain.GCCollected}
 	}
 	for _, tc := range []struct {
 		name string

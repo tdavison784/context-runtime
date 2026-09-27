@@ -889,3 +889,124 @@ func TestUpgradeReconcilesLegacyCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeItemExchangeIndex checks migration 0035 on a database migrated
+// through 0034 (H2, SPEC-2.7): members stored before it are indexed, so
+// EarliestExchangeWithItem finds an item's first exchange in a
+// conversation.
+func TestUpgradeItemExchangeIndex(t *testing.T) {
+	l := openLegacy(t, 34)
+	in := storetest.NewItem("s", "in", 1, "input")
+	l.insert("item", in, nil)
+	for n, id := range []string{"x1", "x2", "x3"} {
+		l.insert("exchange", storetest.NewExchange("s", id, "task", "agent", uint64(n+1), uint64(n+2)), nil)
+	}
+	for _, x := range []string{"x3", "x2"} {
+		l.insert("exchange_member", domain.ExchangeMember{SemanticMeta: storetest.Meta("s", "m-"+x, 9), ExchangeID: x, Position: 1,
+			Role: domain.MemberInput, Source: storetest.ContentRef(in)}, nil)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x, err := r.EarliestExchangeWithItem(domain.ConversationIDFor("task", "agent"), "in")
+		if err != nil || x.ID != "x2" {
+			t.Errorf("EarliestExchangeWithItem after 0035 = %s (%v), want x2", x.ID, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUpgradeSubjectHighWater checks migration 0037 on a database migrated
+// through 0036 (H1): complete PASS/FAIL observations stored before it
+// raise their partition's mark under the key live writes use; partial
+// ones do not.
+func TestUpgradeSubjectHighWater(t *testing.T) {
+	l := openLegacy(t, 36)
+	var runs []domain.ObservationRun
+	for i, id := range []string{"r1", "r2", "r3"} {
+		r := storetest.NewObservationRun(t, "s", id, "repo", "wb", uint64(10+i))
+		runs = append(runs, r)
+		l.insert("observation_run", r, nil)
+	}
+	fp := domain.HashBytes([]byte("w"))
+	complete := storetest.NewObservation(runs[1], "o2", "ev", 20, fp)
+	complete.Outcome, complete.Passed, complete.Failed = domain.OutcomeFail, 2, 1
+	l.insert("observation", storetest.NewObservation(runs[0], "o1", "ev", 21, fp), nil)
+	l.insert("observation", complete, nil)
+	partial := storetest.NewObservation(runs[2], "o3", "ev", 22, fp)
+	partial.Completeness, partial.Passed, partial.Skipped = domain.ObservationPartial, 1, 2
+	l.insert("observation", partial, nil)
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hw, err := r.SubjectHighWater(runs[0].SubjectKey, runs[0].TaskID, runs[0].Access)
+		if err != nil || hw != runs[1].Ordinal {
+			t.Errorf("SubjectHighWater after 0037 = %d (%v), want %d", hw, err, runs[1].Ordinal)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUpgradeCurrentWorkspaceBindings checks migration 0038 on a database
+// migrated through 0037 (H2): only each binding's latest version is filed
+// under its context.
+func TestUpgradeCurrentWorkspaceBindings(t *testing.T) {
+	l := openLegacy(t, 37)
+	for _, b := range []domain.WorkspaceBinding{
+		storetest.NewWorkspaceBinding("s", "wb1", "repo", 1, 1),
+		storetest.NewWorkspaceBinding("s", "wb2", "repo", 1, 2),
+		storetest.NewWorkspaceBinding("s", "wb1", "repo", 2, 3),
+	} {
+		l.insert("workspace_binding", b, nil)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pg, err := r.CurrentWorkspaceBindingsByContext("", "task", "", store.Page{Limit: 5})
+		var got []string
+		for _, b := range pg.Records {
+			got = append(got, fmt.Sprintf("%s/%d", b.ID, b.Version))
+		}
+		if err != nil || strings.Join(got, ",") != "wb2/1,wb1/2" {
+			t.Errorf("CurrentWorkspaceBindingsByContext after 0038 = %v (%v), want [wb2/1 wb1/2]", got, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUpgradeGCResultOutcome checks migration 0039 on a database migrated
+// through 0038 (H3): a result stored before it reads back COLLECTED with
+// no reason and validates.
+func TestUpgradeGCResultOutcome(t *testing.T) {
+	l := openLegacy(t, 38)
+	l.insert("gc_result", domain.GCResult{SemanticMeta: storetest.Meta("s", "gr", 5), GCRequestID: "gc1", CollectReceiptID: "cr1"}, nil)
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := r.GCResult("gc1")
+		if err != nil || g.Outcome != domain.GCCollected || g.Reason != "" || g.Validate() != nil {
+			t.Errorf("GCResult after 0039 = %+v (%v)", g, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -441,7 +441,7 @@ func (t *transaction) put(kind, id string, sub int, value any, replace bool) err
 		}
 		t.wrote = true
 		t.noteSequence(value)
-		if kind != "conversation" && kind != "call" && kind != "attempt" {
+		if kind != "conversation" && kind != "call" && kind != "attempt" && kind != "gc_progress" {
 			t.semanticWrite = true
 		}
 		return nil
@@ -450,7 +450,7 @@ func (t *transaction) put(kind, id string, sub int, value any, replace bool) err
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "PRIMARY KEY constraint failed")) {
 		return fmt.Errorf("%w: %s %s", domain.ErrImmutable, kind, id)
 	}
-	if err == nil && kind != "conversation" && kind != "call" && kind != "attempt" && (kind != "lifecycle" || value.(domain.LifecycleEvent).TargetKind != domain.TargetCall) {
+	if err == nil && kind != "conversation" && kind != "call" && kind != "attempt" && kind != "gc_progress" && (kind != "lifecycle" || value.(domain.LifecycleEvent).TargetKind != domain.TargetCall) {
 		t.semanticWrite = true
 		if kind != "task" {
 			t.semanticSeqRecord = true

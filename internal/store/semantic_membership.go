@@ -9,6 +9,12 @@ type MembershipReader interface {
 	ExchangesByConversation(conversationID string, page Page) (ResultPage[domain.LogicalExchange], error)
 	ExchangeMembers(exchangeID string, page Page) (ResultPage[domain.ExchangeMember], error)
 	MembershipsByItem(itemID string, page Page) (ResultPage[domain.ExchangeMember], error)
+	// EarliestExchangeWithItem is the lowest-ordinal exchange of
+	// conversationID with itemID as a member, ErrNotFound when none: one
+	// keyed lookup through a write-time index, independent of conversation
+	// length (H2, SPEC-2.7). Internal and unfiltered, like
+	// MembershipsByItem.
+	EarliestExchangeWithItem(conversationID, itemID string) (domain.LogicalExchange, error)
 	AdmissionManifest(id string) (domain.AdmissionManifest, error)
 	AdmissionsByExchange(exchangeID string, page Page) (ResultPage[domain.AdmissionManifest], error)
 	Checkpoint(id string) (domain.Checkpoint, error)

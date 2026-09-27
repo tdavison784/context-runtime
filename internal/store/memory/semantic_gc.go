@@ -18,12 +18,13 @@ type gcState struct {
 	resident    map[string][]seqRef // "" -> all resident items; task -> its resident items
 	openGoals   map[string][]seqRef // task -> TURN/TASK-owned OPEN goals
 	residentAll map[string][]seqRef
+	progress    map[string]domain.GCProgress // by GC request ID (H3)
 }
 
 func newGCState() gcState {
 	return gcState{requests: map[string]domain.GCRequest{}, reqIDs: map[string]string{}, pending: map[string][]seqRef{},
 		receipts: map[string]domain.CollectReceipt{}, results: map[string]domain.GCResult{}, resultIDs: map[string]bool{},
-		resident: map[string][]seqRef{}, openGoals: map[string][]seqRef{}, residentAll: map[string][]seqRef{}}
+		resident: map[string][]seqRef{}, openGoals: map[string][]seqRef{}, residentAll: map[string][]seqRef{}, progress: map[string]domain.GCProgress{}}
 }
 
 type gcView struct {
@@ -36,16 +37,20 @@ type gcView struct {
 	resident    orderedIndex[string]
 	openGoals   orderedIndex[string]
 	residentAll orderedIndex[string]
+	progress    table[string, domain.GCProgress]
 }
 
 func newGCView(st *gcState, w bool) gcView {
 	return gcView{requests: newTable(st.requests, w, domain.GCRequest.Clone), reqIDs: newTable(st.reqIDs, w, same[string]),
 		pending: newOrderedIndex(st.pending, w), receipts: newTable(st.receipts, w, domain.CollectReceipt.Clone),
 		results: newTable(st.results, w, domain.GCResult.Clone), resultIDs: newTable(st.resultIDs, w, same[bool]),
-		resident: newOrderedIndex(st.resident, w), openGoals: newOrderedIndex(st.openGoals, w), residentAll: newOrderedIndex(st.residentAll, w)}
+		resident: newOrderedIndex(st.resident, w), openGoals: newOrderedIndex(st.openGoals, w), residentAll: newOrderedIndex(st.residentAll, w),
+		progress: newTable(st.progress, w, domain.GCProgress.Clone)}
 }
 
-func (v *gcView) dirty() bool { return v.requests.dirty() || v.receipts.dirty() || v.results.dirty() }
+func (v *gcView) dirty() bool {
+	return v.requests.dirty() || v.receipts.dirty() || v.results.dirty() || v.progress.dirty()
+}
 
 func (v *gcView) commit() {
 	v.requests.commit()
@@ -57,6 +62,7 @@ func (v *gcView) commit() {
 	v.resident.commit()
 	v.openGoals.commit()
 	v.residentAll.commit()
+	v.progress.commit()
 }
 
 // openTaskGoal reports whether it is an OPEN goal whose declared owning
@@ -168,7 +174,7 @@ func (t *semTx) InsertCollectReceipt(c domain.CollectReceipt) error {
 	}
 	if c.GCRequestID != "" {
 		g, ok := t.r.sem.gc.requests.peek(c.GCRequestID)
-		if !ok || g.RequestID != c.RequestID {
+		if !ok || !store.CollectReceiptOf(g, c.RequestID) {
 			return invalid("collect receipt %s: GC request %s is not stored with its request identity", c.ID, c.GCRequestID)
 		}
 	}
@@ -195,8 +201,10 @@ func (t *semTx) InsertGCResult(g domain.GCResult) error {
 	if !ok {
 		return invalid("GC result %s: request %s is not stored", g.ID, g.GCRequestID)
 	}
-	if c, ok := t.r.sem.gc.receipts.peek(g.CollectReceiptID); !ok || c.GCRequestID != g.GCRequestID {
-		return invalid("GC result %s: receipt %s is not its request's collect receipt", g.ID, g.CollectReceiptID)
+	if g.Outcome == domain.GCCollected {
+		if c, ok := t.r.sem.gc.receipts.peek(g.CollectReceiptID); !ok || c.GCRequestID != g.GCRequestID {
+			return invalid("GC result %s: receipt %s is not its request's collect receipt", g.ID, g.CollectReceiptID)
+		}
 	}
 	t.r.sem.gc.results.put(g.GCRequestID, g)
 	t.r.sem.gc.resultIDs.put(g.ID, true)

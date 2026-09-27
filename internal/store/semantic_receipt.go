@@ -1,6 +1,11 @@
 package store
 
-import "github.com/tdavison784/context-runtime/internal/domain"
+import (
+	"strconv"
+	"strings"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+)
 
 type GCCandidateFilter struct {
 	Viewer      domain.Principal
@@ -47,4 +52,23 @@ type ReceiptWriter interface {
 	// substitutes for a batch CollectReceipt or the request's GCResult.
 	PutGCProgress(p domain.GCProgress, expectedRevision uint64) (domain.GCProgress, error)
 	InsertCollectReceipt(domain.CollectReceipt) error
+}
+
+// CollectReceiptOf reports whether a collect receipt's requestID belongs to
+// GC request g (H3): g's own request identity, or exactly batch n's
+// domain.GCBatchRequestID of it for some n >= 1.
+func CollectReceiptOf(g domain.GCRequest, requestID string) bool {
+	if requestID == g.RequestID {
+		return true
+	}
+	n, ok := strings.CutPrefix(requestID, g.RequestID+"/batch/")
+	if !ok {
+		return false
+	}
+	batch, err := strconv.ParseUint(n, 10, 64)
+	if err != nil {
+		return false
+	}
+	id, err := domain.GCBatchRequestID(g.RequestID, batch)
+	return err == nil && id == requestID
 }

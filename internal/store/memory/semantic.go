@@ -55,6 +55,7 @@ type semState struct {
 	memberPos    map[exchangePos]string
 	membersByEx  map[string][]seqRef
 	membersByIt  map[string][]seqRef
+	itemExchange map[itemConv][]seqRef // (conversation, item) -> exchanges by (ordinal, ID) (H2)
 	acks         map[string]domain.ExchangeAcknowledgment
 	ackByEx      map[string]string
 	admissions   map[string]domain.AdmissionManifest
@@ -96,6 +97,7 @@ func newSemState() *semState {
 		memberPos:    map[exchangePos]string{},
 		membersByEx:  map[string][]seqRef{},
 		membersByIt:  map[string][]seqRef{},
+		itemExchange: map[itemConv][]seqRef{},
 		acks:         map[string]domain.ExchangeAcknowledgment{},
 		ackByEx:      map[string]string{},
 		admissions:   map[string]domain.AdmissionManifest{},
@@ -146,6 +148,7 @@ type semView struct {
 	memberPos    table[exchangePos, string]
 	membersByEx  orderedIndex[string]
 	membersByIt  orderedIndex[string]
+	itemExchange orderedIndex[itemConv]
 	acks         table[string, domain.ExchangeAcknowledgment]
 	ackByEx      table[string, string]
 	admissions   table[string, domain.AdmissionManifest]
@@ -187,6 +190,7 @@ func newSemView(st *semState, w bool) semView {
 		memberPos:    newTable(st.memberPos, w, same[string]),
 		membersByEx:  newOrderedIndex(st.membersByEx, w),
 		membersByIt:  newOrderedIndex(st.membersByIt, w),
+		itemExchange: newOrderedIndex(st.itemExchange, w),
 		acks:         newTable(st.acks, w, domain.ExchangeAcknowledgment.Clone),
 		ackByEx:      newTable(st.ackByEx, w, same[string]),
 		admissions:   newTable(st.admissions, w, domain.AdmissionManifest.Clone),
@@ -237,6 +241,7 @@ func (v *semView) commit() {
 	v.memberPos.commit()
 	v.membersByEx.commit()
 	v.membersByIt.commit()
+	v.itemExchange.commit()
 	v.acks.commit()
 	v.ackByEx.commit()
 	v.admissions.commit()
