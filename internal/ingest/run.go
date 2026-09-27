@@ -196,7 +196,31 @@ func (r *run) advanceTask() error {
 		t = stored
 	}
 	r.task, r.hasTask = t, true
+	if r.openedTurn != 0 {
+		// Each turn advance is one TTL trigger, identified by the new turn
+		// (P3-39, SPEC-1.6); Collect evaluates TTL expiry itself.
+		return r.enqueueGC(r.p, domain.GCTTL, t.TaskID, t.TurnID)
+	}
 	return nil
+}
+
+// enqueueGC produces a durable GC trigger in the event's transaction
+// (P3-39, SPEC-1.6) when the event's recorded policy enables it. An enabled
+// trigger with no lifecycle producer fails closed: the event never commits
+// without its durable trigger. Without a task the request is session-scoped.
+func (r *run) enqueueGC(origin domain.Principal, trigger domain.GCTrigger, taskID, triggerID string) error {
+	if r.pol == nil || !r.pol.GCTriggerEnabled(trigger) {
+		return nil
+	}
+	if r.g.Lifecycle == nil {
+		return domain.ErrUnsupportedSchema
+	}
+	scope := domain.CollectTask
+	if taskID == "" {
+		scope = domain.CollectSession
+	}
+	_, err := r.g.Lifecycle.EnqueueGC(r.tx, origin, trigger, scope, taskID, triggerID)
+	return err
 }
 
 // fill sets the fields every item of this event shares, so a prospective

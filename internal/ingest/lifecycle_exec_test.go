@@ -30,6 +30,11 @@ func (l fakeLifecycle) Resolve(tx store.Tx, actor domain.Principal, in domain.Re
 	return l.apply(tx, domain.LifecycleResolve, actor, in, seq, domain.ItemChange{GoalStatus: &resolved, Retention: &high})
 }
 
+// EnqueueGC fails closed: the routing fake produces no durable triggers.
+func (l fakeLifecycle) EnqueueGC(store.Tx, domain.Principal, domain.GCTrigger, domain.CollectScope, string, string) (string, error) {
+	return "", domain.ErrUnsupportedSchema
+}
+
 func (l fakeLifecycle) Unpin(tx store.Tx, actor domain.Principal, in domain.UnpinIntent, seq uint64) (LifecycleOutcome, error) {
 	durable, high := domain.GenerationDurable, domain.RetentionHigh
 	return l.apply(tx, domain.LifecycleUnpin, actor, in, seq, domain.ItemChange{Generation: &durable, Retention: &high})
