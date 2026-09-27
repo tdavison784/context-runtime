@@ -263,7 +263,8 @@ Ratified refinements beyond the frozen text:
   assertion proof is never rejected by a FAIL," which silently departed from
   the frozen P3-16 text with no commander ruling; PR #6 round 1 (SPEC-1.10)
   withdrew that narrowing as a code fix, and this ADR's text is corrected to
-  match. A newer complete applicable FAIL rejects the subject's **current
+  match. A newer complete, boundary-covering (`failCovers`, §6 above) FAIL
+  rejects the subject's **current
   matcher or resource-bound satisfaction alike** — both are proof, and
   `evaluateOne`'s `VerdictFail` branch runs the same restricted
   `invalidateProof` path regardless of which kind the current proof is
@@ -460,7 +461,18 @@ version without applicable backing, as a second layer behind the service's
 own check; and §6's rejection/high-water rules (H1) decide which run's
 result is "current" for comparison. None of this is optional hardening —
 without migration 0030's uniqueness, a partial/duplicate closing observation
-could itself make ordinal comparison ambiguous.
+could itself make ordinal comparison ambiguous. **Under H1, a newer
+complete PASS at a *non-current* fingerprint still outranks an older PASS
+at the current fingerprint — the probe result is UNRESOLVED, not a silent
+keep of the old proof — and any newer covering FAIL rejects even a
+`FIXED_HASH` `file_read` proof** (DUR-3.10): ordinal and boundary decide
+rejection, never which fingerprint matched. Tests (missing from this
+section until PR #6 round 3, DUR-3.10/SPEC-3.8): `TestH1NewerFailAtOtherFingerprintRejects`,
+`TestH1StalePassAfterRevert`, `TestH1StalePassAfterInapplicableFail`,
+`TestH1PrivateFailDoesNotOutrankTaskPass`,
+`TestPrivateFailNeverRejectsTaskProof_SEC29` (§6); `internal/store/storetest`'s
+`TestConformance/SemanticSubjectHighWater` and the INV-16 backing cases in
+`SemanticSatisfactionBacking`/`SemanticStaleProof`.
 
 ### 13. Invalidation is atomic and narrowly scoped (§P3-23, C-10, §W4-17)
 
@@ -606,13 +618,16 @@ no single §-decision above covers them. Each cites its real code and test.
   *replacement itself* failed even though the replacement's own
   authorization had nothing to do with GC. H4 resolves this at the root:
   `gcqueue.Enqueue(tx, pol, origin, trigger, taskID, triggerID)`
-  (`internal/gcqueue`, imported by `internal/ingest`, `internal/tools`, and
-  `internal/obligation` — everything below `internal/lifecycle` that
-  produces a trigger) persists nothing at all for a task-less trigger and
-  returns success; it never falls back to a session-scoped `CollectScope`,
-  because H4 disables automatic session-scoped collection. The replacement (or keyed write, or
+  (`internal/gcqueue`, imported by `internal/ingest`, `internal/tools`,
+  `internal/obligation`, **and `internal/lifecycle` itself** —
+  `replace.go`'s task-less directive replacement path, SPEC-3.8 — every
+  producer below the top-level lifecycle API) persists nothing at all for
+  a task-less trigger and returns success; it never falls back to a
+  session-scoped `CollectScope`, because H4 disables automatic
+  session-scoped collection. The replacement (or keyed write, or
   observation supersession) that raised the trigger always succeeds on its
   own merits — GC producing nothing is never a reason a mutation fails.
+  Test: `internal/lifecycle`'s `TestReplaceTasklessDirectiveProducesNoGC`.
   Manual SESSION collection uses durable resumable batches under round-3
   ruling J7 (SEC-3.9); see ADR 16. This does not enable automatic task-less
   producers.
