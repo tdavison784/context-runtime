@@ -42,6 +42,12 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// A current-format runtime request ID must be this caller's, in this
+	// transaction, before any lookup: runtime receipts never replay through a
+	// service, so none can be replayed or probed by a caller (SEC-3.6).
+	if err := domain.CheckRequestBeforeLookup(tx, p, requestID); err != nil {
+		return nil, nil, nil, err
+	}
 	// The exact-replay lookup comes first, so an owner's receipt replays even
 	// under a runtime request ID that predates today's derivation (DUR-2.8).
 	// Anyone else is checked for request-ID ownership before that receipt's

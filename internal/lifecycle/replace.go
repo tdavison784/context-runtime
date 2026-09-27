@@ -161,9 +161,6 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 func (s *Service) ReplaceDirectiveStandalone(ctx context.Context, p domain.Principal, i domain.ReplaceDirectiveIntent) (MutationOutcome, error) {
 	var out MutationOutcome
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
-		if err := domain.ValidateCallerReplayID(i.RequestID); err != nil {
-			return err
-		}
 		_, _, prior, err := s.begin(tx, p, domain.MutationLifecycle, string(domain.ActionReplaceDirective), i.RequestID, i)
 		if err != nil {
 			return err

@@ -43,6 +43,9 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 		return "", err
 	}
 	request := HarnessCheckpointRequest{Recipient: recipient, IssuingExchangeID: issuingExchangeID, Intent: intent}
+	if err := domain.CheckRequestBeforeLookup(tx, actor, intent.RequestID); err != nil {
+		return "", err // SEC-3.6
+	}
 	if prior, err := sem.MutationReceipt(domain.MutationMembership, intent.RequestID); err == nil {
 		if prior.Principal != actor {
 			// Ownership of the request ID is checked before another

@@ -19,6 +19,9 @@ func prepareMembershipReceipt(tx store.Tx, actor domain.Principal, requestID, me
 	// a pre-derivation Phase 2 receipt still replays for its owner (DUR-2.8).
 	// Anyone else is checked for request-ID ownership before existence can
 	// matter, so another principal's receipt is no oracle (SEC-2.8).
+	if err := domain.CheckRequestBeforeLookup(tx, actor, requestID); err != nil {
+		return nil, domain.MutationReceipt{}, false, err // SEC-3.6
+	}
 	receipt, err = sem.MutationReceipt(domain.MutationMembership, requestID)
 	if err == nil && receipt.Principal != actor {
 		if idErr := domain.RuntimeRequestOwnedBy(actor, requestID); idErr != nil {
