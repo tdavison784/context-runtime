@@ -42,6 +42,12 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// A current-format runtime request ID must be this caller's, in this
+	// transaction, before any lookup: runtime receipts never replay through a
+	// service, so none can be replayed or probed by a caller (SEC-3.6).
+	if err := domain.CheckRequestBeforeLookup(tx, p, requestID); err != nil {
+		return nil, nil, nil, err
+	}
 	// The exact-replay lookup comes first, so an owner's receipt replays even
 	// under a runtime request ID that predates today's derivation (DUR-2.8).
 	// Anyone else is checked for request-ID ownership before that receipt's
@@ -61,6 +67,15 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 	}
 	if !errors.Is(err, domain.ErrNotFound) {
 		return nil, nil, nil, err
+	}
+	// A new request never names a reserved runtime namespace, except this
+	// transaction's own runtime IDs (SEC-3.7). The collection family is
+	// exempt: queued GC requests collect under their runtime gc_ IDs, and
+	// the only caller entry, Collect, validates before reaching here.
+	if family != domain.MutationCollection {
+		if err := domain.ValidateNewRequestID(tx, p, requestID); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	if _, err := domain.MutationReceiptID(tx, p, family, requestID); err != nil {
 		return nil, nil, nil, err

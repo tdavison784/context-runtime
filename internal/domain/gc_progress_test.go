@@ -54,3 +54,34 @@ func TestGCProgressAndFailureContract(t *testing.T) {
 		}
 	}
 }
+
+// DUR-3.2: the session GC queue cursor is CAS-versioned operational state
+// with a (Seq, ID) cursor, and trigger filters are canonical sets.
+func TestGCQueueCursorAndTriggerSetContract(t *testing.T) {
+	c := GCQueueCursor{SessionID: "s", Revision: 1}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("fresh cursor rejected: %v", err)
+	}
+	c.Cursor, c.Revision = GCCursor{Seq: 4, ID: "gcq_a"}, 2
+	if err := c.Validate(); err != nil {
+		t.Fatalf("advanced cursor rejected: %v", err)
+	}
+	for name, bad := range map[string]GCQueueCursor{
+		"no session":       {Revision: 1},
+		"no revision":      {SessionID: "s"},
+		"zero seq with id": {SessionID: "s", Revision: 1, Cursor: GCCursor{ID: "x"}},
+		"seq without id":   {SessionID: "s", Revision: 1, Cursor: GCCursor{Seq: 2}},
+	} {
+		if !errors.Is(bad.Validate(), ErrInvalidRecord) {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if !ValidGCTriggerSet(DefaultGCTriggers()) || !ValidGCTriggerSet([]GCTrigger{GCManual}) {
+		t.Fatal("canonical trigger set rejected")
+	}
+	for _, bad := range [][]GCTrigger{nil, {}, {GCTTL, GCManual}, {GCManual, GCManual}, {"UNKNOWN"}} {
+		if ValidGCTriggerSet(bad) {
+			t.Errorf("trigger set %q accepted", bad)
+		}
+	}
+}

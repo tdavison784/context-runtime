@@ -174,3 +174,50 @@ func TestIdenticalAgentKeyOverUnknownIdentityIsDuplicate(t *testing.T) {
 		})
 	})
 }
+
+// TestUnknownIdentityRestatementWithDifferentTTLIsANewVersion is SPEC-3.1
+// (C-1, P3-4): a TURN/TTL eligibility origin is a meaningful identity change,
+// so a Working restatement over an unknown pre-upgrade member dedups only
+// when neither side carries one. Adding or dropping a TTL creates a new
+// version that supersedes the legacy member.
+func TestUnknownIdentityRestatementWithDifferentTTLIsANewVersion(t *testing.T) {
+	ttl := func(it domain.ContextItem) domain.ContextItem {
+		n := 2
+		it.TTLTurns, it.CreatedTurn = &n, 1
+		return it
+	}
+	for name, tc := range map[string]struct{ legacyTTL, freshTTL bool }{
+		"legacy TTL restated without": {true, false},
+		"legacy restated with a TTL":  {false, true},
+		"both TTL":                    {true, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			eachStore(t, func(t *testing.T, s store.Store) {
+				const sess = "sess-spec31"
+				actor := principal(sess, domain.AuthorityUser)
+				update(t, s, sess, func(tx store.Tx) error {
+					legacy := member(sess, "a0", tx.NextSeq(), "step one")
+					if tc.legacyTTL {
+						legacy = ttl(legacy)
+					}
+					mustInsert(t, tx, legacy)
+					mustFile(t, tx, legacy)
+					return nil
+				})
+				res := snapshot(t, s, actor, "evt-restate", func(seq uint64) domain.ContextItem {
+					fresh := member(sess, "a1", seq, "step one")
+					if tc.freshTTL {
+						fresh = ttl(fresh)
+					}
+					return fresh
+				})
+				if len(res.Duplicates) != 0 || len(res.Supersedes) != 1 {
+					t.Fatalf("TTL-differing restatement: supersedes %v duplicates %v; want a new version", edges(res.Supersedes), edges(res.Duplicates))
+				}
+				if cur := currentSet(t, s, sess, "a0", "a1"); cur["a0"] || !cur["a1"] {
+					t.Fatalf("current = %v, want the restatement current", cur)
+				}
+			})
+		})
+	}
+}

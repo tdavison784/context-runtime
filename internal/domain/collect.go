@@ -215,6 +215,42 @@ type GCCursor struct {
 	ID  string
 }
 
+func (c GCCursor) valid() bool {
+	return c.Seq == 0 && c.ID == "" || c.Seq != 0 && semanticID(c.ID)
+}
+
+// GCQueueCursor is a session's durable fair-scan position over its pending
+// GC requests (DUR-3.2): unsequenced operational state, CAS-written on
+// Revision like GCProgress, never evidence that a request was collected.
+type GCQueueCursor struct {
+	SessionID string
+	Cursor    GCCursor
+	Revision  uint64
+}
+
+func (c GCQueueCursor) Clone() GCQueueCursor { return c }
+
+func (c GCQueueCursor) Validate() error {
+	if !semanticID(c.SessionID) || c.Revision == 0 {
+		return invalid("GC queue cursor: session and revision required")
+	}
+	if !c.Cursor.valid() {
+		return invalid("GC queue cursor: invalid cursor")
+	}
+	return nil
+}
+
+// ValidGCTriggerSet reports whether ts is a non-empty, sorted, unique set of
+// known triggers: the canonical form of an enabled-trigger filter.
+func ValidGCTriggerSet(ts []GCTrigger) bool {
+	for i, t := range ts {
+		if !t.Valid() || i > 0 && ts[i-1] >= t {
+			return false
+		}
+	}
+	return len(ts) > 0
+}
+
 // GCProgress is operational claim metadata for one GC request processed in
 // bounded batches across passes (H3, P3-39): the durable candidate cursor,
 // completed batches and attempts. It is CAS-written on Revision and is never

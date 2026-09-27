@@ -45,11 +45,19 @@ func TestMembershipDerivedRequestIDIsNoExistenceOracle(t *testing.T) {
 	if existing == nil || missing == nil || existing.Error() != missing.Error() || errors.Is(existing, domain.ErrEventIDConflict) {
 		t.Fatalf("existence oracle: existing=%v missing=%v", existing, missing)
 	}
-	update(t, s, "s", func(tx store.Tx) error {
-		again, err := service.RegisterExchange(tx, actor, intent, 0)
-		if err != nil || again.IDs[0] != first.IDs[0] {
-			t.Fatalf("owner replay: %+v, %v", again, err)
+	// A later transaction: runtime receipts never replay through a service
+	// (an outcome retry replays its event receipt), so even the owner is
+	// refused, identically to an absent receipt (SEC-3.6).
+	for _, id := range []string{registered, absent} {
+		i := intent
+		i.RequestID = id
+		err := s.Update(ctx, "s", func(tx store.Tx) error {
+			_, err := service.RegisterExchange(tx, actor, i, 0)
+			return err
+		})
+		if !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Fatalf("later-transaction runtime request %q: %v", id, err)
 		}
-		return nil
-	})
+	}
+	_ = first
 }
