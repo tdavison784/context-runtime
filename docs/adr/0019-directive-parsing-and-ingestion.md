@@ -89,8 +89,9 @@ amend Q1 to add this explicit escape hatch, without weakening Q1's default.**
 Real code confirms this exactly: `domain.ActionReplaceDirective`
 (`internal/domain/authz.go`), `domain.ReplaceDirectiveIntent`
 (`internal/domain/lifecycle_intent.go`), and
-`lifecycle.Service.ReplaceDirective`/`internal/graph.ReplaceDirective`
-(`internal/lifecycle/replace.go`, W3) implement it; obligation retirement
+`lifecycle.Service.ReplaceDirective` (`internal/lifecycle/replace.go`, W3),
+which itself calls `graph.ReplaceDirective` (`internal/graph/graph.go:298`,
+this ADR's §7 original decision, unchanged), implement it; obligation retirement
 runs through ADR 8 §2's `obligation.DeclareForReplacementTx`. Tests:
 `internal/lifecycle`: `TestReplaceDirectiveReopensWithIdenticalContentAndRetiresObligations`,
 `TestReplaceDirectiveNeedsAuthorityOrExactGrant`,
@@ -107,7 +108,7 @@ P3-35, P3-40) — implemented in `internal/ingest`, this ADR's own package.**
 control, and mutation-intent operations) hashed under
 `ingest-payload/v3` (ADR 4), replacing the frozen v2 encoder for new events
 only — v2 stays frozen and still validated for legacy replay. A submitted
-operation's `RequestID` must be empty; `ingest.OperationRequestID(session,
+operation's `RequestID` must be empty; `domain.OperationRequestID(session,
 occurrence, opIndex, ordinal)` derives it only after acceptance, so no
 caller can forge or predict one. Lifecycle-command v2 executes Resolve/Unpin
 in source order at each command's exact, allocated authorization sequence
@@ -145,8 +146,8 @@ decisions beyond the frozen text," change causes).
   or rebind an obligation. TURN/TTL eligibility origin remains part of
   semantic identity." Retain Q1's changed-content/attributes requirement as
   the default; `ActionReplaceDirective` (above) is the one authorized
-  exception, itself recorded at FR-AUTH-001/FR-DIR-002 rather than as a
-  weakening of this sentence.
+  exception, itself recorded at FR-DIR-005/FR-ING-005 (this same amendment)
+  rather than as a weakening of this sentence.
 
 Applied to SDD.md as v0.10 (this ADR does not itself edit SDD.md).
 
@@ -158,6 +159,14 @@ accepted decision, and which package(s) in the work split own it.
 ### 1. Lifecycle commands: parsed and authorized, not executed (D1, R7)
 
 FR-DIR-005, FR-AUTH-001/002, §8/9, trace T06.
+
+**This section is Phase 2's original record and describes only Phase 2's own
+v1 lifecycle-command behavior (frozen forever, per this ADR's §41 legacy
+manifest): a Phase 2 (`lifecycle-command/v1`) command never executes, and
+never will, even after upgrade.** Phase 3 (P3-35, this ADR's Phase 3
+amendment above) executes new lifecycle commands in source order instead of
+leaving them `PARSED_NOT_EXECUTED`; "not executed" below is not the current
+behavior for a new command, only the permanent behavior for an old one.
 
 Phase 2 parses `Resolve`/`Unpin` into immutable command records — action,
 exact target spelling, the authenticated source actor (§11 below), span
@@ -1222,7 +1231,11 @@ landed `internal/ingest/derive.go:residue` function (§24).
   `## Resolve`/`## Unpin`/unsupported-word heading became residual
   instruction text, a runtime command that failed to parse would reappear
   as ordinary trusted prose, which is worse than the diagnostic-only
-  status quo it would replace.
+  status quo it would replace. This reasoning is about a *malformed*
+  command specifically and is unaffected by Phase 3's P3-35 execution of
+  well-formed ones (§1's note above): a malformed lifecycle heading never
+  executes in either version, so it must never be rendered as instruction
+  text in either version.
 - **Creation order: a unit's residual instruction item is created after
   its directive items, amending M3 (refines §10).** M3 (§10) originally
   ordered a unit's items as "transcript items first, then residual/
@@ -1835,9 +1848,13 @@ isn't covered), that is called out explicitly rather than left silent.
   `TestD1_AuthorizeLifecycleCommand_Grant`,
   `TestD1_AuthorizeLifecycleCommand_Targets`; `internal/ingest/working_test.go`
   — `TestLifecycle_SourceActor_R7` (unauthorized source actor aborts the
-  whole event), `TestLifecycle_ParsedNotExecuted_D1` (resolved, authorized
-  command recorded `PARSED_NOT_EXECUTED`, including `TargetMismatch`,
-  changing no goal/pin/obligation state); `internal/ingest/clauses_test.go`
+  whole event); `internal/ingest/working_test.go:TestLifecycle_ExecutesInOrder_P335`
+  is this same D1 scenario as Phase 3 actually executes it (P3-35): the
+  resolved, authorized command executes in source order rather than staying
+  `PARSED_NOT_EXECUTED`. `internal/ingest/phase2_fixture_test.go:TestPhase2FixtureReplay`
+  is the v1 guarantee this ADR originally described (a v1 lifecycle command
+  stays `PARSED_NOT_EXECUTED` forever, replayed unchanged from the frozen
+  Phase 2 fixture, never executed by the upgrade). `internal/ingest/clauses_test.go`
   — `TestAmbiguousLifecycleTarget`; `internal/ingest/traces_test.go` —
   `TestT06_ParseAndAuthorizationHalf` (trace T06). Both stores via
   `eachStore`.
@@ -2037,9 +2054,11 @@ isn't covered), that is called out explicitly rather than left silent.
   :TestR13_CheckBoundaryConflict` and `internal/ingest/directives_test.go
   :TestDirectives_BoundaryConflict_R13` (a same-ID boundary conflict on one
   item among several rejects only that item and commits the rest, R13);
-  `internal/ingest/working_test.go:TestLifecycle_ParsedNotExecuted_D1`
+  `internal/ingest/working_test.go:TestLifecycle_ExecutesInOrder_P335`
   (Resolve on a non-OPEN goal / Unpin on a non-pinned target each produce a
-  diagnostic and commit the rest of the event, R14, `TargetMismatch`).
+  `TargetMismatch`/`CommandNotExecuted` diagnostic and commit the rest of the
+  event, R14; this is the same test that now also carries D1's execution-order
+  scenario under Phase 3, above).
 - **§21 (round 3 ruling, R16):** `internal/directive/policycheck_test.go`
   — `TestParserAcceptedImpliesPolicyAccepted`, `FuzzPolicyAgreement` (the
   fuzz/property cross-check that every `internal/directive`-accepted

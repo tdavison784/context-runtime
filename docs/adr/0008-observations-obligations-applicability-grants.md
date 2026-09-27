@@ -2,9 +2,11 @@
 
 Status: Proposed (2026-09-26, drafted for Phase 3; reconciled against the integrated
 Phase 3 code at `phase-3-semantic-state` head `fc87199` on 2026-09-26. Gate evidence
-is green per W7's report (one unrelated W3 fixture failure pending); this ADR stays
-Proposed until the commander formally accepts it, though every decision below now
-cites real, `grep`-verified code and tests, not a proposed contract)
+is fully green (`go test -race -count=1 ./...` passes with no exceptions, confirmed
+at PR #6 review round 1 head `c22a53c`; `TestReplaceDirectiveDeclaresRealW4Obligation`,
+pending in W7's original report, now passes); this ADR stays Proposed until the
+commander formally accepts it, though every decision below now cites real,
+`grep`-verified code and tests, not a proposed contract)
 Date: 2026-09-26
 
 ## Context
@@ -179,8 +181,9 @@ Codex's cross-check required an explicit mode chosen at assertion time.
 
 ### 6. Rejected proof and proof refresh use legal transitions (§P3-16, §W4-18..20)
 
-`obligation.evaluateOne`/`satisfy`/`invalidateProof` (`internal/obligation/evaluate.go`)
-implement the restricted `PROOF_REJECTED` and atomic `PROOF_REFRESH` paths.
+`obligation.evaluateOne`/`satisfy` (`internal/obligation/evaluate.go`) and
+`invalidateProof` (`internal/obligation/invalidate.go`) implement the
+restricted `PROOF_REJECTED` and atomic `PROOF_REFRESH` paths.
 Ratified refinements beyond the frozen text:
 
 - **Cross-boundary rejection (§W4-18):** a newer complete FAIL may reject a
@@ -323,10 +326,18 @@ reconciliation.
 
 `obligation.invalidateResource`/`invalidateProof` (`internal/obligation/invalidate.go`,
 `evaluate.go`) implement the restricted, paged, work-bounded invalidation
-transaction. `domain.CauseResourceInvalidation`/`CauseProofRejected`/
-`CauseProofRefresh` (`internal/domain/assertion.go`) are the closed causes,
-each requiring a non-nil `OriginAuthorization` distinct from a live
-`GrantID` (`domain.TransitionDetail.Validate`).
+transaction. `domain.CauseResourceInvalidation` and `CauseProofRejected`
+(`internal/domain/assertion.go`) are the two causes this restricted path
+actually uses, and only these two require a non-nil `OriginAuthorization`
+distinct from a live `GrantID` (`domain.TransitionDetail.Validate`,
+`domain.ObligationTransition.validateSemanticTransition`) — a runtime
+consequence the reporter's own resource authority does not otherwise carry.
+`CauseProofRefresh` (§6) is a *different* case: it is the authorized,
+grant-backed SATISFIED→UNRESOLVED→SATISFIED pair a live matcher grant
+produces, so its release step carries the evaluating actor's own
+`GrantID`, never `OriginAuthorization` — refresh is not part of this
+section's restricted invalidation path, even though both share the
+SATISFIED→UNRESOLVED direction.
 
 **Q-9 (commander-approved beyond the frozen text, §W4-17).** A matcher only
 ever satisfies obligations the reporting principal can access; rejection and
@@ -447,7 +458,10 @@ FROZEN "Required normative amendments at freeze" table approved them
   SUPERSEDES, DEPENDS_ON, REFERENCES and DUPLICATE_OF edges. SATISFIES is a
   typed derived relation from authoritative obligation-transition and proof
   records to an obligation version; it is not a separately persisted
-  item-to-item edge."
+  item-to-item edge. Items do not duplicate an item-to-item edge's data." —
+  the last sentence preserves the replaced text's own "items do not
+  duplicate them" clause, scoped to the item-to-item edges FR-REL-001 still
+  covers, and is the actual SDD.md v0.10 text in full (`SDD.md:217`).
 - **FR-AUTH-002 / FR-OBL-002.** Add: "Positive matcher transitions require a
   live exact-obligation-version grant. Runtime invalidation of an already
   accepted resource-bound proof is a restricted audited consequence of the
@@ -496,12 +510,13 @@ FROZEN "Required normative amendments at freeze" table approved them
 - Event traces T02, T06, and T07 are this ADR's acceptance gate; see "Gate
   evidence" below for the real tests that close it.
 
-## Gate evidence (W7, `final-p3-w7.md`, integration head `fc87199`)
+## Gate evidence (W7, `final-p3-w7.md`, integration head `fc87199`; reconfirmed at
+PR #6 review round 1 head `c22a53c`)
 
-`go vet ./...` and `gofmt -l` are clean. `go test -race -count=1 ./...`
-passes in every package except one unrelated `internal/lifecycle` fixture
-(`TestReplaceDirectiveDeclaresRealW4Obligation`, attributed to a stale W3
-fixture after the facet merges, not to this ADR's contract). Per the Phase 3
+`go vet ./...` and `gofmt -l` are clean. `go test -race -count=1 ./...` passes
+with no exceptions: `TestReplaceDirectiveDeclaresRealW4Obligation`, the one
+`internal/lifecycle` fixture W7's original report left pending (attributed to
+a stale W3 fixture after the facet merges), now passes too. Per the Phase 3
 gate checklist (`phase3-decisions.md`):
 
 | Gate item | This ADR's evidence |
@@ -517,6 +532,70 @@ gate checklist (`phase3-decisions.md`):
 
 Serialized U delta/rebase, actual inherited-request removal, and rebase
 omission/order are explicitly Phase 5 and are not part of this gate.
+
+## Outstanding required tests (SPEC-1.23)
+
+P3-42 requires every decision above to map to its named required tests.
+PR #6 review round 1 (`r6-spec1.md`, SPEC-1.23) searched every package and
+found no real counterpart for the following required-test bullets; this ADR
+records the gap honestly here rather than implying complete coverage
+elsewhere in this document. Three are already being closed as part of a
+different finding's fix, cited below; the rest remain open and are not
+owned by this ADR's own package (`internal/obligation`) unless marked.
+
+- **P3-1** "TargetCall sequence reuse rejected" for Phase 3 record families
+  — closing alongside SPEC-1.4 (W2b: three SQLite row types gain
+  `SemanticSeq()`).
+- **P3-3** "old-key migration" (an agent updates its own pre-upgrade key) —
+  closing alongside SPEC-1.5 (W1: migration backfill or namespace fallback
+  for legacy `Namespace ""`).
+- **P3-4** "legacy unknown declaration fails closed" on the ingest path —
+  closing alongside SPEC-1.3 (W1: `SameDirective` must not fall through to
+  replacement when a declaration is unknown).
+- **P3-1** "Prepare/MarkSent stale after every new semantic record family" —
+  still only the Phase 2 `TestObligationChangeStalesPreview`; no Phase
+  3-record-family case exists (`internal/invocation`).
+- **P3-2** "failed attempt then valid retry" at the Phase 3 service level —
+  no test found in `internal/obligation`, `internal/tools`, or
+  `internal/lifecycle`.
+- **P3-3** "same textual key in all three namespaces" — OBSERVATION is
+  missing from the existing DIRECTIVE/AGENT_KEY case (`internal/domain`).
+- **P3-7** "B's task-visible transcript is not A's membership" — no test
+  found in `internal/graph`'s membership package.
+- **P3-15** "mode-conflicting retry" and "migration without invented
+  exemption/proof" — no test found in `internal/obligation`.
+- **P3-20** "no filesystem/network reads during replay" (only
+  `imports_test.go`'s package-import restriction exists, which is a weaker
+  guarantee) and "uncertain aliases invalidate conservatively" — no test
+  found in `internal/obligation`.
+- **P3-24** "same invocation with a different method/principal conflicts"
+  — no test found in `internal/tools`.
+- **P3-27** "cross-turn semantic summary versus raw leased copy" (the
+  `LeaseID` skip at `internal/tools/checkpoint.go`) — untested.
+- **P3-29** "source usage update does not expire [a lease]" — no test
+  found in `internal/retrieve` or `internal/policy`.
+- **P3-34** "malformed operation rollback includes turns" (existing
+  `TestOps_MissingHandlerFailsClosed` uses a SYSTEM event, which opens no
+  turn) and "semantic writes invalidate unsent previews" — no test found
+  in `internal/ingest`.
+- **P3-35** "mismatch/ambiguity cause boundaries" — no `DetailAccess`
+  assertion on a MISMATCH/AMBIGUOUS outcome specifically.
+- **P3-36** "after further mutations/restart" (`TestP336_ReplacementHistoryReconstructible`
+  never reopens the store) and "checkpoint never retires a requirement"
+  (`gate_t16_test.go` checks facts only, not a requirement) — both in
+  `internal/ingest`.
+- **P3-38** "expired lease releases only lease protection," "superseded
+  SYSTEM instruction collectible with proper actor" (pure matrix only, no
+  service-level case), and "no `LastUsedCall==0` heuristic" — no test found
+  in `internal/policy` or `internal/lifecycle` beyond the pure decision
+  matrix (`TestCollectDecisionMatrix`).
+- **P3-10** Promote/Demote "expired origin unchanged" and a CAS conflict —
+  no test found in `internal/lifecycle`.
+
+This list is not this ADR's package's obligation to close by itself; it is
+recorded so the Phase 3 gate's own claim of completeness is accurate. Adding
+each test, or recording an explicit ruling that a bullet is satisfied
+another way, closes this section.
 
 ## Residual risks and limits
 

@@ -72,12 +72,14 @@ and injection resistance) is tracked in `internal/directive`,
 `internal/ingest`, and `testdata/directives`, not in this directory.
 
 Phase 3 (Semantic state engine) requires ADR 8, written here as Status:
-Proposed pending the Phase 3 gate, and amends ADR 6, 16, and 19 (each keeps
-its own Accepted Status from its own phase; the amendment records what
-Phase 3 adds on top). Phase 3's exit gate (replacement, resolution/
-rehydration, evidence invalidation, and mutation-authority traces against
-event traces T02/T06/T07) is tracked in the new `internal/obligation` and
-`internal/lifecycle` packages, not in this directory.
+Proposed pending the Phase 3 gate, and amends ADR 3, 4, 6, 16, 17, and 19
+(each keeps its own Accepted Status from its own phase; the amendment
+records what Phase 3 adds on top). Phase 3's exit gate (replacement,
+resolution/rehydration, evidence invalidation, and mutation-authority traces
+against event traces T02/T06/T07) is tracked primarily by `internal/ingest`'s
+`TestGate*` suite, which exercises the real W3/W4/W5/W6 services end to end;
+the new `internal/obligation` and `internal/lifecycle` packages carry the
+matching service-level tests, not in this directory.
 
 ## SDD conflicts found and applied (v0.6)
 
@@ -173,9 +175,10 @@ later commander rulings recorded there. New at this pass:
 - Three further SDD.md amendments this reconciliation surfaced, applied
   directly (no dedicated ADR owns the FR text specifically): FR-DOM-006 (a
   semantic tool's own acknowledgment is never `tool_result`/evidence — W5's
-  ruling); FR-TOOL-001 (`context_rehydrate` is the only model-facing
-  rehydration path; the underlying operation is HARNESS-only — W6's ruling
-  2, ADR 6); FR-GC-003/004 (only a conversation's newest checkpoint is
+  ruling); FR-TOOL-001 (`context_get` and `context_rehydrate` are the only
+  model-facing paths to the same lease-issuing admission; the underlying
+  operation is HARNESS-only — W6's ruling 2, ADR 6); FR-GC-003/004 (only a
+  conversation's newest checkpoint is
   protected by kind — C-17, ADR 16; GC triggers run only from an explicit
   enabled set — P3-38/39, ADR 16).
 - ADR 4's "Canonical domain registry (Phase 3)" section (committed directly

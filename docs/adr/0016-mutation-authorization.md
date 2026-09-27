@@ -61,6 +61,27 @@ defines. ADR 8 owns the obligation-matcher/resource-invalidation-specific
 consequences of the fourth bullet below; this ADR remains the
 authorization-mechanism record.
 
+**New lifecycle actions (P3-42, SPEC-1.14).** `domain.Action` (`internal/domain/authz.go`,
+`grant_target.go`) gains six values beyond this ADR's Phase 1 set (`resolve`,
+`unpin`, `replace_directive`, `change_scope`, `assert_obligation`,
+`block_obligation`, `unblock_obligation`, `waive_obligation`,
+`complete_task`): `promote`, `demote`, `archive`, `unarchive`,
+`declare_obligation`, and `set_obligation_materialization`. Every one goes
+through this ADR's unchanged `AuthorizeMutation`/`AuthorizeGrantIssuance`
+entry points; `Action.ValidForTarget(kind)` closes which target kind each
+action may name.
+
+**Typed grant targets extend, rather than replace, this ADR's own
+`AuthorizeGrantIssuance`/`sameTargetSet` decision (P3-42).** `domain.MutationGrant.Targets
+[]GrantTarget` (`internal/domain/authz.go:45`) is the Phase 3 decoded-target
+form; the Decision section's `TargetIDs []string` field above is now the
+legacy v1 path, kept exactly as this ADR originally described it and
+"mutually exclusive with `Targets`" (the field's own doc comment) — a grant
+never mixes the two. `sameTargetSet`'s exact-set check runs unchanged over
+whichever form is populated. ADR 8 §1 owns the exact-obligation-version
+targeting `Targets` adds; this ADR owns the issuance/revocation mechanism
+both forms share.
+
 - **`lifecycle.Service.CompleteTask(tx, p, domain.CompleteTaskIntent, seq)`
   (`internal/lifecycle/complete.go`) is `CompleteTask`'s own authorization
   function, built on `AuthorizeMutation` per goal, exactly as this ADR's
@@ -72,7 +93,7 @@ authorization-mechanism record.
   actual mutation sequence; any inaccessible or unauthorized member yields
   the fixed `ErrInvalidAuthorityPromotion`. It then separately rejects any
   unresolved/blocked current task-owned obligation (via `obligation.UnfinishedTaskObligations`,
-  ADR 8 §4) with the fixed `ErrUnfinishedObligations`
+  ADR 8 §8) with the fixed `ErrUnfinishedObligations`
   (`TestCompletionRejectsAllOwnerBlockersBeforeLedger`). After authorization,
   an in-flight operation or unacknowledged exchange blocks completion
   (`TestCompletionX8RejectsEveryReservationAndOpenExchange`,
@@ -93,10 +114,13 @@ authorization-mechanism record.
 - **Promotion/demotion are typed intents over a closed transition policy, not
   arbitrary `ItemChange` (P3-10).** `lifecycle.Service.Promote`/`Demote`
   (`internal/lifecycle/generation.go`) take `domain.PromoteIntent`/
-  `DemoteIntent` (a type alias, `internal/domain/lifecycle_intent.go`);
-  Promote allows EPHEMERAL→WORKING, WORKING→DURABLE, and current
-  constraint/instruction DURABLE→PINNED; Demote allows DURABLE→WORKING and
-  WORKING→EPHEMERAL for nonrequirement semantic items. PINNED→DURABLE
+  `DemoteIntent` (a type alias, `internal/domain/lifecycle_intent.go`). The
+  exact allowed-pair table below is a **new V1 policy proposal this ADR
+  records, not one the SDD prescribed independently** (P3-10 says exactly
+  this: "The exact V1 pair table is a new policy proposal"): Promote allows
+  EPHEMERAL→WORKING, WORKING→DURABLE, and current constraint/instruction
+  DURABLE→PINNED; Demote allows DURABLE→WORKING and WORKING→EPHEMERAL for
+  nonrequirement semantic items. PINNED→DURABLE
   remains exclusively Unpin (this ADR's existing rule, unchanged); goals,
   transcript/checkpoint/projection records, and current obligation sources
   are excluded, governed instead by this ADR's Resolve/Unpin and ADR 8's
@@ -146,8 +170,14 @@ authorization-mechanism record.
   fact to `lifecycle.Service.Collect` (`internal/lifecycle/collect.go`).
   `domain.Phase3Policy.GCTriggers`/`GCTriggerEnabled`
   (`internal/domain/semantic.go`) is the explicit, sorted, unique enabled
-  trigger set `lifecycle.EnqueueGC` checks before creating a `GCRequest`; an
-  unlisted trigger never fires GC merely because the enum value exists.
+  trigger set `lifecycle.enqueueGC` checks before creating a `GCRequest` for
+  a supersession/TTL/policy trigger — an unlisted one persists nothing and
+  returns an empty ID, never firing GC merely because the enum value
+  exists. `domain.GCTaskCompletion` is the one exempt trigger: task
+  completion's request always persists regardless of the enabled set
+  (P3-39's "task completion always persists its request"), then waits
+  pending until an operator or a later policy enables its actual
+  collection.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
   idempotently after producer commit, never inline with it. Tests:
   `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,

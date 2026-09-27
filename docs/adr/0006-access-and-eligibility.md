@@ -185,10 +185,11 @@ affects inherited content.
   | SESSION | no additional owner check (session-level content has no narrower active-owner state) |
   | any scope | an unexpired TTL, or an explicit retrieval lease (FR-RET-006) covering the item. A TTL is counted in turns of the item's originating task and is treated as expired when the originating task is terminal or is not the dispatching task's turn source (see the TTL decision below) |
 
-  This table is recorded now (Phase 1) even though the eligibility engine
-  (active task/turn tracking, lease issuance) is Phase 3/4 work
-  (`domain.TaskState`, `internal/domain/records.go`, is the Phase 1
-  building block; turn/lease enforcement is not yet implemented).
+  This table was recorded at Phase 1 before the eligibility engine (active
+  task/turn tracking, lease issuance) existed; Phase 3 now implements it in
+  full as `policy.Eligibility` (this ADR's Phase 3 amendment above) —
+  `domain.TaskState` (`internal/domain/records.go`) was the Phase 1 building
+  block, and turn/lease enforcement is no longer future work.
 - Unauthorized reads return `domain.ErrNotFound`
   (`internal/domain/errors.go`), never a distinct "forbidden" error, at
   every layer: `AccessBoundary.Permits` false short-circuits to
@@ -234,14 +235,22 @@ affects inherited content.
      *representations that themselves contain the expired evidence's bytes*
      (the opaque block, the raw history, the projection) are subject to
      removal, never the derived fact.
-  5. Persisted inputs for the recheck are exactly: `Coverage.ItemIDs`, lease
-     records (FR-RET-006, type not yet defined — see open item), and
-     task/turn state (`domain.TaskState`). No additional hidden state is
-     needed or permitted.
+  5. Persisted inputs for the recheck are exactly: `CoverageRecord`/
+     `CoverageMember` (Phase 3's normalized form of what this rule
+     originally called `Coverage.ItemIDs`), the `RetrievalLease` and
+     `OwnerRegistration` records named in this ADR's own Phase 3 amendment
+     above, `domain.TaskState`, and `policy.EligibilitySnapshot` — the one
+     pure input this ADR's amended `Eligibility` function actually consumes.
+     No additional hidden state is needed or permitted (P3-33: this rule is
+     amended to name the actual inputs, not the Phase 1 placeholders it
+     shipped with).
 
-  Phase 1 ships `Coverage.ItemIDs` as a structural field; Phase 3 (ingestion)
-  populates it when derived/opaque content is created; Phase 5
-  (materialization) implements the pre-dispatch recheck and rebase.
+  Phase 1 shipped `Coverage.ItemIDs` as a structural field; Phase 3
+  (`internal/graph.LinkDerivedCoverage`, ADR 8) populates the normalized
+  `CoverageRecord`/`CoverageMember` form above when derived/opaque content
+  is created, and implements the lease/owner inputs rule 5 now names; Phase
+  5 (materialization) still implements the actual pre-dispatch recheck and
+  rebase against `policy.Eligibility`'s output.
 
 ## Alternatives considered
 
@@ -288,15 +297,17 @@ affects inherited content.
   route both access and eligibility through these two named checks rather
   than reimplementing scope comparisons, or the two-check discipline this
   ADR establishes erodes silently.
-- The eligibility table above, and the temporal-eligibility rule for
-  inherited/opaque content, are not yet enforced by any code; Phase 3/4/5
-  work implements them against `domain.TaskState`/turn tracking, `domain
-  .Coverage.ItemIDs`, and a lease record type that does not exist yet
-  (`FR-RET-006`'s lease). Treat both as the accepted, decided contract those
-  phases implement against, not as already-implemented behavior — deciding
-  the rule now (rather than leaving it an open item) is what lets Phase 3
-  ingestion and Phase 5 materialization be built against one design instead
-  of two incompatible guesses.
+- At Phase 1 acceptance, the eligibility table above and the temporal-
+  eligibility rule for inherited/opaque content were not yet enforced by
+  any code; the plan was for Phase 3/4/5 work to implement them against
+  `domain.TaskState`/turn tracking, `domain.Coverage.ItemIDs`, and a lease
+  record type that did not exist yet (`FR-RET-006`'s lease). **Phase 3 has
+  since implemented the eligibility function, the coverage/membership
+  records, and `domain.RetrievalLease` in full** (this ADR's Phase 3
+  amendment above); only actual pre-dispatch enforcement inside
+  materialization remains Phase 5. Deciding the rule at Phase 1 (rather than
+  leaving it an open item) is what let Phase 3 ingestion be built against
+  one design instead of guessing.
 - `RequireNewEpoch` is currently set only by call abandonment (ADR 17); when
   Phase 5 wires FR-ASM-010's eligibility-loss trigger, the same field is
   reused, so no new `Conversation` field is anticipated to be needed for
@@ -323,11 +334,18 @@ affects inherited content.
   `Tx` write against a foreign-session record fails `ErrInvalidRecord`;
   `TestConformance/SessionIsolation` covers the same boundary from the
   writing side.
-- Trace T05 (resolved-goal archival not reopening) is directly locked by
-  `TestConformance/GoalLifecycle`: resolve, archive, retrieve (residency
-  back to RESIDENT without touching `GoalStatus`), then two distinct
-  rejected reopen attempts (`ErrInvalidTransition`), then a same-status
-  resolve as a no-op. Trace T04 (cross-agent/cross-session access) has a
+- Trace T05 (resolved-goal archival not reopening) at the retrieval-tool
+  level, matching SDD v0.10's unchanged-residency amendment (FR-RET-006,
+  above), is locked by `internal/ingest`'s `TestGateT05_ResolvedGoalStaysResolved`,
+  `TestGateT05_RetrievalNeverReopens`, and `TestGateT05_ModelPathGet`.
+  `internal/store/storetest`'s `TestConformance/GoalLifecycle` is a distinct,
+  lower-level store-mechanism test: it exercises resolve, archive, and a
+  generic `ItemChange.Residency` update never touching `GoalStatus` (any
+  authorized caller, not the retrieval path specifically, may flip
+  residency this way — Archive/Unarchive does), then two distinct rejected
+  reopen attempts (`ErrInvalidTransition`), then a same-status resolve as a
+  no-op; it does not itself claim the retrieval tool changes residency.
+  Trace T04 (cross-agent/cross-session access) has a
   provenance-side counterpart already in `internal/graph/graph_test.go`:
   `TestProvenance_Truncation_T04` and `TestProvenance_RootMustBeAccessible`;
   the planner-side "B's assembly never includes A's private history" half
@@ -338,13 +356,16 @@ affects inherited content.
 ### Resolved at acceptance (2026-09-26)
 
 - Exact representation of a retrieval lease (FR-RET-006) — not yet a type in
-  `internal/domain`; needed before Phase 6 (archive/retention) but the
-  eligibility table above already assumes its shape (principal/task/agent/
-  turn-bound, with an expiry).
-  **Decision:** the retrieval lease type is deferred to Phase 6 and will be
-  added to this ADR by amendment before Phase 6 exits; the eligibility
-  table's assumed shape (principal/task/agent/turn-bound with expiry) is the
-  constraint it must meet.
+  `internal/domain` at Phase 1 acceptance; the eligibility table above
+  already assumed its shape (principal/task/agent/turn-bound, with an
+  expiry).
+  **Decision at Phase 1 acceptance:** deferred to Phase 6, to be added by
+  amendment before Phase 6 exits.
+  **Superseded (P3-29/P3-33, this ADR's Phase 3 amendment above):** the
+  retrieval lease landed in Phase 3 instead, as `domain.RetrievalLease`,
+  meeting exactly the shape assumed here (principal/task/agent/turn-bound
+  with expiry). This question is resolved by the Phase 3 amendment, not by
+  a future Phase 6 one.
 - Whether TTL expiry is measured in turns only (`ContextItem.TTLTurns`,
   `internal/domain/item.go`) or needs a session-sequence-based expiry too for
   scopes without a turn concept (WORKFLOW/AGENT/SESSION-scoped ephemeral
