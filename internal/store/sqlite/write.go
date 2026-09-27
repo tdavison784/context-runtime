@@ -360,6 +360,11 @@ func (t *transaction) AppendObligationTransition(v domain.ObligationTransition, 
 	if v.Cause != "" {
 		return domain.ObligationVersion{}, fmt.Errorf("%w: obligation transition %s: a semantic transition requires its detail", domain.ErrInvalidRecord, v.ID)
 	}
+	// INV-16 (DUR-2.12): this path carries no proof or assertion, so it
+	// never satisfies; satisfaction is AppendSemanticObligationTransition's.
+	if v.To == domain.ObligationSatisfied {
+		return domain.ObligationVersion{}, fmt.Errorf("%w: obligation transition %s: SATISFIED requires a proof or assertion", domain.ErrInvalidRecord, v.ID)
+	}
 	var stored domain.ObligationVersion
 	if err := t.get("obligation", v.ObligationID, int(v.Version), &stored); err == nil && stored.DeclarationKind != "" {
 		return domain.ObligationVersion{}, fmt.Errorf("%w: obligation %s/%d: a declared version transitions only with its detail", domain.ErrInvalidRecord, v.ObligationID, v.Version)
