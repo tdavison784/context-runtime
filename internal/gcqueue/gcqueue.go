@@ -18,8 +18,9 @@ import (
 //     Task completion always persists (P3-39).
 //   - A task-less trigger persists nothing (H4): Phase 3 has no session
 //     scoped GC, so every request is TASK scoped.
-//   - The request identity derives from the trigger identity, so a repeated
-//     trigger returns the existing request; the same identity with different
+//   - The request identity derives from the authenticated origin and the
+//     trigger identity (H5), so a repeated trigger returns the existing
+//     request and no caller can name it; the same identity with different
 //     content is ErrEventIDConflict. MANUAL collection is never enqueued.
 //
 // origin is recorded as context only: it never becomes the collector. Any
@@ -50,8 +51,17 @@ func Enqueue(tx store.Tx, pol domain.Phase3Policy, origin domain.Principal, trig
 	if err != nil {
 		return "", err
 	}
-	requestID := "gc_" + domain.NewCanonicalEncoder("context-runtime/gc-trigger/v1").String(origin.SessionID).String(string(trigger)).String(triggerID).Hash()
-	r := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: RequestID(origin.SessionID, requestID), SessionID: origin.SessionID, SchemaVersion: domain.SemanticSchemaV1},
+	// Runtime GC IDs bind the authenticated origin and live in reserved
+	// namespaces no caller can name (H5, SEC-2.6).
+	requestID, err := domain.GCTriggerRequestID(origin, trigger, triggerID)
+	if err != nil {
+		return "", err
+	}
+	recordID, err := domain.GCRequestRecordID(origin.SessionID, requestID)
+	if err != nil {
+		return "", err
+	}
+	r := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: recordID, SessionID: origin.SessionID, SchemaVersion: domain.SemanticSchemaV1},
 		CollectIntent: domain.CollectIntent{RequestID: requestID, Scope: domain.CollectTask, TaskID: taskID, Trigger: trigger}, Origin: origin, PolicyVersion: pol.Version}
 	prior, err := sem.GCRequest(r.ID)
 	if err == nil {
@@ -71,7 +81,8 @@ func Enqueue(tx store.Tx, pol domain.Phase3Policy, origin domain.Principal, trig
 	return r.ID, nil
 }
 
-// RequestID is the durable GC request's record ID for a request identity.
-func RequestID(session, requestID string) string {
-	return "gcq_" + domain.NewCanonicalEncoder("context-runtime/gc-request/v1").String(session).String(requestID).Hash()
+// RequestID is the durable GC request's record ID for a request identity
+// (domain.GCRequestRecordID).
+func RequestID(session, requestID string) (string, error) {
+	return domain.GCRequestRecordID(session, requestID)
 }
