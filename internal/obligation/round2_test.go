@@ -271,3 +271,34 @@ func TestH2CurrentSatisfiesIgnoresHistory(t *testing.T) {
 		t.Fatalf("current SATISFIES after %d transitions = %+v, %v", h2History, v, err)
 	}
 }
+
+// H2: workspace resolution reads each binding's current version, so a
+// binding rebound more times than the work budget never wedges a pinned
+// declaration (which rides its directive's creation transaction).
+func TestH2BindingVersionsDoNotWedgeDeclaration(t *testing.T) {
+	s := newTestService(t)
+	st := newTestStore(t)
+	h := actorOf(domain.AuthorityHarness)
+	setupWorkspace(t, s, st, h)
+	task := domain.WorkspaceSourceContext{Kind: domain.WorkspaceTask, ID: "task"}
+	for v := uint64(2); v <= h2History; v++ {
+		in := bindIntent("ws1", v, task)
+		in.RequestID = fmt.Sprintf("bind-ws1-v%d", v)
+		if _, err := s.bindWS(t, st, h, in); err != nil {
+			t.Fatalf("binding version %d: %v", v, err)
+		}
+	}
+	ref, err := pinAndDeclare(t, s, st, "p1", "tests", domain.AuthorityUser, "All tests must pass.", "")
+	if err != nil || ref == nil {
+		t.Fatalf("declaration after %d binding versions: %v %v", h2History, ref, err)
+	}
+	var o domain.ObligationVersion
+	_ = st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		r, _ := store.ReadSemantic(tx)
+		o, err = r.ExactObligation(*ref)
+		return nil
+	})
+	if err != nil || o.BindingState != domain.BindingBound || o.WorkspaceBindingRef == nil || o.WorkspaceBindingRef.Version != h2History {
+		t.Errorf("obligation = %+v %v, want bound to ws1 v%d", o, err, h2History)
+	}
+}
