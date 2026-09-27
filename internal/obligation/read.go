@@ -149,6 +149,11 @@ type ObligationView struct {
 	Binding                 domain.ObligationBindingState
 	MaterializationDisabled bool
 	Revision                uint64
+	// Pending is the fixed K1 A7 code: the version is effectively
+	// UNRESOLVED because its proof is no longer valid, and the restricted
+	// RESOURCE_INVALIDATION settlement is not recorded yet. It names no
+	// update, path or ID.
+	Pending bool
 }
 
 // VisibleObligations returns the current obligation versions of a task the

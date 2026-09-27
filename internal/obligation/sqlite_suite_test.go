@@ -170,6 +170,11 @@ func TestSQLiteSuite(t *testing.T) {
 		{"SEC410BindingVersionIsNoOracle", TestSEC410BindingVersionIsNoOracle, false},
 		{"EffectiveStatusPassThrough", TestEffectiveStatusPassThrough, true},
 		{"SPEC410ReevaluationSelectsOnlyCurrentEvidence", TestSPEC410ReevaluationSelectsOnlyCurrentEvidence, true},
+		{"K1ReportsNeverFanOut", TestK1ReportsNeverFanOut, false},
+		{"K1ValidityIsMonotone", TestK1ValidityIsMonotone, true},
+		{"K1DependencySemantics", TestK1DependencySemantics, true},
+		{"K1InlineSettleBeforeTransition", TestK1InlineSettleBeforeTransition, true},
+		{"K1ReadsUseEffectiveStatus", TestK1ReadsUseEffectiveStatus, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {
