@@ -199,6 +199,6 @@ func (s *Service) SubjectApplicability(tx store.ReadTx, st domain.SubjectState) 
 	if err != nil {
 		return "", err
 	}
-	a, _, _, err := s.applicability(r, s.newBudget(), obs, run)
+	a, err := s.applicability(r, s.newBudget(), obs, run)
 	return a, err
 }

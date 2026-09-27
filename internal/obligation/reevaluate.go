@@ -98,7 +98,7 @@ func (s *Service) selectEvidence(r store.SemanticReader, work *budget, actor dom
 		if err != nil {
 			return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
 		}
-		a, _, _, err := s.applicability(r, work, obs, run)
+		a, err := s.applicability(r, work, obs, run)
 		if err != nil {
 			return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
 		}
