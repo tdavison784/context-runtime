@@ -104,3 +104,31 @@ func TestGCQueueNeverBlocksBehindSkippedOrFailingRequests(t *testing.T) {
 		})
 	})
 }
+
+// SEC-1.6: never-collectible live items must not exhaust the collection's
+// work bound; only possibly-archivable candidates pay for protection reads.
+func TestLiveItemsDoNotExhaustCollectionBudget(t *testing.T) {
+	const live = 600
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxTransactionWork, pol.MaxGCDecisions = 4096, 4096
+		s, _ := New(db, pol)
+		if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+			if _, err := tx.PutTask(storetest.NewTask("s", "task"), 0, storetest.NewLifecycleEvent("s", "created", tx.NextSeq(), domain.TargetTask, "task")); err != nil {
+				return err
+			}
+			for i := range live {
+				if err := tx.InsertItem(storetest.NewItem("s", fmt.Sprintf("fact-%03d", i), tx.NextSeq(), "fact")); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		out, err := collect(newFacets(), db, s, storetest.NewPrincipal("s", domain.AuthoritySystem), domain.CollectIntent{RequestID: "c", Scope: domain.CollectSession, Trigger: domain.GCManual})
+		if err != nil || len(out.Result.Collect.Decisions) != live || len(out.Result.Collect.ArchivedRefs) != 0 {
+			t.Fatalf("session collection over %d live facts: %v", live, err)
+		}
+	})
+}
