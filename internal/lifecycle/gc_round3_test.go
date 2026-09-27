@@ -304,3 +304,52 @@ func TestJ4ItemFailuresHaveBoundedRetriesAndClosedReasons(t *testing.T) {
 		})
 	}
 }
+
+type gcMissingCapabilityStore struct{ store.Store }
+
+func (s gcMissingCapabilityStore) Update(ctx context.Context, session string, f func(store.Tx) error) error {
+	return s.Store.Update(ctx, session, func(tx store.Tx) error { return f(legacyOnly{tx}) })
+}
+
+// J5 / SPEC-3.2: collector configuration never charges or quarantines a request.
+func TestJ5ConfigurationErrorsLeaveRequestsPending(t *testing.T) {
+	for _, kind := range []string{"policy", "trigger", "capability"} {
+		t.Run(kind, func(t *testing.T) {
+			eachStore(t, func(t *testing.T, db store.Store) {
+				pol := testPolicy()
+				base, _ := New(db, pol)
+				seedEphemeral(t, db, 1, 0)
+				id := enqueueScratch(t, db, base)
+				var runtimeStore store.Store = db
+				switch kind {
+				case "policy":
+					pol.Version = "phase3-policy/v0"
+				case "trigger":
+					pol.GCTriggers = []domain.GCTrigger{domain.GCManual}
+				case "capability":
+					runtimeStore = gcMissingCapabilityStore{db}
+				}
+				s := &Service{store: runtimeStore, policy: pol}
+				before := lastSeq(t, db)
+				for range 4 {
+					if n, err := s.CollectPending(context.Background(), "s", func(domain.GCRequest) (domain.Principal, bool) {
+						return storetest.NewPrincipal("s", domain.AuthoritySystem), true
+					}, 1); n != 0 || err == nil {
+						t.Fatalf("configuration failure: %d %v", n, err)
+					}
+				}
+				if _, found := gcResult(t, db, id); found || len(pendingGC(t, db)) != 1 || lastSeq(t, db) != before {
+					t.Fatal("configuration failure changed request")
+				}
+				readSemantic(t, db, func(sem store.SemanticReader) error {
+					p, err := sem.GCProgress(id)
+					if err == nil && (p.Attempts != 0 || p.Batches != 0) {
+						t.Errorf("configuration charged: %+v", p)
+					}
+					return nil
+				})
+				runGC(t, db, base, id, 5)
+			})
+		})
+	}
+}

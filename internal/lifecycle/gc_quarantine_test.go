@@ -102,34 +102,6 @@ func TestFailingGCRequestsAreQuarantined(t *testing.T) {
 	harness := storetest.NewPrincipal("s", domain.AuthorityHarness)
 	pick := func(domain.GCRequest) (domain.Principal, bool) { return harness, true }
 
-	t.Run("permanent", func(t *testing.T) {
-		eachStore(t, func(t *testing.T, db store.Store) {
-			s, _ := New(db, testPolicy())
-			seedCompletion(t, db, nil, "", false)
-			if err := db.Update(ctx, "s", func(tx store.Tx) error {
-				sem, err := store.Semantic(tx)
-				if err != nil {
-					return err
-				}
-				return sem.InsertGCRequest(domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: "gcq_old", SessionID: "s", SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
-					CollectIntent: domain.CollectIntent{RequestID: "gc_old", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCSupersession},
-					Origin:        storetest.NewPrincipal("s", domain.AuthoritySystem), PolicyVersion: "phase3-policy/v0"})
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := s.CollectPending(ctx, "s", pick, 4); err != nil {
-				t.Fatalf("quarantine pass: %v", err)
-			}
-			res, found := gcResult(t, db, "gcq_old")
-			if !found || res.Outcome != domain.GCFailed || res.Reason != domain.GCFailurePolicyMismatch || res.CollectReceiptID != "" {
-				t.Fatalf("quarantine record: %+v found=%v", res, found)
-			}
-			before := lastSeq(t, db)
-			if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || err != nil || lastSeq(t, db) != before || len(pendingGC(t, db)) != 0 {
-				t.Fatalf("quarantined request retried: n=%d err=%v", n, err)
-			}
-		})
-	})
 	t.Run("single item budget skip", func(t *testing.T) {
 		eachStore(t, func(t *testing.T, db store.Store) {
 			base, _ := New(db, testPolicy())

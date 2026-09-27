@@ -23,7 +23,7 @@ const (
 
 // classifyGCFailure maps an attempt's error to its charge and, for
 // permanent failures, the recorded reason (DUR-2.7). Only deterministic
-// errors quarantine at once: a policy mismatch, an invalid request
+// errors quarantine at once: an invalid request
 // (including a task that no longer exists) and an integrity failure.
 func classifyGCFailure(err error) (gcFailureKind, domain.GCFailureCode) {
 	switch {
@@ -31,10 +31,8 @@ func classifyGCFailure(err error) (gcFailureKind, domain.GCFailureCode) {
 		return gcNotCharged, ""
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded),
 		errors.Is(err, domain.ErrVersionConflict), errors.Is(err, ErrGCTriggerDisabled),
-		errors.Is(err, domain.ErrInvalidAuthorityPromotion):
+		errors.Is(err, domain.ErrInvalidAuthorityPromotion), errors.Is(err, domain.ErrUnsupportedSchema), errors.Is(err, ErrGCConfiguration):
 		return gcNotCharged, ""
-	case errors.Is(err, domain.ErrUnsupportedSchema):
-		return gcPermanent, domain.GCFailurePolicyMismatch
 	case errors.Is(err, domain.ErrIntegrity):
 		return gcPermanent, domain.GCFailureIntegrity
 	case errors.Is(err, domain.ErrInvalidRecord), errors.Is(err, domain.ErrNotFound):

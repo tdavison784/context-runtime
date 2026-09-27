@@ -12,6 +12,8 @@ import (
 
 // ErrGCTriggerDisabled rejects collection for a trigger outside the policy's
 // explicit enabled set. The durable request, if any, stays pending.
+var ErrGCConfiguration = errors.New("lifecycle: invalid collector configuration")
+
 var ErrGCTriggerDisabled = fmt.Errorf("lifecycle: GC trigger disabled by policy: %w", domain.ErrInvalidTransition)
 
 // EnqueueGC persists a durable GC request in the producer's transaction
@@ -61,7 +63,7 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 		}
 	}()
 	if err = collector.Validate(); err != nil {
-		return out, err
+		return out, errors.Join(ErrGCConfiguration, err)
 	}
 	sem, err := store.Semantic(tx)
 	if err != nil {
@@ -180,7 +182,11 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 				return done, errors.Join(append(failures, err)...)
 			}
 			p, ok := collectorFor(r)
-			if !ok || !s.policy.GCTriggerEnabled(r.Trigger) {
+			if !ok {
+				continue
+			}
+			if !s.policy.GCTriggerEnabled(r.Trigger) {
+				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, ErrGCTriggerDisabled))
 				continue
 			}
 			attempts++

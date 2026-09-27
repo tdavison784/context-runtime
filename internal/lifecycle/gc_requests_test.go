@@ -207,7 +207,7 @@ func TestGCTriggerSetIsEnforced(t *testing.T) {
 		t.Fatalf("disabled trigger executed: %v", err)
 	}
 	pick := func(domain.GCRequest) (domain.Principal, bool) { return collector, true }
-	if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || err != nil {
+	if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || !errors.Is(err, ErrGCTriggerDisabled) {
 		t.Fatalf("disabled request not skipped: %d %v", n, err)
 	}
 	if pending := pendingGC(t, mem); len(pending) != 1 {
