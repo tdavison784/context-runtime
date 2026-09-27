@@ -3,6 +3,7 @@ package ingest
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -25,6 +26,7 @@ type t07 struct {
 	refs     []domain.ObligationRef // one bound tests obligation per pin
 	ref      domain.ObligationRef   // refs[0]
 	runs     int
+	mu       sync.Mutex // guards events for concurrent tests
 	events   int
 	auth     uint64 // current authoritative resource revision
 	rev      uint64 // current resource-state revision
@@ -41,6 +43,8 @@ func t07Target(mod func(*domain.TestsTarget)) domain.TargetSpec {
 func fingerprint(s string) string { return domain.HashBytes([]byte(s)) }
 
 func (w *t07) id(prefix string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.events++
 	return fmt.Sprintf("%s-%d", prefix, w.events)
 }
