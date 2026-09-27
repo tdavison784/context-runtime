@@ -220,6 +220,15 @@ func (s *Service) createObligation(tx store.Tx, sem store.SemanticTx, seq uint64
 	if !ok {
 		return domain.ObligationRef{}, domain.ErrInvalidRecord
 	}
+	// Never bind more obligation versions to one source than the tightest
+	// by-source consumer reads, or the source could never be replaced,
+	// demoted, archived or collected (DUR-1.5, G2). Refused before any write.
+	limit := s.policy.ObligationDeclarationLimit()
+	if bound, err := tx.ObligationsBySource(src.ID, limit); errors.Is(err, store.ErrLimitExceeded) || err == nil && len(bound) >= limit {
+		return domain.ObligationRef{}, domain.ErrResourceLimit
+	} else if err != nil {
+		return domain.ObligationRef{}, err
+	}
 	id := domain.DerivedObligationID(key, slot)
 	version := uint64(1)
 	switch latest, err := tx.Obligation(id); {
