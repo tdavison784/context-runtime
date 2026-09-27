@@ -62,6 +62,11 @@ func (s semTx) InsertProjection(p domain.ProjectionRecord) error {
 	if err != nil || it.Role != domain.RoleProjection || it.Authority != domain.AuthorityTool {
 		return invalid("projection %s: item %s is not a stored TOOL projection", p.ID, p.ItemID)
 	}
+	// Reads filter on the item's access: it must be the record's
+	// intersected boundary, never broader (SEC-1.12).
+	if it.Access != p.Access {
+		return invalid("projection %s: item %s access is not the projection's boundary", p.ID, p.ItemID)
+	}
 	if ok, err := s.sourceWithin(p.Source, p.Access); err != nil || !ok {
 		return errors.Join(err, invalidIf(!ok, "projection %s: source is not stored content containing its boundary", p.ID))
 	}
