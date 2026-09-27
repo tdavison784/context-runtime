@@ -363,17 +363,14 @@ func TestGateT06_AllLifecyclePathsAuthorize(t *testing.T) {
 	t.Run("matcher grant on exact version satisfies with proof", func(t *testing.T) { pending(t, depW4+"; "+depW2) })
 }
 
-// TestGateT16_CheckpointFrontier: explicit membership and closed X1–X12
-// frontier, agent/HARNESS forms, F1/F2 independent, size bounds, chains.
+// TestGateT16_CheckpointFrontier: T16 items beyond
+// TestGateT16_CheckpointThroughPipeline, covered at service level by W5.
 func TestGateT16_CheckpointFrontier(t *testing.T) {
-	for _, step := range []string{
-		"X1-X12 closed prefix, issuing round excluded",
-		"F1/F2 current and derived from X3/X9",
-		"HARNESS checkpoint with generation manifest",
-		"missing middle group / unseen history rejected",
-		"oversize checkpoint rejected atomically",
-		"checkpoint chain survives restart",
+	for step, w5 := range map[string]string{
+		"HARNESS checkpoint with generation manifest":    "TestHarnessCheckpointKeepsHarnessAuthorityAndReplays",
+		"missing middle group / unseen history rejected": "TestCheckpointRejectsOpenPrefixOversizeAndForeignManifests",
+		"checkpoint chain survives SQLite restart":       "TestToolReceiptsAndCheckpointSurviveSQLiteReopen",
 	} {
-		t.Run(step, func(t *testing.T) { pending(t, depW5Mem+"; "+depW5Tools+"; "+depW2) })
+		t.Run(step, func(t *testing.T) { pending(t, "gate-level pipeline version (W5 covers it in "+w5+")") })
 	}
 }

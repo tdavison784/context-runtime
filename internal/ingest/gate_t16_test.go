@@ -277,6 +277,28 @@ func TestGateT16_CheckpointThroughPipeline(t *testing.T) {
 			}
 			return nil
 		})
+
+		// A later checkpoint chains to K1 and covers one more closed round
+		// (X5's tool call was answered by K1 itself).
+		x6, manifest6 := c.round(6)
+		k2, err := tools.Execute(ctx, f.s, sess, func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
+			return c.svc.CreateCheckpoint(tx, c.dispatcher, tools.Request[domain.CheckpointIntent]{Invocation: c.invocation(x6),
+				Intent: domain.CheckpointIntent{RequestID: "k2", GenerationManifestID: manifest6, Parts: textParts("As K1; round 5 checkpointed.")}}, seq)
+		})
+		if err != nil {
+			t.Fatalf("second checkpoint: %v", err)
+		}
+		f.view(func(tx store.ReadTx) error {
+			sem, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			k, err := sem.Checkpoint(k2.CheckpointID)
+			if err != nil || k.PriorCheckpointID != k1.CheckpointID || k.CoveredFrontier != 5 || k.IssuingExchangeID != x6.ExchangeID {
+				t.Fatalf("chained checkpoint = %+v (%v)", k, err)
+			}
+			return nil
+		})
 	})
 }
 
