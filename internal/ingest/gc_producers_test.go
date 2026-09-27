@@ -89,12 +89,35 @@ func TestGCProducers_SPEC16(t *testing.T) {
 	})
 }
 
-// TestGCProducers_DisabledOrMissing_SPEC16: under the default policy (the
-// triggers disabled) nothing is enqueued; with a trigger enabled but no
-// lifecycle producer configured, the event fails closed rather than
-// silently dropping its durable trigger.
+// gcTriggersOff records a policy that disables SUPERSESSION and TTL, for
+// tests that deliberately run ingest with a routing fake or no lifecycle
+// executor and are not about GC.
+func (f *fixture) gcTriggersOff() {
+	pol := testPolicy()
+	pol.GCTriggers = []domain.GCTrigger{domain.GCManual, domain.GCTaskCompletion}
+	f.in.Semantic = &pol
+}
+
+// withoutGCTriggers records and executes a policy that disables SUPERSESSION
+// and TTL, now that the default manifest enables them.
+func (f *fixture) withoutGCTriggers() {
+	f.t.Helper()
+	f.gcTriggersOff()
+	pol := *f.in.Semantic
+	svc, err := lifecycle.New(f.s, pol)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.in.Lifecycle = svc
+}
+
+// TestGCProducers_DisabledOrMissing_SPEC16: under a policy that disables the
+// triggers nothing is enqueued; with a trigger enabled but no lifecycle
+// producer configured, the event fails closed rather than silently dropping
+// its durable trigger.
 func TestGCProducers_DisabledOrMissing_SPEC16(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
+		f.withoutGCTriggers()
 		user, sys := principal(domain.AuthorityUser), principal(domain.AuthoritySystem)
 		f.mustIngest(user, userEvent("q1", "hi", false))
 		f.mustIngest(sys, sysEvent("v1", "## Pinned\n- [p] one\n"))

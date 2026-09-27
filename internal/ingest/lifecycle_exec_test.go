@@ -136,6 +136,7 @@ func TestCommandsV2_ExecuteInSourceOrder(t *testing.T) {
 func TestCommandsV2_DetailRedaction(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
 		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+		f.gcTriggersOff() // commands under test, not the GC producer
 		a := principal(domain.AuthorityUser)
 		f.mustIngest(a, userEvent("priv", "## Pinned\n- [p] {scope=AGENT} private rule\n", true))
 		hidden := f.mustIngest(a, userEvent("res-hidden", "## Unpin [p]\n", true))
@@ -181,6 +182,7 @@ func TestCommandsV2_AbortsAtomically(t *testing.T) {
 		f.mustIngest(sys, sysEvent("g", "## Goal [G]\nShip.\n"))
 
 		f.in.Lifecycle = nil
+		f.gcTriggersOff() // the missing command executor must fail, not the GC producer
 		f.requireAtomic(domain.ErrUnsupportedSchema, func() error {
 			_, err := f.ingest(sys, sysEvent("no-exec", "## Remember\n- n\n## Resolve [G]\n"))
 			return err

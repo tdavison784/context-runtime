@@ -94,6 +94,17 @@ func (s unverifiedStore) Update(ctx context.Context, sessionID string, fn func(s
 
 type unverifiedTx struct{ store.Tx }
 
+// The wrapper keeps the transaction's semantic facet: GC triggers and
+// receipts must still reach it.
+func (t unverifiedTx) SemanticTransaction() (store.SemanticTx, error) { return store.Semantic(t.Tx) }
+func (t unverifiedTx) SemanticReadBackend() store.SemanticReader {
+	r, err := store.ReadSemantic(t.Tx)
+	if err != nil {
+		return nil
+	}
+	return r
+}
+
 func (t unverifiedTx) CanonicalCandidates(f store.CanonicalFilter) (store.Lookup, error) {
 	l, err := t.Tx.CanonicalCandidates(f)
 	l.Unverified = append(l.Unverified, "itm_legacy")

@@ -31,8 +31,9 @@ func DefaultPhase3Policy() domain.Phase3Policy {
 		CheckpointGeneration:       domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh,
 		DefaultLeaseCalls: 2, MaxLeaseCalls: 8,
 		// Only triggers with a producer on every path (SPEC-1.6, FR-GC-004):
-		// SUPERSESSION, TTL and POLICY join once ingest produces them too.
-		// Sorted, as the manifest requires.
-		GCTriggers: []domain.GCTrigger{domain.GCManual, domain.GCTaskCompletion},
+		// ingest and ReplaceDirective produce SUPERSESSION, ingest produces
+		// TTL per turn advance, and completion TASK_COMPLETION. POLICY has no
+		// producer yet. Sorted, as the manifest requires.
+		GCTriggers: []domain.GCTrigger{domain.GCManual, domain.GCSupersession, domain.GCTaskCompletion, domain.GCTTL},
 	}
 }
