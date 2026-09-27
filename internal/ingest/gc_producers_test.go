@@ -1,7 +1,7 @@
 package ingest
 
 import (
-	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -111,28 +111,46 @@ func (f *fixture) withoutGCTriggers() {
 	f.in.Lifecycle = svc
 }
 
-// TestGCProducers_DisabledOrMissing_SPEC16: under a policy that disables the
-// triggers nothing is enqueued; with a trigger enabled but no lifecycle
-// producer configured, the event fails closed rather than silently dropping
-// its durable trigger.
-func TestGCProducers_DisabledOrMissing_SPEC16(t *testing.T) {
+// TestGCProducers_RecordedPolicyDecides_SPEC211 (SPEC-2.11, P3-39): the
+// event's RECORDED policy alone decides whether a SUPERSESSION or TTL
+// trigger is produced, through the leaf producer, whatever the lifecycle
+// executor's own policy says, and whether or not an executor is configured.
+// A trigger the recorded policy disables produces nothing.
+func TestGCProducers_RecordedPolicyDecides_SPEC211(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
-		f.withoutGCTriggers()
 		user, sys := principal(domain.AuthorityUser), principal(domain.AuthoritySystem)
+		// Recorded policy disables both; the executor's enables both.
+		f.withGCTriggers()
+		off := testPolicy()
+		off.GCTriggers = []domain.GCTrigger{domain.GCManual, domain.GCTaskCompletion}
+		f.in.Semantic = &off
 		f.mustIngest(user, userEvent("q1", "hi", false))
 		f.mustIngest(sys, sysEvent("v1", "## Pinned\n- [p] one\n"))
 		f.mustIngest(sys, sysEvent("v2", "## Pinned\n- [p] two\n"))
 		if got := f.gcRequests(); len(got[domain.GCTTL])+len(got[domain.GCSupersession]) != 0 {
-			t.Fatalf("disabled triggers enqueued %+v", got)
+			t.Fatalf("triggers the recorded policy disables were enqueued: %+v", got)
 		}
-		f.withGCTriggers()
-		f.in.Lifecycle = nil
-		f.requireAtomic(domain.ErrUnsupportedSchema, func() error {
-			_, err := f.ingest(user, userEvent("q2", "next", false))
-			return err
-		})
-		if _, err := f.ingest(sys, sysEvent("v3", "## Pinned\n- [p] three\n")); !errors.Is(err, domain.ErrUnsupportedSchema) {
-			t.Fatalf("replacement without a GC producer: %v", err)
+		// Recorded policy enables both; the executor's disables both, or
+		// there is no executor at all.
+		on := testPolicy()
+		on.GCTriggers = domain.DefaultGCTriggers()
+		svc, err := lifecycle.New(f.s, off)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, exec := range []LifecycleExecutor{svc, nil} {
+			f.in.Semantic, f.in.Lifecycle = &on, exec
+			f.mustIngest(user, userEvent(fmt.Sprintf("q-on-%d", i), "next", false))
+			f.mustIngest(sys, sysEvent(fmt.Sprintf("v-on-%d", i), fmt.Sprintf("## Pinned\n- [p] version %d\n", i+3)))
+			got := f.gcRequests()
+			if len(got[domain.GCTTL]) != i+1 || len(got[domain.GCSupersession]) != i+1 {
+				t.Fatalf("executor %d: TTL %d, supersession %d, want %d each", i, len(got[domain.GCTTL]), len(got[domain.GCSupersession]), i+1)
+			}
+			for _, r := range append(got[domain.GCTTL], got[domain.GCSupersession]...) {
+				if r.PolicyVersion != on.Version {
+					t.Fatalf("request policy %q, want the recorded %q", r.PolicyVersion, on.Version)
+				}
+			}
 		}
 	})
 }
