@@ -5,9 +5,11 @@ round 2, head `914afef`. `go test -race -count=1 ./...` passes with no exception
 every reconciled head so far; every decision below cites real, `grep`-verified code
 and tests, not a proposed contract. **P3-42's required-test mapping is still
 incomplete** (see "Outstanding required tests" below — SPEC-1.23/SPEC-2.14) **and
-G1's applicability rule is still under active fix as of this pass** (SPEC-2.1/DUR-2.1,
-§12 below): this ADR remains Proposed for both reasons, not merely pending a
-formality)
+G1's applicability rule is only partially landed as of this pass** (§6/§12
+below): the matcher-level ordinal/boundary rejection rule (H1, SEC-2.9) is
+fixed and tested, but the store-side `SubjectHighWater` read it depends on
+(H2, assigned W2) is still a fail-closed stub. This ADR remains Proposed for
+both reasons, not merely pending a formality)
 Date: 2026-09-26
 
 ## Context
@@ -200,10 +202,44 @@ Codex's cross-check required an explicit mode chosen at assertion time.
 restricted `PROOF_REJECTED` and atomic `PROOF_REFRESH` paths.
 Ratified refinements beyond the frozen text:
 
-- **Cross-boundary rejection (§W4-18):** a newer complete FAIL may reject a
-  task-wide matcher proof even when the failing run's own evidence is
-  narrower — rejection only ever moves a version towards UNRESOLVED, and its
-  details are redacted.
+- **Cross-boundary rejection (§W4-18), REPLACED (PR #6 round 2 systemic
+  ruling H1; SEC-2.9; commits `bf69262`/`f5efa47`/`8d14af9`, W4b).** W4's
+  original text said a newer complete FAIL "may reject a task-wide matcher
+  proof even when the failing run's own evidence is narrower," with no
+  boundary check — SEC-2.9 found this let a FAIL private to another agent
+  reject a TASK-wide proof and leak the private observation's ID into a
+  visible record. **The rule is replaced in full:** a proof is rejected only
+  by a subject- and family-matched **COMPLETE FAIL** whose run ordinal is
+  greater than the proof's own run ordinal and whose evidence and run
+  boundaries both cover the proof's boundary (`failCovers`,
+  `internal/obligation/evaluate.go`) — regardless of what fingerprint or
+  content the FAIL observed. Rejection depends on **ordinal and boundary
+  only**, never on comparing fingerprints: this closes the H1 residual where
+  a FAIL judged "inapplicable" by content comparison could be skipped even
+  though it was the newest terminal result for the subject. A newer PASS at
+  a different fingerprint rejects nothing (only FAIL rejects). Rejection
+  still only ever moves a version towards UNRESOLVED, and the rejecting
+  observation's ID is never recorded where an unauthorized reader of the
+  proof could see it. Tests: `TestH1NewerFailAtOtherFingerprintRejects`,
+  `TestH1StalePassAfterRevert`, `TestH1StalePassAfterInapplicableFail`,
+  `TestH1PrivateFailDoesNotOutrankTaskPass`,
+  `TestPrivateFailNeverRejectsTaskProof_SEC29`.
+- **Satisfaction is additionally gated on a per-subject high-water mark
+  (H1's watermark half; SEC-2.1/SPEC-2.1/DUR-2.1).** The newest *complete*
+  PASS or FAIL run for the exact subject partition wins, whatever the
+  current subject state's own applicability — this is what closes the
+  round-1 residual where a workspace revert (W1→W2→W1) made an older run's
+  PASS satisfy despite a newer FAIL, because the watermark previously
+  counted only `Applicability == CURRENT` subject states and a revert moves
+  the old state to STALE. **Status: partially landed as of this pass.** The
+  matcher-level ordinal/boundary rule above (`evaluateOne`) is landed and
+  tested. The store-side `SubjectHighWater` read this rule depends on
+  (assigned W2, part of H2's write-time-pointer work) exists only as an
+  interface method with fail-closed stubs and its own regression test,
+  `internal/store/storetest`'s `TestConformance/SemanticSubjectHighWater`
+  (commit `5bb12db`); the store's actual per-subject-partition
+  implementation has not landed in the commits available to this pass.
+  This ADR will need a further correction once it does.
 - **What rejection touches (§W4-19, corrected — SPEC-1.10/SPEC-2.5).**
   W4's original implementation list narrowed this to "a resource-bound
   assertion proof is never rejected by a FAIL," which silently departed from
@@ -371,6 +407,25 @@ cross-check required complete/current/ordered gating with a persisted
 pre-execution run ordinal (adopted, and now concretely `RegisterRunTx`'s
 allocated sequence). Implemented as originally recorded; no change at
 reconciliation.
+
+**G1: one closing observation per run, plus the ordinal/high-water rules
+that actually decide "current" (SPEC-2.5, PR #6 round 1/2).** This section's
+ordinal is necessary but not sufficient for G1's full comparability
+guarantee; §6 above records the rest, cross-referenced here because it is
+this section's own subject/run/watermark machinery that enforces it:
+migration 0029 makes `(subject, Ordinal)` unique so two runs of one subject
+can never share an ordinal (ambiguous order otherwise); migration 0030 plus
+`store.ClosesRun` (`internal/store/semantic_resource.go`, backed by
+SQLite's `closingObservation` predicate and memory's equivalent check)
+enforce at most one terminal (complete PASS/FAIL, or ERROR/TIMEOUT/
+CANCELLED) observation per run;
+`internal/store`'s commit-time INV-16 guard (`store.ValidateSatisfactionBacking`,
+DUR-1.9) independently re-checks that a commit never leaves a SATISFIED
+version without applicable backing, as a second layer behind the service's
+own check; and §6's rejection/high-water rules (H1) decide which run's
+result is "current" for comparison. None of this is optional hardening —
+without migration 0030's uniqueness, a partial/duplicate closing observation
+could itself make ordinal comparison ambiguous.
 
 ### 13. Invalidation is atomic and narrowly scoped (§P3-23, C-10, §W4-17)
 
