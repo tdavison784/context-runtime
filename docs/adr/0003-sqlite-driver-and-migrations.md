@@ -5,12 +5,41 @@ Date: 2026-09-25
 
 ## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
 
-Phase 3 (worker W2, `internal/store`) adds eleven forward migrations, 0018
-through 0028, after this ADR's Phase 2 migrations (0001 unchanged, per this
-ADR's own rule). The full record/column/index manifest is
+Phase 3 (worker W2, `internal/store`) adds twenty-three forward migrations,
+0018 through 0040 (0018-0028 from the initial Phase 3 merge; 0029-0034
+fixing PR #6 round-1 review findings; 0035-0040 fixing round-2 findings),
+after this ADR's Phase 2 migrations (0001 unchanged, per this ADR's own
+rule). The full record/column/index manifest is
 `docs/phase3-schema-manifest.md` (P3-41); this section records the
 migration list itself and its upgrade-parity tests, matching how this ADR
 already tracks 0001-0017 above.
+
+**Pre-release exception, 0021 (SPEC-2.5, DUR-2.9).** `0021_phase3_declarations.sql`
+was edited in place at `d7e8c13` (DUR-1.10's `SELECT DISTINCT` fix), with its
+checksum pin updated in `durability_test.go` in the same commit. This is
+otherwise exactly what this ADR's own "never edit a committed migration"
+rule (below, enforced by `TestCommittedMigrationsUnchanged`'s pinned-checksum
+map, not only by `TestMigrationChecksumMismatch`'s runtime check) forbids; it
+is accepted only because no release has shipped Phase 3 migrations yet, per
+H6/DUR-2.9 below.
+
+**Unreleased-database exception (H6, DUR-2.9).** A SQLite database created
+against any pre-`914afef` Phase 3 development head cannot reopen against
+this migration list: 0021's edit above changes its checksum, and 0030's
+uniqueness index (`observation_run_closing`) can reject a database whose
+services (at the `c22a53c` PR #6 round-1 head) accepted more than one
+closing observation for a run before the G1 fix landed. Both are accepted,
+undocumented-until-now consequences of iterating on unreleased Phase 3
+migrations, not upgrade-path defects: **no Phase 3 database predating this
+head is supported.** `internal/tools/execute.go`'s `dispatchedRequest` hash
+input changed in this same window with no schema-version dispatch, so a
+tool receipt written before that change also conflicts on retry — the same
+exception covers it. None of this affects the frozen Phase 2 fixture
+(`TestPhase2FixtureReplay`), which predates every Phase 3 migration.
+W2's own `internal/store/sqlite/CONFORMANCE_NOTES.md` (PR #6 round 2)
+records this same exception, naming 0021's root cause precisely: its
+legacy grant backfill inserted duplicate `TargetIDs` twice and failed
+before any later migration could run.
 
 - `0018_phase3_row_fields.sql` — Phase 3 fields on existing record tables
   (P3-3/5/6/12/13/35/40/41): item `Namespace`, decoded grant `Targets`, and
@@ -29,8 +58,11 @@ already tracks 0001-0017 above.
   record.
 - `0021_phase3_declarations.sql` — creation/snapshot declarations, semantic
   change records, and the indexed grant/audit reads (P3-3/4/5/36/39/41). A
-  creation declaration is keyed by its item, one per item; absence is
-  unknown identity, never backfilled (P3-41).
+  creation declaration is keyed by its item, one per item. **At 0021 alone,
+  absence was unknown identity, never backfilled; 0034 below reconciles a
+  known declaration for every pre-upgrade keyed item where the ingest
+  receipt snapshot establishes its creation identity, and records unknown
+  (non-executable) otherwise (SPEC-2.5, corrects P3-41's original text).**
 - `0022_phase3_resources.sql` — resource registration/reporting, per-path
   content, workspace bindings, pre-execution runs, typed observations, and
   subject state (P3-19..22/41). Nothing is backfilled: no migration guesses
@@ -62,6 +94,78 @@ already tracks 0001-0017 above.
   of the recorded Phase 3 policy (P3-38/39, ADR 16's amendment): a row
   without a recorded Phase 3 policy (every Phase 2 envelope/receipt) is
   unaffected, and no trigger set is backfilled onto it.
+- `0029_observation_run_ordinal.sql` (PR #6 round 1, SEC-1.13) — a unique
+  index on `rec_observation_run(session_id, f_subject_key, f_ordinal)`: two
+  runs of one subject can never share an ordinal, which would make run
+  order, and so the subject watermark (ADR 8 §12), ambiguous. No Phase 2
+  database has runs, so the index builds over an empty or already-unique
+  table.
+- `0030_observation_run_closes_once.sql` (PR #6 round 1, G1/DUR-1.1) — a
+  unique index enforcing at most one closing observation (a complete
+  PASS/FAIL, or an ERROR/TIMEOUT/CANCELLED) per run, matching the
+  `closingObservation` predicate in `internal/obligation`. **Consequence
+  (H6, DUR-2.9): a database that accepted more than one closing observation
+  per run under an earlier, pre-G1-fix service version cannot reopen
+  against this index; no Phase 3 database predating `914afef` is supported
+  (see the unreleased-database exception above).**
+- `0031_grant_target_liveness.sql` (PR #6 round 1, G2/SEC-1.5/DUR-1.4) —
+  each grant-target index row carries its grant's revocation and expiry
+  sequence (0 for none), backfilled from `rec_grant` and kept current by
+  `RevokeGrant`, so a live-grant read serves the unrevoked range without
+  visiting revoked or expired history.
+- `0032_subject_state_live_index.sql` (PR #6 round 1, G2/SEC-1.8/DUR-1.2) —
+  a partial index holding exactly the CURRENT subject states in
+  first-filing order, so a resource report's invalidation work never costs
+  STALE/UNKNOWN history; a state enters and leaves the index as its
+  applicability changes.
+- `0033_resource_update_paths.sql` (PR #6 round 1, G2/SEC-1.7/DUR-1.2) — an
+  index of resource updates by the paths they may affect (a path or one of
+  its ancestor directories, plus every ALL-paths/UNKNOWN update), so a
+  path's currency check never walks unrelated history. **This index exists
+  but has no service caller yet (DUR-2.2 / SEC-2.5 / XREV-2.2):
+  `internal/obligation`'s `currentPathState` still pages every
+  `ResourceUpdate` after the path's recording update, so the intended cost
+  bound is not yet realized; only `storetest` calls the indexed read
+  directly. Wiring the service to `ResourceUpdatesAffectingPath` is open
+  (assigned W4b).**
+- `0034_reconcile_legacy_creation.sql` (PR #6 round 1, G5/SPEC-1.3/FROZEN
+  C-1, P3-4/41) — the checksum-pinned Go step
+  (`steps_0034.go`, `reconcileLegacyCreationV1`) that reconciles a creation
+  declaration for every pre-upgrade keyed item stored without an explicit
+  namespace, exactly as the corrected 0021 bullet above describes; atomic
+  with its own version row, idempotent, and deterministic. Tests:
+  `internal/store/sqlite`'s `TestUpgradeReconcilesLegacyCreation`;
+  `internal/ingest`'s `TestLegacyRestatementDedupsAfterUpgrade` and
+  `TestUpgradeRestatesEveryCurrentDirective_G5`.
+- `0035_item_exchange_index.sql` (PR #6 round 2, H2/SPEC-2.7) — an item's
+  exchange within a conversation, by ordinal: `EarliestExchangeWithItem`
+  answers which exchange first holds an item with one keyed `LIMIT 1`
+  search, independent of the conversation's length (closing the
+  checkpoint-coverage-lookup cost growth SPEC-2.7 found). A member's
+  exchange row is written when the member is inserted; pre-migration rows
+  are backfilled from the member/exchange tables.
+- `0036_grant_target_liveness_ranges.sql` (PR #6 round 2, H2/DUR-2.10) —
+  replaces 0031's single OR-based index (which still scanned and sorted
+  every revoked/expired row) with three disjoint live-grant ranges
+  `LiveGrantsFor` reads directly, so the cost is the live grants, not the
+  target's whole history.
+- `0037_subject_high_water.sql` (PR #6 round 2, H1/SEC-2.1/SPEC-2.1/DUR-2.1)
+  — the per-`(subject, task, access)`-partition high-water mark (ADR 8 §6):
+  the highest run ordinal with a complete PASS or FAIL, raised by every
+  such observation whatever its fingerprint or applicability.
+- `0038_current_workspace_binding.sql` (PR #6 round 2, H2) — one row per
+  workspace binding ID at its latest version, in that version's context
+  (ADR 8 §10): a page counts live bindings, not historical versions, and a
+  rebind moves the row to the new context, retiring it from the old one.
+- `0039_gc_result_outcome.sql` (PR #6 round 2, H3/SEC-2.4/SPEC-2.4/DUR-2.7)
+  — `GCResult` gains a closed `Outcome` (`COLLECTED`/`FAILED`) and failure
+  `Reason`; every pre-migration result is backfilled `COLLECTED` with no
+  reason, since every such result already linked a collect receipt.
+- `0040_gc_progress.sql` (PR #6 round 2, H3) — one CAS-written row per
+  pending GC request holding the durable `(Seq, ID)` candidate cursor,
+  completed batches, and attempts; operational metadata only, never a
+  substitute for a batch's collect receipt or the request's result, and
+  carries no semantic sequence.
 
 **Tests that lock this list (all in `internal/store/sqlite`, extending this
 ADR's existing migration-checksum/upgrade discipline):**

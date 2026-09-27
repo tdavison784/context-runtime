@@ -1,12 +1,13 @@
 # 8. Observation identities, obligation matcher/claim versions, applicability fingerprints, mutation grants, and invalidation rules
 
-Status: Proposed (2026-09-26, drafted for Phase 3; reconciled against the integrated
-Phase 3 code at `phase-3-semantic-state` head `fc87199` on 2026-09-26. Gate evidence
-is fully green (`go test -race -count=1 ./...` passes with no exceptions, confirmed
-at PR #6 review round 1 head `c22a53c`; `TestReplaceDirectiveDeclaresRealW4Obligation`,
-pending in W7's original report, now passes); this ADR stays Proposed until the
-commander formally accepts it, though every decision below now cites real,
-`grep`-verified code and tests, not a proposed contract)
+Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through PR #6 review
+round 2 with W1/W2/W3/W4/W7's round-2 fixes fully merged (`phase-3-semantic-state`
+head `75f5c45`, all integrated). `go test -race -count=1 ./...` passes with
+no exceptions; every decision below cites real, `grep`-verified code and
+tests, not a proposed contract. **P3-42's required-test mapping is still
+incomplete** (see "Outstanding required tests" below — SPEC-1.23/SPEC-2.14): this ADR remains Proposed for
+that reason, not merely pending a formality. G1's applicability rule (§6/§12)
+is now fully landed, matcher and store sides both.)
 Date: 2026-09-26
 
 ## Context
@@ -141,6 +142,20 @@ applicability proof current as of commit (§4), applied under
 closed (`domain.ObligationReasonCode`); rationale text is bounded and
 access-filtered.
 
+**The raw Phase 2 `store.Tx.AppendObligationTransition` path now refuses
+SATISFIED, closing an INV-16 gap this ADR's own transaction never had
+(PR #6 round 2, DUR-2.12).** ADR 16's original, still-legal raw method
+(unchanged there — it remains Phase 2's own legacy entry point) carries no
+proof or assertion record and predates this ADR's Phase 3 backing
+requirement entirely; before this fix it could still commit an
+undeclared/legacy version straight from UNRESOLVED to SATISFIED with
+nothing behind it. Both backends now reject `To == ObligationSatisfied` on
+that path outright — satisfaction is exclusively
+`AppendSemanticObligationTransition`'s (this section's path), which always
+carries a `TransitionDetail`. There is no production caller of the raw
+path that could have hit this (`storetest` exercised it directly), so this
+closes a latent gap, not an active one.
+
 ### 4. Proof visibility and the derived SATISFIES view (§P3-14)
 
 `domain.ApplicabilityProof` names the exact obligation version, `TargetSpec`,
@@ -171,7 +186,20 @@ provenance only and never a silent resource dependency (`ATTESTATION cannot
 carry a resource proof` per the schema manifest). **UNBOUND obligations
 (§W4-21):** a RESOURCE_BOUND assertion on an UNBOUND obligation is
 `ErrUnknownApplicability` — it can still be attested, matching W2's
-proof-target check.
+proof-target check. **A claim must cover the obligation's own target
+(PR #6 round 1, SPEC-1.11/SPEC-2.13).** `checkResourceClaims` originally
+accepted any well-formed dependency claim without comparing it to
+`o.TargetSpec`, so a RESOURCE_BOUND assertion could cite an unrelated
+resource or path and still satisfy the obligation — attestation semantics
+under a RESOURCE_BOUND label. It now requires at least one dependency that
+actually covers the target: a `DependencyWorkspace` claim must match the
+target resource's authoritative revision and fingerprint exactly: a
+`DependencyCurrentPath` claim must resolve through the same current-path
+read `file_read` observations use (§9/§10) and match the target's locator;
+and a `DependencyFixedContent` claim is meaningful only as the required
+snapshot of a `FIXED_HASH` file target, matching `TargetSpec.File.RequiredHash`
+exactly — anywhere else it is rejected as an unbound claim, never silently
+accepted as vacuous coverage.
 
 **Alternative considered and rejected (C-14).** Claude M10 proposed inferring
 `Applicability = ASSERTED` for a bare assertion and treating a citation
@@ -186,14 +214,62 @@ Codex's cross-check required an explicit mode chosen at assertion time.
 restricted `PROOF_REJECTED` and atomic `PROOF_REFRESH` paths.
 Ratified refinements beyond the frozen text:
 
-- **Cross-boundary rejection (§W4-18):** a newer complete FAIL may reject a
-  task-wide matcher proof even when the failing run's own evidence is
-  narrower — rejection only ever moves a version towards UNRESOLVED, and its
-  details are redacted.
-- **What rejection touches (§W4-19):** rejection affects only a matcher
-  proof from a lower-ordinal run of the *same subject*; a resource-bound
-  assertion proof is never rejected by a FAIL, and an ATTESTATION is never
-  touched by resource invalidation at all.
+- **Cross-boundary rejection (§W4-18), REPLACED (PR #6 round 2 systemic
+  ruling H1; SEC-2.9; commits `bf69262`/`f5efa47`/`8d14af9`, W4b).** W4's
+  original text said a newer complete FAIL "may reject a task-wide matcher
+  proof even when the failing run's own evidence is narrower," with no
+  boundary check — SEC-2.9 found this let a FAIL private to another agent
+  reject a TASK-wide proof and leak the private observation's ID into a
+  visible record. **The rule is replaced in full:** a proof is rejected only
+  by a subject- and family-matched **COMPLETE FAIL** whose run ordinal is
+  greater than the proof's own run ordinal and whose evidence and run
+  boundaries both cover the proof's boundary (`failCovers`,
+  `internal/obligation/evaluate.go`) — regardless of what fingerprint or
+  content the FAIL observed. Rejection depends on **ordinal and boundary
+  only**, never on comparing fingerprints: this closes the H1 residual where
+  a FAIL judged "inapplicable" by content comparison could be skipped even
+  though it was the newest terminal result for the subject. A newer PASS at
+  a different fingerprint rejects nothing (only FAIL rejects). Rejection
+  still only ever moves a version towards UNRESOLVED, and the rejecting
+  observation's ID is never recorded where an unauthorized reader of the
+  proof could see it. Tests: `TestH1NewerFailAtOtherFingerprintRejects`,
+  `TestH1StalePassAfterRevert`, `TestH1StalePassAfterInapplicableFail`,
+  `TestH1PrivateFailDoesNotOutrankTaskPass`,
+  `TestPrivateFailNeverRejectsTaskProof_SEC29`.
+- **Satisfaction is additionally gated on a per-subject high-water mark
+  (H1's watermark half; SEC-2.1/SPEC-2.1/DUR-2.1). Fully landed as of this
+  pass (commits `7ab3bfe`, `a444105`, W2; `8d14af9`, W4b).** The newest
+  *complete* PASS or FAIL run for the exact subject partition wins, whatever
+  the current subject state's own applicability — this closes the round-1
+  residual where a workspace revert (W1→W2→W1) made an older run's PASS
+  satisfy despite a newer FAIL, because the watermark previously counted
+  only `Applicability == CURRENT` subject states and a revert moves the old
+  state to STALE. `store.ResourceReader.SubjectHighWater(subjectKey, taskID,
+  access)` (`internal/store/semantic_resource.go`) is one keyed read per
+  partition, maintained at write time by `InsertObservation` in both
+  backends (SQLite: migration `0037_subject_high_water.sql`, a primary-key
+  table; memory: an in-memory map keyed the same way) — `subjectWatermark`
+  (`internal/obligation/evaluate.go`) takes the max across the run's own
+  partition and every partition whose evidence could back the obligation.
+  **The same mark independently re-gates at commit time**, not only at
+  evaluation: both stores' `checkProofNotStale`/equivalent guard (the
+  commit-time half of INV-16, `store.ValidateSatisfactionBacking`'s sibling
+  check) rejects a commit whose proof's run ordinal is older than the
+  subject's current high-water mark, closing the same window a
+  read-then-write race could otherwise open between evaluation and commit.
+  Tests: `internal/store/storetest`'s `TestConformance/SemanticSubjectHighWater`.
+- **What rejection touches (§W4-19, corrected — SPEC-1.10/SPEC-2.5).**
+  W4's original implementation list narrowed this to "a resource-bound
+  assertion proof is never rejected by a FAIL," which silently departed from
+  the frozen P3-16 text with no commander ruling; PR #6 round 1 (SPEC-1.10)
+  withdrew that narrowing as a code fix, and this ADR's text is corrected to
+  match. A newer complete applicable FAIL rejects the subject's **current
+  matcher or resource-bound satisfaction alike** — both are proof, and
+  `evaluateOne`'s `VerdictFail` branch runs the same restricted
+  `invalidateProof` path regardless of which kind the current proof is
+  (`internal/obligation/evaluate.go`). An ATTESTATION carries no proof and
+  is never touched by resource invalidation at all — that half of the
+  original text was always correct and is unchanged.
 - **Refresh (§W4-20):** the release (UNRESOLVED) step writes at the
   evaluation's own sequence; the positive (SATISFIED) step is authorized in
   advance at its own later sequence, before either write commits. Without a
@@ -226,6 +302,19 @@ authority over the source, or an exact-occurrence grant, is required; naming
 a SYSTEM source is never sufficient. The exception affects rendering only —
 it never satisfies, waives, protects, or permits completion
 (`TestUnfinishedTaskObligations`, ADR 16 §P3-9 amendment).
+
+**A source's declared obligations are bounded (PR #6 round 1, DUR-1.5,
+G2/SPEC-2.13).** `domain.Phase3Policy.ObligationDeclarationLimit()`
+(`internal/domain/semantic.go`) is `min(MaxTargets, MaxObligationsPerSource)`
+— the tighter of the policy's own target-set cap and a fixed 256 — and
+`createObligation` (`internal/obligation/declare.go:226`) refuses to bind
+one more obligation version to a source than this limit *before writing
+anything*, returning `ErrResourceLimit`. Without this bound, a source could
+accumulate more declared obligation versions than its tightest by-source
+consumer read (the lifecycle replacement/retirement path, ADR 16) could ever
+page, making the source permanently unreplaceable, undemoteable,
+unarchivable, and uncollectible — the same "producer limits never exceed
+consumer limits" principle round 1's G2 ruling states generally.
 
 ### 9. Resource currentness has an authenticated, ordered source (§P3-19, C-9, §W4-10..16)
 
@@ -274,6 +363,19 @@ neither universal read access nor resource-reporting capability by itself).
 Both rulings are implemented as originally recorded; no change at
 reconciliation.
 
+**Resolution reads only each binding's current version, and only while that
+version is in the context (PR #6 round 2, H2, commit `eb0ae67`, W1).**
+`resolveWorkspace` originally paged `WorkspaceBindingsByContext` — every
+version of every binding in a context — and kept the highest version seen
+in memory; enough rebinding history for one context could exceed the work
+bound and permanently fail a Pinned directive's creation. It now pages
+W1's write-time `CurrentWorkspaceBindingsByContext` (migration 0038's
+one-row-per-binding pointer index), so version history never counts against
+the bound. This is a behavior change beyond a performance fix: **a binding
+counts in a context only while its latest version is still recorded
+there** — a rebind that moves a binding to a different context retires it
+from the old one, rather than leaving a stale version visible forever.
+
 ### 11. Typed observations preserve evidence and reporter provenance (§P3-21, C-6, C-7, §W4-22..23)
 
 `obligation.RegisterRunTx`/`ReportObservationTx`/`evidenceInRun`
@@ -281,6 +383,25 @@ reconciliation.
 an exact TOOL evidence occurrence; only the run's registering reporter may
 report against it (§W4-12 restated), and malformed input is rejected
 atomically (C-7).
+
+**Evidence is bound to the run's own execution, not merely to the caller's
+say-so (PR #6 round 1, SPEC-1.12).** "Validate same session, execution and
+boundary" (P3-21) originally checked only that the intent's `ExecutionID`
+matched the run's — the reporter agreeing with itself, not a fact about the
+evidence occurrence. `evidenceInRun` (`internal/obligation/observation.go:221`)
+now additionally requires the evidence's own `Source.ToolCallID` to equal
+`run.ExecutionID`: **the documented harness contract is that a harness
+reporting an observation must set `ExecutionID` to the producing tool
+call's ID**, so the evidence occurrence a run cites is provably the one that
+tool call actually produced, not an unrelated TOOL item reused across runs.
+**Resolved (SPEC-2.8, PR #6 round 2, W2).** `store.ProducedBy(ev, execution)`
+(`internal/store/semantic_resource.go`) is the shared predicate both
+backends' `InsertObservation` now call independently: `ev.Source != nil &&
+ev.Source.ToolCallID != "" && ev.Source.ToolCallID == execution`. P3-21's
+"validated by service and store" now holds in full — the service-level
+check above and this store-level check are two independent enforcement
+layers, not one masquerading as two. Tests:
+`internal/store/storetest`'s `TestConformance/SemanticObservationEvidenceExecution`.
 
 **T07 evidence ruling (§W4-22, commander-approved beyond the frozen text).**
 TOOL evidence may be TURN- or TASK-scoped **if it has exactly the run's own
@@ -322,6 +443,25 @@ pre-execution run ordinal (adopted, and now concretely `RegisterRunTx`'s
 allocated sequence). Implemented as originally recorded; no change at
 reconciliation.
 
+**G1: one closing observation per run, plus the ordinal/high-water rules
+that actually decide "current" (SPEC-2.5, PR #6 round 1/2).** This section's
+ordinal is necessary but not sufficient for G1's full comparability
+guarantee; §6 above records the rest, cross-referenced here because it is
+this section's own subject/run/watermark machinery that enforces it:
+migration 0029 makes `(subject, Ordinal)` unique so two runs of one subject
+can never share an ordinal (ambiguous order otherwise); migration 0030 plus
+`store.ClosesRun` (`internal/store/semantic_resource.go`, backed by
+SQLite's `closingObservation` predicate and memory's equivalent check)
+enforce at most one terminal (complete PASS/FAIL, or ERROR/TIMEOUT/
+CANCELLED) observation per run;
+`internal/store`'s commit-time INV-16 guard (`store.ValidateSatisfactionBacking`,
+DUR-1.9) independently re-checks that a commit never leaves a SATISFIED
+version without applicable backing, as a second layer behind the service's
+own check; and §6's rejection/high-water rules (H1) decide which run's
+result is "current" for comparison. None of this is optional hardening —
+without migration 0030's uniqueness, a partial/duplicate closing observation
+could itself make ordinal comparison ambiguous.
+
 ### 13. Invalidation is atomic and narrowly scoped (§P3-23, C-10, §W4-17)
 
 `obligation.invalidateResource`/`invalidateProof` (`internal/obligation/invalidate.go`,
@@ -338,6 +478,16 @@ produces, so its release step carries the evaluating actor's own
 `GrantID`, never `OriginAuthorization` — refresh is not part of this
 section's restricted invalidation path, even though both share the
 SATISFIED→UNRESOLVED direction.
+
+**A changed directory intersects files under it (PR #6 round 1, SPEC-1.18).**
+`change.affects` (`internal/obligation/invalidate.go:39,50`) originally
+compared a reported path to a dependency's path by exact string equality
+only, so a report naming a changed directory (e.g. `src`) never invalidated
+a `CURRENT_CONTENT` dependency on a file under it (`src/a.go`) — the
+opposite of P3-23's required conservative intersection. It now matches
+`p == q || strings.HasPrefix(p, q+"/")`: a directory report affects every
+path under it, and a sibling whose name merely shares a prefix (`doc` vs.
+`docs`) stays distinct because the comparison requires the exact separator.
 
 **Q-9 (commander-approved beyond the frozen text, §W4-17).** A matcher only
 ever satisfies obligations the reporting principal can access; rejection and
@@ -390,6 +540,17 @@ no single §-decision above covers them. Each cites its real code and test.
   `obs-state/1`, and keeps its own clone (including W1's `GCTriggers` slice)
   so a caller cannot alias and mutate it after construction.
   `TestNewPinsRuleVersions`, `TestServiceRequiresFiniteKnownPolicy`.
+- **Runtime discipline — deferred sequence allocation (PR #6 round 2,
+  DUR-2.14, commit `1ecbbf8`).** `begin` (`internal/obligation/service.go`)
+  now accepts `seq == 0` and defers allocation until after the replay check
+  (`allocate`, called post-replay), matching the same "replay before
+  `NextSeq`" discipline `graph.operationSeq` and `lifecycle.collect` already
+  use elsewhere — an exact retry of a W4 mutation consumes no sequence.
+  **Except pinned declarations:** `beginAt` (used only for a declaration
+  that must ride another write's own transaction — a Pinned source's
+  creation or replacement) still requires a nonzero `seq`, because that
+  sequence must be the *other* write's exact sequence, never independently
+  deferred or allocated. `TestDeferredSeqAllocatedAfterReplay_DUR214`.
 - **Replacement declarations (§W4-29, ties to §P3-4/C-1 below).**
   `obligation.DeclareForReplacementTx(tx, actor, newSourceItemID, seq)`
   (`internal/obligation/declare.go`) reads a replacement's explicit
@@ -417,6 +578,33 @@ no single §-decision above covers them. Each cites its real code and test.
   W7's final report's open item ("W1 may register it formally") is resolved.
   See ADR 4's "Canonical domain registry (Phase 3)" section, which this ADR
   does not duplicate.
+- **A task-less trigger produces no GC request; Phase 3 has no
+  session-scoped GC (PR #6 round 2 systemic ruling H4; SPEC-2.2/DUR-2.5).**
+  A directive's explicit replacement (ADR 19's Q1/C-1 amendment) may itself
+  be session-scoped (`TaskID == ""`); before this ruling, its SUPERSESSION
+  side effect tried to build a `CollectTask` request with an empty
+  `TaskID`, which `domain.CollectIntent.Validate` rejects — so the
+  *replacement itself* failed even though the replacement's own
+  authorization had nothing to do with GC. H4 resolves this at the root:
+  `gcqueue.Enqueue(tx, pol, origin, trigger, taskID, triggerID)`
+  (`internal/gcqueue`, imported by `internal/ingest`, `internal/tools`, and
+  `internal/obligation` — everything below `internal/lifecycle` that
+  produces a trigger) persists nothing at all for a task-less trigger and
+  returns success; it never falls back to a session-scoped `CollectScope`,
+  because Phase 3 defines none. The replacement (or keyed write, or
+  observation supersession) that raised the trigger always succeeds on its
+  own merits — GC producing nothing is never a reason a mutation fails.
+  `domain.GCTaskCompletion` is exempt from this restriction the same way it
+  is exempt from the enabled-set check (ADR 16's amendment): it always
+  names a real task by construction. **SPEC-2.11 (same commit):** `Enqueue`
+  takes the caller's own recorded `Phase3Policy`, not the executor's — the
+  policy that decided the source event's classification is the same one
+  that decides GC-trigger enablement and is stamped on the request, so an
+  executor running a newer or older policy can never silently drop or
+  misattribute a trigger the event's own policy enabled. Tests:
+  `internal/gcqueue`'s `TestEnqueueUsesRecordedPolicyAndTaskScope`;
+  `internal/ingest`'s `TestGCProducers_TasklessSupersession_H4` and
+  `TestGCProducers_RecordedPolicyDecides_SPEC211`.
 
 ## Alternatives considered
 
@@ -533,25 +721,37 @@ gate checklist (`phase3-decisions.md`):
 Serialized U delta/rebase, actual inherited-request removal, and rebase
 omission/order are explicitly Phase 5 and are not part of this gate.
 
-## Outstanding required tests (SPEC-1.23)
+## Outstanding required tests (SPEC-1.23, SPEC-2.14)
 
 P3-42 requires every decision above to map to its named required tests.
 PR #6 review round 1 (`r6-spec1.md`, SPEC-1.23) searched every package and
-found no real counterpart for the following required-test bullets; this ADR
-records the gap honestly here rather than implying complete coverage
-elsewhere in this document. Three are already being closed as part of a
-different finding's fix, cited below; the rest remain open and are not
-owned by this ADR's own package (`internal/obligation`) unless marked.
+found no real counterpart for the required-test bullets below. Round 2
+(`r6-spec2.md`, SPEC-2.14) reconfirmed the gap is still open, noting that
+exactly three bullets have since gained a real test as a side effect of
+their round-1 code fix landing:
 
-- **P3-1** "TargetCall sequence reuse rejected" for Phase 3 record families
-  — closing alongside SPEC-1.4 (W2b: three SQLite row types gain
-  `SemanticSeq()`).
-- **P3-3** "old-key migration" (an agent updates its own pre-upgrade key) —
-  closing alongside SPEC-1.5 (W1: migration backfill or namespace fallback
-  for legacy `Namespace ""`).
-- **P3-4** "legacy unknown declaration fails closed" on the ingest path —
-  closing alongside SPEC-1.3 (W1: `SameDirective` must not fall through to
-  replacement when a declaration is unknown).
+- **Resolved.** **P3-1** "TargetCall sequence reuse rejected" for Phase 3
+  record families — `internal/store/storetest`'s
+  `TestConformance/SemanticLedgerSeqIsolation` and
+  `internal/store/sqlite`'s `TestPhase3RowsCarrySemanticSeq` (SPEC-1.4:
+  the three SQLite row types now implement `SemanticSeq()`).
+- **Resolved.** **P3-3** "old-key migration" (an agent updates its own
+  pre-upgrade key) — `internal/graph`'s `TestAgentUpdatesOwnPreUpgradeKey`
+  and `internal/ingest`'s `TestUpgradeAgentOwnOldKey_G5` (SPEC-1.5).
+- **Resolved.** **P3-4** "legacy unknown declaration fails closed" on the
+  ingest path — `internal/graph`'s
+  `TestIdenticalRestatementOfUnknownIdentityFailsClosed` and
+  `internal/ingest`'s `TestUnknownIdentityRestatementIsALineDiagnostic`
+  (SPEC-1.3; migration 0034 additionally reconciles a *known* declaration
+  where identity is establishable, per ADR 3's amendment above — the
+  "fails closed" case these tests cover is now the narrower unknown-only
+  case, not every legacy item).
+
+The remaining bullets are still open, not owned by this ADR's own package
+(`internal/obligation`) unless marked, and P3-42's mapping therefore remains
+unmet — this ADR stays Proposed for this reason among others (Status header
+above).
+
 - **P3-1** "Prepare/MarkSent stale after every new semantic record family" —
   still only the Phase 2 `TestObligationChangeStalesPreview`; no Phase
   3-record-family case exists (`internal/invocation`).
@@ -593,9 +793,10 @@ owned by this ADR's own package (`internal/obligation`) unless marked.
   no test found in `internal/lifecycle`.
 
 This list is not this ADR's package's obligation to close by itself; it is
-recorded so the Phase 3 gate's own claim of completeness is accurate. Adding
-each test, or recording an explicit ruling that a bullet is satisfied
-another way, closes this section.
+recorded so the Phase 3 gate's own claim of completeness is accurate. SPEC-2.14
+counts 21 required-test bullets still open across the list above (the three
+resolved bullets moved out of the count). Adding each test, or recording an
+explicit ruling that a bullet is satisfied another way, closes this section.
 
 ## Residual risks and limits
 

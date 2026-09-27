@@ -26,6 +26,13 @@ W7 contract additions:
 - `917a379`: Event.Operations payload RequestID must be empty. Ingest derives
   OperationRequestID(session, occurrence, opIndex, ordinal) after acceptance;
   ValidateResolved requires the derived ID and resolved references.
+  **(PR #6 round 2, SPEC-2.13: this signature is stale.** G3/SEC-1.2
+  changed it to `OperationRequestID(p Principal, occurrence string,
+  operation, command uint64)` — a full principal, not a bare session
+  string. This handoff document is a point-in-time commit log and is not
+  otherwise kept current; see ADR 19's Phase 3 amendment for the current
+  signature and SEC-2.2/SEC-2.6/H5's still-open question of which
+  principal it should bind.)
 - `6594958`: graph.DeclareCreation(tx, item, CreationAcceptance) is the shared
   declaration writer. CreationAcceptance supplies PolicyVersion,
   AcceptedAttributes, ObligationDeclarationHash and SupportIDs. Stored item

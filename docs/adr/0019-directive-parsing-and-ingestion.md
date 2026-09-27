@@ -108,9 +108,74 @@ P3-35, P3-40) — implemented in `internal/ingest`, this ADR's own package.**
 control, and mutation-intent operations) hashed under
 `ingest-payload/v3` (ADR 4), replacing the frozen v2 encoder for new events
 only — v2 stays frozen and still validated for legacy replay. A submitted
-operation's `RequestID` must be empty; `domain.OperationRequestID(session,
-occurrence, opIndex, ordinal)` derives it only after acceptance, so no
-caller can forge or predict one. Lifecycle-command v2 executes Resolve/Unpin
+operation's `RequestID` must be empty; `domain.OperationRequestID(p
+Principal, occurrence string, operation, command uint64)` derives it only
+after acceptance, so no caller can forge or predict one — its current
+signature binds a full principal, not just a session ID (PR #6 round 1,
+G3/SEC-1.2, fixing the stale `(session, occurrence, opIndex, ordinal)`
+signature this ADR previously described). **H5 landed in this
+reconciliation (PR #6 round 2, SEC-2.2/SEC-2.6, commit `a1d734f`, W1):
+`OperationRequestID` now binds both principals explicitly, not one.** Its
+current signature is `OperationRequestID(authenticated, owner Principal,
+occurrence string, eventSeq, operation, command uint64)`: `authenticated`
+is the ingesting principal H5 requires (`internal/ingest/ops.go`'s
+`typedOperation` now passes `r.p`, the authenticated caller, not the
+lowered source actor it passed before), and `owner` is the receipt owner
+(the lowered actor or dispatcher) the request is filed under — the ID also
+now binds the event's own sequence (`req_<eventSeq>_<inner>.<tag>`), so a
+caller cannot name a future or past event's request. `MutationReceiptID`
+runs before any receipt lookup and accepts a `req_` ID only for its exact
+owner and only when its event sequence was allocated in the current
+transaction: no principal, including one sharing every field with the
+lowered actor, can name another principal's runtime request. GC runtime
+IDs follow the same rule from `domain` directly:
+`GCTriggerRequestID` binds the authenticated origin (`gc-trigger/v2`) and
+`GCRequestRecordID` names the queued request; `gc_` and `gcq_` join `req_`
+as reserved prefixes callers may never supply, checked by
+`ValidateCallerRequestID` before every standalone lifecycle mutation
+(item, grant, `CompleteTask`, `ReplaceDirective`) and manual `Collect`.
+
+**Reserved-namespace rejection runs after the exact-replay lookup, not
+before (PR #6 round 2, DUR-2.8/SEC-2.8).** Checking a reserved prefix
+(`req_`/`outcome-`/`gc_`/`gcq_`) before looking up an existing receipt
+would refuse to replay a Phase 2 event whose caller `EventID` happens to
+collide with a namespace this ADR reserved only at Phase 3.
+`lookupReceipt` (`internal/ingest/ingest.go`) now runs first; a match
+replays regardless of namespace, and the reserved-namespace check applies
+only once no receipt is found, i.e. only to a genuinely new request. This
+is the same ownership-before-existence discipline §11's
+`AuthorizeMutation`/`AuthorizeSupersession` already use for access
+disclosure, now applied to receipt disclosure: `internal/lifecycle`'s
+`begin` (`internal/lifecycle/receipt.go`) applies the identical rule —
+exact-replay lookup first, then `domain.RuntimeRequestOwnedBy` before a
+foreign receipt's existence can affect the outcome (SEC-2.8, no existence
+oracle). Tests: `internal/ingest`'s frozen-fixture round-trip in
+`testdata/phase2/reserved.db`/`reserved.golden.json`; `internal/lifecycle`'s
+`TestLifecycleDerivedRequestIDIsNoExistenceOracle` and
+`TestLegacyRuntimeRequestIDReplaysForItsOwnerOnly`.
+
+**Owner registration is exercised end to end through ingest, including
+restart (PR #6 round 2, SPEC-2.12, closing the SPEC-1.7 test gap).**
+`internal/ingest`'s `TestIngestRegisteredOwnersOutliveTaskAndRestart_SPEC212`
+registers a WORKFLOW/AGENT owner through a real ingested event (not a
+seeded fixture), completes its task, restarts the store, and confirms the
+owner's broad-scope goal/pin survives and Collect does not archive it —
+closing the gap where the existing pure/seeded tests could pass even with
+the ingest-side producer removed.
+
+**An empty, non-nil `Operations` is rejected at validation, never
+silently treated as "no operations" (G4 = SEC-1.11 = SPEC-1.2).**
+`Event.ValidateV3` (`internal/domain/ingest_v3.go`) requires `Operations`
+to be either `nil` (every span ingests in the frozen per-span order) or a
+non-empty stream covering every span — before this fix, an event with
+spans and an explicitly empty `Operations` slice (e.g. JSON
+`"operations": []`) took the v3 path and stored its spans without ingesting
+any of them, silently losing content under an `EventID` a caller could
+never successfully retry (`Operations: nil` on retry produced
+`ErrEventIDConflict` instead of re-ingesting). Tests:
+`TestV3RejectsEmptyNonNilOperationStream`,
+`TestEmptyOperationStreamRejected_G4`. Lifecycle-command v2 executes
+Resolve/Unpin
 in source order at each command's exact, allocated authorization sequence
 (never a predicted one), with C-2's narrowed `DetailAccess` redaction
 applied to the execution outcome itself, not just target resolution. A
@@ -1129,7 +1194,47 @@ Answers to `p2-ingest`'s implementation questions, appended to
   record itself — a target in the wrong state for its action is, from the
   caller's perspective, not currently a valid target for that action, the
   same outcome class as `TargetNotFound`, distinguished only by the
-  `Reason` token, never by a different `Code`.
+  `Reason` token, never by a different `Code`. **Added at Phase 3 (SPEC-1.3,
+  PR #6 round 1; SPEC-2.13, this pair was missing from the pinned list):**
+  `ReasonUnknownIdentity` ("unknown_identity") pairs with
+  `ErrUnsupportedDirective` — an identical restatement of a version whose
+  creation identity is unknown (a pre-upgrade item migration 0034 could not
+  reconcile, ADR 3's amendment) is neither a duplicate nor an authorized
+  replacement, so the line is dropped exactly as an unsupported lifecycle
+  word would be, never silently accepted or promoted to a hard event abort.
+**The unknown-identity limitation is directive-line-specific by design; two
+other `SameDirective` callers now dedup successfully instead of failing
+(SPEC-2.9/SPEC-2.10, PR #6 round 2, residual of SPEC-1.3; commit `2ca005c`,
+W1).** An attribute-only change to an unknown-identity directive (e.g.
+adding `{obligation=…}` to otherwise identical text) still produces
+`unknown_identity` and never lands as a replacement, because
+`graph.knownDeclaration` fails closed whenever the prior declaration is
+unknown, regardless of what changed, and directive lines can carry
+attributes, an obligation declaration, or cited support their row alone
+does not show — so an unknown declaration can never be safely assumed
+identical for them. **Working-snapshot members and tool-written agent
+keys are different: their creation identity is fully shown by the row
+itself (`attributeFreeIdentity`, `internal/graph/duplicate.go`) — a
+Working snapshot member (`Section == SectionWorking`) or a tool-written
+agent key (`AuthorityAgent`, `Section == SectionNone`) never carries an
+accepted attribute, obligation declaration, or cited support beyond what
+the row already records.** For these two classes only, `SameDirective`
+now treats an unknown pre-upgrade identity as a match when the fresh
+declaration adds nothing beyond the row (`plainDeclaration`) — linking
+`DUPLICATE_OF`, never replacing, re-filing, or rebinding it, closing both
+SPEC-2.9's Working-snapshot-abort failure and SPEC-2.10's
+agent-key-returns-an-error failure with the same successful dedup G5
+always intended. A *distinct* version (genuinely new support, attributes,
+or content) still replaces normally, going through the ordinary
+authorized path. The explicit `graph.ReplaceDirective` still refuses an
+identical restatement of unknown identity outright, for any class — this
+dedup path is detection only, never an authorized replacement, matching
+Q1's default. Tests: `internal/graph`'s
+`TestIdenticalSnapshotOverUnknownIdentityIsDuplicate`,
+`TestIdenticalAgentKeyOverUnknownIdentityIsDuplicate`; `internal/ingest`'s
+`TestUpgradeAgentOwnOldKey_G5`.
+
+
 
 ### 24. Round 6 ruling (ingest-suite findings): R20
 
@@ -2056,9 +2161,10 @@ isn't covered), that is called out explicitly rather than left silent.
   item among several rejects only that item and commits the rest, R13);
   `internal/ingest/working_test.go:TestLifecycle_ExecutesInOrder_P335`
   (Resolve on a non-OPEN goal / Unpin on a non-pinned target each produce a
-  `TargetMismatch`/`CommandNotExecuted` diagnostic and commit the rest of the
-  event, R14; this is the same test that now also carries D1's execution-order
-  scenario under Phase 3, above).
+  `TargetMismatch` diagnostic with result status `domain.CommandNotExecuted`
+  (`"NOT_EXECUTED"`, a `domain.CommandStatus` value, not itself a diagnostic)
+  and commit the rest of the event, R14; this is the same test that now also
+  carries D1's execution-order scenario under Phase 3, above).
 - **§21 (round 3 ruling, R16):** `internal/directive/policycheck_test.go`
   — `TestParserAcceptedImpliesPolicyAccepted`, `FuzzPolicyAgreement` (the
   fuzz/property cross-check that every `internal/directive`-accepted

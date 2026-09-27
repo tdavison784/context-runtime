@@ -129,6 +129,20 @@ both forms share.
   refreshes TTL, restores currentness, or waives an obligation
   (`TestGenerationPairsFollowClosedPolicy`). Raw `ItemChange` remains an
   internal storage mechanism, never a public mutation surface.
+- **Unpin now reaches any current PINNED semantic item, not only a keyed
+  DIRECTIVE (PR #6 round 1, SPEC-1.8).** Promote's DURABLE→PINNED path
+  (above) can pin an *unkeyed* semantic item — exactly the SYSTEM/HARNESS
+  residual instructions/constraints production actually creates — but
+  Unpin originally resolved only a keyed item in the DIRECTIVE namespace,
+  so a Promote-pinned instruction could never be unpinned (Demote also
+  forbids PINNED→DURABLE, since that transition is exclusively Unpin's).
+  `lifecycle.directive`'s target-resolution switch
+  (`internal/lifecycle/directive.go:46-55`) now accepts an unkeyed,
+  `RoleSemantic` item specifically for `ActionUnpin` (never for Resolve,
+  which still targets DIRECTIVE goals only) — the keyed/DIRECTIVE
+  restriction stays exactly as strict for every other case, including
+  AGENT_KEY and OBSERVATION items and every stale/superseded/lower-authority
+  target. `TestPromotedUnkeyedPinCanBeUnpinned`.
 - **Grant issuance/revocation are authenticated intents with runtime-derived
   attribution, not caller-certified fields (P3-11).** `lifecycle.Service.IssueGrant`/
   `RevokeGrant` (`internal/lifecycle/grants.go`) take `domain.GrantIntent`/
@@ -178,6 +192,57 @@ both forms share.
   (P3-39's "task completion always persists its request"), then waits
   pending until an operator or a later policy enables its actual
   collection.
+  **Default enabled set and its producers (PR #6 round 1/2, SPEC-2.13).**
+  `policy.DefaultPhase3Policy()` (`internal/policy/phase3.go`) enables
+  `{MANUAL, SUPERSESSION, TASK_COMPLETION, TTL}` — **not**
+  `domain.DefaultGCTriggers()`'s all-five set, which also includes `POLICY`.
+  The stated rule is that only a trigger with a producer on every path that
+  can raise it is enabled by default (`FR-GC-004` permits a disabled
+  trigger); `POLICY` has no producer yet, so it stays off. **SPEC-2.3
+  (PR #6 round 2): this rule was violated for SUPERSESSION on two paths;
+  one is now fixed in this reconciliation, one is fixed but not yet merged
+  here.** Observation-state supersession
+  (`graph.FileObservationState`, via `internal/obligation/subject_state.go`'s
+  `deriveState`) now enqueues through `gcqueue.Enqueue`, keyed by the new
+  state occurrence, under the service's own recorded policy — a first state
+  (nothing to supersede) enqueues nothing, and a task-less trigger persists
+  nothing per H4 (`internal/gcqueue`, W4b). Tests:
+  `TestObservationStateSupersessionEnqueuesGC_SPEC23`. **Both SPEC-2.3
+  paths are now landed.** Agent keyed writes (`internal/tools/keyed.go`,
+  via `graph.ReplaceDirective`) and task-less directive replacement
+  (`internal/lifecycle/replace.go`) also enqueue through `gcqueue.Enqueue`
+  now, closing the round-1/round-2 gap where a keyed replacement or a
+  session-scoped directive replacement produced no `GCRequest`, or failed
+  outright, despite SUPERSESSION being enabled by default. An enabled
+  trigger whose executor
+  cannot run it (a stale `PolicyVersion` on the request, or a missing
+  authorized collector) fails that attempt closed rather than silently
+  succeeding; it stays pending for a later, correctly-configured attempt.
+  **GC requests quarantine on permanent failure and collect large
+  candidate sets in durable batches (H3/SEC-2.4/SPEC-2.4/DUR-2.7, commit
+  `e68ce80`).** `classifyGCFailure` (`internal/lifecycle/gc_failure.go`)
+  sorts an attempt's error into not-charged (cancelled, contended, trigger
+  disabled — stays pending), transient (counts toward a bounded attempt
+  limit, then quarantines `ATTEMPTS_EXHAUSTED`), or permanent
+  (`ErrUnsupportedSchema`/`ErrIntegrity`/`ErrInvalidRecord`/`ErrNotFound` —
+  quarantines at once with a closed `GCFailureCode`). `ExecuteGCRequest`
+  runs the next batch from the request's `GCProgress` cursor
+  (`GCBatchRequestID(n)`), advancing it by CAS, so one oversized request
+  can never wedge the whole queue or exceed the per-call work bound.
+  Quarantined and completed requests leave `PendingGCRequests`, so one
+  permanently failing request no longer blocks every later one. Tests:
+  `TestClassifyGCFailure`, `TestFailingGCRequestsAreQuarantined`,
+  `TestLargeGCRequestCollectsAcrossBatches`,
+  `TestCollectionPlansInBoundedBatches`,
+  `TestOverflowingCandidateIsIneligibleNotAWedge`,
+  `TestBatchFitsTheReceiptLimit`.
+  **Grant issuance shares its live-count cap fairly and reserves room for
+  SYSTEM (SEC-2.7).** `liveGrantRoom` (`internal/lifecycle/grants.go`)
+  limits any one issuer to at most a quarter of the policy's live-grant
+  cap per `(action, target)`, with the last quarter reserved for SYSTEM —
+  so no lower-authority issuer, alone or in combination, can exhaust the
+  cap and deny issuance to everyone else. Test:
+  `TestLiveGrantCapIsSharedFairly`.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
   idempotently after producer commit, never inline with it. Tests:
   `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,
