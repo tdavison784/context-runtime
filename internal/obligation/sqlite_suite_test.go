@@ -124,6 +124,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"SPEC112EvidenceBoundToExecution", TestSPEC112EvidenceBoundToExecution, true},
 		{"SEC17PathCurrencyIgnoresEarlierHistory", TestSEC17PathCurrencyIgnoresEarlierHistory, false},
 		{"SEC18DeadSubjectStatesDoNotWedgeReports", TestSEC18DeadSubjectStatesDoNotWedgeReports, true},
+		{"DUR15DeclarationLimitPerSource", TestDUR15DeclarationLimitPerSource, false},
 		{"ObservationStateChain", TestObservationStateChain, true},
 		{"ObservationStateGating", TestObservationStateGating, true},
 		{"MatcherGrantT06", TestMatcherGrantT06, true},
