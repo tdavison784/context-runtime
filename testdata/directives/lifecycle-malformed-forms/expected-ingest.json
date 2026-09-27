@@ -34,7 +34,7 @@
       "target_id": "ok",
       "authority": "USER",
       "actor_authority": "USER",
-      "status": "PARSED_NOT_EXECUTED",
+      "status": "NOT_EXECUTED",
       "resolution": "NOT_FOUND",
       "range": [
         136,

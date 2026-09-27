@@ -112,18 +112,14 @@
       "from": "event#1",
       "to": "event#0",
       "authority": "SYSTEM",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#2",
       "to": "event#0",
       "authority": "SYSTEM",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     }
   ],
   "obligations": [],

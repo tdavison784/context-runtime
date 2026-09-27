@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -13,6 +14,10 @@ import (
 // receipt in creation order; the transaction makes it all-or-nothing.
 type run struct {
 	g          Ingester
+	binding    *domain.OutcomeBinding // a provider outcome's originating context
+	membership *OutcomeMembership     // how that outcome joins its exchange, if at all
+	pol        *domain.Phase3Policy   // effective Phase 3 policy; nil only for frozen v2 (tests)
+	obl        *obligation.Service    // built on first use from pol
 	tx         store.Tx
 	p          domain.Principal
 	e          domain.Event
@@ -45,6 +50,12 @@ type run struct {
 
 	suppliedBlobs map[string]bool // blob hashes whose bytes this event supplied
 	unverified    map[string]bool // unverified items already reported (DUR-3.1)
+
+	transcripts      map[int]domain.ContextItem // span index -> its transcript item
+	opResults        []domain.OperationResult   // in operation order (P3-34)
+	mutationReceipts []string                   // typed operations' receipts, in order
+	created          map[string]Created         // operation alias -> what it created
+	unitOp           uint64                     // operation (or span) index being ingested
 }
 
 func isNotFound(err error) bool { return errors.Is(err, domain.ErrNotFound) }
@@ -70,16 +81,63 @@ func (r *run) apply() (domain.IngestReceipt, error) {
 	r.suppliedBlobs = map[string]bool{}
 	r.unverified = map[string]bool{}
 	r.derived = map[int]int{}
+	r.transcripts = map[int]domain.ContextItem{}
 
-	if err := r.advanceTask(); err != nil {
-		return domain.IngestReceipt{}, err
+	// Resource control runs outside task lifecycle: it never creates a
+	// task, opens a turn, or is refused because a task completed (P3-20,
+	// P3-34).
+	if !r.e.Control {
+		if err := r.advanceTask(); err != nil {
+			return domain.IngestReceipt{}, err
+		}
 	}
-	for si := range r.e.Spans {
-		if err := r.ingestSpan(si); err != nil {
+	if r.e.Operations == nil {
+		for si := range r.e.Spans {
+			r.unitOp = uint64(si)
+			if err := r.ingestSpan(si); err != nil {
+				return domain.IngestReceipt{}, err
+			}
+		}
+	}
+	for oi, op := range r.e.Operations {
+		if err := r.operation(oi, op); err != nil {
+			return domain.IngestReceipt{}, err
+		}
+	}
+	if r.membership != nil {
+		if r.pol == nil {
+			return domain.IngestReceipt{}, domain.ErrUnsupportedSchema
+		}
+		if err := r.registerOutput(*r.membership); err != nil {
 			return domain.IngestReceipt{}, err
 		}
 	}
 	return r.commit()
+}
+
+// operation applies the oi-th operation of the event's ordered stream
+// (P3-34). A span operation ingests its span, exactly once (ValidateV3);
+// its result is readable at the span's transcript boundary, and an alias
+// of it names what the span created. A typed operation runs through its
+// registered handler.
+func (r *run) operation(oi int, op domain.SemanticOperation) error {
+	if op.Kind != domain.OperationSpan {
+		return r.typedOperation(oi, op)
+	}
+	si, from := op.Span.Index, len(r.items)
+	r.unitOp = uint64(oi)
+	if err := r.ingestSpan(si); err != nil {
+		return err
+	}
+	if op.Alias != "" {
+		c, err := r.spanCreated(from)
+		if err != nil {
+			return err
+		}
+		r.alias(op.Alias, c)
+	}
+	r.opResults = append(r.opResults, domain.OperationResult{Index: oi, Kind: op.Kind, Alias: op.Alias, Access: r.transcripts[si].Access})
+	return nil
 }
 
 // advanceTask creates the principal's task on its first task-bound event
@@ -87,6 +145,9 @@ func (r *run) apply() (domain.IngestReceipt, error) {
 // event (D18). Ownership is immutable: a task of another workflow is
 // rejected, and a COMPLETED task is never reactivated by ingestion.
 func (r *run) advanceTask() error {
+	if r.binding != nil {
+		return r.outcomeTask()
+	}
 	if r.p.TaskID == "" {
 		return nil
 	}
@@ -146,9 +207,19 @@ func (r *run) fill(it domain.ContextItem) domain.ContextItem {
 	it.WorkflowID = r.p.WorkflowID
 	it.TaskID = r.p.TaskID
 	it.AgentID = r.p.AgentID
-	if r.hasTask && r.task.Turn > 0 {
+	switch {
+	case r.binding != nil:
+		// A provider outcome belongs to the turn its call was issued in,
+		// never the task's newest turn (P3-34).
+		it.CreatedTurn, it.TurnID = r.binding.Turn, r.binding.TurnID
+	case r.hasTask && r.task.Turn > 0:
 		it.CreatedTurn = r.task.Turn
 		it.TurnID = r.task.TurnID
+	}
+	// Under a Phase 3 policy a parsed directive's namespace is explicit
+	// (P3-3); its current key is the same as the legacy fallback's.
+	if r.pol != nil && it.DirectiveID != "" && it.Section != domain.SectionNone && it.Namespace == "" {
+		it.Namespace = domain.NamespaceDirective
 	}
 	it.ContentHash = domain.ContentHash(it.Parts)
 	it.SemanticBytes = domain.SemanticBytes(it.Parts)
@@ -166,7 +237,11 @@ func (r *run) newItem(it domain.ContextItem) (domain.ContextItem, error) {
 	it = r.fill(it)
 	it.ID = domain.DerivedItemID(r.p.SessionID, r.itemKey(), len(r.items))
 	it.Seq = r.tx.NextSeq()
-	if err := it.Validate(); err != nil {
+	validate := it.Validate
+	if r.pol != nil {
+		validate = it.ValidateSemantic
+	}
+	if err := validate(); err != nil {
 		return domain.ContextItem{}, err
 	}
 	if err := it.ValidateTurnOwnership(); err != nil {
@@ -196,6 +271,7 @@ func (r *run) ingestSpan(si int) error {
 	if err != nil {
 		return err
 	}
+	r.transcripts[si] = transcript
 	actor, err := domain.SourceActor(r.p, span.Authority)
 	if err != nil {
 		return err
@@ -251,6 +327,9 @@ func (r *run) transcript(si int, span domain.Span) (domain.ContextItem, error) {
 // commit writes the replayable envelope and the immutable receipt, with its
 // diagnostic and lifecycle-command records, in one store write (D14, D16).
 func (r *run) commit() (domain.IngestReceipt, error) {
+	if err := r.settleItems(); err != nil {
+		return domain.IngestReceipt{}, err
+	}
 	rc := domain.IngestReceipt{
 		SessionID:     r.p.SessionID,
 		OccurrenceID:  r.occurrence,
@@ -272,17 +351,47 @@ func (r *run) commit() (domain.IngestReceipt, error) {
 	if len(rc.Diagnostics) > r.limits.MaxEventDiagnostics+len(r.e.Spans) {
 		return domain.IngestReceipt{}, errLimit("MaxEventDiagnostics")
 	}
-	if err := rc.Validate(); err != nil {
+	var (
+		env domain.EventEnvelope
+		err error
+	)
+	if r.pol != nil {
+		rc.SchemaVersion, rc.RequestHashVersion, rc.Operations, rc.MutationReceiptIDs = domain.IngestReceiptSchemaV2, domain.RequestHashV3, r.opResults, r.mutationReceipts
+		env, err = domain.NewSemanticEventEnvelope(r.p, r.occurrence, r.e, r.limits, *r.pol)
+	} else {
+		env, err = domain.NewEventEnvelope(r.p, r.occurrence, r.e)
+	}
+	if err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	env, err := domain.NewEventEnvelope(r.p, r.occurrence, r.e)
-	if err != nil {
+	if err := rc.Validate(); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	if err := r.tx.InsertIngestion(env, rc); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	return rc.Clone(), nil
+}
+
+// settleItems refreshes the receipt's snapshot of every item this event
+// created that a later step of the same event changed, such as a goal it
+// declared and then resolved (P3-35): the receipt records each item as the
+// event left it, which is what the store holds when the receipt commits.
+// Only executed mutations can change an item after its creation.
+func (r *run) settleItems() error {
+	if len(r.mutationReceipts) == 0 {
+		return nil
+	}
+	for i, it := range r.items {
+		stored, err := r.tx.Item(it.ID)
+		if err != nil {
+			return err
+		}
+		if stored.Version != it.Version {
+			r.items[i] = stored.Clone()
+		}
+	}
+	return nil
 }
 
 // blob stores supplied image/document bytes, or authorizes a reference to

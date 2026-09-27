@@ -14,20 +14,32 @@ var hardMaxEventBytes uint64 = 1 << 30
 const (
 	hardMaxSpans = 1 << 16
 	hardMaxParts = 1 << 20
+	// hardMaxOperations and hardMaxOperationBytes bound a typed operation
+	// stream's count and canonical metadata (P3-34, SEC-2.1).
+	hardMaxOperations     = 1 << 12
+	hardMaxOperationBytes = 1 << 26
 )
 
 // sizeLimits are the count and byte bounds checkSizes enforces.
 type sizeLimits struct {
 	spans, parts            uint64
 	span, blob, eventBudget uint64
+	ops, opBytes            uint64
 }
 
 func hardSizes() sizeLimits {
-	return sizeLimits{hardMaxSpans, hardMaxParts, hardMaxEventBytes, hardMaxEventBytes, hardMaxEventBytes}
+	return sizeLimits{hardMaxSpans, hardMaxParts, hardMaxEventBytes, hardMaxEventBytes, hardMaxEventBytes, hardMaxOperations, hardMaxOperationBytes}
 }
 
-func configuredSizes(l domain.Limits) sizeLimits {
-	return sizeLimits{uint64(l.MaxSpans), uint64(l.MaxParts), uint64(l.MaxSpanBytes), uint64(l.MaxBlobBytes), uint64(l.MaxEventBytes)}
+// configuredSizes are the configured limits; without a Phase 3 policy the
+// operation bounds are the hard ceilings, and validation then rejects any
+// typed stream as unsupported.
+func configuredSizes(l domain.Limits, pol *domain.Phase3Policy) sizeLimits {
+	ops, opBytes := uint64(hardMaxOperations), uint64(hardMaxOperationBytes)
+	if pol != nil {
+		ops, opBytes = uint64(max(pol.MaxOperations, 0)), uint64(max(pol.MaxMetadataBytes, 0))
+	}
+	return sizeLimits{uint64(l.MaxSpans), uint64(l.MaxParts), uint64(l.MaxSpanBytes), uint64(l.MaxBlobBytes), uint64(l.MaxEventBytes), ops, opBytes}
 }
 
 // checkSizes bounds e's spans, parts, per-span text, blob bytes, and total
@@ -70,6 +82,15 @@ func checkSizes(e domain.Event, l sizeLimits) error {
 	}
 	if total > l.eventBudget {
 		return errLimit("event bytes")
+	}
+	if uint64(len(e.Operations)) > l.ops {
+		return errLimit("operation count")
+	}
+	if len(e.Operations) > 0 {
+		// Bounded: the encoder stops at the limit before copying more.
+		if _, err := domain.CanonicalSemanticArguments(e.Operations, int(min(l.opBytes, hardMaxOperationBytes))); err != nil {
+			return errLimit("operation bytes")
+		}
 	}
 	return nil
 }
@@ -117,8 +138,13 @@ func admitKnownRetry(tx store.ReadTx, p domain.Principal, e domain.Event, limitE
 // content: an event whose shape differs from the stored original cannot be
 // its exact retry.
 func sameShape(e, orig domain.Event) bool {
-	if e.Kind != orig.Kind || e.TurnBoundary != orig.TurnBoundary || len(e.Spans) != len(orig.Spans) {
+	if e.Kind != orig.Kind || e.TurnBoundary != orig.TurnBoundary || e.Control != orig.Control || len(e.Spans) != len(orig.Spans) || len(e.Operations) != len(orig.Operations) {
 		return false
+	}
+	for i, op := range e.Operations {
+		if op.Kind != orig.Operations[i].Kind || len(op.References) != len(orig.Operations[i].References) {
+			return false
+		}
 	}
 	for i, s := range e.Spans {
 		o := orig.Spans[i]

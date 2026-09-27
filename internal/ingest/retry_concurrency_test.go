@@ -161,7 +161,9 @@ func TestDiagnosticsCapTruncates(t *testing.T) {
 	eachStore(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
 		full := f.mustIngest(user, richEvent("full"))
-		capped, err := Ingester{Limits: domain.Limits{MaxEventDiagnostics: 2}, IDs: &domain.SequentialIDs{}, Now: f.in.Now}.Ingest(ctx, f.s, user, richEvent("capped"))
+		cappedIn := f.in
+		cappedIn.Limits, cappedIn.IDs = domain.Limits{MaxEventDiagnostics: 2}, &domain.SequentialIDs{}
+		capped, err := cappedIn.Ingest(ctx, f.s, user, richEvent("capped"))
 		if err != nil {
 			t.Fatal(err)
 		}

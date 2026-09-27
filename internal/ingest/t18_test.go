@@ -11,6 +11,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
 	"github.com/tdavison784/context-runtime/internal/store/sqlite"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 )
 
 func exampleText(t *testing.T, name string) string {
@@ -52,7 +53,7 @@ func currentIDs(t *testing.T, s store.Store, k domain.Kind) []string {
 func TestT18_EndToEnd(t *testing.T) {
 	doc := exampleText(t, "t18-pasted-document")
 	w1, w2 := exampleText(t, "t18-working-w1"), exampleText(t, "t18-working-w2")
-	path := filepath.Join(t.TempDir(), "t18.db")
+	path := sqlitetest.Path(t)
 	stores := map[string]func() store.Store{
 		"memory": func() store.Store { return memory.New() },
 		"sqlite": func() store.Store {

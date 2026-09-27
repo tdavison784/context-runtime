@@ -299,7 +299,7 @@ func TestSizeGateMatchesValidateFor_SEC21(t *testing.T) {
 	}
 	for _, c := range []struct{ text, blob int }{{64, 32}, {65, 0}, {64, 33}, {60, 32}, {64, 31}} {
 		e := mk(c.text, c.blob)
-		gate, exact := checkSizes(e, configuredSizes(l)) == nil, e.ValidateFor(user, l) == nil
+		gate, exact := checkSizes(e, configuredSizes(l, nil)) == nil, e.ValidateFor(user, l) == nil
 		if gate != exact {
 			t.Errorf("text %d blob %d: gate accepts %v, ValidateFor accepts %v", c.text, c.blob, gate, exact)
 		}

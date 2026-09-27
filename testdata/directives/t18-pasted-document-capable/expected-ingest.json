@@ -113,18 +113,14 @@
       "from": "event#1",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#2",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     }
   ],
   "obligations": [],
@@ -134,7 +130,7 @@
       "target_id": "launch",
       "authority": "USER",
       "actor_authority": "USER",
-      "status": "PARSED_NOT_EXECUTED",
+      "status": "NOT_EXECUTED",
       "resolution": "NOT_FOUND",
       "range": [
         100,

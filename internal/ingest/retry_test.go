@@ -195,6 +195,7 @@ func TestRetryIdentity_SessionScopedRich(t *testing.T) {
 		if ra.OccurrenceID == rb.OccurrenceID || slices.ContainsFunc(rb.ItemIDs(), func(id string) bool { return slices.Contains(ra.ItemIDs(), id) }) {
 			t.Fatal("sessions share item IDs or occurrences")
 		}
+		counts := map[string]int{}
 		for _, pair := range []struct {
 			s string
 			r domain.IngestReceipt
@@ -215,13 +216,21 @@ func TestRetryIdentity_SessionScopedRich(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if len(obs) != 1 || obs[0].SessionID != pair.s || !slices.Contains(own, obs[0].SourceItemID) {
-					t.Fatalf("%s: obligations = %+v", pair.s, obs)
+				// Explicit obligation= and claim-pattern pins both declare
+				// (P3-12); each session has its own, from its own items.
+				counts[pair.s] = len(obs)
+				for _, o := range obs {
+					if len(obs) == 0 || o.SessionID != pair.s || !slices.Contains(own, o.SourceItemID) {
+						t.Fatalf("%s: obligations = %+v", pair.s, obs)
+					}
 				}
 				return nil
 			}); err != nil {
 				t.Fatal(err)
 			}
+		}
+		if counts[sess] == 0 || counts[sess] != counts["S2"] {
+			t.Fatalf("obligations per session = %v", counts)
 		}
 		// Each session's retry returns its own original receipt.
 		if again, err := f.in.Ingest(ctx, f.s, pa, ea); err != nil || !reflect.DeepEqual(again, ra) {

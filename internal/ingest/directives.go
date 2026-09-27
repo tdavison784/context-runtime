@@ -7,6 +7,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/directive"
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/graph"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -101,12 +102,17 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		}
 		return err
 	}
-	canonical, dup, err := r.duplicateOf(c.actor, it, item.Obligation)
+	// Insert, declare, then compare (W1 6594958): duplicate detection
+	// compares immutable creation declarations, so the new occurrence's
+	// declaration must exist before SameDirective sees it.
+	it, err = r.newItem(it)
 	if err != nil {
 		return err
 	}
-
-	it, err = r.newItem(it)
+	if err := r.declare(it, item.Obligation); err != nil {
+		return err
+	}
+	canonical, dup, err := r.duplicateOf(c.actor, it, item.Obligation)
 	if err != nil {
 		return err
 	}
@@ -135,7 +141,24 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		r.rels++
 		r.repls = append(r.repls, domain.IngestLink{ItemID: it.ID, TargetID: prev})
 	}
-	if item.Obligation != "" {
+	if r.pol != nil && it.Section == domain.SectionPinned {
+		// P3-12: the new, current, nonduplicate Pinned source declares its
+		// slot-0 obligation through W4: explicit obligation= wins, else the
+		// claim pattern decides whether one exists, with an immutable
+		// binding or a fixed UNBOUND reason. A duplicate returned above.
+		// A pin with neither declares nothing (BindPinned would decline),
+		// so the service and its workspace lookup are skipped.
+		if _, claimed := obligation.MatchClaim(it.Parts[0].Text); item.Obligation == "" && !claimed {
+			return nil
+		}
+		svc, err := r.obligations()
+		if err != nil {
+			return err
+		}
+		if _, err := svc.DeclarePinnedTx(r.tx, c.actor, it.ID, item.Obligation, r.tx.NextSeq()); err != nil {
+			return err
+		}
+	} else if item.Obligation != "" {
 		return r.declareObligation(it, item.Obligation)
 	}
 	if it.Section == domain.SectionReferences {
@@ -163,8 +186,28 @@ func (r *run) duplicateOf(actor domain.Principal, it domain.ContextItem, claim s
 	return cur, same, nil
 }
 
-// declareObligation creates the UNRESOLVED obligation version a Pinned
-// item's obligation=<claim> declares (D13): its identity derives from the
+// declare records its immutable creation declaration (P3-4) under the
+// policy's dedup registry. The declaration takes every creation default
+// from the stored item; the only accepted attribute that the stored fields
+// do not already capture is an explicit obligation=<claim>, recorded as
+// such, so adding or dropping a declared obligation is never a duplicate.
+// Kind, scope and TTL attributes are captured by their effect; restating a
+// default explicitly is a nonsemantic spelling difference. Frozen v2
+// identity (tests only) records none.
+func (r *run) declare(it domain.ContextItem, claim string) error {
+	if r.pol == nil {
+		return nil
+	}
+	accepted := graph.CreationAcceptance{PolicyVersion: r.pol.Dedup}
+	if claim != "" {
+		accepted.AcceptedAttributes = []string{"obligation=" + claim}
+	}
+	_, err := graph.DeclareCreation(r.tx, it, accepted)
+	return err
+}
+
+// declareObligation creates the frozen v2 (Phase 2) UNRESOLVED obligation
+// version a Pinned item's obligation=<claim> declares (D13): its identity derives from the
 // directive's full current-version key and slot 0, never from the claim, so
 // replacing the directive versions the same obligation. The claim is only a
 // name; no matcher is bound and no grant issued.
@@ -198,7 +241,8 @@ func (r *run) declareObligation(it domain.ContextItem, claim string) error {
 }
 
 // linkDerived records that it was derived from its span's transcript, at
-// creation, with coverage naming the transcript (D8, FR-REL-008).
+// creation, with PROVENANCE coverage naming the transcript (D8, FR-REL-008,
+// P3-6).
 func (r *run) linkDerived(c unitCtx, it domain.ContextItem) error {
 	if r.rels >= r.limits.MaxRelationships {
 		return errLimit("MaxRelationships")
@@ -207,7 +251,15 @@ func (r *run) linkDerived(c unitCtx, it domain.ContextItem) error {
 	if r.derived[c.si]++; r.derived[c.si] > r.limits.MaxItemsPerSpan {
 		return errLimit("MaxItemsPerSpan")
 	}
-	_, err := graph.LinkDerived(r.tx, c.actor, it.ID, []string{c.transcript.ID}, &domain.Coverage{}, r.graphEventID())
+	sources := []string{c.transcript.ID}
+	var err error
+	if r.pol != nil {
+		// Transcript derivation is provenance, not evidence support or a
+		// replaceable exchange (P3-6), with the policy's finite bound.
+		_, err = graph.LinkDerivedCoverage(r.tx, c.actor, it.ID, sources, domain.CoverageProvenance, r.graphEventID(), r.pol.MaxCoverageMembers)
+	} else {
+		_, err = graph.LinkDerived(r.tx, c.actor, it.ID, sources, &domain.Coverage{}, r.graphEventID())
+	}
 	r.rels++
 	return err
 }
@@ -278,14 +330,21 @@ func (r *run) detectDuplicate(si, pi int, actor domain.Principal, it domain.Cont
 		if c.ID == it.ID || c.Seq >= it.Seq || c.Scope != it.Scope {
 			continue
 		}
+		// Compare before mutating: a failed graph mutation poisons the
+		// transaction (W1 1babf3c). The index already matched content,
+		// role, kind, authority, boundary and task; a candidate that is
+		// itself a duplicate cannot be canonical, and a later one may be.
+		dupOf, err := r.tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: c.ID})
+		if err != nil {
+			return err
+		}
+		if len(dupOf) > 0 {
+			continue
+		}
 		if r.rels >= r.limits.MaxRelationships {
 			return errLimit("MaxRelationships")
 		}
-		_, err := graph.LinkDuplicate(r.tx, actor, it.ID, c.ID, r.graphEventID(), dedupRule, "")
-		switch {
-		case errors.Is(err, graph.ErrNotDuplicate):
-			continue // c is itself a duplicate; a later candidate may be canonical
-		case err != nil:
+		if _, err := graph.LinkDuplicate(r.tx, actor, it.ID, c.ID, r.graphEventID(), dedupRule, ""); err != nil {
 			return err
 		}
 		r.rels++
