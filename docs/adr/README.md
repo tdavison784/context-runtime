@@ -72,12 +72,14 @@ and injection resistance) is tracked in `internal/directive`,
 `internal/ingest`, and `testdata/directives`, not in this directory.
 
 Phase 3 (Semantic state engine) requires ADR 8, written here as Status:
-Proposed pending the Phase 3 gate, and amends ADR 6, 16, and 19 (each keeps
-its own Accepted Status from its own phase; the amendment records what
-Phase 3 adds on top). Phase 3's exit gate (replacement, resolution/
-rehydration, evidence invalidation, and mutation-authority traces against
-event traces T02/T06/T07) is tracked in the new `internal/obligation` and
-`internal/lifecycle` packages, not in this directory.
+Proposed pending the Phase 3 gate, and amends ADR 3, 4, 6, 16, 17, and 19
+(each keeps its own Accepted Status from its own phase; the amendment
+records what Phase 3 adds on top). Phase 3's exit gate (replacement,
+resolution/rehydration, evidence invalidation, and mutation-authority traces
+against event traces T02/T06/T07) is tracked primarily by `internal/ingest`'s
+`TestGate*` suite, which exercises the real W3/W4/W5/W6 services end to end;
+the new `internal/obligation` and `internal/lifecycle` packages carry the
+matching service-level tests, not in this directory.
 
 ## SDD conflicts found and applied (v0.6)
 
