@@ -75,22 +75,23 @@ func TestGCQueueNeverBlocksBehindSkippedOrFailingRequests(t *testing.T) {
 				t.Fatal(err)
 			}
 			enqueue(t, db, s, "event-1")
-			// H3: the failing head is quarantined on its first failure, the
-			// request behind it still runs, and nothing is retried later.
-			for pass := range 3 {
-				n, err := s.CollectPending(ctx, "s", pick, 4)
-				want := 1
-				if pass > 0 {
-					want = 0
-				}
-				if n != want || !errors.Is(err, domain.ErrUnsupportedSchema) {
-					t.Fatalf("pass %d: n=%d err=%v, want %d", pass, n, err, want)
-				}
+			// M1 (DUR-4.9): the version-mismatched head settles
+			// FAILED/POLICY_MISMATCH on its first meeting — reported
+			// through ErrGCPolicyVersion, which is an ErrUnsupportedSchema —
+			// and the request behind it still runs in the same pass.
+			n, err := s.CollectPending(ctx, "s", pick, 4)
+			if n != 1 || !errors.Is(err, ErrGCPolicyVersion) || !errors.Is(err, domain.ErrUnsupportedSchema) {
+				t.Fatalf("pass 0: n=%d err=%v", n, err)
 			}
-			if res, found := gcResult(t, db, "gcq_old"); found {
-				t.Fatalf("misconfigured head quarantined: %+v", res)
+			res, found := gcResult(t, db, "gcq_old")
+			if !found || res.Outcome != domain.GCFailed || res.Reason != domain.GCFailurePolicyMismatch {
+				t.Fatalf("mismatched head not settled: %+v found=%v", res, found)
 			}
-			if pending := pendingGC(t, db); len(pending) != 1 {
+			// Later passes are quiet and nothing is retried.
+			if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || err != nil {
+				t.Fatalf("pass 1: n=%d err=%v", n, err)
+			}
+			if pending := pendingGC(t, db); len(pending) != 0 {
 				t.Fatalf("pending: %+v", pending)
 			}
 		})

@@ -344,6 +344,93 @@ func TestBatchSizeRecoversAfterAWorkHalving_SEC47(t *testing.T) {
 	})
 }
 
+// DUR-4.9 (ruling M1): a pending request recorded under another policy
+// version no longer strands. CollectPending settles it
+// FAILED/POLICY_MISMATCH on first meeting — nothing archived, nothing
+// charged (J5) — so the normal re-arm path applies under the current
+// policy. A TASK_COMPLETION trigger the executor's policy disables keeps
+// its J5 semantics: ErrGCTriggerDisabled (tested with errors.Is) and the
+// request stays pending.
+func TestPolicyMismatchSettlesAndRearms_DUR49(t *testing.T) {
+	ctx := context.Background()
+	pick := func(domain.GCRequest) (domain.Principal, bool) {
+		return storetest.NewPrincipal("s", domain.AuthoritySystem), true
+	}
+	eachStore(t, func(t *testing.T, db store.Store) {
+		base, _ := New(db, testPolicy())
+		id := completeLarge(t, db, base, 2)
+		next := testPolicy()
+		next.Version = "phase3-policy/v9"
+		// New pins today's single version (DUR-4.9), so the upgraded
+		// executor is hand-built, as in TestJ5ConfigurationErrors.
+		s := &Service{store: db, policy: next}
+
+		// First meeting: reported through ErrGCPolicyVersion, settled
+		// FAILED/POLICY_MISMATCH, nothing archived, nothing charged.
+		if n, err := s.CollectPending(ctx, "s", pick, 1); n != 0 || !errors.Is(err, ErrGCPolicyVersion) {
+			t.Fatalf("policy mismatch pass: n=%d err=%v", n, err)
+		}
+		r, found := gcResult(t, db, id)
+		if !found || r.Outcome != domain.GCFailed || r.Reason != domain.GCFailurePolicyMismatch {
+			t.Fatalf("mismatched request not settled: %+v found=%v", r, found)
+		}
+		if err := db.View(ctx, "s", func(tx store.ReadTx) error {
+			for i := range 2 {
+				it, err := tx.Item(fmt.Sprintf("scratch-%03d", i))
+				if err != nil {
+					return err
+				}
+				if it.Residency != domain.ResidencyResident {
+					t.Errorf("%s archived by a settlement", it.ID)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		readSemantic(t, db, func(sem store.SemanticReader) error {
+			if p, err := sem.GCProgress(id); err == nil && (p.Attempts != 0 || p.Batches != 0) {
+				t.Errorf("settlement charged the request: %+v", p)
+			}
+			return nil
+		})
+		// Later meetings are quiet.
+		if n, err := s.CollectPending(ctx, "s", pick, 1); n != 0 || err != nil {
+			t.Fatalf("settled request retried: n=%d err=%v", n, err)
+		}
+		// The normal re-arm path works under the current policy and
+		// collects.
+		var rearm string
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			var err error
+			rearm, err = s.RearmGCRequest(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), id)
+			return err
+		}); err != nil || rearm == "" {
+			t.Fatalf("re-arm under current policy: %q %v", rearm, err)
+		}
+		runGC(t, db, s, rearm, 8)
+		if r, ok := gcResult(t, db, rearm); !ok || r.Outcome != domain.GCCollected {
+			t.Fatalf("re-armed request: %+v ok=%v", r, ok)
+		}
+
+		// A disabled TASK_COMPLETION trigger keeps reporting
+		// ErrGCTriggerDisabled and never settles its request.
+		stranded := enqueueWithID(t, db, base, domain.GCTaskCompletion, "task")
+		off := testPolicy()
+		off.GCTriggers = []domain.GCTrigger{domain.GCManual, domain.GCSupersession}
+		soff, _ := New(db, off)
+		if n, err := soff.CollectPending(ctx, "s", pick, 1); n != 0 || !errors.Is(err, ErrGCTriggerDisabled) {
+			t.Fatalf("disabled completion: n=%d err=%v", n, err)
+		}
+		if _, found := gcResult(t, db, stranded); found {
+			t.Fatal("disabled trigger settled its request")
+		}
+		if list := pendingGC(t, db); len(list) != 1 || list[0].ID != stranded {
+			t.Fatalf("disabled request not still pending: %+v", list)
+		}
+	})
+}
+
 // SEC-4.5 (J5 wedge): a pending request's continuation binds to authority
 // class and task, not the exact principal that ran batch 1. A same-task
 // HARNESS with another AgentID finishes the request; binding to the first

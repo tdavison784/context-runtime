@@ -11,10 +11,19 @@ import (
 )
 
 // ErrGCTriggerDisabled rejects collection for a trigger outside the policy's
-// explicit enabled set. The durable request, if any, stays pending.
+// explicit enabled set; test it with errors.Is (DUR-4.9). The durable
+// request, if any, stays pending: this is a configuration fault, never a
+// charge on the request (J5).
 var ErrGCConfiguration = errors.New("lifecycle: invalid collector configuration")
 
 var ErrGCTriggerDisabled = fmt.Errorf("lifecycle: GC trigger disabled by policy: %w", domain.ErrInvalidTransition)
+
+// ErrGCPolicyVersion reports a pending GC request recorded under another
+// policy version (DUR-4.9, ruling M1); test it with errors.Is. CollectPending
+// settles such a request FAILED/POLICY_MISMATCH — uncharged, nothing
+// archived — so it stops stranding and the normal re-arm path applies under
+// the current policy.
+var ErrGCPolicyVersion = fmt.Errorf("lifecycle: GC request recorded under another policy version: %w", domain.ErrUnsupportedSchema)
 
 // EnqueueGC persists a durable GC request in the producer's transaction
 // (P3-39) under this executor's policy; it is a thin wrapper over
@@ -283,6 +292,18 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 			}
 			if !s.policy.GCTriggerEnabled(r.Trigger) {
 				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, ErrGCTriggerDisabled))
+				continue
+			}
+			// A request recorded under another policy version cannot run
+			// under this one (DUR-4.9, ruling M1): settle it
+			// FAILED/POLICY_MISMATCH — uncharged, nothing archived — so it
+			// stops stranding and the normal re-arm path applies under the
+			// current policy.
+			if r.PolicyVersion != s.policy.Version {
+				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, ErrGCPolicyVersion))
+				if qerr := s.settleGCFailure(ctx, session, r.ID, domain.GCFailurePolicyMismatch, false); qerr != nil {
+					failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, qerr))
+				}
 				continue
 			}
 			attempts++
