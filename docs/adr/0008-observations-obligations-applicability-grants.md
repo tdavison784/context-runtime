@@ -1,22 +1,23 @@
 # 8. Observation identities, obligation matcher/claim versions, applicability fingerprints, mutation grants, and invalidation rules
 
-Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through PR #6
-round 4 (head `4ff6ca1`; SPEC-4.4/DUR-4.10 correct the prior "reconciled
-through ... round 2" header), with W1-W7's round-3 fixes — including
-DUR-3.1's derive-at-read subject applicability and per-resource
-live-proof-dependents cap — fully merged. `go test -race -count=1
--timeout 45m ./...` passes with no exceptions; every decision below cites
-real, `grep`-verified code and tests, not a proposed contract. **P3-42's
-required-test mapping is still incomplete** (see "Outstanding required
-tests" below — SPEC-1.23/SPEC-2.14/SPEC-3.9/SPEC-4.9): this ADR remains
-Proposed for that reason, not merely pending a formality. G1's
-applicability rule (§6/§12) is fully landed, matcher and store sides both.
-**The commander's FROZEN K1 ruling (`.worktrees/_commander/K1-final.md`)
-retires this round's live-proof-dependents cap (DUR-3.1 (C)) for a
-derive-at-read validity design with no cap at all; K1's own implementation
-has not yet landed as of this pass (round 4, `round4-p6-fixes.md`, W4b
-lead) — see the K1 subsection below, recorded here as decided but not yet
-built, the same way DUR-3.1 itself was recorded one round earlier.**)
+Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through the
+round-4 integration, worktree `p3-int`, head `dc07666` (SPEC-4.4/DUR-4.10/
+K1e/SPEC-4.9 correct the prior "reconciled through PR #6 round 4 (head
+`4ff6ca1`)" header, itself a correction of a stale "round 2"), with every
+round-4 branch merged — K1 (derived-at-read proof validity, replacing
+DUR-3.1 (C)'s cap), L1 (derived-at-read subject applicability, `store
+.SubjectApplicability`), M1 (GC policy-version-mismatch quarantine), M2
+(the settlement pre-check before obligation-version retirement), M3
+(every P3-42 required-test bullet written), M4, and the round-4 GC/grant
+fixes. `go test -race -count=1 -timeout 45m ./...` passes with no
+exceptions; every decision below cites real, `grep`-verified code and
+tests, not a proposed contract. **This ADR remains Proposed for one
+narrower reason than before:** the P3-42 required-test mapping is now
+met, modulo a small number of adjacent-test/Low-confidence caveats the
+coverage table below still records inline (see "Outstanding required
+tests" below), and K1 has fully landed, but the commander has not yet
+ruled this ADR Accepted at the Phase 3 gate — that ruling is explicitly
+outside this docs pass's authority.)
 Date: 2026-09-26
 
 ## Context
@@ -576,75 +577,150 @@ This changes §12's "recorded" framing for the file-content case
 specifically; the OBSERVATION-derived `task_state` item itself (§11/§12,
 TOOL authority, C-6) is unaffected.
 
-**K1 — the FROZEN commander ruling that replaces (C) (round 4;
+**K1 — the FROZEN commander ruling that replaces (C), landed (round 4;
 `.worktrees/_commander/K1-final.md`, background `proposal-K1.md`/
-`K1-sec.md`/`K1-spec.md`; not yet landed as of this pass, W4b lead with
-W2c/W3c/W7b/W1).** In place of a write-time cap, K1 makes proof validity
-**derived at read**, exactly as (B) already does for subject-state
-applicability, and removes the cap and its refusal path entirely (K1a,
-K1d):
+`K1-sec.md`/`K1-spec.md`; landed in the round-4 integration, worktree
+`p3-int`, head `dc07666`; W4b lead with W2c/W3c/W7b/W1).** In place of a
+write-time cap, K1 makes proof validity **derived at read**, exactly as
+(B) already does for subject-state applicability, and removes the cap
+and its refusal path entirely (K1a, K1d):
 
-- **A1 — monotone, write-time-pointer validity.** A proof is valid iff
-  its resource is KNOWN and, for every recorded non-`FIXED_CONTENT`
-  dependency, no accepted update with a later revision *affects* it under
-  today's `change.affects` rule (a `WORKSPACE` dependency only on a
-  fingerprint change or lost freshness; a `CURRENT_PATH` dependency only
-  on a touch to its path, an ancestor directory, `ALL`, or `UNKNOWN`,
-  never on a same-content path report; `FIXED_CONTENT` never). This is
-  decided from two write-time pointers maintained in the report's own
-  O(1) transaction — per resource, `LastWorkspaceDivergenceRev`; per
-  `(resource, key)` for the exact path/each ancestor directory/`ALL`,
-  `LastAffectingRev` — so a dependency is invalid iff a relevant pointer
-  exceeds its recorded `ResourceRevision`. Validity is monotone: once a
-  proof is derived invalid it is never valid again, so a W1→W2→W1 revert
-  cannot resurrect it.
+- **A1 — monotone, write-time-pointer validity.** `store.ProofDerivedValid`
+  (`internal/store/semantic_validity.go`) is the one shared rule: a proof
+  is valid iff its resource is KNOWN and, for every recorded
+  non-`FIXED_CONTENT` dependency, no accepted update with a later
+  revision *affects* it under `change.affects`'s existing rule (a
+  `WORKSPACE` dependency only on a fingerprint change or lost freshness;
+  a `CURRENT_PATH` dependency only on a touch to its path, an ancestor
+  directory, `ALL`, or `UNKNOWN`, never on a same-content path report;
+  `FIXED_CONTENT` never). This is decided from two write-time pointers,
+  migration 0048's `lookup_workspace_divergence` (per resource, the
+  raises' revision order — `LastWorkspaceDivergenceRev`) and
+  `lookup_affecting_raise` (per resource/key, `LastAffectingRev`),
+  maintained in the report's own O(1) transaction; a dependency is
+  invalid iff a relevant pointer exceeds its recorded `ResourceRevision`.
+  Both fail closed: an unreadable record, dependency, or pointer, or an
+  exceeded read bound, returns invalid with the error, never true.
+  Validity is monotone: once a proof is derived invalid it is never valid
+  again, so a W1→W2→W1 revert cannot resurrect it. Migration: `0048_k1_pointers.sql`,
+  frozen step `0048/k1/reconcile-workspace-divergence-v1`
+  (`reconcileK1PointersV1`, `steps_0048.go`) backfills divergence exactly
+  from each resource's fingerprint chain, and conservatively raises every
+  stored report's `ALL` key and every changed path (same-content history
+  isn't reconstructible, so a backfilled raise can settle a proof a live
+  report would have spared — an accepted, one-time-upgrade-only
+  overapproximation, not an ongoing behavior). Tests:
+  `TestK1ReportsNeverFanOut`, `TestK1ValidityIsMonotone`,
+  `TestK1DependencySemantics`, `TestConformance/SemanticProofDerivedValid`
+  (storetest). **Gap, not yet fixed as of this pass:** unlike 0045-0047,
+  migration 0048 has no dedicated `TestUpgrade*` upgrade-parity fixture —
+  only its checksum is pinned (`TestCommittedMigrationsUnchanged`,
+  `TestCommittedStepsUnchanged`), so a pre-0048 database's divergence
+  pointers backfilling correctly is untested by a real upgrade replay.
 - **A2 — one effective-status helper, everywhere status is selected.**
-  Every status-selected query — `CompleteTask`/X8, GC protection
-  (including `gc_snapshot`'s `OpenObligationSource`), the FR-DOM-007
-  mandatory set, eligibility, the `SATISFIES` view, and inspection — also
-  selects stored-SATISFIED resource-bound versions and applies the
-  helper; a test fails on any other `domain.ObligationSatisfied`/
-  resource-bound `.Status` comparison outside the helper, the transition
-  table, and the store guards.
-- **A3/A4 — inline settle plus an async audit worker.** Before any
-  transition on a version whose effective status differs from its stored
-  status, the same transaction first writes the restricted
-  `RESOURCE_INVALIDATION` transition (cause: the earliest affecting
-  update, exact key `(proofID, causingUpdate)`, `OriginAuthorizationRef`
-  per C-10), then applies the requested transition from the effective
-  state — closing the gap where a fresh PASS over a stale proof would
-  otherwise take the ordinary `PROOF_REFRESH` path and the record would
-  never show the intervening invalidation. A durable, resumable async
-  audit worker (the GC-queue-cursor pattern) writes the same
-  exact-keyed settlement afterward, idempotent with the inline write, as
-  SYSTEM, under CAS on the obligation revision, recording the causing
-  update's actual reporter and `OriginAuthorizationRef` separately; it
-  never blocks a report and correctness never depends on it having run.
-- **A5 — INV-16 and the commit guard.** INV-16 becomes "SATISFIED
-  (effective) is backed by an assertion or proof that is valid at read";
-  the commit guard refuses a SATISFIED write whose proof is derived
-  invalid at commit, and the generated-history property is amended to
-  "stored SATISFIED ⇒ effective SATISFIED, or pending settlement whose
-  causing update is committed."
-- **A6 — the cap is retired, not narrowed.** Migration 0046's column and
-  the recorded `MaxLiveProofDependents` field stay (P3-40 request hashes
-  already include them, and committed migrations are never edited), but
-  K1 stops validating and using the field entirely — a historical policy
-  therefore keeps validating under its own recorded rule. Migration
-  0045's ancestor-key index is reused for A1's write-time pointers rather
-  than dropped.
-- **A7 — disclosure and a bounded fail-closed rule.** Pending settlement
-  is visible only through access-filtered obligation reads, as a fixed
-  code with no update, path, or ID; an unreadable pointer or dependency
-  makes the effective status UNRESOLVED (fail closed); dependencies per
-  proof are bounded at creation (the existing claim bound) so derivation
-  always fits the transaction's work budget regardless of a resource's
-  live-proof count.
+  `obligation.EffectiveStatus(r, o)` (`internal/obligation/effective.go`)
+  is the one helper: a stored SATISFIED version is effectively SATISFIED
+  only while `ProofDerivedValid` holds; otherwise it is effectively
+  UNRESOLVED and `pending` (a settlement has not been recorded yet).
+  Every status-selected query that exists today goes through it or a
+  thin wrapper: `CompleteTask`/X8 and GC protection (`gc_snapshot`'s
+  `OpenObligationSource`) via `internal/lifecycle/effective_status.go`'s
+  `openObligation` (`effectiveStatus = obligation.EffectiveStatus`); the
+  `SATISFIES` view and inspection (`ObligationView`) directly in
+  `internal/obligation/read.go`; matcher evaluation in
+  `internal/obligation/evaluate.go`. **The FR-DOM-007 mandatory set and
+  automatic-planning eligibility are Phase 4 planner territory
+  (`internal/plan`, SDD §6) that does not exist yet — A2's requirement
+  there is necessarily deferred, not landed, and this ADR records it as
+  such rather than claiming coverage a nonexistent package can't have.**
+  A repo-wide AST enforcement test,
+  `TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2`
+  (`internal/domain/effective_status_boundary_test.go`), parses every
+  non-test `.go` file outside `internal/domain`/`internal/store` and
+  fails if any function other than `obligation.EffectiveStatus` and
+  `graph.settleBeforeRetirement` (M2's settlement pre-check, itself
+  settlement machinery) compares or switches on a stored
+  `ObligationStatus` constant; its `effectiveStatusPending` allowlist,
+  for comparisons predating K1 that still needed migrating, is empty —
+  nothing remains pending. Tests: `TestK1ReadsUseEffectiveStatus`,
+  `TestCompletionBlockersUseEffectiveStatus_K1A2`,
+  `TestGCProtectionUsesEffectiveStatus_K1A2`,
+  `TestStatusSelectorsReadStoredSatisfiedVersions_K1A2`,
+  `TestArchiveProtectionUsesEffectiveStatus_K1A2`
+  (`internal/lifecycle/effective_status_test.go`).
+- **A3/A4 — inline settle plus an async audit worker.**
+  `obligation.Service.settle` (`internal/obligation/effective.go`) writes
+  the restricted `RESOURCE_INVALIDATION` transition before any transition
+  on a pending version: cause is `settlementCause`'s earliest update, by
+  session `(Seq, ID)`, that actually fired one of the proof's dependency
+  pointers (`FirstWorkspaceDivergenceAfter`/`FirstAffectingUpdateAfter`),
+  keyed exactly `(proofID, causeID)` so every path settles a proof at
+  most once. `graph.WithPendingSettler` (`internal/graph/settlement.go`)
+  injects `obligation.Service.SettleBeforeRetireTx` as graph's
+  `PendingSettler`: `settleBeforeRetirement` calls it before a version is
+  retired (replacement, supersession), and without an injected settler,
+  retiring a derived-invalid SATISFIED version fails closed with
+  `graph.ErrPendingSettlement` (M2) rather than ever recording
+  SATISFIED→retired over a pending settlement. `obligation.Service.SettlePendingTx`
+  is the durable, resumable async worker (the GC-queue-cursor pattern,
+  migration 0048's `settlement_cursor` and `lookup_live_proof`): as the
+  session's SYSTEM runtime (`runtimeActor`), it audits up to a bounded
+  page of live proofs after the cursor, settles each pending one through
+  the same exact-keyed path as the inline settle (idempotent with it),
+  skips settled/re-satisfied/waived/retired versions, and never blocks or
+  charges a report — correctness never depends on it having run. The
+  settlement's actor is always the session SYSTEM runtime; the causing
+  update's own `Reporter` field (unchanged from P3-19/ADR 8 §9) is the
+  record of who actually reported the change, kept separate from the
+  settlement's own actor. Tests (`internal/obligation/k1_test.go`
+  unless noted): `TestK1InlineSettleBeforeTransition`,
+  `TestK1SettlementWorker`, `TestK1SettleBeforeRetire`,
+  `TestK1ReplacementSettlesPendingBeforeRetirement`;
+  `TestPendingSatisfiedVersionIsUnfinishedAndProtected_K1`
+  (`internal/lifecycle/k1_pending_test.go`).
+- **A5 — INV-16 and the commit guard.** SDD v0.11 (below) states INV-16 as
+  "a current obligation's effective SATISFIED status is backed by an
+  assertion or proof that is valid at read." Both stores' `checkProofDerivedValid`
+  (`internal/store/memory/semantic_k1.go`, `internal/store/sqlite/semantic_k1.go`)
+  is the A5 commit guard: it refuses a SATISFIED write whose proof is
+  derived invalid at commit, calling `store.ProofDerivedValid` directly.
+  Tests: `TestConformance/SemanticA5CommitGuard` (storetest);
+  `TestConcurrentINV16`, `TestK1PropertyEffectiveSatisfactionIsValid`
+  (property: stored SATISFIED ⇒ effective SATISFIED, or pending
+  settlement whose causing update is committed).
+- **A6 — the cap is retired, not narrowed.** `Phase3Policy.Validate`
+  (`internal/domain/semantic.go`) no longer validates
+  `MaxLiveProofDependents` at all (K1 A6, GLM-2, DUR-4.6): the field and
+  migration 0046's column stay recorded, since P3-40's request hashes
+  already include them and committed migrations are never edited, but a
+  historical policy that recorded it now simply replays under its own
+  recorded value with no re-validation. `dependentRoom` and its
+  `errDependentCap` refusal are gone from `internal/obligation/evaluate.go`
+  and `transition.go` entirely, not narrowed. Migration 0045's
+  `lookup_live_proof_path`/`lookup_live_dependents` tables are **not**
+  reused for A1's pointers (correcting this ADR's own earlier draft of
+  this section) — they stay maintained as an unused write-time metric
+  (K1d: "the counter may stay as a metric"), while A1's actual pointers
+  are migration 0048's own new tables. Tests:
+  `TestK1MultiResourceProofsNeverWedgeReports_DUR42`,
+  `TestK1StableLiveProofsNeverBlockSatisfaction_DUR43`.
+- **A7 — disclosure and a bounded fail-closed rule.** `ObligationView.Pending`
+  (`internal/obligation/read.go`) is the fixed K1 A7 code: `VisibleObligations`
+  reports it whenever a version's effective status differs from its
+  stored one because of a pending settlement, naming no update, path, or
+  ID. `EffectiveStatus`/`ProofDerivedValid` fail closed on any unreadable
+  pointer or dependency (UNRESOLVED, with the error); dependencies per
+  proof stay bounded at creation by the existing claim bound (`MaxTargets`/
+  `MaxEvidence`), so derivation always fits the transaction's work budget
+  regardless of a resource's live-proof count.
 
-K1e's SDD amendment is recorded below, applied now per the commander's
-FROZEN ruling, independent of K1's own implementation landing — the same
-precedent SDD v0.9/v0.10's freeze-time amendments already set for this
-repository (ADR 19).
+K1e's SDD amendment is recorded below. It was first applied per the
+commander's FROZEN ruling ahead of K1's own implementation landing — the
+same precedent SDD v0.9/v0.10's freeze-time amendments already set for
+this repository (ADR 19) — and K1's implementation has since landed
+(round 4, above), so the SDD text and the Decision-section text above
+are now both current, real code and no longer a forward-looking
+placeholder.
 
 **A changed directory intersects files under it (PR #6 round 1, SPEC-1.18).**
 `change.affects` (`internal/obligation/invalidate.go:39,50`) originally
