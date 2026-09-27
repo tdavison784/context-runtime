@@ -14,6 +14,7 @@ func leasePolicy() domain.Phase3Policy {
 		MaxPageSize: 8, MaxReceiptBytes: 8192, MaxGCDecisions: 8, MaxOperations: 8, MaxMetadataBytes: 8192, MaxTargets: 8, MaxEvidence: 8,
 		MaxCoverageMembers: 8, MaxTransactionWork: 16, MaxToolResultBytes: 8192, MaxCheckpointSemanticBytes: 16 * 1024,
 		DefaultLeaseCalls: 2, MaxLeaseCalls: 4, CheckpointGeneration: domain.GenerationWorking, CheckpointRetention: domain.RetentionNormal,
+		GCTriggers: domain.DefaultGCTriggers(),
 	}
 }
 

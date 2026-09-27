@@ -11,7 +11,7 @@ import (
 )
 
 func membershipTestPolicy() domain.Phase3Policy {
-	return domain.Phase3Policy{MaxPageSize: 16, MaxReceiptBytes: 8192, MaxGCDecisions: 16, CheckpointGeneration: domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh, Version: domain.Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs-state/1", Eligibility: "eligibility/1", Locator: "locator/1", Coverage: "coverage/1", Dedup: "dedup/1", MaxOperations: 16, MaxMetadataBytes: 4096, MaxTargets: 16, MaxEvidence: 16, MaxCoverageMembers: 64, MaxTransactionWork: 128, MaxToolResultBytes: 8192, MaxCheckpointSemanticBytes: 16384, DefaultLeaseCalls: 2, MaxLeaseCalls: 8}
+	return domain.Phase3Policy{MaxPageSize: 16, MaxReceiptBytes: 8192, MaxGCDecisions: 16, CheckpointGeneration: domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh, Version: domain.Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs-state/1", Eligibility: "eligibility/1", Locator: "locator/1", Coverage: "coverage/1", Dedup: "dedup/1", MaxOperations: 16, MaxMetadataBytes: 4096, MaxTargets: 16, MaxEvidence: 16, MaxCoverageMembers: 64, MaxTransactionWork: 128, MaxToolResultBytes: 8192, MaxCheckpointSemanticBytes: 16384, DefaultLeaseCalls: 2, MaxLeaseCalls: 8, GCTriggers: domain.DefaultGCTriggers()}
 }
 
 func membershipTestStore(t *testing.T) (store.Store, *MembershipService, domain.Principal, domain.RegisterExchangeIntent) {
@@ -37,13 +37,13 @@ func TestMembershipRegisterPersistsOrderAndReplaysBeforeTurnAndRevision(t *testi
 	var original domain.RecordResult
 	update(t, s, "s", func(tx store.Tx) error {
 		var err error
-		original, err = service.RegisterExchange(tx, actor, intent)
+		original, err = service.RegisterExchange(tx, actor, intent, tx.NextSeq())
 		return err
 	})
 	update(t, s, "s", func(tx store.Tx) error {
 		next := intent
 		next.RequestID, next.ExpectedMembershipRevision = "register-2", 1
-		if _, err := service.RegisterExchange(tx, actor, next); err != nil {
+		if _, err := service.RegisterExchange(tx, actor, next, tx.NextSeq()); err != nil {
 			return err
 		}
 		task, _ := tx.Task(intent.Principal.TaskID)
@@ -53,8 +53,8 @@ func TestMembershipRegisterPersistsOrderAndReplaysBeforeTurnAndRevision(t *testi
 	})
 	update(t, s, "s", func(tx store.Tx) error {
 		before := tx.LastSeq()
-		got, err := service.RegisterExchange(tx, actor, intent)
-		if err != nil || !reflect.DeepEqual(got, original) || tx.LastSeq() != before {
+		got, err := service.RegisterExchange(tx, actor, intent, tx.NextSeq())
+		if err != nil || !reflect.DeepEqual(got, original) || tx.LastSeq() != before+1 {
 			t.Fatalf("replay: %+v, %v", got, err)
 		}
 		sem, _ := store.Semantic(tx)

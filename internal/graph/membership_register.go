@@ -20,12 +20,15 @@ func NewMembershipService(policy domain.Phase3Policy) (*MembershipService, error
 
 // RegisterExchange records a new originating turn and dense conversation ordinal.
 // The returned immutable identity is replayed without re-reading the exchange.
-func (s *MembershipService) RegisterExchange(tx store.Tx, actor domain.Principal, intent domain.RegisterExchangeIntent) (result domain.RecordResult, err error) {
+func (s *MembershipService) RegisterExchange(tx store.Tx, actor domain.Principal, intent domain.RegisterExchangeIntent, seq uint64) (result domain.RecordResult, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
 		}
 	}()
+	if err = checkOperationSeq(tx, seq); err != nil {
+		return result, err
+	}
 	sem, receipt, replay, err := prepareMembershipReceipt(tx, actor, intent.RequestID, "RegisterExchange", intent, s.policy)
 	if err != nil {
 		return result, err
@@ -39,7 +42,6 @@ func (s *MembershipService) RegisterExchange(tx store.Tx, actor domain.Principal
 	if s.policy.MaxTransactionWork < 6 {
 		return result, domain.ErrResourceLimit
 	}
-	seq := tx.NextSeq()
 	if err = checkMembershipControl(tx.SessionID(), actor, intent.Principal); err != nil {
 		return result, err
 	}

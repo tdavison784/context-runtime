@@ -70,7 +70,7 @@ func TestMembershipRegistrationPoisonsEveryPartialWrite(t *testing.T) {
 				return err
 			}
 			fault := &membershipFaultWriter{SemanticTx: sem, failAt: failAt}
-			if _, err = service.RegisterExchange(membershipFaultTx{tx, fault}, actor, intent); !errors.Is(err, errMembershipWrite) {
+			if _, err = service.RegisterExchange(membershipFaultTx{tx, fault}, actor, intent, tx.NextSeq()); !errors.Is(err, errMembershipWrite) {
 				t.Fatalf("write %d: %v", failAt, err)
 			}
 			return nil // The application ignores the service failure.
@@ -89,7 +89,7 @@ func TestMembershipRegistrationPoisonsEveryPartialWrite(t *testing.T) {
 			if _, err := sem.ConversationMembership(domain.ConversationIDFor(actor.TaskID, actor.AgentID)); !errors.Is(err, domain.ErrNotFound) {
 				t.Fatal("membership survived", err)
 			}
-			result, err := service.RegisterExchange(tx, actor, intent)
+			result, err := service.RegisterExchange(tx, actor, intent, tx.NextSeq())
 			if err != nil {
 				return err
 			}
@@ -119,7 +119,10 @@ func TestMembershipRegistrationRejectsUntrustedStaleAndPrivateIntents(t *testing
 			case "revision":
 				intent.ExpectedMembershipRevision, want = 1, domain.ErrVersionConflict
 			}
-			err := s.Update(ctx, "s", func(tx store.Tx) error { _, err := service.RegisterExchange(tx, actor, intent); return err })
+			err := s.Update(ctx, "s", func(tx store.Tx) error {
+				_, err := service.RegisterExchange(tx, actor, intent, tx.NextSeq())
+				return err
+			})
 			if !errors.Is(err, want) {
 				t.Fatalf("got %v, want %v", err, want)
 			}
