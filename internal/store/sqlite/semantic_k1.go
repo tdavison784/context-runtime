@@ -80,6 +80,34 @@ func (t *transaction) resolvePathRaises() error {
 	return nil
 }
 
+// checkProofDerivedValid is the A5 commit guard: a committed SATISFIED
+// version may not rest on a proof the monotone pointers have already felled
+// (K1 A5). Pending path raises resolve first, so this transaction's own
+// raises are visible whatever their write order.
+func (t *transaction) checkProofDerivedValid(ref domain.ObligationRef, proofID string) error {
+	if proofID == "" {
+		return nil
+	}
+	var o domain.ObligationVersion
+	if err := t.get("obligation", ref.ObligationID, int(ref.Version), &o); err != nil {
+		return err
+	}
+	if o.Status != domain.ObligationSatisfied || o.CurrentProofID != proofID {
+		return nil
+	}
+	if err := t.resolvePathRaises(); err != nil {
+		return err
+	}
+	ok, err := store.ProofDerivedValid(semRead{t}, proofID)
+	if err != nil {
+		return fmt.Errorf("proof %s: derived validity unreadable: %w", proofID, err)
+	}
+	if !ok {
+		return fmt.Errorf("proof %s: derived invalid at commit: %w", proofID, domain.ErrInvalidTransition)
+	}
+	return nil
+}
+
 // raiseAffectingAll inserts the ALL-key raise of one update (K1 A1).
 func (t *transaction) raiseAffectingAll(u domain.ResourceUpdate) error {
 	_, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_affecting_raise(session_id,resource_id,path_key,revision,update_id) VALUES(?,?,?,?,?)",
