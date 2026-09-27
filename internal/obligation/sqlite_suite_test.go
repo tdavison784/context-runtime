@@ -148,6 +148,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"RunAndObservationReceipts", TestRunAndObservationReceipts, true},
 		{"RegisterResourceReceipt", TestRegisterResourceReceipt, false},
 		{"ConcurrentINV16", TestConcurrentINV16, true},
+		{"DeferredSeqAllocatedAfterReplay_DUR214", TestDeferredSeqAllocatedAfterReplay_DUR214, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {
