@@ -27,6 +27,7 @@ func (s *Service) BindWorkspaceTx(tx store.Tx, actor domain.Principal, in domain
 	if res, ok, err := replay(sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	if !trustedControl(actor) {
 		return domain.MutationResult{}, domain.ErrInvalidAuthorityPromotion
 	}

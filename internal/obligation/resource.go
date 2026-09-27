@@ -31,6 +31,7 @@ func (s *Service) RegisterResourceTx(tx store.Tx, actor domain.Principal, in dom
 	if res, ok, err := replay(sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	b, err := s.registerResource(tx, sem, actor, in, seq)
 	if err != nil {
 		return domain.MutationResult{}, err
@@ -104,6 +105,7 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 	if res, ok, err := replay(sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	bind, err := sem.ResourceBinding(in.ResourceID)
 	if err != nil || !bind.Access.Permits(actor) {
 		return domain.MutationResult{}, notFound(err)

@@ -35,6 +35,7 @@ func (s *Service) RegisterRunTx(tx store.Tx, actor domain.Principal, in domain.R
 	if res, ok, err := replay(sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	run, err := s.registerRun(tx, sem, actor, in, seq)
 	if err != nil {
 		return domain.MutationResult{}, err
@@ -124,6 +125,7 @@ func (s *Service) ReportObservationTx(tx store.Tx, actor domain.Principal, in do
 	if res, ok, err := replay(sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	obs, err := s.reportObservation(tx, sem, actor, in, seq)
 	if err != nil {
 		return domain.MutationResult{}, err

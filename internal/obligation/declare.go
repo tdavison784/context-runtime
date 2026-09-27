@@ -25,7 +25,7 @@ const (
 // Phase 2 pin is bound retroactively. The event's receipt is the caller's; a
 // nil reference means the item declares no obligation.
 func (s *Service) DeclarePinnedTx(tx store.Tx, actor domain.Principal, sourceID, explicitClaim string, seq uint64) (*domain.ObligationRef, error) {
-	sem, err := begin(tx, actor, seq)
+	sem, err := beginAt(tx, actor, seq)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (s *Service) DeclarePinnedTx(tx store.Tx, actor domain.Principal, sourceID,
 // inherited grant or proof. A nil reference means the replacement declares
 // no obligation.
 func (s *Service) DeclareForReplacementTx(tx store.Tx, actor domain.Principal, sourceID string, seq uint64) (*domain.ObligationRef, error) {
-	sem, err := begin(tx, actor, seq)
+	sem, err := beginAt(tx, actor, seq)
 	if err != nil {
 		return nil, err
 	}
@@ -140,6 +140,7 @@ func (s *Service) DeclareObligationTx(tx store.Tx, actor domain.Principal, in do
 	if res, ok, err := replay(sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	if !trustedControl(actor) {
 		return domain.MutationResult{}, domain.ErrInvalidAuthorityPromotion
 	}
