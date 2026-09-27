@@ -2,9 +2,11 @@
 
 Status: Proposed (2026-09-26, drafted for Phase 3; reconciled against the integrated
 Phase 3 code at `phase-3-semantic-state` head `fc87199` on 2026-09-26. Gate evidence
-is green per W7's report (one unrelated W3 fixture failure pending); this ADR stays
-Proposed until the commander formally accepts it, though every decision below now
-cites real, `grep`-verified code and tests, not a proposed contract)
+is fully green (`go test -race -count=1 ./...` passes with no exceptions, confirmed
+at PR #6 review round 1 head `c22a53c`; `TestReplaceDirectiveDeclaresRealW4Obligation`,
+pending in W7's original report, now passes); this ADR stays Proposed until the
+commander formally accepts it, though every decision below now cites real,
+`grep`-verified code and tests, not a proposed contract)
 Date: 2026-09-26
 
 ## Context
@@ -323,10 +325,18 @@ reconciliation.
 
 `obligation.invalidateResource`/`invalidateProof` (`internal/obligation/invalidate.go`,
 `evaluate.go`) implement the restricted, paged, work-bounded invalidation
-transaction. `domain.CauseResourceInvalidation`/`CauseProofRejected`/
-`CauseProofRefresh` (`internal/domain/assertion.go`) are the closed causes,
-each requiring a non-nil `OriginAuthorization` distinct from a live
-`GrantID` (`domain.TransitionDetail.Validate`).
+transaction. `domain.CauseResourceInvalidation` and `CauseProofRejected`
+(`internal/domain/assertion.go`) are the two causes this restricted path
+actually uses, and only these two require a non-nil `OriginAuthorization`
+distinct from a live `GrantID` (`domain.TransitionDetail.Validate`,
+`domain.ObligationTransition.validateSemanticTransition`) — a runtime
+consequence the reporter's own resource authority does not otherwise carry.
+`CauseProofRefresh` (§6) is a *different* case: it is the authorized,
+grant-backed SATISFIED→UNRESOLVED→SATISFIED pair a live matcher grant
+produces, so its release step carries the evaluating actor's own
+`GrantID`, never `OriginAuthorization` — refresh is not part of this
+section's restricted invalidation path, even though both share the
+SATISFIED→UNRESOLVED direction.
 
 **Q-9 (commander-approved beyond the frozen text, §W4-17).** A matcher only
 ever satisfies obligations the reporting principal can access; rejection and
@@ -496,12 +506,13 @@ FROZEN "Required normative amendments at freeze" table approved them
 - Event traces T02, T06, and T07 are this ADR's acceptance gate; see "Gate
   evidence" below for the real tests that close it.
 
-## Gate evidence (W7, `final-p3-w7.md`, integration head `fc87199`)
+## Gate evidence (W7, `final-p3-w7.md`, integration head `fc87199`; reconfirmed at
+PR #6 review round 1 head `c22a53c`)
 
-`go vet ./...` and `gofmt -l` are clean. `go test -race -count=1 ./...`
-passes in every package except one unrelated `internal/lifecycle` fixture
-(`TestReplaceDirectiveDeclaresRealW4Obligation`, attributed to a stale W3
-fixture after the facet merges, not to this ADR's contract). Per the Phase 3
+`go vet ./...` and `gofmt -l` are clean. `go test -race -count=1 ./...` passes
+with no exceptions: `TestReplaceDirectiveDeclaresRealW4Obligation`, the one
+`internal/lifecycle` fixture W7's original report left pending (attributed to
+a stale W3 fixture after the facet merges), now passes too. Per the Phase 3
 gate checklist (`phase3-decisions.md`):
 
 | Gate item | This ADR's evidence |
