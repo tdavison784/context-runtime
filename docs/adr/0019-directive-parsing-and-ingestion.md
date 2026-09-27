@@ -124,17 +124,43 @@ is the ingesting principal H5 requires (`internal/ingest/ops.go`'s
 lowered source actor it passed before), and `owner` is the receipt owner
 (the lowered actor or dispatcher) the request is filed under — the ID also
 now binds the event's own sequence (`req_<eventSeq>_<inner>.<tag>`), so a
-caller cannot name a future or past event's request. `MutationReceiptID`
-runs before any receipt lookup and accepts a `req_` ID only for its exact
-owner and only when its event sequence was allocated in the current
-transaction: no principal, including one sharing every field with the
-lowered actor, can name another principal's runtime request. GC runtime
-IDs follow the same rule from `domain` directly:
+caller cannot name a future or past event's request. **The actual check
+order at a standalone lifecycle entry point (SPEC-4.5, round 4; corrects
+this paragraph's prior "`MutationReceiptID` runs before any receipt
+lookup" text, which conflated it with a different function).**
+`lifecycle.Service.begin` (`internal/lifecycle/receipt.go`) runs four
+steps in this exact order, and `MutationReceiptID` is the *last* one, not
+the first:
+
+1. `domain.CheckRequestBeforeLookup(tx, p, requestID)` — the function that
+   actually "runs before any receipt lookup": a current-format `req_` ID
+   is refused unless it was allocated in this transaction (SEC-3.6).
+2. The exact-replay lookup (`sem.MutationReceipt`), with
+   `domain.RuntimeRequestOwnedBy` applied only to a foreign receipt
+   (SEC-2.8's no-existence-oracle rule, above).
+3. `domain.ValidateNewRequestID(tx, p, requestID)` on a genuinely new
+   request (skipped for the collection family, whose only caller,
+   `Collect`, already validated).
+4. `domain.MutationReceiptID(tx, p, family, requestID)` — computed only
+   once steps 1-3 pass, to name the receipt a brand-new request will be
+   stored under; it accepts a `req_` ID only for its exact owner and only
+   when its event sequence was allocated in the current transaction, so
+   no principal, including one sharing every field with the lowered
+   actor, can name another principal's runtime request.
+
+GC runtime IDs follow the same rule from `domain` directly:
 `GCTriggerRequestID` binds the authenticated origin (`gc-trigger/v2`) and
 `GCRequestRecordID` names the queued request; `gc_` and `gcq_` join `req_`
-as reserved prefixes callers may never supply, checked by
-`ValidateCallerRequestID` before every standalone lifecycle mutation
-(item, grant, `CompleteTask`, `ReplaceDirective`) and manual `Collect`.
+as reserved prefixes callers may never supply. **`ValidateCallerRequestID`
+(SEC-3.7) now guards every caller-request-ID entry point, not only the
+short list this paragraph previously named:** standalone lifecycle
+mutations (item, grant, `CompleteTask`, `ReplaceDirective`) and manual
+`Collect`, plus the semantic-tool handlers (`internal/tools`), retrieval
+(`internal/retrieve`), graph membership (`internal/graph`), obligation
+mutations (`internal/obligation`), and the harness checkpoint path.
+Tests: `*RefuseReservedRequestIDs_SEC37` in `internal/tools`,
+`internal/graph`, `internal/obligation`, `internal/retrieve`, and
+`internal/ingest`.
 
 **Reserved-namespace rejection runs after the exact-replay lookup, not
 before (PR #6 round 2, DUR-2.8/SEC-2.8).** Checking a reserved prefix
