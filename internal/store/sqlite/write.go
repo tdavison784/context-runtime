@@ -128,6 +128,12 @@ func (t *transaction) InsertRelationship(v domain.Relationship) error {
 			return err
 		}
 	}
+	// Normalized coverage is referenced, never copied: it must be stored (P3-6).
+	if v.CoverageID != "" {
+		if ok, err := t.exists("coverage", v.CoverageID); err != nil || !ok {
+			return errors.Join(err, invalidIf(!ok, "relationship %s: coverage %s is not stored", v.ID, v.CoverageID))
+		}
+	}
 	if v.Type == domain.RelSupersedes {
 		cycle, _, err := t.closesSupersessionCycle(v.FromID, v.ToID)
 		if err != nil {
@@ -293,6 +299,9 @@ func (t *transaction) RetireObligationVersion(obligationID string, version, expe
 		if err := t.put("obligation", obligationID, int(version), v, true); err != nil {
 			return err
 		}
+		if err := t.noteLiveProof(old, v); err != nil {
+			return err
+		}
 		return t.AppendLifecycleEvent(event)
 	})
 	return v, err
@@ -329,52 +338,85 @@ func (t *transaction) UpdateObligationVersion(v domain.ObligationVersion, expect
 			return domain.ObligationVersion{}, err
 		}
 	}
-	err = t.put("obligation", v.ObligationID, int(v.Version), v, true)
+	err = t.atomic(func() error {
+		if err := t.put("obligation", v.ObligationID, int(v.Version), v, true); err != nil {
+			return err
+		}
+		return t.noteLiveProof(old, v)
+	})
 	return v.Clone(), err
 }
 func (t *transaction) AppendObligationTransition(v domain.ObligationTransition, expectedRevision uint64) (domain.ObligationVersion, error) {
-	if err := v.Validate(); err != nil {
+	// Phase 3 transitions carry a cause and a detail and go through the
+	// semantic facet; a declared Phase 3 version never moves on this path.
+	if v.Cause != "" {
+		return domain.ObligationVersion{}, fmt.Errorf("%w: obligation transition %s: a semantic transition requires its detail", domain.ErrInvalidRecord, v.ID)
+	}
+	var stored domain.ObligationVersion
+	if err := t.get("obligation", v.ObligationID, int(v.Version), &stored); err == nil && stored.DeclarationKind != "" {
+		return domain.ObligationVersion{}, fmt.Errorf("%w: obligation %s/%d: a declared version transitions only with its detail", domain.ErrInvalidRecord, v.ObligationID, v.Version)
+	}
+	old, next, err := t.checkTransition(v, expectedRevision)
+	if err != nil {
 		return domain.ObligationVersion{}, err
+	}
+	if err := next.Validate(); err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	err = t.atomic(func() error { return t.writeTransition(v, old, next) })
+	return next.Clone(), err
+}
+
+// checkTransition applies the shared transition rules to v against the
+// stored version (CAS, currentness, From status) and returns the stored and
+// next version without writing; callers validate next once its caches are
+// final.
+func (t *transaction) checkTransition(v domain.ObligationTransition, expectedRevision uint64) (old, next domain.ObligationVersion, err error) {
+	if err := v.Validate(); err != nil {
+		return old, next, err
 	}
 	if err := t.checkSession(v.SessionID); err != nil {
-		return domain.ObligationVersion{}, err
+		return old, next, err
 	}
 	if err := t.checkSeq(v.Seq); err != nil {
-		return domain.ObligationVersion{}, err
+		return old, next, err
 	}
 	var duplicate domain.ObligationTransition
 	if err := t.get("obligation_transition", v.ID, 0, &duplicate); err == nil {
-		return domain.ObligationVersion{}, domain.ErrImmutable
+		return old, next, domain.ErrImmutable
 	} else if !errors.Is(err, domain.ErrNotFound) {
-		return domain.ObligationVersion{}, err
+		return old, next, err
 	}
-	var current domain.ObligationVersion
-	if err := t.get("obligation", v.ObligationID, int(v.Version), &current); err != nil {
-		return domain.ObligationVersion{}, err
+	if err := t.get("obligation", v.ObligationID, int(v.Version), &old); err != nil {
+		return old, next, err
 	}
-	if current.Revision != expectedRevision {
-		return domain.ObligationVersion{}, domain.ErrVersionConflict
+	if old.Revision != expectedRevision {
+		return old, next, domain.ErrVersionConflict
 	}
-	if !current.Current || v.From != current.Status {
-		return domain.ObligationVersion{}, domain.ErrInvalidTransition
+	if !old.Current || v.From != old.Status {
+		return old, next, domain.ErrInvalidTransition
 	}
-	current.Status = v.To
+	next = old.Clone()
+	next.Status = v.To
 	if v.To == domain.ObligationSatisfied {
-		current.EvidenceIDs = slices.Clone(v.EvidenceIDs)
+		next.EvidenceIDs = slices.Clone(v.EvidenceIDs)
 	} else {
-		current.EvidenceIDs = nil
+		next.EvidenceIDs = nil
 	}
-	current.Revision++
-	if err := current.Validate(); err != nil {
-		return domain.ObligationVersion{}, err
+	next.Revision++
+	return old, next, nil
+}
+
+// writeTransition stores a checked transition and its version, keeping the
+// live proof dependency index in step.
+func (t *transaction) writeTransition(v domain.ObligationTransition, old, next domain.ObligationVersion) error {
+	if err := t.put("obligation_transition", v.ID, 0, v, false); err != nil {
+		return err
 	}
-	err := t.atomic(func() error {
-		if err := t.put("obligation_transition", v.ID, 0, v, false); err != nil {
-			return err
-		}
-		return t.put("obligation", current.ObligationID, int(current.Version), current, true)
-	})
-	return current.Clone(), err
+	if err := t.put("obligation", next.ObligationID, int(next.Version), next, true); err != nil {
+		return err
+	}
+	return t.noteLiveProof(old, next)
 }
 func (t *transaction) InsertGrant(v domain.MutationGrant) error {
 	if err := v.Validate(); err != nil {
@@ -389,7 +431,12 @@ func (t *transaction) InsertGrant(v domain.MutationGrant) error {
 	if v.RevokedSeq != 0 {
 		return fmt.Errorf("%w: new grant cannot be revoked", domain.ErrInvalidRecord)
 	}
-	return t.put("grant", v.ID, 0, v, false)
+	return t.atomic(func() error {
+		if err := t.put("grant", v.ID, 0, v, false); err != nil {
+			return err
+		}
+		return t.indexGrant(v)
+	})
 }
 func (t *transaction) RevokeGrant(id string, event domain.LifecycleEvent) (domain.MutationGrant, error) {
 	v, err := t.Grant(id)

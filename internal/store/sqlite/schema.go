@@ -65,19 +65,71 @@ func makeSchemas() map[string]*recordSchema {
 		{"diagnostic", domain.DiagnosticRecord{}, "ID", ""},
 		{"command", domain.LifecycleCommandRecord{}, "ID", ""},
 		{"reference", domain.UnresolvedReference{}, "ID", ""},
+		// Phase 3 companions (semantic_*.go).
+		{"owner", domain.OwnerRegistration{}, "ID", ""},
+		{"coverage", domain.CoverageRecord{}, "ID", ""},
+		{"coverage_member", coverageMemberRow{}, "CoverageID", "Ordinal"},
+		{"exchange", domain.LogicalExchange{}, "ID", ""},
+		{"exchange_member", domain.ExchangeMember{}, "ID", ""},
+		{"exchange_ack", domain.ExchangeAcknowledgment{}, "ID", ""},
+		{"admission", domain.AdmissionManifest{}, "ID", ""},
+		{"membership", domain.ConversationMembershipState{}, "ConversationID", ""},
+		{"checkpoint", domain.Checkpoint{}, "ID", ""},
+		{"mutation_receipt", domain.MutationReceipt{}, "ID", ""},
+		{"tool_receipt", domain.ToolExecutionReceipt{}, "ID", ""},
+		{"creation_declaration", domain.CreationDeclaration{}, "ItemID", ""},
+		{"snapshot_declaration", domain.SnapshotDeclaration{}, "ID", ""},
+		{"semantic_change", domain.SemanticChange{}, "ID", ""},
+		{"resource_binding", domain.ResourceBinding{}, "ResourceID", ""},
+		{"resource_update", domain.ResourceUpdate{}, "ID", ""},
+		{"resource_state", domain.ResourceState{}, "ResourceID", ""},
+		{"path_state", pathStateRow{}, "LocatorKey", ""},
+		{"workspace_binding", domain.WorkspaceBinding{}, "ID", "Version"},
+		{"observation_run", domain.ObservationRun{}, "ID", ""},
+		{"observation", domain.ObservationRecord{}, "ID", ""},
+		{"subject_state", subjectStateRow{}, "Key", ""},
+		{"obligation_declaration", obligationDeclarationRow{}, "ObligationID", "Version"},
+		{"proof", domain.ApplicabilityProof{}, "ID", ""},
+		{"proof_dependency", domain.ProofDependency{}, "ID", ""},
+		{"assertion", domain.AssertionRecord{}, "ID", ""},
+		{"transition_detail", domain.TransitionDetail{}, "TransitionID", ""},
+		{"retrieval_lease", domain.RetrievalLease{}, "ID", ""},
+		{"retrieval_result", domain.RetrievalResult{}, "ID", ""},
+		{"projection", domain.ProjectionRecord{}, "ID", ""},
+		{"retrieval_event", domain.RetrievalEvent{}, "ID", ""},
+		{"gc_request", domain.GCRequest{}, "ID", ""},
+		{"collect_receipt", domain.CollectReceipt{}, "ID", ""},
+		{"gc_result", domain.GCResult{}, "GCRequestID", ""},
 	}
 	out := make(map[string]*recordSchema, len(definitions))
 	for _, d := range definitions {
 		s := &recordSchema{kind: d.kind, table: "rec_" + d.kind, idField: d.id, subField: d.sub, typ: reflect.TypeOf(d.record)}
 		for i := 0; i < s.typ.NumField(); i++ {
 			f := s.typ.Field(i)
+			if f.Anonymous && f.Type == semanticMetaType {
+				// An embedded SemanticMeta is flattened: its promoted fields
+				// are the record's own, so ID and SessionID can be keys.
+				for j := 0; j < f.Type.NumField(); j++ {
+					g := f.Type.Field(j)
+					if g.Name == "SessionID" || g.Name == s.idField || g.Name == s.subField {
+						continue
+					}
+					s.collect(g.Type, []int{i, j}, "f_"+snake(g.Name))
+				}
+				continue
+			}
 			if f.Name == "SessionID" || f.Name == s.idField || f.Name == s.subField {
 				continue
 			}
 			s.collect(f.Type, []int{i}, "f_"+snake(f.Name))
 		}
 		cols := []string{"session_id", "id", "subkey"}
+		seen := map[string]bool{}
 		for _, c := range s.columns {
+			if seen[c.name] {
+				panic("sqlite schema: duplicate column " + s.table + "." + c.name)
+			}
+			seen[c.name] = true
 			cols = append(cols, c.name)
 		}
 		s.selectSQL = "SELECT " + strings.Join(cols, ",") + " FROM " + s.table
@@ -96,9 +148,26 @@ func makeSchemas() map[string]*recordSchema {
 	return out
 }
 
-var timeType = reflect.TypeOf(time.Time{})
+var (
+	timeType         = reflect.TypeOf(time.Time{})
+	semanticMetaType = reflect.TypeOf(domain.SemanticMeta{})
+)
+
+// valueLeafTypes are immutable nested result unions stored whole in one
+// lossless-encoded TEXT column rather than flattened: they are never
+// filtered or ordered on, and flattening their union members produces
+// ambiguous column names (a nested Before.Version beside a BeforeVersion).
+var valueLeafTypes = map[reflect.Type]bool{
+	reflect.TypeFor[domain.MutationResult]():     true,
+	reflect.TypeFor[domain.ToolResult]():         true,
+	reflect.TypeFor[domain.ItemMutationResult](): true,
+}
 
 func (s *recordSchema) collect(typ reflect.Type, path []int, name string) {
+	if valueLeafTypes[typ] {
+		s.columns = append(s.columns, recordColumn{name: name, path: path, typ: typ})
+		return
+	}
 	if typ.Kind() == reflect.Pointer {
 		s.columns = append(s.columns, recordColumn{name: name + "_present", path: path, typ: typ, role: presentColumn})
 		s.collect(typ.Elem(), path, name)
@@ -146,6 +215,9 @@ func (c recordColumn) sqlType() string {
 	if t == partsType {
 		return "BLOB" // lossless parts (lossless.go)
 	}
+	if valueLeafTypes[t] {
+		return "TEXT" // lossless value (lossless.go)
+	}
 	switch t.Kind() {
 	case reflect.String:
 		return "TEXT"
@@ -163,7 +235,12 @@ func (c recordColumn) sqlType() string {
 
 // recordTables lists every record table in creation order.
 var recordTables = []string{"item", "relationship", "event", "obligation", "obligation_transition", "grant", "task", "lifecycle", "conversation", "call", "attempt",
-	"envelope", "receipt", "receipt_item", "diagnostic", "command", "reference"}
+	"envelope", "receipt", "receipt_item", "diagnostic", "command", "reference",
+	"owner", "coverage", "coverage_member", "exchange", "exchange_member", "exchange_ack", "admission", "membership",
+	"checkpoint", "mutation_receipt", "tool_receipt", "creation_declaration", "snapshot_declaration", "semantic_change",
+	"resource_binding", "resource_update", "resource_state", "path_state", "workspace_binding", "observation_run", "observation", "subject_state",
+	"obligation_declaration", "proof", "proof_dependency", "assertion", "transition_detail",
+	"retrieval_lease", "retrieval_result", "projection", "retrieval_event", "gc_request", "collect_receipt", "gc_result"}
 
 // typedColumns is the column layout (name -> declared type) the Go record
 // types require of each rec_* table. Migrations are forward-only and never
@@ -297,6 +374,11 @@ func encodeField(v reflect.Value) (any, error) {
 			return b, err // parts occupy a BLOB column (migration 0002)
 		}
 		return string(b), nil
+	case reflect.Struct:
+		if valueLeafTypes[v.Type()] {
+			b, err := encodeLossless(v)
+			return string(b), err
+		}
 	}
 	return nil, fmt.Errorf("unsupported field type %s", v.Type())
 }
@@ -422,6 +504,11 @@ func decodeField(f reflect.Value, x any, bytesNil bool) error {
 				f.SetBytes(append([]byte{}, b...))
 			}
 			return nil
+		}
+		return decodeLossless([]byte(asString(x)), f)
+	case reflect.Struct:
+		if !valueLeafTypes[f.Type()] {
+			return fmt.Errorf("unsupported field type %s", f.Type())
 		}
 		return decodeLossless([]byte(asString(x)), f)
 	default:

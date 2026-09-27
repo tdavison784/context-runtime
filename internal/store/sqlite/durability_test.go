@@ -229,7 +229,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 
 func openTemp(t *testing.T) (*Store, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "state.db")
+	path := freshPath(t)
 	s, err := Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -262,23 +262,33 @@ func TestMigrationChecksumMismatch(t *testing.T) {
 // Migrations are forward-only (ADR 3, R8): a committed file is never edited,
 // and a schema change always lands as a new numbered file added here.
 var committedMigrations = map[string]string{
-	"0001_init.sql":                        "b854c18a7c7573ef8346e39903fb8d2faed2336b02bd92f3f26862c676e7f3a6",
-	"0002_lossless_parts.sql":              "a897953dc55e11ebf150735f7456a8928602633deb4393f890344475d4c29140",
-	"0003_lossless_string_lists.sql":       "5a6ea923364592d6d5352e9d88f5a008c874cfa6e9fffc96d694b7cf974cb783",
-	"0004_item_provenance_and_claims.sql":  "28fb42784d55451370936adeabad8a0c9324ac2eb0ab114c6a1bf652acb2682a",
-	"0005_current_version_namespace.sql":   "0527eefcced1a570d91ee412565b90e74d91e6d83bf12c629eaf18cee1063725",
-	"0006_obligation_source_index.sql":     "edf28088fa126863e097258a17f80b88ea7d30ff1bb6ce19a5f70d3f8ba0ee1b",
-	"0007_ingestion_records.sql":           "1ad74ed0a49f73a42cd56e6fd3dd517139af1c464146efeef76aaa72ba93e836",
-	"0008_unresolved_references.sql":       "ff8f0422c61ffc45996c7b4fcf95cd4437a66e2141d3353f7a139fabfe538fa7",
-	"0009_item_blob_index.sql":             "0d1792ff5e3b159224ae2692af3ced94f5c06ad83cc454f912573000461d8fe5",
-	"0010_item_duplicate_index.sql":        "0a181a80b748f5c8c6797e0f58e015935d21c1df68f85754f2e356ac052c8197",
-	"0011_item_source_index.sql":           "f0cb7508d575adaa12a20009e9860ab96478f9b8fc52424a62fc846f420a583c",
-	"0012_access_filtered_lookups.sql":     "904534c3f0ac90a37b2a0bd5f8b13fca86ec50fb5b8e344f70e5fde13f66846e",
-	"0013_drop_pre_f1_lookups.sql":         "9a038bf8ab370753e7822c4f9a83bf60b28e6c598fe1f2f1d18a1b73bee59cec",
-	"0014_receipt_max_reference_links.sql": "f9b5886a6bffda9c87a2f6fa7956476dde9b2fecfec8d036e3cf7c0c08b6f088",
-	"0015_ordered_graph_indexes.sql":       "29641185de8f67af08dfe15d768d23259827a2b74f10840eee1b778e5558bc18",
-	"0016_command_detail_access.sql":       "c322f7515903139ec59afb1a5bda80b0fe54eabf22e8a5c3c025699b995c40ba",
-	"0017_lookup_item_indexes.sql":         "02e46d0af353de5feddba2678ec58c29b2e31ac296b59d676c451848022b2226",
+	"0001_init.sql":                                  "b854c18a7c7573ef8346e39903fb8d2faed2336b02bd92f3f26862c676e7f3a6",
+	"0002_lossless_parts.sql":                        "a897953dc55e11ebf150735f7456a8928602633deb4393f890344475d4c29140",
+	"0003_lossless_string_lists.sql":                 "5a6ea923364592d6d5352e9d88f5a008c874cfa6e9fffc96d694b7cf974cb783",
+	"0004_item_provenance_and_claims.sql":            "28fb42784d55451370936adeabad8a0c9324ac2eb0ab114c6a1bf652acb2682a",
+	"0005_current_version_namespace.sql":             "0527eefcced1a570d91ee412565b90e74d91e6d83bf12c629eaf18cee1063725",
+	"0006_obligation_source_index.sql":               "edf28088fa126863e097258a17f80b88ea7d30ff1bb6ce19a5f70d3f8ba0ee1b",
+	"0007_ingestion_records.sql":                     "1ad74ed0a49f73a42cd56e6fd3dd517139af1c464146efeef76aaa72ba93e836",
+	"0008_unresolved_references.sql":                 "ff8f0422c61ffc45996c7b4fcf95cd4437a66e2141d3353f7a139fabfe538fa7",
+	"0009_item_blob_index.sql":                       "0d1792ff5e3b159224ae2692af3ced94f5c06ad83cc454f912573000461d8fe5",
+	"0010_item_duplicate_index.sql":                  "0a181a80b748f5c8c6797e0f58e015935d21c1df68f85754f2e356ac052c8197",
+	"0011_item_source_index.sql":                     "f0cb7508d575adaa12a20009e9860ab96478f9b8fc52424a62fc846f420a583c",
+	"0012_access_filtered_lookups.sql":               "904534c3f0ac90a37b2a0bd5f8b13fca86ec50fb5b8e344f70e5fde13f66846e",
+	"0013_drop_pre_f1_lookups.sql":                   "9a038bf8ab370753e7822c4f9a83bf60b28e6c598fe1f2f1d18a1b73bee59cec",
+	"0014_receipt_max_reference_links.sql":           "f9b5886a6bffda9c87a2f6fa7956476dde9b2fecfec8d036e3cf7c0c08b6f088",
+	"0015_ordered_graph_indexes.sql":                 "29641185de8f67af08dfe15d768d23259827a2b74f10840eee1b778e5558bc18",
+	"0016_command_detail_access.sql":                 "c322f7515903139ec59afb1a5bda80b0fe54eabf22e8a5c3c025699b995c40ba",
+	"0017_lookup_item_indexes.sql":                   "02e46d0af353de5feddba2678ec58c29b2e31ac296b59d676c451848022b2226",
+	"0018_phase3_row_fields.sql":                     "5a3fa32221c30d3a6f0f250ac57d4d017049ccd9d5176ff68dda72310e827817",
+	"0019_command_execution_result.sql":              "1acd85fe8876b64c211fc842a7bb3af8c841773685b4471a9e0359ad4679d96d",
+	"0020_phase3_membership.sql":                     "58d3ea7d924fdc784d8b1cc5ee0feb9b4b9a9f149b9f4159ada8d368266d6d83",
+	"0021_phase3_declarations.sql":                   "2e1b287ab04010fd28fa38494d0f5ce6d3f51e858979da59fc8e2b55bd89e0d7",
+	"0022_phase3_resources.sql":                      "25c4e4c659dd885d34c0a59e1002ed715118ae1697c028b18ddc80d10c7d63b3",
+	"0023_phase3_proofs.sql":                         "68b0b1b69d0c7fd4577156000f806b95fd2061a242d18a714befe0321c4461fe",
+	"0024_phase3_retrieval.sql":                      "e3ba996a790c1c5bdb80238b2f73c75da1b92635832d2e7e0ece3cd2dadc3d5f",
+	"0025_phase3_gc.sql":                             "2575fb48ff70c6ff2ae34ddedf12ea1c7cf2569b9bc4eb516abc87e716824ccd",
+	"0026_reconcile_legacy_matcher_satisfaction.sql": "45ebb8523aca1e6c22b50a51f147f11ac2bdadff6105cbe59542819fcc69ad33",
+	"0027_current_version_observation_namespace.sql": "176b2865137387c2e7a61b980c2f67e20c54d08c4938b491142ada52d683ba9f",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {
@@ -486,16 +496,26 @@ func TestFileCreatedPrivate(t *testing.T) {
 func TestCallTransitionsRequireAttemptEvidence(t *testing.T) {
 	s, _ := openTemp(t)
 	actor := domain.Principal{SessionID: "s", Authority: domain.AuthorityHarness}
-	err := s.Update(context.Background(), "s", func(tx store.Tx) error {
-		request := []byte("request")
-		call := domain.CallRecord{CallID: "call", SessionID: "s", ConversationID: "conversation", Operation: domain.OperationInference,
-			State: domain.CallPrepared, Principal: actor, ServiceActor: actor, Request: request, RequestHash: domain.HashBytes(request),
-			PreparedSeq: tx.NextSeq(), Revision: 1}
+	ctx := context.Background()
+	// Each rejected write is probed alone: one after a successful write
+	// would poison its transaction (P3-1).
+	probe := func(name string, want error, fn func(tx store.Tx) error) {
+		t.Helper()
+		if err := s.Update(ctx, "s", fn); !errors.Is(err, want) {
+			t.Fatalf("%s = %v, want %v", name, err, want)
+		}
+	}
+	request := []byte("request")
+	call := domain.CallRecord{CallID: "call", SessionID: "s", ConversationID: "conversation", Operation: domain.OperationInference,
+		State: domain.CallPrepared, Principal: actor, ServiceActor: actor, Request: request, RequestHash: domain.HashBytes(request), Revision: 1}
+	attempt := domain.CallAttempt{CallID: "call", SessionID: "s", Attempt: 1, State: domain.AttemptSent}
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		call.PreparedSeq = tx.NextSeq()
 		call.ProposalHash = domain.CallProposalHash(call)
 		if err := tx.InsertCall(call); err != nil {
 			return err
 		}
-		attempt := domain.CallAttempt{CallID: "call", SessionID: "s", Attempt: 1, State: domain.AttemptSent, SentSeq: tx.NextSeq()}
+		attempt.SentSeq = tx.NextSeq()
 		if err := tx.PutCallAttempt(attempt); err != nil {
 			return err
 		}
@@ -503,61 +523,80 @@ func TestCallTransitionsRequireAttemptEvidence(t *testing.T) {
 		call.Attempts = 1
 		var err error
 		call, err = tx.UpdateCall(call, 1)
-		if err != nil {
-			return err
-		}
-		response := []byte("response")
-		outcome := domain.CallOutcome{Attempt: 1, State: domain.CallCompleted, Response: response, ResponseHash: domain.HashBytes(response)}
-		premature := call.Clone()
-		premature.State = domain.CallCompleted
-		premature.Outcome = &outcome
-		premature.OutcomeHash = outcome.OutcomeHash()
-		premature.FinishedSeq = tx.NextSeq()
-		if _, err := tx.UpdateCall(premature, call.Revision); !errors.Is(err, domain.ErrInvalidTransition) {
-			t.Fatalf("premature completion = %v", err)
-		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response := []byte("response")
+	outcome := domain.CallOutcome{Attempt: 1, State: domain.CallCompleted, Response: response, ResponseHash: domain.HashBytes(response)}
+	completion := func(tx store.Tx) domain.CallRecord {
+		c := call.Clone()
+		c.State = domain.CallCompleted
+		c.Outcome = &outcome
+		c.OutcomeHash = outcome.OutcomeHash()
+		c.FinishedSeq = tx.NextSeq()
+		return c
+	}
+	probe("premature completion", domain.ErrInvalidTransition, func(tx store.Tx) error {
+		_, err := tx.UpdateCall(completion(tx), call.Revision)
+		return err
+	})
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
 		attempt.State = domain.AttemptCompleted
 		attempt.OutcomeHash = outcome.OutcomeHash()
 		attempt.FinishedSeq = tx.NextSeq()
 		if err := tx.PutCallAttempt(attempt); err != nil {
 			return err
 		}
-		premature.FinishedSeq = tx.NextSeq()
-		if _, err := tx.UpdateCall(premature, call.Revision); err != nil {
-			return err
-		}
-		changed := attempt
-		changed.ProviderRequestID = "changed"
-		if err := tx.PutCallAttempt(changed); !errors.Is(err, domain.ErrImmutable) {
-			t.Fatalf("closed attempt mutation = %v", err)
-		}
-		return nil
-	})
-	if err != nil {
+		_, err := tx.UpdateCall(completion(tx), call.Revision)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
+	probe("closed attempt mutation", domain.ErrImmutable, func(tx store.Tx) error {
+		changed := attempt
+		changed.ProviderRequestID = "changed"
+		return tx.PutCallAttempt(changed)
+	})
 }
 
 func TestAuditedGrantAndTaskMutations(t *testing.T) {
 	s, _ := openTemp(t)
 	actor := domain.Principal{SessionID: "s", Authority: domain.AuthorityHarness}
-	err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+	ctx := context.Background()
+	probe := func(name string, want error, fn func(tx store.Tx) error) {
+		t.Helper()
+		if err := s.Update(ctx, "s", fn); !errors.Is(err, want) {
+			t.Fatalf("%s = %v, want %v", name, err, want)
+		}
+	}
+	var duplicate domain.LifecycleEvent
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
 		grantee := actor
 		grant := domain.MutationGrant{ID: "g", SessionID: "s", Action: domain.ActionResolve, TargetIDs: []string{"item"}, Issuer: actor, Grantee: &grantee, IssuedSeq: tx.NextSeq()}
 		if err := tx.InsertGrant(grant); err != nil {
 			return err
 		}
-		duplicate := domain.LifecycleEvent{ID: "audit", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetItem, TargetID: "item", Action: "first", Actor: actor}
-		if err := tx.AppendLifecycleEvent(duplicate); err != nil {
-			return err
-		}
-		bad := duplicate
-		bad.Seq = tx.NextSeq()
-		bad.TargetKind = domain.TargetGrant
-		bad.TargetID = "g"
-		if _, err := tx.RevokeGrant("g", bad); !errors.Is(err, domain.ErrImmutable) {
-			t.Fatalf("duplicate audit = %v", err)
-		}
+		duplicate = domain.LifecycleEvent{ID: "audit", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetItem, TargetID: "item", Action: "first", Actor: actor}
+		return tx.AppendLifecycleEvent(duplicate)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	revocation := func(tx store.Tx, id string) domain.LifecycleEvent {
+		e := duplicate
+		e.ID, e.Seq, e.TargetKind, e.TargetID = id, tx.NextSeq(), domain.TargetGrant, "g"
+		return e
+	}
+	probe("duplicate audit", domain.ErrImmutable, func(tx store.Tx) error {
+		_, err := tx.RevokeGrant("g", revocation(tx, "audit"))
+		return err
+	})
+	task := domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive}
+	probe("unaudited task create", domain.ErrInvalidRecord, func(tx store.Tx) error {
+		_, err := tx.PutTask(task, 0, domain.LifecycleEvent{})
+		return err
+	})
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
 		still, err := tx.Grant("g")
 		if err != nil {
 			return err
@@ -565,9 +604,7 @@ func TestAuditedGrantAndTaskMutations(t *testing.T) {
 		if still.RevokedSeq != 0 {
 			t.Fatal("failed revocation changed grant")
 		}
-		good := bad
-		good.ID = "revoke"
-		good.Seq = tx.NextSeq()
+		good := revocation(tx, "revoke")
 		revoked, err := tx.RevokeGrant("g", good)
 		if err != nil {
 			return err
@@ -575,25 +612,24 @@ func TestAuditedGrantAndTaskMutations(t *testing.T) {
 		if revoked.RevokedSeq != good.Seq {
 			t.Fatal("revocation did not use audit sequence")
 		}
-		task := domain.TaskState{SessionID: "s", TaskID: "task", Status: domain.TaskActive}
-		if _, err := tx.PutTask(task, 0, domain.LifecycleEvent{}); !errors.Is(err, domain.ErrInvalidRecord) {
-			t.Fatalf("unaudited task create = %v", err)
-		}
 		created := domain.LifecycleEvent{ID: "task-create", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "create", Actor: actor}
 		task, err = tx.PutTask(task, 0, created)
-		if err != nil {
-			return err
-		}
-		task.Status = domain.TaskCompleted
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task.Status = domain.TaskCompleted
+	probe("unaudited task completion", domain.ErrInvalidRecord, func(tx store.Tx) error {
 		task.CompletedSeq = tx.NextSeq()
-		if _, err := tx.PutTask(task, 1, domain.LifecycleEvent{}); !errors.Is(err, domain.ErrInvalidRecord) {
-			t.Fatalf("unaudited task completion = %v", err)
-		}
-		done := domain.LifecycleEvent{ID: "task-done", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "complete", Actor: actor}
-		_, err = tx.PutTask(task, 1, done)
+		_, err := tx.PutTask(task, 1, domain.LifecycleEvent{})
 		return err
 	})
-	if err != nil {
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		task.CompletedSeq = tx.NextSeq()
+		done := domain.LifecycleEvent{ID: "task-done", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "complete", Actor: actor}
+		_, err := tx.PutTask(task, 1, done)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -604,14 +640,25 @@ func TestObligationTransitionCAS(t *testing.T) {
 	err := s.Update(context.Background(), "s", func(tx store.Tx) error {
 		ob := domain.ObligationVersion{ObligationID: "o", Version: 1, SessionID: "s", TaskID: "task", SourceItemID: "source", SourceAuthority: domain.AuthorityUser,
 			Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, Status: domain.ObligationUnresolved, Current: true, CreatedSeq: tx.NextSeq(), Revision: 1}
-		if err := tx.InsertObligationVersion(ob); err != nil {
-			return err
-		}
-		tr := domain.ObligationTransition{ID: "tr", SessionID: "s", ObligationID: "o", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation, Actor: actor, EvidenceIDs: []string{"e"}}
-		if _, err := tx.AppendObligationTransition(tr, 2); !errors.Is(err, domain.ErrVersionConflict) {
-			t.Fatalf("stale transition = %v", err)
-		}
-		updated, err := tx.AppendObligationTransition(tr, 1)
+		return tx.InsertObligationVersion(ob)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition := func(tx store.Tx) domain.ObligationTransition {
+		return domain.ObligationTransition{ID: "tr", SessionID: "s", ObligationID: "o", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation, Actor: actor, EvidenceIDs: []string{"e"}}
+	}
+	// Probed alone: a rejected write after a successful one would poison
+	// the transaction (P3-1).
+	err = s.Update(context.Background(), "s", func(tx store.Tx) error {
+		_, err := tx.AppendObligationTransition(transition(tx), 2)
+		return err
+	})
+	if !errors.Is(err, domain.ErrVersionConflict) {
+		t.Fatalf("stale transition = %v", err)
+	}
+	err = s.Update(context.Background(), "s", func(tx store.Tx) error {
+		updated, err := tx.AppendObligationTransition(transition(tx), 1)
 		if err != nil {
 			return err
 		}

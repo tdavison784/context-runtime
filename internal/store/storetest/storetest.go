@@ -96,6 +96,33 @@ var suite = []testCase{
 	{"CurrentVersions(DIRECTIVE)Order", testCurrentDirectivesOrder},
 	{"CurrentNamespaces", testCurrentNamespaces},
 
+	// Phase 3 semantic facet (membership, coverage, receipts).
+	{"SemanticFacet", testSemanticFacet},
+	{"SemanticCoverage", testSemanticCoverage},
+	{"SemanticExchanges", testSemanticExchanges},
+	{"SemanticMembershipFrontier", testSemanticMembershipFrontier},
+	{"SemanticCheckpoints", testSemanticCheckpoints},
+	{"SemanticReceipts", testSemanticReceipts},
+	{"SemanticCreationDeclarations", testSemanticCreationDeclarations},
+	{"SemanticSnapshotDeclarations", testSemanticSnapshotDeclarations},
+	{"SemanticCurrentPointerCAS", testSemanticCurrentPointerCAS},
+	{"SemanticGrantsFor", testSemanticGrantsFor},
+	{"SemanticChanges", testSemanticChanges},
+	{"SemanticResources", testSemanticResources},
+	{"SemanticResourcePaths", testSemanticResourcePaths},
+	{"SemanticWorkspaceBindings", testSemanticWorkspaceBindings},
+	{"SemanticObservations", testSemanticObservations},
+	{"SemanticObligationDeclarations", testSemanticObligationDeclarations},
+	{"SemanticMatcherProof", testSemanticMatcherProof},
+	{"SemanticProofReferences", testSemanticProofReferences},
+	{"SemanticInvalidation", testSemanticInvalidation},
+	{"SemanticAttestation", testSemanticAttestation},
+	{"SemanticMaterialization", testSemanticMaterialization},
+	{"SemanticRetrieval", testSemanticRetrieval},
+	{"SemanticGCRequests", testSemanticGCRequests},
+	{"SemanticGCCandidates", testSemanticGCCandidates},
+	{"SemanticOpenGoalsByTaskOwner", testSemanticOpenGoalsByTaskOwner},
+
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},
 	{"ReceiptKeepsOriginalItems", testReceiptKeepsOriginalItems},
@@ -146,6 +173,17 @@ func view(t *testing.T, s store.Store, sess string, fn func(tx store.ReadTx) err
 	t.Helper()
 	if err := s.View(ctx, sess, fn); err != nil {
 		t.Fatalf("View(%s): %v", sess, err)
+	}
+}
+
+// rejected runs fn in its own transaction and fails the test unless Update
+// returns want. A write that fails after another write succeeded poisons its
+// transaction (P3-1), so a rejection case never shares a transaction with
+// setup writes it expects to commit.
+func rejected(t *testing.T, s store.Store, sess string, want error, fn func(tx store.Tx) error) {
+	t.Helper()
+	if err := s.Update(ctx, sess, fn); !errors.Is(err, want) {
+		t.Fatalf("error = %v, want %v", err, want)
 	}
 }
 

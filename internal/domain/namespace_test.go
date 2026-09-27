@@ -39,3 +39,43 @@ func TestItemNamespaceSeparatesDirectivesFromAgentKeys(t *testing.T) {
 		t.Fatal("item without an ID has a namespace")
 	}
 }
+
+func TestExplicitNamespaceOverridesLegacyShape(t *testing.T) {
+	it := ContextItem{SessionID: "s1", TaskID: "t1", DirectiveID: "same", Namespace: NamespaceObservation,
+		Access: AccessBoundary{Scope: ScopeTask, SessionID: "s1", TaskID: "t1"}}
+	k, ok := it.CurrentKey()
+	if !ok || k.Namespace != NamespaceObservation {
+		t.Fatal("observation inferred as agent key")
+	}
+	seen := map[string]bool{}
+	for _, ns := range []DirectiveNamespace{NamespaceDirective, NamespaceAgentKey, NamespaceObservation} {
+		k.Namespace = ns
+		k.ID = "sub_" + HashBytes(nil)[7:]
+		h, err := k.CanonicalHash()
+		if err != nil || seen[h] {
+			t.Fatal("namespace key collision", err)
+		}
+		seen[h] = true
+	}
+	it.Namespace = "UNKNOWN"
+	if _, ok := it.CurrentKey(); ok {
+		t.Fatal("unknown namespace downgraded to legacy")
+	}
+}
+
+func TestObservationSupersessionRequiresTrustedRuleActor(t *testing.T) {
+	access := AccessBoundary{Scope: ScopeTask, SessionID: "s", TaskID: "t"}
+	old := ContextItem{ID: "old", SessionID: "s", TaskID: "t", Authority: AuthorityTool, Access: access, Namespace: NamespaceObservation, DirectiveID: "sub_" + HashBytes(nil)[7:]}
+	newItem := old
+	newItem.ID = "new"
+	for _, authority := range []Authority{AuthorityTool, AuthorityAgent, AuthorityUser} {
+		p := Principal{SessionID: "s", TaskID: "t", Authority: authority}
+		if AuthorizeSupersession(p, newItem, old) == nil {
+			t.Fatal("untrusted observation supersession", authority)
+		}
+	}
+	p := Principal{SessionID: "s", TaskID: "t", Authority: AuthorityHarness}
+	if err := AuthorizeSupersession(p, newItem, old); err != nil {
+		t.Fatal(err)
+	}
+}

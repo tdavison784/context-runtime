@@ -20,35 +20,42 @@ func TestInsertRelationshipRejectsCorruptEndpoint_SPEC44(t *testing.T) {
 	lossy := storetest.NewItem("s", "lossy", 1, "a\xffb")
 	l.insert("item", lossy, map[string]any{"f_parts": legacyPartsJSON(t, lossy.Parts)})
 	s := l.upgrade()
-	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
-		if err := tx.InsertItem(storetest.NewItem("s", "fresh", tx.NextSeq(), "fresh")); err != nil {
-			return err
+	ctx := context.Background()
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		return tx.InsertItem(storetest.NewItem("s", "fresh", tx.NextSeq(), "fresh"))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Each rejected edge is probed in its own transaction: after a
+	// successful write a rejection poisons the transaction (P3-1).
+	for _, c := range []struct {
+		typ      domain.RelationshipType
+		from, to string
+	}{
+		{domain.RelDerivedFrom, "fresh", "lossy"},
+		{domain.RelSupersedes, "fresh", "lossy"},
+		{domain.RelDuplicateOf, "fresh", "lossy"},
+		{domain.RelDerivedFrom, "lossy", "fresh"},
+		{domain.RelSupersedes, "lossy", "fresh"},
+	} {
+		id := string(c.typ) + "-" + c.from + "-" + c.to
+		err := s.Update(ctx, "s", func(tx store.Tx) error {
+			return tx.InsertRelationship(storetest.NewRelationship("s", id, c.typ, c.from, c.to, tx.NextSeq()))
+		})
+		if !errors.Is(err, domain.ErrIntegrity) {
+			t.Errorf("%s %s -> %s: err = %v, want ErrIntegrity", c.typ, c.from, c.to, err)
 		}
-		for _, c := range []struct {
-			typ      domain.RelationshipType
-			from, to string
-		}{
-			{domain.RelDerivedFrom, "fresh", "lossy"},
-			{domain.RelSupersedes, "fresh", "lossy"},
-			{domain.RelDuplicateOf, "fresh", "lossy"},
-			{domain.RelDerivedFrom, "lossy", "fresh"},
-			{domain.RelSupersedes, "lossy", "fresh"},
-		} {
-			id := string(c.typ) + "-" + c.from + "-" + c.to
-			err := tx.InsertRelationship(storetest.NewRelationship("s", id, c.typ, c.from, c.to, tx.NextSeq()))
-			if !errors.Is(err, domain.ErrIntegrity) {
-				t.Errorf("%s %s -> %s: err = %v, want ErrIntegrity", c.typ, c.from, c.to, err)
-			}
-			if _, err := tx.Relationships(store.RelationshipFilter{Type: c.typ, FromID: c.from}); err != nil {
-				return err
-			}
-		}
+	}
+	err := s.Update(ctx, "s", func(tx store.Tx) error {
+		return tx.InsertRelationship(storetest.NewRelationship("s", "dangling", domain.RelSupersedes, "fresh", "missing", tx.NextSeq()))
+	})
+	if !errors.Is(err, domain.ErrDanglingRelationship) {
+		t.Errorf("missing endpoint: %v, want ErrDanglingRelationship", err)
+	}
+	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
 		rels, err := tx.Relationships(store.RelationshipFilter{})
 		if err != nil || len(rels) != 0 {
 			t.Errorf("relationships written: %d, %v", len(rels), err)
-		}
-		if err := tx.InsertRelationship(storetest.NewRelationship("s", "dangling", domain.RelSupersedes, "fresh", "missing", tx.NextSeq())); !errors.Is(err, domain.ErrDanglingRelationship) {
-			t.Errorf("missing endpoint: %v, want ErrDanglingRelationship", err)
 		}
 		return nil
 	}); err != nil {

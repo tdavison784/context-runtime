@@ -398,6 +398,131 @@ item ID only when it actually occurs, is less disruptive and matches how
   behavior — see ADR 16's `ReplaceDirective`/`rejectVisibleBoundaryConflict`
   decision for its tests.
 
+## Canonical domain registry (Phase 3)
+
+Every `domain.CanonicalEncoder` domain tag names exactly one identity or
+hash family. A tag is never reused for a different field sequence or
+meaning, and a changed encoding takes a new version. Distinct families
+therefore cannot collide even when their inputs are equal. The golden list
+in `internal/domain/canonical_domains_test.go` is the enforced copy of this
+table. It fails when production code uses an unregistered literal domain,
+when a computed mutation-family domain is unregistered, or when this
+section omits a registered domain. Registering a domain means changing the
+test list and this section in the same commit.
+
+Phase 1–2 identity and hashing (domain, invocation):
+
+- `context-runtime/call-id/v2`
+- `context-runtime/call-lifecycle-id/v1`
+- `context-runtime/call-outcome/v2`
+- `context-runtime/call-proposal/v1`
+- `context-runtime/content/v1`
+- `context-runtime/conversation/v1`
+- `context-runtime/event-occurrence/v1`
+- `context-runtime/ingest-payload/v2`
+- `context-runtime/item-id/v1`
+- `context-runtime/tool-invocation/v1`
+- `context-runtime/turn-id/v1`
+
+Phase 3 domain contracts (W1):
+
+- `context-runtime/coverage-member/v1`
+- `context-runtime/coverage/v1`
+- `context-runtime/creation-declaration/v1`
+- `context-runtime/current-key/v2`
+- `context-runtime/grant-target/v1`
+- `context-runtime/ingest-payload/v3`
+- `context-runtime/ingest/outcome-event-id/v1`
+- `context-runtime/mutation-receipt-id/v1`
+- `context-runtime/mutation-request/v3`
+- `context-runtime/obligation-id/v1`
+- `context-runtime/obligation-target/v1`
+- `context-runtime/observation-subject/v1`
+- `context-runtime/operation-request-id/v1`
+- `context-runtime/proof-id/v1`
+- `context-runtime/resource-locator/v1`
+- `context-runtime/semantic-arguments/v1`
+- `context-runtime/snapshot-declaration/v1`
+
+Graph record identities (W1):
+
+- `context-runtime/graph/creation-declaration-id/v1`
+- `context-runtime/graph/derived-coverage-id/v1`
+- `context-runtime/graph/derived-relationship-id/v2`
+- `context-runtime/graph/lifecycle-event-id/v2`
+- `context-runtime/graph/obligation-audit-id/v1`
+- `context-runtime/graph/relationship-id/v1`
+- `context-runtime/graph/snapshot-declaration-id/v1`
+
+Lifecycle, grant and GC audit/receipt identities (W3):
+
+- `context-runtime/collect-audit/v1`
+- `context-runtime/collect-receipt/v1`
+- `context-runtime/gc-request/v1`
+- `context-runtime/gc-result/v1`
+- `context-runtime/gc-trigger/v1`
+- `context-runtime/grant-revocation-audit/v1`
+- `context-runtime/lifecycle-audit/v1`
+- `context-runtime/lifecycle-change/v1`
+- `context-runtime/lifecycle-replacement-event/v1`
+- `context-runtime/lifecycle-replacement-item/v1`
+- `context-runtime/task-completion-audit/v1`
+
+Logical membership and tool identities (W5):
+
+- `context-runtime/logical-membership-id/v1`
+- `context-runtime/tools/id/v1`
+
+Retrieval records (W6):
+
+- `context-runtime/retrieval-record/v1`
+
+Ingest audit identities (W7):
+
+- `context-runtime/ingest/task-audit-id/v1`
+
+W4 obligation/resource/observation (request hash per mutation family, then record identities):
+
+- `context-runtime/w4/obligation.declare/v1`
+- `context-runtime/w4/obligation.materialization/v1`
+- `context-runtime/w4/obligation.reevaluate/v1`
+- `context-runtime/w4/obligation.transition/v1`
+- `context-runtime/w4/observation.report/v1`
+- `context-runtime/w4/observation.run/v1`
+- `context-runtime/w4/resource.register/v1`
+- `context-runtime/w4/resource.report/v1`
+- `context-runtime/w4/resource.resync/v1`
+- `context-runtime/w4/workspace.bind/v1`
+- `context-runtime/w4/record-id/v1`
+
+`context-runtime/w4/record-id/v1` (W4, `internal/obligation`) derives W4
+record IDs: audit events, transitions, dependencies, observations, runs and
+updates. Each ID is a prefix plus the full hash of (kind, ordered parts).
+The kind is encoded first, so records of different kinds never share an ID.
+This domain is separate from W4's per-family request-hash domains
+`context-runtime/w4/<family>/v1`. Family names contain a dot, so no family
+domain can equal it.
+
+### Tool-outcome EventID format (W7)
+
+The external result of a tool call issued by an authenticated provider
+output is ingested under the EventID `OutcomeEventID(b) + "/" +
+toolCallID`. `domain.ToolOutcomeEventID` builds it,
+`domain.ValidateToolOutcomeEventID` binds an EventID to an exact
+authenticated output and call, and `domain.ParseToolOutcomeEventID` checks
+its shape without authenticating anything. The format registers no new
+canonical domain. Its prefix is the `outcome-` plus 64 lowercase hex
+`OutcomeEventID` under `context-runtime/ingest/outcome-event-id/v1`, a
+fixed 72 bytes. The split is therefore unambiguous even when the tool call
+ID itself contains `/`. The tool call ID must be 1 to
+`MaxToolOutcomeCallIDBytes` (183) printable ASCII bytes with no space, so
+the whole EventID fits `MaxEventIDBytes`. Longer tool call IDs have no
+tool-outcome EventID and are rejected. The result is bound to exactly one
+call of one output: a different output, exchange, turn or tool call yields
+a different EventID. Golden vectors in
+`internal/domain/tool_outcome_id_test.go` freeze both the outcome ID and
+this format.
+
 ## Open questions
 
 ### Resolved at acceptance (2026-09-26)

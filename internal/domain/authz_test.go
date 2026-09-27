@@ -223,7 +223,7 @@ func systemActor() Principal {
 	return Principal{SessionID: "s1", TaskID: "t1", Authority: AuthoritySystem}
 }
 func agentActor() Principal {
-	return Principal{SessionID: "s1", TaskID: "t1", Authority: AuthorityAgent}
+	return Principal{SessionID: "s1", TaskID: "t1", AgentID: "a1", Authority: AuthorityAgent}
 }
 func toolActor() Principal { return Principal{SessionID: "s1", TaskID: "t1", Authority: AuthorityTool} }
 
@@ -865,6 +865,10 @@ func itemWith(authority Authority, access AccessBoundary) ContextItem {
 func keyedAgentItem(key string, access AccessBoundary) ContextItem {
 	it := itemWith(AuthorityAgent, access)
 	it.DirectiveID = AgentKeyID(key)
+	it.Namespace = NamespaceAgentKey
+	it.TaskID, it.AgentID, it.WorkflowID = agentActor().TaskID, agentActor().AgentID, agentActor().WorkflowID
+	it.Scope, it.Section = ScopeTask, SectionNone
+	it.Access.AgentID, it.Access.WorkflowID = it.AgentID, it.WorkflowID
 	return it
 }
 
