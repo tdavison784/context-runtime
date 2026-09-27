@@ -216,6 +216,7 @@ type GCCursor struct {
 // completed batches and attempts. It is CAS-written on Revision and is never
 // a substitute for a batch's CollectReceipt or the request's GCResult.
 type GCProgress struct {
+	BatchSize                   int    // adaptive item-count ceiling; zero uses policy default
 	SnapshotSeq                 uint64 // fixed eligibility ceiling, ordered by (item Seq, ID)
 	SessionID, GCRequestID      string
 	Cursor                      GCCursor

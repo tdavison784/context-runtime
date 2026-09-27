@@ -55,6 +55,15 @@ func planOnce(t *testing.T, db store.Store, s *Service, after domain.GCCursor) b
 		}
 		plan, err = s.planBatch(tx, sem, storetest.NewPrincipal("s", domain.AuthoritySystem),
 			domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual}, tx.NextSeq(), domain.GCProgress{Cursor: after})
+		if err != nil {
+			return err
+		}
+		i := domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual}
+		args, err := domain.CanonicalSemanticArguments(i, s.policy.MaxMetadataBytes)
+		if err != nil {
+			return err
+		}
+		plan, err = s.fitCollectionPlan(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), i, args, "", plan)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -126,7 +135,7 @@ func TestOverflowingCandidateIsIneligibleNotAWedge(t *testing.T) {
 func TestBatchFitsTheReceiptLimit(t *testing.T) {
 	eachStore(t, func(t *testing.T, db store.Store) {
 		pol := testPolicy()
-		pol.MaxReceiptBytes = 2048
+		pol.MaxReceiptBytes = 4096
 		s, _ := New(db, pol)
 		seedEphemeral(t, db, 60, 0)
 		plan := planOnce(t, db, s, domain.GCCursor{})

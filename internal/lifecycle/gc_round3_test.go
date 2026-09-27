@@ -113,3 +113,55 @@ func TestJ2SnapshotAndCursorStayFrozen(t *testing.T) {
 		}
 	})
 }
+
+// J3 / XREV-3.2: limits apply to the complete persisted receipt; large
+// requests shrink their item-count batch and eventually finish.
+func TestJ3CompleteReceiptFitsAndBatchAdapts(t *testing.T) {
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxReceiptBytes = 4096
+		s, _ := New(db, pol)
+		id := completeLarge(t, db, s, 60)
+		runGC(t, db, s, id, 100)
+		readSemantic(t, db, func(sem store.SemanticReader) error {
+			r, err := sem.GCResult(id)
+			if err != nil {
+				return err
+			}
+			c, err := sem.CollectReceipt(r.CollectReceiptID)
+			if err != nil {
+				return err
+			}
+			m, err := sem.MutationReceipt(domain.MutationCollection, c.RequestID)
+			if err != nil {
+				return err
+			}
+			_, err = domain.CanonicalSemanticArguments(m, pol.MaxReceiptBytes)
+			return err
+		})
+	})
+}
+
+func TestJ3WorkExhaustionHalvesPersistedItemCount(t *testing.T) {
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxGCDecisions, pol.MaxTransactionWork = 8, 16
+		s, _ := New(db, pol)
+		seedEphemeral(t, db, 10, 0)
+		id := enqueueScratch(t, db, s)
+		if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+			_, err := s.ExecuteGCRequest(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), id, 0)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		readSemantic(t, db, func(sem store.SemanticReader) error {
+			p, err := sem.GCProgress(id)
+			if p.BatchSize != 4 || p.Cursor.ID != "eph-000" || p.Batches != 1 {
+				t.Errorf("progress: %+v", p)
+			}
+			return err
+		})
+		runGC(t, db, s, id, 20)
+	})
+}

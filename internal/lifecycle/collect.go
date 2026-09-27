@@ -89,6 +89,10 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	if err != nil {
 		return out, err
 	}
+	plan, err = s.fitCollectionPlan(tx, p, i, args, gcRequestID, plan)
+	if err != nil {
+		return out, err
+	}
 	// A direct Collect is single-shot: exceeding one batch fails as a whole
 	// (P3-39). Durable GC requests continue across batches instead (H3).
 	if plan.more && link == nil {
@@ -118,7 +122,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 		// More candidates remain: advance the durable cursor (CAS); the next
 		// pass runs batch n+1 from it.
 		next := domain.GCProgress{SessionID: p.SessionID, GCRequestID: link.requestID, Cursor: plan.next,
-			Batches: link.progress.Batches + 1, Attempts: link.progress.Attempts, SnapshotSeq: receipt.SnapshotSeq, Revision: link.progress.Revision + 1}
+			Batches: link.progress.Batches + 1, Attempts: link.progress.Attempts, SnapshotSeq: receipt.SnapshotSeq, BatchSize: plan.batchSize, Revision: link.progress.Revision + 1}
 		if _, err = sem.PutGCProgress(next, link.progress.Revision); err != nil {
 			return out, err
 		}
@@ -141,12 +145,13 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 // decisions, the archive effects to apply, a reserved sequence no archive
 // consumed, and the durable cursor after its last candidate.
 type batchPlan struct {
-	receipt domain.CollectReceipt
-	effects []itemEffect
-	cursors []domain.GCCursor // position of each decided candidate
-	spare   uint64
-	next    domain.GCCursor
-	more    bool
+	batchSize int
+	receipt   domain.CollectReceipt
+	effects   []itemEffect
+	cursors   []domain.GCCursor // position of each decided candidate
+	spare     uint64
+	next      domain.GCCursor
+	more      bool
 }
 
 // planBatch freezes the candidates after cursor, in (Seq, ID) order, and
@@ -164,27 +169,35 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 	if progress.Batches > 0 {
 		snap = progress.SnapshotSeq
 	}
-	plan := batchPlan{receipt: domain.CollectReceipt{RequestID: i.RequestID, PolicyVersion: s.policy.Version, Principal: p, SnapshotSeq: snap}, spare: seq, next: after}
+	batchSize := progress.BatchSize
+	if batchSize == 0 {
+		batchSize = s.policy.MaxGCDecisions
+	}
+	batchSize = min(batchSize, s.policy.MaxGCDecisions)
+	plan := batchPlan{batchSize: batchSize, receipt: domain.CollectReceipt{RequestID: i.RequestID, PolicyVersion: s.policy.Version, Principal: p, SnapshotSeq: snap}, spare: seq, next: after}
 	b := workBudget{remaining: s.policy.MaxTransactionWork, pageSize: s.policy.MaxPageSize}
 	seqs := seqPool{spare: seq, next: tx.NextSeq}
 	seen := map[string]bool{}
 	cache := newGCCache()
-	stop := func() (batchPlan, error) {
+	stop := func(exhausted bool) (batchPlan, error) {
+		if exhausted {
+			plan.batchSize = max(1, plan.batchSize/2)
+		}
 		plan.spare = seqs.spare
-		if len(plan.receipt.Decisions) == 0 {
+		if len(plan.receipt.Decisions) == 0 && batchSize == 1 {
 			return plan, domain.ErrResourceLimit // one candidate exceeds a whole batch
 		}
 		plan.more = true
-		return s.fitReceipt(plan)
+		return plan, nil
 	}
 	cursor := store.Cursor{Seq: after.Seq, ID: after.ID}
 	for {
-		room := s.policy.MaxGCDecisions - len(plan.receipt.Decisions)
+		room := batchSize - len(plan.receipt.Decisions)
 		if room <= 0 {
-			return stop()
+			return stop(false)
 		}
 		if err := b.spend(1); err != nil {
-			return stop()
+			return stop(true)
 		}
 		page, err := sem.GCCandidates(store.GCCandidateFilter{Viewer: p, Scope: i.Scope, TaskID: i.TaskID, SnapshotSeq: snap, Page: store.Page{After: cursor, Limit: min(b.pageSize, room)}})
 		if err != nil {
@@ -205,7 +218,7 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 				// Unfinished candidate: nothing of it is kept; the next batch
 				// starts with it.
 				b, seqs.spare = saved, spare
-				return stop()
+				return stop(true)
 			}
 			if err != nil {
 				return plan, err
@@ -222,7 +235,7 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 		}
 		if !page.More {
 			plan.spare = seqs.spare
-			return s.fitReceipt(plan)
+			return plan, nil
 		}
 		if len(page.Records) == 0 {
 			return plan, domain.ErrIntegrity
@@ -274,17 +287,35 @@ func (s *Service) decideCandidate(tx store.Tx, sem store.SemanticReader, p domai
 		To: string(domain.ResidencyArchived), Actor: p, GrantID: auth.GrantIDs[target.AuthorizationKey]}}, nil
 }
 
-// fitReceipt cuts a batch to the longest prefix whose frozen receipt fits
-// MaxReceiptBytes, continuing from its last kept candidate.
-func (s *Service) fitReceipt(plan batchPlan) (batchPlan, error) {
+// fitCollectionPlan sizes the complete eventual MutationReceipt before effects.
+// Conservative sequence values cover allocations made while applying the plan.
+func (s *Service) fitCollectionPlan(tx store.Tx, p domain.Principal, i domain.CollectIntent, args []byte, requestID string, plan batchPlan) (batchPlan, error) {
+	id, err := domain.MutationReceiptID(tx, p, domain.MutationCollection, i.RequestID)
+	if err != nil {
+		return plan, err
+	}
+	hash, err := domain.MutationRequestHash(p, domain.MutationCollection, methodCollect, args)
+	if err != nil {
+		return plan, err
+	}
 	for {
-		if _, err := domain.CanonicalSemanticArguments(plan.receipt, s.policy.MaxReceiptBytes); err == nil {
+		receipt := plan.receipt.Clone()
+		receipt.GCRequestID = requestID
+		receipt.SemanticMeta = domain.SemanticMeta{ID: collectReceiptID(p.SessionID, i.RequestID), SessionID: p.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: uint64(1<<63 - 1)}
+		for _, e := range plan.effects {
+			receipt.ArchivedRefs = append(receipt.ArchivedRefs, domain.ItemRevisionRef{ItemID: e.before.ID, Version: e.before.Version + 1})
+		}
+		full := domain.MutationReceipt{SemanticMeta: domain.SemanticMeta{ID: id, SessionID: p.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: uint64(1<<63 - 1)},
+			Family: domain.MutationCollection, RequestID: i.RequestID, Principal: p, CanonicalMethod: methodCollect, CanonicalArguments: args,
+			RequestHashVersion: domain.RequestHashV3, RequestHash: hash, PolicyVersion: s.policy.Version, Result: domain.MutationResult{Collect: &receipt}}
+		if _, err := domain.CanonicalSemanticArguments(full, s.policy.MaxReceiptBytes); err == nil {
 			return plan, nil
 		}
-		n := len(plan.receipt.Decisions) / 2
-		if n == 0 {
+		if len(plan.receipt.Decisions) <= 1 {
 			return plan, domain.ErrResourceLimit
 		}
+		plan.batchSize = max(1, plan.batchSize/2)
+		n := min(plan.batchSize, len(plan.receipt.Decisions)/2)
 		kept := map[string]bool{}
 		for _, ref := range plan.receipt.CandidateRefs[:n] {
 			kept[ref.ItemID] = true
