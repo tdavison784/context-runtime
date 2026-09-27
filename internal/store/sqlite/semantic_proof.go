@@ -616,3 +616,18 @@ func (s semRead) ObligationTransition(id string) (domain.ObligationTransition, e
 	var tr domain.ObligationTransition
 	return tr, s.t.get("obligation_transition", id, 0, &tr)
 }
+
+// LiveProofsByPath implements store.ProofReader.
+func (s semRead) LiveProofsByPath(resourceID, path string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	return store.ResultPage[domain.ApplicabilityProof]{}, domain.ErrUnsupportedSchema
+}
+
+// LiveWorkspaceProofs implements store.ProofReader.
+func (s semRead) LiveWorkspaceProofs(resourceID string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	return store.ResultPage[domain.ApplicabilityProof]{}, domain.ErrUnsupportedSchema
+}
+
+// LiveProofDependents implements store.ProofReader.
+func (s semRead) LiveProofDependents(resourceID string) (uint64, error) {
+	return 0, domain.ErrUnsupportedSchema
+}
