@@ -1,6 +1,10 @@
 package store
 
-import "github.com/tdavison784/context-runtime/internal/domain"
+import (
+	"fmt"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+)
 
 type DeclarationReader interface {
 	LifecycleByTarget(kind domain.TargetKind, targetID string, page Page) (ResultPage[domain.LifecycleEvent], error)
@@ -26,4 +30,18 @@ type DeclarationWriter interface {
 	// superseded targets, mismatched keys and stale expected prior atomically.
 	SetCurrentVersion(itemID, expectedPriorItemID string) error
 	InsertSemanticChange(domain.SemanticChange) error
+}
+
+// DistinctGrantTargets rejects a grant naming one legacy target twice
+// (DUR-1.10). Typed targets are already a set (MutationGrant.Validate);
+// TargetIDs never were, so both stores check them before indexing.
+func DistinctGrantTargets(g domain.MutationGrant) error {
+	seen := make(map[string]bool, len(g.TargetIDs))
+	for _, id := range g.TargetIDs {
+		if seen[id] {
+			return fmt.Errorf("%w: grant %s names target %s twice", domain.ErrInvalidRecord, g.ID, id)
+		}
+		seen[id] = true
+	}
+	return nil
 }

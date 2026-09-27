@@ -417,6 +417,9 @@ func (t *tx) InsertGrant(g domain.MutationGrant) error {
 	if err := g.Validate(); err != nil {
 		return err
 	}
+	if err := store.DistinctGrantTargets(g); err != nil {
+		return err
+	}
 	if g.RevokedSeq != 0 {
 		return invalid("grant %s: a new grant cannot be revoked", g.ID)
 	}

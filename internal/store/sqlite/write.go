@@ -422,6 +422,9 @@ func (t *transaction) InsertGrant(v domain.MutationGrant) error {
 	if err := v.Validate(); err != nil {
 		return err
 	}
+	if err := store.DistinctGrantTargets(v); err != nil {
+		return err
+	}
 	if err := t.checkSession(v.SessionID); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -156,7 +157,8 @@ func (t *transaction) indexGrant(g domain.MutationGrant) error {
 	for _, id := range g.TargetIDs {
 		keys = append(keys, legacyGrantKey(id))
 	}
-	for _, k := range keys {
+	slices.Sort(keys)
+	for _, k := range slices.Compact(keys) {
 		if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_grant_target(session_id,action,target_key,issued_seq,grant_id) VALUES(?,?,?,?,?)",
 			t.session, string(g.Action), k, g.IssuedSeq, g.ID); err != nil {
 			return err
