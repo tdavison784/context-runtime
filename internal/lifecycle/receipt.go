@@ -38,15 +38,21 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 	if p.SessionID != tx.SessionID() {
 		return nil, nil, nil, domain.ErrNotFound
 	}
-	if _, err := domain.MutationReceiptID(p, family, requestID); err != nil {
-		return nil, nil, nil, err
-	}
 	sem, err := store.Semantic(tx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// The exact-replay lookup comes first, so an owner's receipt replays even
+	// under a runtime request ID that predates today's derivation (DUR-2.8).
+	// Anyone else is checked for request-ID ownership before that receipt's
+	// existence can change the outcome: no existence oracle (SEC-2.8).
 	r, err := sem.MutationReceipt(family, requestID)
 	if err == nil {
+		if r.Principal != p {
+			if _, idErr := domain.MutationReceiptID(p, family, requestID); idErr != nil {
+				return nil, nil, nil, idErr
+			}
+		}
 		if err := checkReplay(r, p, family, method, intent); err != nil {
 			return nil, nil, nil, err
 		}
@@ -54,6 +60,9 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 		return sem, nil, &r, nil
 	}
 	if !errors.Is(err, domain.ErrNotFound) {
+		return nil, nil, nil, err
+	}
+	if _, err := domain.MutationReceiptID(p, family, requestID); err != nil {
 		return nil, nil, nil, err
 	}
 	args, err := domain.CanonicalSemanticArguments(intent, s.policy.MaxMetadataBytes)

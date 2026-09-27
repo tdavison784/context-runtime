@@ -95,7 +95,16 @@ func TestLegacyRuntimeRequestIDReplaysForItsOwnerOnly(t *testing.T) {
 			receipt, err = sem.MutationReceipt(domain.MutationLifecycle, "legacy-src")
 			return err
 		})
+		// A faithful legacy receipt: its frozen request names the legacy ID.
+		legacy := src
+		legacy.RequestID = legacyID
 		receipt.RequestID = legacyID
+		if receipt.CanonicalArguments, err = domain.CanonicalSemanticArguments(legacy, testPolicy().MaxMetadataBytes); err != nil {
+			t.Fatal(err)
+		}
+		if receipt.RequestHash, err = domain.MutationRequestHash(owner, domain.MutationLifecycle, receipt.CanonicalMethod, receipt.CanonicalArguments); err != nil {
+			t.Fatal(err)
+		}
 		archive := func(p domain.Principal) (LifecycleOutcome, error) {
 			var out LifecycleOutcome
 			err := db.Update(ctx, "s", func(tx store.Tx) error {
