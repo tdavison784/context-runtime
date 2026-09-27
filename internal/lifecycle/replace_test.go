@@ -179,3 +179,42 @@ func TestReplaceDirectiveFailsClosedOnUnknownIdentity(t *testing.T) {
 		})
 	}
 }
+
+// SPEC-1.6: an enabled SUPERSESSION trigger persists a stable GC request
+// from the replacement's own transaction; a disabled one persists nothing.
+func TestReplaceDirectiveEnqueuesSupersessionGC(t *testing.T) {
+	ctx := context.Background()
+	user := storetest.NewPrincipal("s", domain.AuthorityUser)
+	for _, enabled := range []bool{true, false} {
+		mem := memory.New()
+		t.Cleanup(func() { mem.Close() })
+		seedDirective(t, mem, domain.AuthorityUser, false)
+		pol := testPolicy()
+		pol.GCTriggers = []domain.GCTrigger{domain.GCManual, domain.GCTaskCompletion}
+		if enabled {
+			pol.GCTriggers = []domain.GCTrigger{domain.GCManual, domain.GCSupersession, domain.GCTaskCompletion} // sorted
+		}
+		s, err := New(mem, pol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := s.ReplaceDirectiveStandalone(ctx, user, replaceIntent("r", 1, "ship the release"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pending := pendingGC(t, mem)
+		if !enabled {
+			if len(pending) != 0 {
+				t.Fatalf("disabled trigger enqueued: %+v", pending)
+			}
+			continue
+		}
+		if len(pending) != 1 || pending[0].Trigger != domain.GCSupersession || pending[0].Scope != domain.CollectTask || pending[0].TaskID != "task" || pending[0].Origin != user {
+			t.Fatalf("supersession GC request: %+v", pending)
+		}
+		// Replay neither re-enqueues nor conflicts.
+		if again, err := s.ReplaceDirectiveStandalone(ctx, user, replaceIntent("r", 1, "ship the release")); err != nil || again.MutationReceiptID != out.MutationReceiptID || len(pendingGC(t, mem)) != 1 {
+			t.Fatalf("replay: %v", err)
+		}
+	}
+}
