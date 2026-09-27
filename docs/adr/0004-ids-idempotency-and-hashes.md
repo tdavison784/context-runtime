@@ -503,6 +503,26 @@ This domain is separate from W4's per-family request-hash domains
 `context-runtime/w4/<family>/v1`. Family names contain a dot, so no family
 domain can equal it.
 
+### Tool-outcome EventID format (W7)
+
+The external result of a tool call issued by an authenticated provider
+output is ingested under the EventID `OutcomeEventID(b) + "/" +
+toolCallID`. `domain.ToolOutcomeEventID` builds it,
+`domain.ValidateToolOutcomeEventID` binds an EventID to an exact
+authenticated output and call, and `domain.ParseToolOutcomeEventID` checks
+its shape without authenticating anything. The format registers no new
+canonical domain. Its prefix is the `outcome-` plus 64 lowercase hex
+`OutcomeEventID` under `context-runtime/ingest/outcome-event-id/v1`, a
+fixed 72 bytes. The split is therefore unambiguous even when the tool call
+ID itself contains `/`. The tool call ID must be 1 to
+`MaxToolOutcomeCallIDBytes` (183) printable ASCII bytes with no space, so
+the whole EventID fits `MaxEventIDBytes`. Longer tool call IDs have no
+tool-outcome EventID and are rejected. The result is bound to exactly one
+call of one output: a different output, exchange, turn or tool call yields
+a different EventID. Golden vectors in
+`internal/domain/tool_outcome_id_test.go` freeze both the outcome ID and
+this format.
+
 ## Open questions
 
 ### Resolved at acceptance (2026-09-26)
