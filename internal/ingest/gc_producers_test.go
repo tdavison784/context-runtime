@@ -155,6 +155,29 @@ func TestGCProducers_RecordedPolicyDecides_SPEC211(t *testing.T) {
 	})
 }
 
+// TestGCProducers_TasklessSupersession_H4 (H4, SPEC-2.2/DUR-2.5): replacing
+// a directive with no TaskID succeeds and produces no GC request; Phase 3
+// has no session-scoped GC.
+func TestGCProducers_TasklessSupersession_H4(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		f.withGCTriggers()
+		sys := domain.Principal{SessionID: sess, Authority: domain.AuthoritySystem}
+		event := func(id, text string) domain.Event {
+			e := sysEvent(id, text)
+			e.Spans[0].Access = domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: sess}
+			return e
+		}
+		f.mustIngest(sys, event("s1", "## Pinned\n- [p] {scope=SESSION} one\n"))
+		r := f.mustIngest(sys, event("s2", "## Pinned\n- [p] {scope=SESSION} two\n"))
+		if len(r.Replacements) != 1 {
+			t.Fatalf("task-less replacement: %+v", r.Replacements)
+		}
+		if got := f.gcRequests(); len(got) != 0 {
+			t.Fatalf("task-less supersession enqueued %+v", got)
+		}
+	})
+}
+
 // TestGCProducers_WorkingSnapshot_SPEC16: a filed Working snapshot that
 // retires earlier members enqueues exactly one SUPERSESSION request,
 // however many members it retires; a first snapshot or an identical
