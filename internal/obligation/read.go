@@ -27,7 +27,16 @@ func (s *Service) UnfinishedTaskObligations(tx store.ReadTx, taskID string) (boo
 			return 0, store.Cursor{}, false, err
 		}
 		for _, o := range pg.Records {
-			if o.Current && (o.Status == domain.ObligationUnresolved || o.Status == domain.ObligationBlocked) {
+			if !o.Current {
+				continue
+			}
+			// Effective status: a SATISFIED version whose proof is no
+			// longer valid is unfinished (K1 A2, X8/P3-9).
+			st, _, err := EffectiveStatus(r, o)
+			if err != nil {
+				return 0, store.Cursor{}, false, err
+			}
+			if st == domain.ObligationUnresolved || st == domain.ObligationBlocked {
 				unfinished = true
 			}
 		}
@@ -97,7 +106,13 @@ func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target dom
 		}
 		return nil
 	}
-	isCurrent := o.Current && o.Status == domain.ObligationSatisfied && o.CurrentProofID != ""
+	// The current proof is the one backing the version's EFFECTIVE
+	// satisfaction: a proof no longer valid at read supports nothing (K1 A2).
+	effective, _, err := EffectiveStatus(r, o)
+	if err != nil {
+		return SatisfiesView{}, err
+	}
+	isCurrent := o.Current && effective == domain.ObligationSatisfied && o.CurrentProofID != ""
 	if currentOnly {
 		// The present proof and its installing transition, by key: never
 		// the version's history (H2).
@@ -167,15 +182,26 @@ func (s *Service) VisibleObligations(tx store.ReadTx, viewer domain.Principal, t
 	if err != nil {
 		return nil, err
 	}
+	r, err := store.ReadSemantic(tx)
+	if err != nil {
+		return nil, err
+	}
 	var out []ObligationView
 	for _, o := range all {
 		if !o.Current || !o.Access.Permits(viewer) {
 			continue
 		}
+		// Effective status, with pending settlement as a fixed flag that
+		// names no update, path or ID (K1 A2/A7).
+		st, pending, err := EffectiveStatus(r, o)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, ObligationView{
 			Target:       domain.ObligationRef{SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version},
 			SourceItemID: o.SourceItemID, SourceAuthority: o.SourceAuthority, Description: o.Description,
-			Status: o.Status, Binding: o.BindingState, MaterializationDisabled: o.MaterializationDisabled, Revision: o.Revision,
+			Status: st, Binding: o.BindingState, MaterializationDisabled: o.MaterializationDisabled, Revision: o.Revision,
+			Pending: pending,
 		})
 	}
 	return out, nil
