@@ -69,6 +69,9 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return "", err
 	}
+	if err := domain.ValidateCallerRequestID(intent.RequestID); err != nil {
+		return "", err // a harness checkpoint is a caller request (SEC-3.7)
+	}
 	receiptID, err := domain.MutationReceiptID(tx, actor, domain.MutationMembership, intent.RequestID)
 	if err != nil {
 		return "", err

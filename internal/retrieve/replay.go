@@ -44,6 +44,10 @@ func replayRetrieval(r retrievalReplayReader, actor domain.Principal, i Admissio
 			return domain.RetrievalResult{}, false, idErr
 		}
 		if err != nil {
+			// A new request: never a reserved runtime namespace (SEC-3.7).
+			if err := domain.ValidateNewRequestID(nil, actor, i.Rehydrate.RequestID); err != nil {
+				return domain.RetrievalResult{}, false, err
+			}
 			return domain.RetrievalResult{}, false, nil
 		}
 		return domain.RetrievalResult{}, false, domain.ErrEventIDConflict

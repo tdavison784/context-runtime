@@ -43,6 +43,9 @@ func prepareMembershipReceipt(tx store.Tx, actor domain.Principal, requestID, me
 	if !errors.Is(err, domain.ErrNotFound) {
 		return nil, receipt, false, err
 	}
+	if err := domain.ValidateNewRequestID(tx, actor, requestID); err != nil {
+		return nil, receipt, false, err // SEC-3.7
+	}
 	id, err := domain.MutationReceiptID(tx, actor, domain.MutationMembership, requestID)
 	if err != nil {
 		return nil, receipt, false, err

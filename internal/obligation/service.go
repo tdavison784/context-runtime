@@ -68,6 +68,9 @@ func replay(tx domain.SeqAllocator, r store.SemanticReader, actor domain.Princip
 	}
 	rec, err := r.MutationReceipt(req.family, req.id)
 	if errors.Is(err, domain.ErrNotFound) {
+		if err := domain.ValidateNewRequestID(tx, actor, req.id); err != nil {
+			return domain.MutationResult{}, false, err // SEC-3.7
+		}
 		if req.overLimit {
 			return domain.MutationResult{}, false, domain.ErrResourceLimit // a new request is held to today's limit
 		}

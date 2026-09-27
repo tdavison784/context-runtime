@@ -14,10 +14,9 @@ import (
 func TestToolsRefuseReservedRequestIDs_SEC37(t *testing.T) {
 	st, i := toolFixture(t)
 	s := testService(t)
+	// A refused call writes nothing, so the same tool call stays open for
+	// every attempt and for the control.
 	for n, id := range []string{"gc_x", "gcq_x", "evt_x", "itm_x", "REQ"} {
-		if n > 0 {
-			i, _ = nextRound(t, st, i, string(rune('b'+n)), true)
-		}
 		err := st.Update(testContext, "s", func(tx store.Tx) error {
 			seq := tx.NextSeq()
 			rid := id
@@ -31,7 +30,6 @@ func TestToolsRefuseReservedRequestIDs_SEC37(t *testing.T) {
 			t.Errorf("tool accepted caller request ID in reserved namespace %q", id)
 		}
 	}
-	i, _ = nextRound(t, st, i, "z", true)
 	if err := st.Update(testContext, "s", func(tx store.Tx) error {
 		_, err := s.Remember(tx, dispatcher(i), Request[domain.KeyedWriteIntent]{i, keyed("req-ok", "kz", "v")}, tx.NextSeq())
 		return err

@@ -86,6 +86,18 @@ func CheckRequestBeforeLookup(tx SeqAllocator, owner Principal, requestID string
 	return nil
 }
 
+// ValidateNewRequestID checks the request ID of a new request (no receipt
+// exists), after the owner's exact-replay lookup (DUR-2.8). A current-format
+// runtime ID is accepted only as this transaction's own (the runtime path,
+// e.g. ingest executing an event's operations); any other ID must be a
+// caller ID outside every reserved runtime namespace (H5, SEC-3.7).
+func ValidateNewRequestID(tx SeqAllocator, owner Principal, requestID string) error {
+	if _, ok := runtimeRequestSeq(requestID); ok {
+		return CheckRequestBeforeLookup(tx, owner, requestID)
+	}
+	return ValidateCallerRequestID(requestID)
+}
+
 // RuntimeRequestOwnedBy fails when requestID is in the runtime req_
 // namespace but was not derived for owner; any other ID passes. Stores use
 // it as a commit-time check on the receipts they hold.
