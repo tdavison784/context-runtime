@@ -82,6 +82,16 @@ func CollectDecision(it domain.ContextItem, s GCSnapshot) (domain.GCDecisionCode
 	return domain.GCIneligible, GCReasonLive, nil
 }
 
+// MayArchive decides from item-local and lifetime facts alone, treating
+// every protection fact as absent. Protection facts only turn ARCHIVE into
+// PROTECTED, so a non-ARCHIVE answer here is final and callers may skip the
+// protection reads; an ARCHIVE answer needs the full CollectDecision.
+func MayArchive(it domain.ContextItem, s GCSnapshot) (domain.GCDecisionCode, GCReason, error) {
+	s.ObligationsKnown = true
+	s.OpenObligationSource, s.OpenExchange, s.LiveLease, s.NewestCheckpoint = false, false, false, false
+	return CollectDecision(it, s)
+}
+
 func current(c domain.ItemCurrentness) bool {
 	return c == domain.ItemCurrent || c == domain.ItemUnkeyed
 }

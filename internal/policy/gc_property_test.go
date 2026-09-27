@@ -57,6 +57,9 @@ func TestCollectDecisionSafetyProperties(t *testing.T) {
 		if err != nil {
 			t.Fatalf("case %d: %v", n, err)
 		}
+		if pre, _, err := MayArchive(it, s); err != nil || pre != domain.GCArchive && code == domain.GCArchive {
+			t.Fatalf("case %d: MayArchive=%s but CollectDecision=ARCHIVE (%v)", n, pre, err)
+		}
 		if again, againReason, _ := CollectDecision(it, s); again != code || againReason != reason {
 			t.Fatalf("case %d: nondeterministic decision", n)
 		}

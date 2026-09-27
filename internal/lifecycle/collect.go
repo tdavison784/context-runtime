@@ -123,18 +123,29 @@ func (s *Service) planCollection(tx store.Tx, sem store.SemanticReader, p domain
 		return tx.NextSeq()
 	}
 	seen := map[string]bool{}
+	cache := newGCCache()
 	for _, it := range candidates {
 		if seen[it.ID] || it.SessionID != p.SessionID || it.Seq > snap || !it.Access.Permits(p) || i.Scope == domain.CollectTask && it.TaskID != i.TaskID {
 			return r, nil, 0, domain.ErrIntegrity
 		}
 		seen[it.ID] = true
-		gs, err := s.gcSnapshot(tx, sem, it, snap, &b)
+		// Cheap facts first: only a possible archive pays for protection
+		// reads, so live items cannot exhaust the work bound (SEC-1.6).
+		gs, err := s.gcBase(tx, sem, it, snap, cache, &b)
 		if err != nil {
 			return r, nil, 0, err
 		}
-		code, _, err := policy.CollectDecision(it, gs)
+		code, _, err := policy.MayArchive(it, gs)
 		if err != nil {
 			return r, nil, 0, err
+		}
+		if code == domain.GCArchive {
+			if err := s.gcProtection(tx, sem, it, &gs, &b); err != nil {
+				return r, nil, 0, err
+			}
+			if code, _, err = policy.CollectDecision(it, gs); err != nil {
+				return r, nil, 0, err
+			}
 		}
 		ref := domain.ItemRevisionRef{ItemID: it.ID, Version: it.Version}
 		if code == domain.GCArchive {

@@ -111,7 +111,7 @@ func TestLiveItemsDoNotExhaustCollectionBudget(t *testing.T) {
 	const live = 600
 	eachStore(t, func(t *testing.T, db store.Store) {
 		pol := testPolicy()
-		pol.MaxTransactionWork, pol.MaxGCDecisions = 4096, 4096
+		pol.MaxTransactionWork, pol.MaxGCDecisions, pol.MaxReceiptBytes = 4096, 4096, 1<<20 // DefaultPhase3Policy limits
 		s, _ := New(db, pol)
 		if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
 			if _, err := tx.PutTask(storetest.NewTask("s", "task"), 0, storetest.NewLifecycleEvent("s", "created", tx.NextSeq(), domain.TargetTask, "task")); err != nil {
