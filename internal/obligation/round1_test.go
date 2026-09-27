@@ -141,3 +141,35 @@ func TestXREV11StalePathClaim(t *testing.T) {
 		t.Errorf("stale path claim after a resync omitting the path: %v", err)
 	}
 }
+
+// SPEC-1.9 (C-4): reevaluation after an authorized revalidation, or after a
+// revert to already-proven content, re-satisfies from the same observation.
+func TestSPEC19ReevaluateAfterRevalidation(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	o := f.status(t, f.sysTests)
+	if o.Status != domain.ObligationSatisfied {
+		t.Fatalf("setup = %+v", o)
+	}
+	if _, err := f.s.transition(t, f.st, f.system, intent(f.sysTests, o.Revision, domain.ObligationUnresolved)); err != nil {
+		t.Fatal(err)
+	}
+	o = f.status(t, f.sysTests)
+	if _, err := f.reevaluate(t, f.harness, f.sysTests, o.Revision); err != nil {
+		t.Fatalf("reevaluate after revalidation: %v", err)
+	}
+	if o = f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Fatalf("not re-satisfied: %+v", o)
+	}
+	// W1 -> W2 (invalidates) -> W1 (revert) -> reevaluate the same PASS.
+	f.r.set(t, f.fixture, hashOf("W2"), false)
+	f.r.set(t, f.fixture, hashOf("W1"), false)
+	o = f.status(t, f.sysTests)
+	if _, err := f.reevaluate(t, f.harness, f.sysTests, o.Revision); err != nil {
+		t.Fatalf("reevaluate after revert: %v", err)
+	}
+	if o = f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Errorf("not re-satisfied after revert: %+v", o)
+	}
+}
