@@ -889,3 +889,34 @@ func TestUpgradeReconcilesLegacyCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeItemExchangeIndex checks migration 0035 on a database migrated
+// through 0034 (H2, SPEC-2.7): members stored before it are indexed, so
+// EarliestExchangeWithItem finds an item's first exchange in a
+// conversation.
+func TestUpgradeItemExchangeIndex(t *testing.T) {
+	l := openLegacy(t, 34)
+	in := storetest.NewItem("s", "in", 1, "input")
+	l.insert("item", in, nil)
+	for n, id := range []string{"x1", "x2", "x3"} {
+		l.insert("exchange", storetest.NewExchange("s", id, "task", "agent", uint64(n+1), uint64(n+2)), nil)
+	}
+	for _, x := range []string{"x3", "x2"} {
+		l.insert("exchange_member", domain.ExchangeMember{SemanticMeta: storetest.Meta("s", "m-"+x, 9), ExchangeID: x, Position: 1,
+			Role: domain.MemberInput, Source: storetest.ContentRef(in)}, nil)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x, err := r.EarliestExchangeWithItem(domain.ConversationIDFor("task", "agent"), "in")
+		if err != nil || x.ID != "x2" {
+			t.Errorf("EarliestExchangeWithItem after 0035 = %s (%v), want x2", x.ID, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
