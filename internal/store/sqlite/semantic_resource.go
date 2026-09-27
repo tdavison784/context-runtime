@@ -562,3 +562,8 @@ func (s semRead) ClosingObservation(runID string) (domain.ObservationRecord, err
 	var o domain.ObservationRecord
 	return o, s.t.getWhere("observation", "f_run_id=? AND "+closingObservation, &o, runID)
 }
+
+// SubjectHighWater implements store.ResourceReader.
+func (s semRead) SubjectHighWater(subjectKey, taskID string, access domain.AccessBoundary) (uint64, error) {
+	return 0, domain.ErrUnsupportedSchema
+}

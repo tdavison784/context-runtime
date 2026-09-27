@@ -638,3 +638,8 @@ func (r semRead) ClosingObservation(runID string) (domain.ObservationRecord, err
 	}
 	return o, nil
 }
+
+// SubjectHighWater implements store.ResourceReader.
+func (r semRead) SubjectHighWater(subjectKey, taskID string, access domain.AccessBoundary) (uint64, error) {
+	return 0, domain.ErrUnsupportedSchema
+}
