@@ -67,9 +67,9 @@ func (s *Service) ReevaluateTx(tx store.Tx, actor domain.Principal, in domain.Re
 	return result, nil
 }
 
-// selectEvidence picks the newest accepted observation among the subject
-// states of the partitions whose evidence is publishable at the obligation's
-// boundary (DUR-1.2: a few indexed lookups, independent of run history).
+// selectEvidence picks the newest accepted observation, currently applicable
+// at read, among the subject states of the partitions whose evidence is
+// publishable at the obligation's boundary (DUR-1.2: a few indexed lookups, independent of run history).
 // Observations the caller cannot access are never selected, returned, or
 // allowed to shadow an accessible one (SEC-1.9, P3-14/24).
 func (s *Service) selectEvidence(r store.SemanticReader, work *budget, actor domain.Principal, o domain.ObligationVersion) (domain.ObservationRecord, domain.ObservationRun, bool, error) {
@@ -89,7 +89,20 @@ func (s *Service) selectEvidence(r store.SemanticReader, work *budget, actor dom
 		if err != nil {
 			return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
 		}
-		if obs.Access.Permits(actor) && st.AcceptedOrdinal > best.AcceptedOrdinal {
+		if !obs.Access.Permits(actor) || st.AcceptedOrdinal <= best.AcceptedOrdinal {
+			continue
+		}
+		// Only evidence that describes the resource now is selected: the
+		// state's applicability is derived at read (SPEC-4.10, P3-22).
+		run, err := r.ObservationRun(obs.RunID)
+		if err != nil {
+			return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
+		}
+		a, _, _, err := s.applicability(r, work, obs, run)
+		if err != nil {
+			return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
+		}
+		if a == domain.ApplicabilityCurrent {
 			best = st
 		}
 	}
