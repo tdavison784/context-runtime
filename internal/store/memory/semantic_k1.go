@@ -76,6 +76,29 @@ func (t *tx) resolvePathRaises() {
 	}
 }
 
+// checkProofDerivedValid is the A5 commit guard: a committed SATISFIED
+// version may not rest on a proof the monotone pointers have already felled
+// (K1 A5). Pending path raises resolve first, so this transaction's own
+// raises are visible whatever their write order.
+func (t *tx) checkProofDerivedValid(r *readTx, ref domain.ObligationRef, proofID string) error {
+	if proofID == "" {
+		return nil
+	}
+	o, ok := r.obligations.peek(refKey(ref))
+	if !ok || o.Status != domain.ObligationSatisfied || o.CurrentProofID != proofID {
+		return nil
+	}
+	t.resolvePathRaises()
+	ok, err := store.ProofDerivedValid(r.SemanticReadBackend(), proofID)
+	if err != nil {
+		return fmt.Errorf("proof %s: derived validity unreadable: %w", proofID, err)
+	}
+	if !ok {
+		return fmt.Errorf("proof %s: derived invalid at commit: %w", proofID, domain.ErrInvalidTransition)
+	}
+	return nil
+}
+
 // raiseAfterID bounds the exclusive cursor of a revision seek: semantic IDs
 // never contain 0xff, so (rev, raiseAfterID) precedes every entry of rev.
 const raiseAfterID = "\xff"

@@ -20,30 +20,38 @@ func report(t *testing.T, s store.Store, id string, from uint64, fp string, path
 	t.Helper()
 	var u domain.ResourceUpdate
 	update(t, s, sessA, func(tx store.Tx) error {
-		sem := semantic(t, tx)
-		u = NewResourceUpdate(sessA, id, "repo", tx.NextSeq(), from, fp, paths...)
-		noErr(t, sem.InsertResourceUpdate(u))
-		_, err := sem.PutResourceState(StateAfter(u, tx.NextSeq()), from)
-		noErr(t, err)
-		for _, p := range paths {
-			h, ok := contents[p]
-			if !ok {
-				continue
-			}
-			loc := domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: p}
-			var expected uint64
-			if cur, err := sem.ResourcePathState(loc); err == nil {
-				expected = cur.Revision
-			} else {
-				wantErr(t, err, domain.ErrNotFound)
-			}
-			_, err = sem.PutResourcePathState(domain.ResourcePathState{SemanticMeta: Meta(sessA, "ps-"+p, tx.NextSeq()), Locator: loc,
-				ContentHash: domain.HashBytes([]byte(h)), ResourceUpdateID: u.ID, ResourceRevision: u.ResultingAuthoritativeRevision,
-				Revision: 1, Freshness: domain.ResourceKnown}, expected)
-			noErr(t, err)
-		}
+		u = reportInTx(t, tx, id, from, fp, paths, contents)
 		return nil
 	})
+	return u
+}
+
+// reportInTx is report's write inside a caller's transaction, for the A5
+// guard's same-transaction cases.
+func reportInTx(t *testing.T, tx store.Tx, id string, from uint64, fp string, paths []string, contents map[string]string) domain.ResourceUpdate {
+	t.Helper()
+	sem := semantic(t, tx)
+	u := NewResourceUpdate(sessA, id, "repo", tx.NextSeq(), from, fp, paths...)
+	noErr(t, sem.InsertResourceUpdate(u))
+	_, err := sem.PutResourceState(StateAfter(u, tx.NextSeq()), from)
+	noErr(t, err)
+	for _, p := range paths {
+		h, ok := contents[p]
+		if !ok {
+			continue
+		}
+		loc := domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: p}
+		var expected uint64
+		if cur, err := sem.ResourcePathState(loc); err == nil {
+			expected = cur.Revision
+		} else {
+			wantErr(t, err, domain.ErrNotFound)
+		}
+		_, err = sem.PutResourcePathState(domain.ResourcePathState{SemanticMeta: Meta(sessA, "ps-"+p, tx.NextSeq()), Locator: loc,
+			ContentHash: domain.HashBytes([]byte(h)), ResourceUpdateID: u.ID, ResourceRevision: u.ResultingAuthoritativeRevision,
+			Revision: 1, Freshness: domain.ResourceKnown}, expected)
+		noErr(t, err)
+	}
 	return u
 }
 
@@ -254,42 +262,62 @@ func testSemanticSettlementCursor(t *testing.T, s store.Store) {
 // assertedProof with the dependency revision exposed.
 func k1AssertedProof(t *testing.T, s store.Store, id string, rev uint64, deps ...depSpec) domain.ObligationVersion {
 	t.Helper()
+	noErr(t, k1Satisfy(t, s, id, rev, deps...))
 	var o domain.ObligationVersion
-	update(t, s, sessA, func(tx store.Tx) error {
-		sem := semantic(t, tx)
-		o = BoundObligation(t, sessA, id, 1, tx.NextSeq(), "src")
-		noErr(t, tx.InsertObligationVersion(o))
-		seq := tx.NextSeq()
-		trID := "tr-" + id
-		proofID, err := domain.ApplicabilityProofID(Ref(o), trID)
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		var err error
+		o, err = readSemantic(t, tx).ExactObligation(domain.ObligationRef{SessionID: sessA, ObligationID: id, Version: 1})
 		noErr(t, err)
-		spec, err := o.TargetSpec.CanonicalHash()
-		noErr(t, err)
-		var records []domain.ProofDependency
-		for i, d := range deps {
-			dep := domain.ProofDependency{SemanticMeta: Meta(sessA, "dep-"+id+"-"+string(rune('a'+i)), seq), ProofID: proofID, ResourceID: "repo",
-				Kind: d.kind, ResourceRevision: rev, Fingerprint: fpA, Access: o.Access}
-			if d.path != "" {
-				dep.Locator = &domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: d.path}
-			}
-			records = append(records, dep)
-		}
-		user := NewPrincipal(sessA, domain.AuthorityUser)
-		p := domain.ApplicabilityProof{ResourceID: "repo", Fingerprint: fpA, ResourceRevision: rev, SemanticMeta: Meta(sessA, proofID, seq),
-			Target: Ref(o), TargetSpecHash: spec, TransitionID: trID, RuleVersion: "rule/1", AssertionID: "asr-" + id,
-			DependencyIDs: dependencyIDs(records), Access: o.Access}
-		noErr(t, sem.InsertApplicabilityProof(p, records))
-		noErr(t, sem.InsertAssertion(domain.AssertionRecord{SemanticMeta: Meta(sessA, "asr-"+id, seq), Target: Ref(o), Mode: domain.AssertionResourceBound,
-			Actor: user, TransitionID: trID, ProofID: proofID, Access: o.Access}))
-		tr := domain.ObligationTransition{ID: trID, SessionID: sessA, ObligationID: id, Version: 1, Seq: seq, From: domain.ObligationUnresolved,
-			To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation, Actor: user, Cause: domain.CauseAssertion,
-			AssertionMode: domain.AssertionResourceBound, ProofID: proofID, RequestID: "req-" + trID, ReasonCode: domain.ReasonAuthorizedTransition}
-		d := domain.TransitionDetail{SemanticMeta: Meta(sessA, "td-"+trID, seq), Target: Ref(o), TransitionID: trID, Cause: domain.CauseAssertion,
-			ProofID: proofID, AssertionID: "asr-" + id, RuleVersion: "rule/1"}
-		o, err = sem.AppendSemanticObligationTransition(tr, d, 1)
-		return err
+		return nil
 	})
 	return o
+}
+
+// k1Satisfy performs k1SatisfyInTx's write in its own transaction, reporting
+// the commit's error: the A5 guard refuses at commit, not in the method.
+func k1Satisfy(t *testing.T, s store.Store, id string, rev uint64, deps ...depSpec) error {
+	t.Helper()
+	return s.Update(ctx, sessA, func(tx store.Tx) error {
+		return k1SatisfyInTx(t, tx, id, rev, deps...)
+	})
+}
+
+// k1SatisfyInTx is k1AssertedProof's write inside a caller's transaction,
+// for the A5 guard's same-transaction cases.
+func k1SatisfyInTx(t *testing.T, tx store.Tx, id string, rev uint64, deps ...depSpec) error {
+	t.Helper()
+	sem := semantic(t, tx)
+	o := BoundObligation(t, sessA, id, 1, tx.NextSeq(), "src")
+	noErr(t, tx.InsertObligationVersion(o))
+	seq := tx.NextSeq()
+	trID := "tr-" + id
+	proofID, err := domain.ApplicabilityProofID(Ref(o), trID)
+	noErr(t, err)
+	spec, err := o.TargetSpec.CanonicalHash()
+	noErr(t, err)
+	var records []domain.ProofDependency
+	for i, d := range deps {
+		dep := domain.ProofDependency{SemanticMeta: Meta(sessA, "dep-"+id+"-"+string(rune('a'+i)), seq), ProofID: proofID, ResourceID: "repo",
+			Kind: d.kind, ResourceRevision: rev, Fingerprint: fpA, Access: o.Access}
+		if d.path != "" {
+			dep.Locator = &domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: d.path}
+		}
+		records = append(records, dep)
+	}
+	user := NewPrincipal(sessA, domain.AuthorityUser)
+	p := domain.ApplicabilityProof{ResourceID: "repo", Fingerprint: fpA, ResourceRevision: rev, SemanticMeta: Meta(sessA, proofID, seq),
+		Target: Ref(o), TargetSpecHash: spec, TransitionID: trID, RuleVersion: "rule/1", AssertionID: "asr-" + id,
+		DependencyIDs: dependencyIDs(records), Access: o.Access}
+	noErr(t, sem.InsertApplicabilityProof(p, records))
+	noErr(t, sem.InsertAssertion(domain.AssertionRecord{SemanticMeta: Meta(sessA, "asr-"+id, seq), Target: Ref(o), Mode: domain.AssertionResourceBound,
+		Actor: user, TransitionID: trID, ProofID: proofID, Access: o.Access}))
+	tr := domain.ObligationTransition{ID: trID, SessionID: sessA, ObligationID: id, Version: 1, Seq: seq, From: domain.ObligationUnresolved,
+		To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation, Actor: user, Cause: domain.CauseAssertion,
+		AssertionMode: domain.AssertionResourceBound, ProofID: proofID, RequestID: "req-" + trID, ReasonCode: domain.ReasonAuthorizedTransition}
+	det := domain.TransitionDetail{SemanticMeta: Meta(sessA, "td-"+trID, seq), Target: Ref(o), TransitionID: trID, Cause: domain.CauseAssertion,
+		ProofID: proofID, AssertionID: "asr-" + id, RuleVersion: "rule/1"}
+	_, err = sem.AppendSemanticObligationTransition(tr, det, 1)
+	return err
 }
 
 // dependencyIDs lists the deps' IDs in insertion order.
@@ -382,13 +410,18 @@ func testSemanticProofDerivedValid(t *testing.T, s store.Store) {
 	report(t, s, "u1", 0, fpA, []string{"src/a.go"}, map[string]string{"src/a.go": "v1"})
 	// One view resolves the obligation's current proof and derives its
 	// validity; the sqlite store serves one view at a time, so a helper
-	// that opened a second view here would deadlock.
+	// that opened a second view here would deadlock. The obligation must
+	// have a current proof, or an expect-invalid case could pass vacuously
+	// on an empty proof ID.
 	valid := func(id string) bool {
 		t.Helper()
 		var ok bool
 		view(t, s, sessA, func(tx store.ReadTx) error {
 			o, err := readSemantic(t, tx).ExactObligation(domain.ObligationRef{SessionID: sessA, ObligationID: id, Version: 1})
 			noErr(t, err)
+			if o.CurrentProofID == "" {
+				t.Fatalf("obligation %s has no current proof", id)
+			}
 			ok, err = store.ProofDerivedValid(readSemantic(t, tx), o.CurrentProofID)
 			noErr(t, err)
 			return nil
@@ -451,4 +484,57 @@ func testSemanticProofDerivedValid(t *testing.T, s store.Store) {
 		}
 		return nil
 	})
+}
+
+// testSemanticA5CommitGuard checks the A5 commit guard: a SATISFIED write
+// resting on a proof the monotone pointers have already felled is refused
+// at commit — atomically, and also when the felling report shares its
+// transaction and is written after the satisfying write, so the guard must
+// resolve the transaction's pending path raises itself (K1 A5).
+func testSemanticA5CommitGuard(t *testing.T, s store.Store) {
+	k1Setup(t, s)
+	// u1 establishes the resource; u2 changes src/a.go's content, raising
+	// its exact affecting key to revision 2.
+	report(t, s, "u1", 0, fpA, []string{"src/a.go"}, map[string]string{"src/a.go": "v1"})
+	report(t, s, "u2", 1, fpA, []string{"src/a.go"}, map[string]string{"src/a.go": "v2"})
+	// A dependency below the raised revision is refused at commit.
+	if err := k1Satisfy(t, s, "o-stale", 1, depSpec{domain.DependencyCurrentPath, "src/a.go"}); !errorsIs(err, domain.ErrInvalidTransition) {
+		t.Errorf("stale dependency: error = %v, want ErrInvalidTransition", err)
+	}
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		if _, err := readSemantic(t, tx).ExactObligation(domain.ObligationRef{SessionID: sessA, ObligationID: "o-stale", Version: 1}); !errorsIs(err, domain.ErrNotFound) {
+			t.Errorf("refused write survived: %v", err)
+		}
+		return nil
+	})
+	// A dependency at the raised revision commits.
+	if err := k1Satisfy(t, s, "o-fresh", 2, depSpec{domain.DependencyCurrentPath, "src/a.go"}); err != nil {
+		t.Errorf("dependency at the raised revision: %v", err)
+	}
+	// One transaction, adversarial order: the satisfying write is appended
+	// before the report that fells it, so the guard must resolve the pending
+	// path raise itself rather than trust the resolution's registration
+	// order.
+	err := s.Update(ctx, sessA, func(tx store.Tx) error {
+		if err := k1SatisfyInTx(t, tx, "o-same", 2, depSpec{domain.DependencyCurrentPath, "src/a.go"}); err != nil {
+			return err
+		}
+		reportInTx(t, tx, "u3", 2, fpA, []string{"src/a.go"}, map[string]string{"src/a.go": "v3"})
+		return nil
+	})
+	if !errorsIs(err, domain.ErrInvalidTransition) {
+		t.Errorf("same-transaction felling: error = %v, want ErrInvalidTransition", err)
+	}
+	// The same order with a spared raise commits: the report records the
+	// path's prior content, so nothing rises past the dependency.
+	err = s.Update(ctx, sessA, func(tx store.Tx) error {
+		if err := k1SatisfyInTx(t, tx, "o-keep", 2, depSpec{domain.DependencyCurrentPath, "src/a.go"}); err != nil {
+			return err
+		}
+		reportInTx(t, tx, "u4", 2, fpA, []string{"src/a.go"}, map[string]string{"src/a.go": "v2"})
+		return nil
+	})
+	if err != nil {
+		t.Errorf("same-transaction spare: %v", err)
+	}
 }

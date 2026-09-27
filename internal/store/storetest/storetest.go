@@ -161,6 +161,7 @@ var suite = []testCase{
 	{"SemanticSettlementCursor", testSemanticSettlementCursor},
 	{"SemanticLiveProofs", testSemanticLiveProofs},
 	{"SemanticProofDerivedValid", testSemanticProofDerivedValid},
+	{"SemanticA5CommitGuard", testSemanticA5CommitGuard},
 	{"RawTransitionCannotSatisfy", testRawTransitionCannotSatisfy},
 
 	// Ingestion records.

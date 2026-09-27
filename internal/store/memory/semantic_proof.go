@@ -722,7 +722,12 @@ func (t *semTx) AppendSemanticObligationTransition(tr domain.ObligationTransitio
 				return invalid("transition %s: assertion %s is not stored for it", tr.ID, d.AssertionID)
 			}
 		}
-		return t.r.checkProofNotStale(ref, tr.ProofID)
+		if err := t.r.checkProofNotStale(ref, tr.ProofID); err != nil {
+			return err
+		}
+		// The A5 commit guard refuses a SATISFIED write resting on a
+		// derived-invalid proof (K1 A5, semantic_k1.go).
+		return t.t.checkProofDerivedValid(t.r, ref, tr.ProofID)
 	})
 	return next.Clone(), nil
 }
