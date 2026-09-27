@@ -29,13 +29,66 @@ func (s *Service) DeclarePinnedTx(tx store.Tx, actor domain.Principal, sourceID,
 	if err != nil {
 		return nil, err
 	}
+	src, err := s.newPinnedSource(tx, actor, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	return s.declarePinned(tx, sem, actor, src, explicitClaim, seq)
+}
+
+// DeclareForReplacementTx declares the slot-0 obligation of a Pinned
+// occurrence created by an explicit authorized replacement in this
+// transaction (C-1, P3-4/12), for lifecycle.ReplaceDirective. The explicit
+// claim is read from the occurrence's immutable creation declaration, never
+// from the caller; an occurrence without a known declaration fails closed
+// with ErrUnsupportedSchema. The prior version must already be retired by
+// the replacement, so the result is the next version, UNRESOLVED, with no
+// inherited grant or proof. A nil reference means the replacement declares
+// no obligation.
+func (s *Service) DeclareForReplacementTx(tx store.Tx, actor domain.Principal, sourceID string, seq uint64) (*domain.ObligationRef, error) {
+	sem, err := begin(tx, actor, seq)
+	if err != nil {
+		return nil, err
+	}
+	src, err := s.newPinnedSource(tx, actor, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	decl, err := sem.CreationDeclaration(src.ID)
+	if errors.Is(err, domain.ErrNotFound) || err == nil && !decl.LegacyKnown {
+		return nil, domain.ErrUnsupportedSchema
+	}
+	if err != nil {
+		return nil, err
+	}
+	claim := ""
+	for _, a := range decl.AcceptedSemantics.AcceptedAttributes {
+		v, ok := strings.CutPrefix(a, "obligation=")
+		if !ok {
+			continue
+		}
+		if claim != "" || !domain.ValidAttributeValue(v) {
+			return nil, domain.ErrInvalidRecord
+		}
+		claim = v
+	}
+	return s.declarePinned(tx, sem, actor, src, claim, seq)
+}
+
+// newPinnedSource loads a Pinned occurrence created in this transaction by
+// an actor with authority at least the source's.
+func (s *Service) newPinnedSource(tx store.Tx, actor domain.Principal, sourceID string) (domain.ContextItem, error) {
 	src, err := tx.Item(sourceID)
 	if err != nil || !src.Access.Permits(actor) {
-		return nil, notFound(err)
+		return domain.ContextItem{}, notFound(err)
 	}
 	if src.Section != domain.SectionPinned || src.Generation != domain.GenerationPinned || !tx.Allocated(src.Seq) || !actor.Authority.AtLeast(src.Authority) {
-		return nil, domain.ErrInvalidRecord
+		return domain.ContextItem{}, domain.ErrInvalidRecord
 	}
+	return src, nil
+}
+
+func (s *Service) declarePinned(tx store.Tx, sem store.SemanticTx, actor domain.Principal, src domain.ContextItem, explicitClaim string, seq uint64) (*domain.ObligationRef, error) {
 	if explicitClaim != "" && !domain.ValidAttributeValue(explicitClaim) {
 		return nil, domain.ErrInvalidRecord
 	}

@@ -89,6 +89,8 @@ func TestSQLiteSuite(t *testing.T) {
 		{"DeclarePinnedRejects", TestDeclarePinnedRejects, false},
 		{"DeclarePinnedReplacementVersions", TestDeclarePinnedReplacementVersions, false},
 		{"DeclareHarness", TestDeclareHarness, false},
+		{"DeclareForReplacement", TestDeclareForReplacement, false},
+		{"DeclareForReplacementFailsClosed", TestDeclareForReplacementFailsClosed, false},
 		{"SetMaterialization", TestSetMaterialization, false},
 		{"TransitionMatrix", TestTransitionMatrix, false},
 		{"TransitionAuthorityT06", TestTransitionAuthorityT06, false},

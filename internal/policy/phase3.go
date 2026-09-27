@@ -30,5 +30,7 @@ func DefaultPhase3Policy() domain.Phase3Policy {
 		MaxCheckpointSemanticBytes: domain.DefaultMaxCheckpointSemanticBytes,
 		CheckpointGeneration:       domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh,
 		DefaultLeaseCalls: 2, MaxLeaseCalls: 8,
+		// Every registered trigger; embedders narrow the set explicitly.
+		GCTriggers: domain.DefaultGCTriggers(),
 	}
 }

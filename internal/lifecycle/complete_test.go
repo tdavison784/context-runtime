@@ -111,9 +111,13 @@ func TestCompleteTaskResolvesOwnedGoalsAndReplaysFrozenReceipt(t *testing.T) {
 				t.Fatalf("goal %s not resolved: %+v", id, g)
 			}
 		}
-		gc, ok := f.requests[first.GCRequestID]
-		if !ok || gc.Trigger != domain.GCTaskCompletion || gc.TaskID != "task" || gc.Origin != p {
-			t.Fatalf("GC request: %+v", gc)
+		sem, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		gc, err := sem.GCRequest(first.GCRequestID)
+		if err != nil || gc.Trigger != domain.GCTaskCompletion || gc.TaskID != "task" || gc.Origin != p {
+			t.Fatalf("GC request: %+v %v", gc, err)
 		}
 		return nil
 	}); err != nil {

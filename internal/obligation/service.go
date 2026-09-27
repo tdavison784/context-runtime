@@ -30,7 +30,7 @@ func New(policy domain.Phase3Policy, reg *Registry) (*Service, error) {
 	if reg == nil || policy.Claim != ClaimPatternVersion || policy.Matcher != MatcherRegistryVersion || policy.ObservationState != ObservationStateRule {
 		return nil, domain.ErrUnsupportedSchema
 	}
-	return &Service{policy: policy, reg: reg}, nil
+	return &Service{policy: policy.Clone(), reg: reg}, nil // no aliasing of caller slices
 }
 
 // request is one mutation's stable identity and canonical arguments (P3-2).

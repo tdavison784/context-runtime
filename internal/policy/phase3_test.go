@@ -17,8 +17,14 @@ func TestDefaultPhase3PolicyIsFiniteAndPinsRegistries(t *testing.T) {
 	if p.MaxCheckpointSemanticBytes != 16*1024 || p.CheckpointGeneration == domain.GenerationPinned || p.DefaultLeaseCalls != 2 || p.MaxLeaseCalls != 8 {
 		t.Fatal("unsafe defaults")
 	}
+	for _, trigger := range domain.DefaultGCTriggers() {
+		if !p.GCTriggerEnabled(trigger) {
+			t.Fatalf("default manifest disables %s", trigger)
+		}
+	}
 	p.MaxTargets = 0
-	if DefaultPhase3Policy().MaxTargets == 0 {
+	p.GCTriggers[0] = "CHANGED"
+	if d := DefaultPhase3Policy(); d.MaxTargets == 0 || d.GCTriggers[0] == "CHANGED" {
 		t.Fatal("caller changed shared defaults")
 	}
 }

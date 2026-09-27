@@ -3,16 +3,24 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
+// ErrGCTriggerDisabled rejects collection for a trigger outside the policy's
+// explicit enabled set. The durable request, if any, stays pending.
+var ErrGCTriggerDisabled = fmt.Errorf("lifecycle: GC trigger disabled by policy: %w", domain.ErrInvalidTransition)
+
 // EnqueueGC persists a durable GC request in the producer's transaction
 // (P3-39). The request ID derives from the trigger identity, so a duplicate
 // trigger is one request; the same identity with different content conflicts.
 // Manual collection calls Collect directly and is never enqueued. The origin is
-// recorded as context only: it never becomes the collecting principal.
+// recorded as context only: it never becomes the collecting principal. A
+// supersession/TTL/policy trigger outside the enabled set persists nothing and
+// returns an empty ID; task completion always persists its request (P3-39),
+// which then waits, pending, until its trigger is enabled.
 func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain.GCTrigger, scope domain.CollectScope, taskID, triggerID string) (string, error) {
 	sem, err := store.Semantic(tx)
 	if err != nil {
@@ -25,11 +33,17 @@ func (s *Service) enqueueGC(tx store.Tx, sem store.SemanticTx, origin domain.Pri
 	if trigger == domain.GCManual || triggerID == "" {
 		return "", domain.ErrInvalidRecord
 	}
+	if !trigger.Valid() {
+		return "", domain.ErrInvalidRecord
+	}
 	if err := origin.Validate(); err != nil {
 		return "", err
 	}
 	if origin.SessionID != tx.SessionID() {
 		return "", domain.ErrNotFound
+	}
+	if trigger != domain.GCTaskCompletion && !s.policy.GCTriggerEnabled(trigger) {
+		return "", nil
 	}
 	requestID := "gc_" + domain.NewCanonicalEncoder("context-runtime/gc-trigger/v1").String(origin.SessionID).String(string(trigger)).String(triggerID).Hash()
 	r := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: gcRequestID(origin.SessionID, requestID), SessionID: origin.SessionID, SchemaVersion: domain.SemanticSchemaV1},
@@ -93,12 +107,15 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 	if req.PolicyVersion != s.policy.Version {
 		return out, domain.ErrUnsupportedSchema
 	}
+	if !s.policy.GCTriggerEnabled(req.Trigger) {
+		return out, ErrGCTriggerDisabled
+	}
 	return s.collect(tx, collector, req.CollectIntent, req.ID, seq)
 }
 
 // CollectPending executes up to max pending requests, each in its own
 // transaction. collectorFor supplies the authenticated collector for a
-// request, or false to leave it pending. The first failure stops the batch
+// request, or false to leave it pending; disabled triggers stay pending too. The first failure stops the batch
 // and leaves that request pending.
 func (s *Service) CollectPending(ctx context.Context, session string, collectorFor func(domain.GCRequest) (domain.Principal, bool), max int) (int, error) {
 	if collectorFor == nil || max <= 0 {
@@ -119,7 +136,7 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 	done := 0
 	for _, r := range pending {
 		p, ok := collectorFor(r)
-		if !ok {
+		if !ok || !s.policy.GCTriggerEnabled(r.Trigger) {
 			continue
 		}
 		if err := s.store.Update(ctx, session, func(tx store.Tx) error {

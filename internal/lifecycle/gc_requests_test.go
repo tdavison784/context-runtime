@@ -51,18 +51,25 @@ func TestCompletionGCRequestExecutesOnceAfterProducerCommit(t *testing.T) {
 			t.Fatalf("%s collected: %v", name, err)
 		}
 	}
-	if _, ok := f.results[id]; ok {
-		t.Fatal("failed attempt linked a result")
-	}
+	readSemantic(t, mem, func(sem store.SemanticReader) error {
+		if _, err := sem.GCResult(id); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("failed attempt linked a result: %v", err)
+		}
+		return nil
+	})
 	collector := storetest.NewPrincipal("s", domain.AuthorityHarness)
 	first, err := executeGC(f, mem, s, collector, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := first.Result.Collect
-	if r.GCRequestID != id || len(r.ArchivedRefs) != 1 || r.ArchivedRefs[0].ItemID != "scratch" || f.results[id].CollectReceiptID != r.ID {
-		t.Fatalf("collection: %+v link %+v", r, f.results[id])
-	}
+	readSemantic(t, mem, func(sem store.SemanticReader) error {
+		link, err := sem.GCResult(id)
+		if err != nil || r.GCRequestID != id || len(r.ArchivedRefs) != 1 || r.ArchivedRefs[0].ItemID != "scratch" || link.CollectReceiptID != r.ID {
+			t.Fatalf("collection: %+v link %+v %v", r, link, err)
+		}
+		return nil
+	})
 	if err := f.update(mem, func(tx store.Tx) error {
 		sem, _ := store.Semantic(tx)
 		page, err := sem.PendingGCRequests(store.Page{Limit: 4})
@@ -116,8 +123,8 @@ func TestEnqueueGCDeduplicatesTriggerIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if ids[0] != ids[1] || len(f.requests) != 1 {
-		t.Fatalf("duplicate trigger: %v %d", ids, len(f.requests))
+	if pending := pendingGC(t, mem); ids[0] != ids[1] || len(pending) != 1 {
+		t.Fatalf("duplicate trigger: %v %+v", ids, pending)
 	}
 	for name, enqueue := range map[string]func(store.Tx) (string, error){
 		"changed scope": func(tx store.Tx) (string, error) {
@@ -133,14 +140,94 @@ func TestEnqueueGCDeduplicatesTriggerIdentity(t *testing.T) {
 	}
 }
 
-func TestCollectPendingFailsClosedWithoutBackendSupport(t *testing.T) {
+func TestCollectPendingExecutesDurableRequestsOnRealStore(t *testing.T) {
+	ctx := context.Background()
 	mem := memory.New()
 	t.Cleanup(func() { mem.Close() })
 	s, _ := New(mem, testPolicy())
-	n, err := s.CollectPending(context.Background(), "s", func(domain.GCRequest) (domain.Principal, bool) {
-		return storetest.NewPrincipal("s", domain.AuthoritySystem), true
-	}, 4)
-	if n != 0 || !errors.Is(err, domain.ErrUnsupportedSchema) {
+	seedCompletion(t, mem, nil, "", false)
+	scratch := storetest.NewItem("s", "scratch", 0, "scratch")
+	scratch.Scope, scratch.Access, scratch.Generation = domain.ScopeTask, storetest.DirectiveBoundary("s"), domain.GenerationEphemeral
+	seedItem(t, mem, scratch)
+	if _, err := s.CompleteTaskStandalone(ctx, storetest.NewPrincipal("s", domain.AuthorityUser), domain.CompleteTaskIntent{RequestID: "r", TaskID: "task"}); err != nil {
+		t.Fatal(err)
+	}
+	collector := storetest.NewPrincipal("s", domain.AuthorityHarness)
+	skip := func(domain.GCRequest) (domain.Principal, bool) { return domain.Principal{}, false }
+	if n, err := s.CollectPending(ctx, "s", skip, 4); n != 0 || err != nil {
+		t.Fatalf("skipped: %d %v", n, err)
+	}
+	pick := func(r domain.GCRequest) (domain.Principal, bool) { return collector, r.TaskID == collector.TaskID }
+	if n, err := s.CollectPending(ctx, "s", pick, 4); n != 1 || err != nil {
 		t.Fatalf("pending: %d %v", n, err)
+	}
+	if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || err != nil {
+		t.Fatalf("request executed twice: %d %v", n, err)
+	}
+	if err := mem.View(ctx, "s", func(tx store.ReadTx) error {
+		it, err := tx.Item("scratch")
+		if err != nil || it.Residency != domain.ResidencyArchived {
+			t.Fatalf("scratch not collected: %+v %v", it, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGCTriggerSetIsEnforced(t *testing.T) {
+	ctx := context.Background()
+	mem := memory.New()
+	t.Cleanup(func() { mem.Close() })
+	manualOnly := testPolicy()
+	manualOnly.GCTriggers = []domain.GCTrigger{domain.GCManual}
+	s, err := New(mem, manualOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCompletion(t, mem, nil, "", false)
+	// Completion always persists its durable request, even while disabled.
+	done, err := s.CompleteTaskStandalone(ctx, storetest.NewPrincipal("s", domain.AuthorityUser), domain.CompleteTaskIntent{RequestID: "r", TaskID: "task"})
+	if err != nil || done.GCRequestID == "" {
+		t.Fatalf("completion: %+v %v", done, err)
+	}
+	collector := storetest.NewPrincipal("s", domain.AuthorityHarness)
+	f := newFacets()
+	if _, err := executeGC(f, mem, s, collector, done.GCRequestID); !errors.Is(err, ErrGCTriggerDisabled) {
+		t.Fatalf("disabled trigger executed: %v", err)
+	}
+	pick := func(domain.GCRequest) (domain.Principal, bool) { return collector, true }
+	if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || err != nil {
+		t.Fatalf("disabled request not skipped: %d %v", n, err)
+	}
+	if pending := pendingGC(t, mem); len(pending) != 1 {
+		t.Fatalf("disabled request lost: %+v", pending)
+	}
+	// A disabled producer trigger persists nothing.
+	if err := f.update(mem, func(tx store.Tx) error {
+		id, err := s.EnqueueGC(tx, collector, domain.GCSupersession, domain.CollectSession, "", "event-1")
+		if id != "" {
+			t.Fatalf("disabled trigger enqueued %s", id)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if pending := pendingGC(t, mem); len(pending) != 1 {
+		t.Fatalf("disabled producer persisted: %+v", pending)
+	}
+	if _, err := collect(f, mem, s, collector, domain.CollectIntent{RequestID: "m", Scope: domain.CollectSession, Trigger: domain.GCManual}); err != nil {
+		t.Fatalf("enabled manual collection: %v", err)
+	}
+	// Re-enabling lets the same durable request run once.
+	all, _ := New(mem, testPolicy())
+	if n, err := all.CollectPending(ctx, "s", pick, 4); n != 1 || err != nil {
+		t.Fatalf("re-enabled request: %d %v", n, err)
+	}
+	completionOnly := testPolicy()
+	completionOnly.GCTriggers = []domain.GCTrigger{domain.GCTaskCompletion}
+	s2, _ := New(mem, completionOnly)
+	if _, err := collect(f, mem, s2, collector, domain.CollectIntent{RequestID: "m2", Scope: domain.CollectSession, Trigger: domain.GCManual}); !errors.Is(err, ErrGCTriggerDisabled) {
+		t.Fatalf("disabled manual collection: %v", err)
 	}
 }
