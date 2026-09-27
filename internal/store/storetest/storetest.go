@@ -143,6 +143,7 @@ var suite = []testCase{
 	{"SemanticGCRequests", testSemanticGCRequests},
 	{"SemanticGCOutcomes", testSemanticGCOutcomes},
 	{"SemanticGCBatchReceipts", testSemanticGCBatchReceipts},
+	{"SemanticGCProgress", testSemanticGCProgress},
 	{"SemanticGCCandidates", testSemanticGCCandidates},
 	{"SemanticOpenGoalsByTaskOwner", testSemanticOpenGoalsByTaskOwner},
 	{"SemanticLedgerSeqIsolation", testSemanticLedgerSeqIsolation},

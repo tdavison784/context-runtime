@@ -105,3 +105,65 @@ func testSemanticGCBatchReceipts(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// testSemanticGCProgress checks the GC batch cursor (H3): an exact-key
+// read, a compare-and-swap put on Revision whose stored revision is the
+// expected one plus one, a conflict that writes nothing, a request that
+// must exist and still be pending, and a progress-only transaction (an
+// attempt count) that commits without a sequenced record.
+func testSemanticGCProgress(t *testing.T, s store.Store) {
+	req := gcWorld(t, s)
+	progress := func(batches uint64, cursor domain.GCCursor, attempts uint64) domain.GCProgress {
+		return domain.GCProgress{SessionID: sessA, GCRequestID: req.ID, Cursor: cursor, Batches: batches, Attempts: attempts}
+	}
+	read := func() (domain.GCProgress, error) {
+		var p domain.GCProgress
+		var err error
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			p, err = readSemantic(t, tx).GCProgress(req.ID)
+			return nil
+		})
+		return p, err
+	}
+	if _, err := read(); !errorsIs(err, domain.ErrNotFound) {
+		t.Errorf("before the first claim: error = %v, want ErrNotFound", err)
+	}
+	put := func(p domain.GCProgress, expected uint64) (domain.GCProgress, error) {
+		var out domain.GCProgress
+		err := s.Update(ctx, sessA, func(tx store.Tx) error {
+			var err error
+			out, err = semantic(t, tx).PutGCProgress(p, expected)
+			return err
+		})
+		return out, err
+	}
+	got, err := put(progress(0, domain.GCCursor{}, 1), 0) // an attempt, alone in its transaction
+	noErr(t, err)
+	if got.Revision != 1 {
+		t.Errorf("created progress revision = %d, want 1", got.Revision)
+	}
+	if _, err := put(progress(1, domain.GCCursor{Seq: 3, ID: "i1"}, 1), 0); !errorsIs(err, domain.ErrVersionConflict) {
+		t.Errorf("stale revision: error = %v, want ErrVersionConflict", err)
+	}
+	got, err = put(progress(1, domain.GCCursor{Seq: 3, ID: "i1"}, 1), 1)
+	noErr(t, err)
+	if stored, err := read(); err != nil || stored != got || stored.Revision != 2 || stored.Batches != 1 {
+		t.Errorf("GCProgress = %+v (%v), want %+v at revision 2", stored, err, got)
+	}
+	bad := progress(0, domain.GCCursor{Seq: 3, ID: "i1"}, 1) // a cursor without a completed batch
+	if _, err := put(bad, 2); !errorsIs(err, domain.ErrInvalidRecord) {
+		t.Errorf("invalid progress: error = %v, want ErrInvalidRecord", err)
+	}
+	missing := progress(0, domain.GCCursor{}, 1)
+	missing.GCRequestID = "gc-missing"
+	if _, err := put(missing, 0); !errorsIs(err, domain.ErrInvalidRecord) {
+		t.Errorf("progress of a missing request: error = %v, want ErrInvalidRecord", err)
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		return semantic(t, tx).InsertGCResult(domain.GCResult{SemanticMeta: Meta(sessA, "gr-gc1", tx.NextSeq()), GCRequestID: req.ID,
+			Outcome: domain.GCFailed, Reason: domain.GCFailureAttemptsExhausted})
+	})
+	if _, err := put(progress(1, domain.GCCursor{Seq: 3, ID: "i1"}, 2), 2); !errorsIs(err, domain.ErrInvalidTransition) {
+		t.Errorf("progress of a finished request: error = %v, want ErrInvalidTransition", err)
+	}
+}
