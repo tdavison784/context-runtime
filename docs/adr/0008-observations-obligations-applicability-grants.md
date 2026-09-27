@@ -542,25 +542,37 @@ gate checklist (`phase3-decisions.md`):
 Serialized U delta/rebase, actual inherited-request removal, and rebase
 omission/order are explicitly Phase 5 and are not part of this gate.
 
-## Outstanding required tests (SPEC-1.23)
+## Outstanding required tests (SPEC-1.23, SPEC-2.14)
 
 P3-42 requires every decision above to map to its named required tests.
 PR #6 review round 1 (`r6-spec1.md`, SPEC-1.23) searched every package and
-found no real counterpart for the following required-test bullets; this ADR
-records the gap honestly here rather than implying complete coverage
-elsewhere in this document. Three are already being closed as part of a
-different finding's fix, cited below; the rest remain open and are not
-owned by this ADR's own package (`internal/obligation`) unless marked.
+found no real counterpart for the required-test bullets below. Round 2
+(`r6-spec2.md`, SPEC-2.14) reconfirmed the gap is still open, noting that
+exactly three bullets have since gained a real test as a side effect of
+their round-1 code fix landing:
 
-- **P3-1** "TargetCall sequence reuse rejected" for Phase 3 record families
-  — closing alongside SPEC-1.4 (W2b: three SQLite row types gain
-  `SemanticSeq()`).
-- **P3-3** "old-key migration" (an agent updates its own pre-upgrade key) —
-  closing alongside SPEC-1.5 (W1: migration backfill or namespace fallback
-  for legacy `Namespace ""`).
-- **P3-4** "legacy unknown declaration fails closed" on the ingest path —
-  closing alongside SPEC-1.3 (W1: `SameDirective` must not fall through to
-  replacement when a declaration is unknown).
+- **Resolved.** **P3-1** "TargetCall sequence reuse rejected" for Phase 3
+  record families — `internal/store/storetest`'s
+  `TestConformance/SemanticLedgerSeqIsolation` and
+  `internal/store/sqlite`'s `TestPhase3RowsCarrySemanticSeq` (SPEC-1.4:
+  the three SQLite row types now implement `SemanticSeq()`).
+- **Resolved.** **P3-3** "old-key migration" (an agent updates its own
+  pre-upgrade key) — `internal/graph`'s `TestAgentUpdatesOwnPreUpgradeKey`
+  and `internal/ingest`'s `TestUpgradeAgentOwnOldKey_G5` (SPEC-1.5).
+- **Resolved.** **P3-4** "legacy unknown declaration fails closed" on the
+  ingest path — `internal/graph`'s
+  `TestIdenticalRestatementOfUnknownIdentityFailsClosed` and
+  `internal/ingest`'s `TestUnknownIdentityRestatementIsALineDiagnostic`
+  (SPEC-1.3; migration 0034 additionally reconciles a *known* declaration
+  where identity is establishable, per ADR 3's amendment above — the
+  "fails closed" case these tests cover is now the narrower unknown-only
+  case, not every legacy item).
+
+The remaining bullets are still open, not owned by this ADR's own package
+(`internal/obligation`) unless marked, and P3-42's mapping therefore remains
+unmet — this ADR stays Proposed for this reason among others (Status header
+above).
+
 - **P3-1** "Prepare/MarkSent stale after every new semantic record family" —
   still only the Phase 2 `TestObligationChangeStalesPreview`; no Phase
   3-record-family case exists (`internal/invocation`).
@@ -602,9 +614,10 @@ owned by this ADR's own package (`internal/obligation`) unless marked.
   no test found in `internal/lifecycle`.
 
 This list is not this ADR's package's obligation to close by itself; it is
-recorded so the Phase 3 gate's own claim of completeness is accurate. Adding
-each test, or recording an explicit ruling that a bullet is satisfied
-another way, closes this section.
+recorded so the Phase 3 gate's own claim of completeness is accurate. SPEC-2.14
+counts 21 required-test bullets still open across the list above (the three
+resolved bullets moved out of the count). Adding each test, or recording an
+explicit ruling that a bullet is satisfied another way, closes this section.
 
 ## Residual risks and limits
 
