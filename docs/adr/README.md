@@ -173,9 +173,10 @@ later commander rulings recorded there. New at this pass:
 - Three further SDD.md amendments this reconciliation surfaced, applied
   directly (no dedicated ADR owns the FR text specifically): FR-DOM-006 (a
   semantic tool's own acknowledgment is never `tool_result`/evidence — W5's
-  ruling); FR-TOOL-001 (`context_rehydrate` is the only model-facing
-  rehydration path; the underlying operation is HARNESS-only — W6's ruling
-  2, ADR 6); FR-GC-003/004 (only a conversation's newest checkpoint is
+  ruling); FR-TOOL-001 (`context_get` and `context_rehydrate` are the only
+  model-facing paths to the same lease-issuing admission; the underlying
+  operation is HARNESS-only — W6's ruling 2, ADR 6); FR-GC-003/004 (only a
+  conversation's newest checkpoint is
   protected by kind — C-17, ADR 16; GC triggers run only from an explicit
   enabled set — P3-38/39, ADR 16).
 - ADR 4's "Canonical domain registry (Phase 3)" section (committed directly
