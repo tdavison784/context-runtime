@@ -337,10 +337,11 @@ func TestLiveProofPathReadsSeek(t *testing.T) {
 	assertIndexed(t, s, []string{"session_id", "resource_id"}, q, "s", "repo")
 }
 
-// TestCursorPagesSeekRange checks DUR-3.5: a page resumed from a cursor
-// seeks its (seq, id) keyset in the index, (seq,id)>(?,?) or <(?,?) in the
-// search constraint, so a page costs the same at any depth instead of
-// re-scanning every row before the cursor.
+// TestCursorPagesSeekRange checks DUR-3.5 and DUR-4.10: a page resumed from
+// a cursor seeks its (seq, id) keyset in the index, (seq,id)>(?,?) or
+// <(?,?) in the search constraint, so a page costs the same at any depth
+// instead of re-scanning every row before the cursor. Every paged Phase 3
+// read is locked here.
 func TestCursorPagesSeekRange(t *testing.T) {
 	s, _ := openTemp(t)
 	page := store.Page{Limit: 5, After: store.Cursor{Seq: 7, ID: "x"}}
@@ -382,6 +383,55 @@ func TestCursorPagesSeekRange(t *testing.T) {
 		},
 		"CheckpointsByConversation(descending)": func(r store.SemanticReader) error {
 			_, err := r.CheckpointsByConversation(viewer, "conv", page)
+			return err
+		},
+		// DUR-4.10: reads that already seek, locked here so a regression to
+		// re-scanning before the cursor fails.
+		"LifecycleByTarget": func(r store.SemanticReader) error {
+			_, err := r.LifecycleByTarget(domain.TargetItem, "i", page)
+			return err
+		},
+		"SemanticChanges": func(r store.SemanticReader) error {
+			_, err := r.SemanticChanges(viewer, domain.ItemGrantTarget("s", "i"), page)
+			return err
+		},
+		"ExchangeMembers":      func(r store.SemanticReader) error { _, err := r.ExchangeMembers("x", page); return err },
+		"AdmissionsByExchange": func(r store.SemanticReader) error { _, err := r.AdmissionsByExchange("x", page); return err },
+		"OpenExchangesByTask":  func(r store.SemanticReader) error { _, err := r.OpenExchangesByTask("task", page); return err },
+		"ReservingCallsByTask": func(r store.SemanticReader) error { _, err := r.ReservingCallsByTask("task", page); return err },
+		"LeasesByHolder": func(r store.SemanticReader) error {
+			_, err := r.LeasesByHolder(domain.Principal{SessionID: "s", TaskID: "t", AgentID: "a", Authority: domain.AuthorityAgent}, "conv", "turn", page)
+			return err
+		},
+		"LeasesBySource": func(r store.SemanticReader) error {
+			_, err := r.LeasesBySource(domain.ItemContentRef{ItemID: "i", ContentHash: "h"}, page)
+			return err
+		},
+		"RetrievalEventsByRequest": func(r store.SemanticReader) error {
+			_, err := r.RetrievalEventsByRequest(viewer, "req", page)
+			return err
+		},
+		"ProofDependencies": func(r store.SemanticReader) error { _, err := r.ProofDependencies("p", page); return err },
+		"CurrentBoundObligationsBySubject": func(r store.SemanticReader) error {
+			_, err := r.CurrentBoundObligationsBySubject("sub", page)
+			return err
+		},
+		"ObligationsByTaskOwner": func(r store.SemanticReader) error { _, err := r.ObligationsByTaskOwner("task", page); return err },
+		"WorkspaceBindingsByContext": func(r store.SemanticReader) error {
+			_, err := r.WorkspaceBindingsByContext("", "task", "", page)
+			return err
+		},
+		"OpenGoalsByTaskOwner": func(r store.SemanticReader) error { _, err := r.OpenGoalsByTaskOwner("task", page); return err },
+		"GCCandidates(task)": func(r store.SemanticReader) error {
+			_, err := r.GCCandidates(store.GCCandidateFilter{Viewer: viewer, Scope: domain.CollectTask, TaskID: "task", SnapshotSeq: 9, Page: page})
+			return err
+		},
+		"GCCandidates(session)": func(r store.SemanticReader) error {
+			_, err := r.GCCandidates(store.GCCandidateFilter{Viewer: viewer, Scope: domain.CollectSession, SnapshotSeq: 9, Page: page})
+			return err
+		},
+		"PendingGCRequestsByTrigger": func(r store.SemanticReader) error {
+			_, err := r.PendingGCRequestsByTrigger([]domain.GCTrigger{domain.GCSupersession, domain.GCTTL}, page)
 			return err
 		},
 	}
