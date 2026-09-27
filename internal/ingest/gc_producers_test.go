@@ -1,0 +1,115 @@
+package ingest
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/lifecycle"
+	"github.com/tdavison784/context-runtime/internal/store"
+)
+
+// withGCTriggers enables every GC trigger in both the ingester's recorded
+// policy and its lifecycle service's.
+func (f *fixture) withGCTriggers() {
+	f.t.Helper()
+	pol := testPolicy()
+	pol.GCTriggers = domain.DefaultGCTriggers()
+	f.in.Semantic = &pol
+	svc, err := lifecycle.New(f.s, pol)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.in.Lifecycle = svc
+}
+
+// gcRequests returns the session's pending GC requests by trigger.
+func (f *fixture) gcRequests() map[domain.GCTrigger][]domain.GCRequest {
+	f.t.Helper()
+	out := map[domain.GCTrigger][]domain.GCRequest{}
+	f.view(func(tx store.ReadTx) error {
+		sem, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		page, err := sem.PendingGCRequests(store.Page{Limit: 256})
+		for _, r := range page.Records {
+			out[r.Trigger] = append(out[r.Trigger], r)
+		}
+		return err
+	})
+	return out
+}
+
+// TestGCProducers_SPEC16 (P3-39, SPEC-1.6): with the SUPERSESSION and TTL
+// triggers enabled, ingest enqueues a durable GC request, in the event's
+// transaction, when a parsed directive replaces a current version (origin:
+// the replacing source actor) and when an event advances its task's turn
+// (one per turn). A duplicate restatement, an event that opens no turn, and
+// retries enqueue nothing more.
+func TestGCProducers_SPEC16(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		f.withGCTriggers()
+		user, sys := principal(domain.AuthorityUser), principal(domain.AuthoritySystem)
+		// Every USER event opens a turn; a SYSTEM event opens none.
+		q := userEvent("q1", "hi", false)
+		f.mustIngest(user, q)
+		ttl := f.gcRequests()[domain.GCTTL]
+		if len(ttl) != 1 || ttl[0].TaskID != "T" || ttl[0].Scope != domain.CollectTask || ttl[0].Origin != user {
+			t.Fatalf("TTL requests after turn 1 = %+v", ttl)
+		}
+
+		f.mustIngest(sys, sysEvent("v1", "## Pinned\n- [p] one\n"))
+		f.mustIngest(sys, sysEvent("dup", "Note.\n## Pinned\n- [p] one\n"))
+		if got := f.gcRequests(); len(got[domain.GCSupersession]) != 0 || len(got[domain.GCTTL]) != 1 {
+			t.Fatalf("a first version, a duplicate or a turnless event enqueued: %+v", got)
+		}
+		v2 := sysEvent("v2", "## Pinned\n- [p] two\n")
+		f.mustIngest(sys, v2)
+		sup := f.gcRequests()[domain.GCSupersession]
+		if len(sup) != 1 || sup[0].TaskID != "T" || sup[0].Scope != domain.CollectTask || sup[0].Origin != sys {
+			t.Fatalf("supersession requests = %+v", sup)
+		}
+
+		q2 := userEvent("q2", "next", false)
+		f.mustIngest(user, q2)
+		seq := f.lastSeq()
+		for _, st := range []struct {
+			p domain.Principal
+			e domain.Event
+		}{{user, q}, {sys, v2}, {user, q2}} {
+			if _, err := f.ingest(st.p, st.e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got := f.gcRequests()
+		if len(got[domain.GCTTL]) != 2 || len(got[domain.GCSupersession]) != 1 || f.lastSeq() != seq {
+			t.Fatalf("after turn 2 and retries: TTL %d, supersession %d, seq %d -> %d", len(got[domain.GCTTL]), len(got[domain.GCSupersession]), seq, f.lastSeq())
+		}
+	})
+}
+
+// TestGCProducers_DisabledOrMissing_SPEC16: under the default policy (the
+// triggers disabled) nothing is enqueued; with a trigger enabled but no
+// lifecycle producer configured, the event fails closed rather than
+// silently dropping its durable trigger.
+func TestGCProducers_DisabledOrMissing_SPEC16(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		user, sys := principal(domain.AuthorityUser), principal(domain.AuthoritySystem)
+		f.mustIngest(user, userEvent("q1", "hi", false))
+		f.mustIngest(sys, sysEvent("v1", "## Pinned\n- [p] one\n"))
+		f.mustIngest(sys, sysEvent("v2", "## Pinned\n- [p] two\n"))
+		if got := f.gcRequests(); len(got[domain.GCTTL])+len(got[domain.GCSupersession]) != 0 {
+			t.Fatalf("disabled triggers enqueued %+v", got)
+		}
+		f.withGCTriggers()
+		f.in.Lifecycle = nil
+		f.requireAtomic(domain.ErrUnsupportedSchema, func() error {
+			_, err := f.ingest(user, userEvent("q2", "next", false))
+			return err
+		})
+		if _, err := f.ingest(sys, sysEvent("v3", "## Pinned\n- [p] three\n")); !errors.Is(err, domain.ErrUnsupportedSchema) {
+			t.Fatalf("replacement without a GC producer: %v", err)
+		}
+	})
+}
