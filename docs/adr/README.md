@@ -40,7 +40,7 @@ Codex) has scrutinized it, noting which findings changed the decision.
 | 5 | Semantic scoring weights, SemanticBytes encoding, fixed-point scale, relevance threshold, resident-byte limits, soft-pressure fraction, retrieval-call windows, stub budget, checkpoint size limit, decision-trace retention | Phase 4 | pending — gates Phase 4 |
 | 6 | Access-boundary and context-eligibility matrix, historical leases, expiry, epoch validation | Phase 1 | [Accepted](0006-access-and-eligibility.md) |
 | 7 | Lexical index and normalization rules | Phase 4 | pending — gates Phase 4 |
-| 8 | Observation identities, obligation matcher/claim versions, evidence applicability fingerprints, mutation grants, invalidation rules | Phase 3 | [Proposed](0008-observations-obligations-applicability-grants.md) — gates Phase 3 |
+| 8 | Observation identities, obligation matcher/claim versions, evidence applicability fingerprints, mutation grants, invalidation rules | Phase 3 | [Proposed](0008-observations-obligations-applicability-grants.md) — gates Phase 3; gate evidence green at integration head `fc87199` (one unrelated W3 fixture pending), Status kept Proposed pending commander acceptance |
 | 9 | Provider transport libraries, retry policy, OpenAI API surface, verified reasoning replay rules | Phase 5 | pending — gates Phase 5 |
 | 10 | Benchmark fixture/oracle, comparative statistics and run counts, baseline profiles, shared resource limits/projections, reproducible hardware/data profile | Phase 5 (initial fixture/profile); finalized Phase 8 | pending — gates Phase 5 |
 | 11 | Render templates and delimiters per provider | Phase 5 | pending — gates Phase 5 |
@@ -154,6 +154,34 @@ ADR 8 itself remains Status: Proposed — these SDD.md edits are applied now,
 per the commander's freeze ruling, independently of ADR 8 reaching Accepted
 at the Phase 3 gate, the same precedent ADR 19's v0.9 edits set for this
 repository (below).
+
+**Final reconciliation against the integrated code (2026-09-26, head
+`fc87199`).** ADR 8's decisions, and ADR 6/16/17/19's amendments, were
+rewritten to cite real, `grep`-verified packages/functions/tests from the
+landed `internal/obligation` (W4), `internal/tools`/`internal/graph`
+membership (W5), and `internal/ingest` (W7) code, per W4/W5/W7's final
+reports (`final-p3-w4.md`, `final-p3-w5.md`, `final-p3-w7.md`) and the
+later commander rulings recorded there. New at this pass:
+
+- [0003](0003-sqlite-driver-and-migrations.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
+  Phase 3's eleven forward migrations, 0018 through 0028.
+- [0017](0017-call-ledger.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
+  `domain.OutcomeBinding`, exchange membership joined to a completed
+  outcome through its trusted dispatcher, and confirmation that
+  `Conversation.LogicalCalls` is the one completed-inference counter both
+  this ADR and Phase 3's retrieval leases read.
+- Three further SDD.md amendments this reconciliation surfaced, applied
+  directly (no dedicated ADR owns the FR text specifically): FR-DOM-006 (a
+  semantic tool's own acknowledgment is never `tool_result`/evidence — W5's
+  ruling); FR-TOOL-001 (`context_rehydrate` is the only model-facing
+  rehydration path; the underlying operation is HARNESS-only — W6's ruling
+  2, ADR 6); FR-GC-003/004 (only a conversation's newest checkpoint is
+  protected by kind — C-17, ADR 16; GC triggers run only from an explicit
+  enabled set — P3-38/39, ADR 16).
+- ADR 4's "Canonical domain registry (Phase 3)" section (committed directly
+  by workers W4/W7 during implementation, `549190c`/`6933b09`) was checked
+  against the golden list in `internal/domain/canonical_domains_test.go`
+  and found complete and accurate; no further edit was needed.
 
 Independent review: Codex gpt-6-sol xhigh reviewed all seven Phase 1 ADRs
 against the committed code and the SDD in two passes — the initial review
