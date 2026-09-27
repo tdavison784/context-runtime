@@ -118,3 +118,33 @@ tables. Source item content and source ranges retain their existing immutable st
   where it does not. This seed document is not otherwise updated after the
   contract freeze; see ADR 3's Phase 3 amendment for the authoritative,
   current migration list.**
+
+## PR #6 round 3 additions (DUR-3.1/DUR-3.2; added by explicit commander
+request, an exception to the "not otherwise updated" note above — ADR 3's
+own migration bullets for 0045-0047 remain the authoritative, current
+list)
+
+These are internal lookup/index tables and a policy field, not persisted
+domain records, matching how migration 0012's `lookup_canonical`/
+`lookup_working`/`lookup_source`/`lookup_blob` tables were never added to
+the "Persisted record manifest" above either:
+
+- `lookup_live_proof_path` (`session_id, resource_id, key, seq, proof_id`)
+  — DUR-3.1 (A): each live proof's exact-path/ancestor-directory `CURRENT_PATH`
+  keys, and its `WORKSPACE` key (`"ws"`), so a report reads only the
+  proofs it can affect.
+- `lookup_live_dependents` (`session_id, resource_id, dependents`) —
+  the live non-`FIXED_CONTENT` dependency-row count per resource, the
+  cap `Phase3Policy.MaxLiveProofDependents` validates against (retired by
+  the commander's FROZEN K1 ruling once K1 itself lands, ADR 8 K1e).
+- `Phase3Policy.MaxLiveProofDependents` (int; default 256) — an added
+  field on the recorded policy, persisted on `rec_envelope`/`rec_receipt`
+  (migration 0046) so P3-40's exact historical retry keeps validating
+  under the policy it was recorded with.
+- `lookup_pending_gc_trigger` (`session_id, trigger, seq, request_id`) —
+  DUR-3.2: pending `GCRequest`s indexed by trigger, so a collector never
+  pages a disabled trigger's requests.
+- `gc_queue_cursor` (`session_id` PK, `cursor_seq, cursor_id, revision`)
+  — DUR-3.2: each session's CAS-written, durable scan position,
+  replacing an earlier in-process cursor that a restart or a new service
+  instance used to reset.
