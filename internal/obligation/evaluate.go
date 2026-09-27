@@ -74,23 +74,14 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
 	}
-	v := m.Evaluate(in)
-	switch v.Kind {
-	case VerdictPass:
-		switch {
-		case o.Status == domain.ObligationUnresolved:
-			return s.satisfy(tx, sem, actor, o, obs, v, nil)
-		case o.Status == domain.ObligationSatisfied && cur != nil && cur.ObservationID != obs.ID && run.Ordinal > curOrdinal:
-			return s.satisfy(tx, sem, actor, o, obs, v, cur)
-		}
-	case VerdictFail:
-		// A newer complete applicable FAIL rejects this subject's current
-		// matcher or resource-bound satisfaction through the restricted path
-		// (P3-16, SPEC-1.10). Attestations carry no proof and are untouched.
-		// Applicable means the FAIL's evidence boundary covers the proof's:
-		// a FAIL private to another agent never rejects a wider proof, and
-		// its ID is never recorded where the proof's readers see it (H1,
-		// SEC-2.9).
+	// A newer complete FAIL of this subject and family rejects the current
+	// matcher or resource-bound satisfaction through the restricted path
+	// (P3-16, SPEC-1.10) whatever fingerprint or content it observed:
+	// ordering is by run ordinal only (H1). It must cover the proof's
+	// boundary, so a FAIL private to another agent never rejects a wider
+	// proof or has its ID recorded where the proof's readers see it
+	// (SEC-2.9). Attestations carry no proof and are untouched.
+	if obs.Family == m.Family() && obs.SubjectKey == o.TargetSubjectKey && obs.TerminalComplete() && obs.Outcome == domain.OutcomeFail {
 		if o.Status == domain.ObligationSatisfied && cur != nil && run.Ordinal > curOrdinal && failCovers(cur.Access, obs, run) {
 			inv := invalidation{cause: domain.CauseProofRejected, causeRecord: obs.ID, requestID: obs.ID, reason: domain.ReasonProofRejected, rule: ProofRejectionRule}
 			seq := tx.NextSeq()
@@ -98,6 +89,15 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 				return nil, err
 			}
 			return []string{recordID("otr_", string(inv.cause), cur.Target.Target().AuthorizationKey, obs.ID)}, nil
+		}
+		return nil, nil
+	}
+	if v := m.Evaluate(in); v.Kind == VerdictPass {
+		switch {
+		case o.Status == domain.ObligationUnresolved:
+			return s.satisfy(tx, sem, actor, o, obs, v, nil)
+		case o.Status == domain.ObligationSatisfied && cur != nil && cur.ObservationID != obs.ID && run.Ordinal > curOrdinal:
+			return s.satisfy(tx, sem, actor, o, obs, v, cur)
 		}
 	}
 	return nil, nil
