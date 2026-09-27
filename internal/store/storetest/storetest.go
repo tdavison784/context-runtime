@@ -126,6 +126,8 @@ var suite = []testCase{
 	{"SemanticGCCandidates", testSemanticGCCandidates},
 	{"SemanticOpenGoalsByTaskOwner", testSemanticOpenGoalsByTaskOwner},
 	{"SemanticLedgerSeqIsolation", testSemanticLedgerSeqIsolation},
+	{"SemanticSatisfactionBacking", testSemanticSatisfactionBacking},
+	{"SemanticStaleProof", testSemanticStaleProof},
 
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},
