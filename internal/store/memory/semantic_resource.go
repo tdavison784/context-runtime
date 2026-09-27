@@ -342,7 +342,6 @@ func (t *semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 	return nil
 }
 
-// wbRefID is a binding version's index entry ID.
 // bindingAt is the version of binding id filed at seq: versions take
 // strictly increasing sequences, so it is found by binary search.
 func (r semRead) bindingAt(id string, seq uint64) (domain.WorkspaceBinding, bool) {
