@@ -111,6 +111,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"G1StalePassAfterNewerFail", TestG1StalePassAfterNewerFail, true},
 		{"G1StalePassAfterRejection", TestG1StalePassAfterRejection, true},
 		{"G1OneTerminalObservationPerRun", TestG1OneTerminalObservationPerRun, true},
+		{"XREV11StalePathClaim", TestXREV11StalePathClaim, false},
 		{"ObservationStateChain", TestObservationStateChain, true},
 		{"ObservationStateGating", TestObservationStateGating, true},
 		{"MatcherGrantT06", TestMatcherGrantT06, true},

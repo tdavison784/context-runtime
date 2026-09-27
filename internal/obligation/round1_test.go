@@ -63,3 +63,81 @@ func TestG1OneTerminalObservationPerRun(t *testing.T) {
 		t.Errorf("same-run PASS after FAIL satisfied: %+v", o)
 	}
 }
+
+// fileObligation declares a CURRENT_CONTENT file_read on docs/a.md for the
+// USER pin, returning its reference.
+func (f *evalFixture) fileObligation(t *testing.T, slot string) domain.ObligationRef {
+	t.Helper()
+	target := fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, "")
+	in := domain.DeclareObligationIntent{RequestID: "d-file-" + slot, SourceItemID: "pu", DeclarationSlot: slot, Description: "read it",
+		ExpectedSourceVersion: 1, Target: &target, Matcher: &FileReadV1}
+	if _, err := f.s.declare(t, f.st, f.harness, in); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := f.item(t, "pu").CurrentKey()
+	n, _ := harnessSlot(slot)
+	return domain.ObligationRef{SessionID: testSession, ObligationID: domain.DerivedObligationID(key, n), Version: 1}
+}
+
+func (f *evalFixture) resourceReport(t *testing.T, fp string, resync, all bool, changed []string, contents ...domain.ResourcePathContent) {
+	t.Helper()
+	f.r.n++
+	in := domain.ReportResourceChangeIntent{RequestID: fmt.Sprintf("rr-%d", f.r.n), ResourceID: "repo1", ExpectedRevision: f.r.rev,
+		ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf(fp),
+		Resynchronization: resync, AllPaths: all, ChangedPaths: changed, PathContents: contents}
+	if _, err := f.s.report(t, f.st, f.harness, in); err != nil {
+		t.Fatal(err)
+	}
+	f.r.rev++
+	f.r.auth++
+}
+
+func (f *evalFixture) assertPath(t *testing.T, ref domain.ObligationRef, rev uint64, content string) error {
+	t.Helper()
+	o := f.status(t, ref)
+	loc := domain.ResourceLocator{ResourceID: "repo1", BaseDir: ".", Path: "docs/a.md"}
+	in := intent(ref, o.Revision, domain.ObligationSatisfied)
+	in.AssertionMode = domain.AssertionResourceBound
+	in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyCurrentPath, ResourceID: "repo1", ResourceRevision: rev, Fingerprint: hashOf(content), Locator: &loc}}
+	_, err := f.s.transition(t, f.st, f.system, in)
+	return err
+}
+
+// XREV-1.1: a CURRENT_PATH claim is validated through the same currentness
+// rule as file_read, so a stale cached path state cannot restore a proof a
+// resource report invalidated.
+func TestXREV11StalePathClaim(t *testing.T) {
+	f := newEvalFixture(t)
+	ref := f.fileObligation(t, "7")
+	f.resourceReport(t, "W1b", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	rev := f.r.auth
+	if err := f.assertPath(t, ref, rev, "H1"); err != nil {
+		t.Fatalf("current path claim: %v", err)
+	}
+	// An unrelated edit keeps the path content current.
+	f.resourceReport(t, "W2", false, false, []string{"docs/b.md"})
+	if err := f.assertPath(t, ref, rev, "H1"); err != nil {
+		// Already satisfied: a second assertion is a transition error, not staleness.
+		if errors.Is(err, domain.ErrUnknownApplicability) {
+			t.Fatalf("unrelated edit made the path claim stale: %v", err)
+		}
+	}
+	// The path changes without new content: the proof is invalidated and a
+	// new assertion of the old revision/content is refused.
+	f.resourceReport(t, "W3", false, false, []string{"docs/a.md"})
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("path change kept proof: %+v", o)
+	}
+	if err := f.assertPath(t, ref, rev, "H1"); !errors.Is(err, domain.ErrUnknownApplicability) {
+		t.Errorf("stale path claim after a changed-path report: %v", err)
+	}
+	// A resync that omits the path also leaves no current content.
+	g := newEvalFixture(t)
+	ref2 := g.fileObligation(t, "7")
+	g.resourceReport(t, "W1b", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	rev2 := g.r.auth
+	g.resourceReport(t, "W4", true, false, nil)
+	if err := g.assertPath(t, ref2, rev2, "H1"); !errors.Is(err, domain.ErrUnknownApplicability) {
+		t.Errorf("stale path claim after a resync omitting the path: %v", err)
+	}
+}
