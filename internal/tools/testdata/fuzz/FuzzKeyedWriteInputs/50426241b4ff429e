@@ -1,0 +1,4 @@
+go test fuzz v1
+string("5......")
+string("fact")
+string("8\xff2\xff2")

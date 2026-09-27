@@ -43,7 +43,7 @@ func TestGateT17_AgentToolsThroughPipeline(t *testing.T) {
 		agent := agentPrincipal()
 		dispatcher := dispatcherFor(agent)
 		b := f.inference(agent, "r1")
-		calls := []string{"state-1", "state-2", "remember", "resolve"}
+		calls := []string{"state-1", "state-2", "state-3", "remember", "resolve"}
 		out, err := f.in.IngestOutcome(ctx, f.s, b, outcomeEvent(b, "Updating state, noting the API, and claiming G1."), &OutcomeMembership{Dispatcher: dispatcher, ToolCallIDs: calls})
 		if err != nil {
 			t.Fatal(err)
@@ -77,6 +77,17 @@ func TestGateT17_AgentToolsThroughPipeline(t *testing.T) {
 		if first.Keyed == nil || second.Keyed == nil || second.Keyed.Duplicate || second.Keyed.SupersededItemID != first.Keyed.ItemID ||
 			!f.isCurrent(second.Keyed.ItemID) || f.isCurrent(first.Keyed.ItemID) {
 			t.Fatalf("agent.status versions: %+v then %+v", first.Keyed, second.Keyed)
+		}
+		// Semantic duplicate handling (TEST-1.2): a third write with the
+		// same content under a new tool call is a duplicate of the current
+		// version; it creates no new current version and supersedes nothing.
+		third, err := updateState("state-3", "API done; running tests.")
+		if err != nil {
+			t.Fatalf("update_state 3: %v", err)
+		}
+		if third.Keyed == nil || !third.Keyed.Duplicate || third.Keyed.SupersededItemID != "" || !f.isCurrent(second.Keyed.ItemID) ||
+			third.Keyed.ItemID != second.Keyed.ItemID && f.isCurrent(third.Keyed.ItemID) {
+			t.Fatalf("identical update_state: %+v (second %+v)", third.Keyed, second.Keyed)
 		}
 
 		// TEST-1.1 (INV-09): an identical tool retry replays and allocates

@@ -481,7 +481,14 @@ Retrieval records (W6):
 
 Ingest audit identities (W7):
 
+- `context-runtime/ingest/owner-registration-id/v1`
 - `context-runtime/ingest/task-audit-id/v1`
+
+`context-runtime/ingest/owner-registration-id/v1` derives the record ID
+`own_` + hex hash of (session, owner kind, owner ID) for the immutable
+WORKFLOW/AGENT `OwnerRegistration` that ingest writes on an owner's first
+trusted association (P3-32/C-15). The record is unique per (session, kind,
+owner ID), so the ID never needs another input.
 
 W4 obligation/resource/observation (request hash per mutation family, then record identities):
 

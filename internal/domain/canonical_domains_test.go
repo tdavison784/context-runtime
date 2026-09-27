@@ -43,6 +43,7 @@ var registeredCanonicalDomains = []string{
 	"context-runtime/ingest-payload/v2",
 	"context-runtime/ingest-payload/v3",
 	"context-runtime/ingest/outcome-event-id/v1",
+	"context-runtime/ingest/owner-registration-id/v1",
 	"context-runtime/ingest/task-audit-id/v1",
 	"context-runtime/item-id/v1",
 	"context-runtime/lifecycle-audit/v1",

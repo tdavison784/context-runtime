@@ -1,0 +1,4 @@
+go test fuzz v1
+string("22z")
+string("fact")
+string("0\x84`")

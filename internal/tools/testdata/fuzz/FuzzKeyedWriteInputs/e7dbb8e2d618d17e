@@ -1,0 +1,4 @@
+go test fuzz v1
+string("kkkk8kkkk0kkkkkkkkkkk1kkkkykkkkkkkkk7kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk")
+string("fact")
+string("U")
