@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -134,4 +135,36 @@ func TestRevokeGrantNeedsDirectAuthorityAndEndsAuthorization(t *testing.T) {
 	if _, err := s.ArchiveStandalone(ctx, harness, domain.ArchiveIntent{RequestID: "a", ItemID: "sys", ExpectedVersion: 1}); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 		t.Fatalf("revoked grant authorized archive: %v", err)
 	}
+}
+
+// SEC-1.5 / DUR-1.4 (G2, producer half): issuance never creates more live
+// grants per (action, target) than authorization's bounded read accepts, so
+// issued grants can never wedge authorization of the target.
+func TestIssuanceCapsLiveGrantsAtTheAuthorizationReadLimit(t *testing.T) {
+	ctx := context.Background()
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxTargets = 3
+		s, _ := New(db, pol)
+		sys := storetest.NewItem("s", "sys", 0, "system fact")
+		sys.Authority = domain.AuthoritySystem
+		seedItem(t, db, sys)
+		system := storetest.NewPrincipal("s", domain.AuthoritySystem)
+		grantee := func(n int) domain.Principal {
+			p := storetest.NewPrincipal("s", domain.AuthorityHarness)
+			p.AgentID = fmt.Sprintf("agent-%d", n)
+			return p
+		}
+		for n := range pol.MaxTargets {
+			if _, err := s.IssueGrantStandalone(ctx, system, archiveGrant(fmt.Sprintf("g%d", n), fmt.Sprintf("grant-%d", n), "sys", grantee(n))); err != nil {
+				t.Fatalf("grant %d: %v", n, err)
+			}
+		}
+		if _, err := s.IssueGrantStandalone(ctx, system, archiveGrant("over", "grant-over", "sys", grantee(99))); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("live grant beyond the read limit issued: %v", err)
+		}
+		if _, err := s.ArchiveStandalone(ctx, grantee(0), domain.ArchiveIntent{RequestID: "a", ItemID: "sys", ExpectedVersion: 1}); err != nil {
+			t.Fatalf("authorization with a full live set: %v", err)
+		}
+	})
 }
