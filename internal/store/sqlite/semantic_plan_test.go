@@ -175,17 +175,18 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 	}
 }
 
-// TestLiveReadsUseLiveIndexes checks the G2 live-only reads search their
-// live indexes, so dead history is never visited row by row: CURRENT
-// subject states through 0032's partial index, and unrevoked grants
-// through 0031's liveness index.
+// TestLiveReadsUseLiveIndexes checks the indexed reads search an index, so
+// history is never visited row by row: subject states through the full
+// by-resource index (L1, SEC-4.11: applicability is a filing-time fact, so
+// 0032's CURRENT-only partial index can no longer serve the read), and
+// unrevoked grants through 0031's liveness index.
 func TestLiveReadsUseLiveIndexes(t *testing.T) {
 	s, _ := openTemp(t)
 	for _, c := range []struct {
 		index string
 		read  func(r store.SemanticReader) error
 	}{
-		{"subject_state_resource_current", func(r store.SemanticReader) error {
+		{"subject_state_resource", func(r store.SemanticReader) error {
 			_, err := r.SubjectStatesByResource("repo", store.Page{Limit: 5})
 			return err
 		}},
