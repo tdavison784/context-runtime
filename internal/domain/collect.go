@@ -334,6 +334,19 @@ func GCTriggerRequestID(origin Principal, trigger GCTrigger, triggerID string) (
 	return gcTriggerRequestPrefix + e.String(string(trigger)).String(triggerID).Hash(), nil
 }
 
+// GCRearmRequestID is the collection request ID for re-arming a FAILED GC
+// request (DUR-3.3, SEC-4.4, DUR-4.8): it derives from the failed request
+// alone, in its own encoder domain, so it is idempotent whatever authorized
+// actor re-arms, and no runtime trigger, manual collection or caller-named
+// request can alias or squat it. Like every runtime collection ID it lives
+// in the reserved "gc_" namespace.
+func GCRearmRequestID(failedID string) (string, error) {
+	if !semanticID(failedID) {
+		return "", invalid("GC re-arm request: failed request identity required")
+	}
+	return gcTriggerRequestPrefix + NewCanonicalEncoder("context-runtime/gc-rearm/v1").String(failedID).Hash(), nil
+}
+
 // GCRequestRecordID is the record ID of the GC request whose collection
 // request ID is requestID, in the reserved "gcq_" namespace.
 func GCRequestRecordID(session, requestID string) (string, error) {

@@ -138,3 +138,38 @@ func TestGCRuntimeIDsAreReservedAndOriginBound(t *testing.T) {
 		}
 	}
 }
+
+// DUR-3.3 / SEC-4.4 / DUR-4.8: a re-arm identity derives from the failed
+// request alone, in its own encoder domain: idempotent across actors and
+// never equal to a runtime trigger or manual derivation over the same bytes.
+func TestGCRearmRequestIDIsActorFreeAndDomainSeparated(t *testing.T) {
+	p := Principal{SessionID: "s", WorkflowID: "w", TaskID: "t", Authority: AuthoritySystem}
+	record, err := GCRequestRecordID("s", "gc_root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := GCRearmRequestID(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := GCRearmRequestID(record); again != id {
+		t.Fatal("re-arm identity is not deterministic")
+	}
+	if other, _ := GCRearmRequestID("gcq_other"); other == id {
+		t.Fatal("re-arm identity ignores the failed request")
+	}
+	// Same bytes through the runtime trigger and (via a caller-named root)
+	// manual derivations must not collide with the re-arm domain.
+	trigger, _ := GCTriggerRequestID(p, GCTaskCompletion, record)
+	if trigger == id {
+		t.Fatal("re-arm identity aliases a runtime trigger derivation")
+	}
+	for _, reserved := range []string{id, "gc_" + id} {
+		if !ReservedIDPrefix(reserved) || ValidateCallerRequestID(reserved) == nil {
+			t.Errorf("%q is callable by a caller", reserved)
+		}
+	}
+	if _, err := GCRearmRequestID(""); err == nil {
+		t.Error("re-arm of an empty failed request accepted")
+	}
+}
