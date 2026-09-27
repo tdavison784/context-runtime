@@ -1,9 +1,7 @@
 package graph
 
 import (
-	"cmp"
 	"errors"
-	"slices"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -52,7 +50,10 @@ func CheckpointOfItem(tx store.ReadTx, viewer domain.Principal, itemID string, p
 //
 // Access before limit (XREV-1.3): a checkpoint is visible only to a viewer
 // with its conversation's exact owners, so only the viewer's own conversation
-// is read. Other conversations' memberships are never read or charged.
+// is consulted. Cost is independent of history (H2, SPEC-2.7, XREV-2.3): one
+// exact read of the write-time (conversation, item) index gives the earliest
+// round containing the item, then only the checkpoints that cover it, plus
+// the one that stops the scan, are read.
 func CheckpointsCoveringItem(tx store.ReadTx, viewer domain.Principal, itemID string, pageSize, workLimit int) ([]domain.Checkpoint, error) {
 	if _, err := readViewableItem(tx, viewer, itemID); err != nil {
 		return nil, err
@@ -65,48 +66,19 @@ func CheckpointsCoveringItem(tx store.ReadTx, viewer domain.Principal, itemID st
 		return nil, err
 	}
 	conversation := domain.ConversationIDFor(viewer.TaskID, viewer.AgentID)
-	var newest *domain.Checkpoint
-	if err = scanCheckpoints(sem, viewer, conversation, pageSize, workLimit, func(_ int, c domain.Checkpoint) bool {
-		newest = &c
-		return false
-	}); err != nil || newest == nil {
-		return nil, err
+	earliest, err := sem.EarliestExchangeWithItem(conversation, itemID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, nil
 	}
-	work := 1
-	exchanges, err := collectMembershipPages(pageSize, workLimit-work, func(page store.Page) (store.ResultPage[domain.LogicalExchange], error) {
-		return sem.ExchangesByConversation(conversation, page)
-	})
 	if err != nil {
 		return nil, err
 	}
-	work += len(exchanges)
-	slices.SortFunc(exchanges, func(a, b domain.LogicalExchange) int { return cmp.Compare(a.Ordinal, b.Ordinal) })
-	earliest := uint64(0)
-	for _, x := range exchanges {
-		if x.ConversationID != conversation || x.SessionID != viewer.SessionID {
-			return nil, domain.ErrIntegrity
-		}
-		if x.Ordinal > newest.CoveredFrontier {
-			break // no visible checkpoint covers a later round
-		}
-		members, err := collectMembershipPages(pageSize, workLimit-work, func(page store.Page) (store.ResultPage[domain.ExchangeMember], error) {
-			return sem.ExchangeMembers(x.ID, page)
-		})
-		if err != nil {
-			return nil, err
-		}
-		work += len(members)
-		if slices.ContainsFunc(members, func(m domain.ExchangeMember) bool { return m.Source.ItemID == itemID }) {
-			earliest = x.Ordinal
-			break
-		}
-	}
-	if earliest == 0 {
-		return nil, nil
+	if earliest.Validate() != nil || earliest.ConversationID != conversation || earliest.SessionID != viewer.SessionID {
+		return nil, domain.ErrIntegrity
 	}
 	var out []domain.Checkpoint
-	err = scanCheckpoints(sem, viewer, conversation, pageSize, workLimit-work, func(_ int, c domain.Checkpoint) bool {
-		if c.CoveredFrontier < earliest {
+	err = scanCheckpoints(sem, viewer, conversation, pageSize, workLimit-1, func(_ int, c domain.Checkpoint) bool {
+		if c.CoveredFrontier < earliest.Ordinal {
 			return false // chains never regress: older ones cover less
 		}
 		out = append(out, c)
