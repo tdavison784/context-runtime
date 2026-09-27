@@ -1213,14 +1213,20 @@ unknown, regardless of what changed, and directive lines can carry
 attributes, an obligation declaration, or cited support their row alone
 does not show — so an unknown declaration can never be safely assumed
 identical for them. **Working-snapshot members and tool-written agent
-keys are different: their creation identity is fully shown by the row
-itself (`attributeFreeIdentity`, `internal/graph/duplicate.go`) — a
-Working snapshot member (`Section == SectionWorking`) or a tool-written
-agent key (`AuthorityAgent`, `Section == SectionNone`) never carries an
-accepted attribute, obligation declaration, or cited support beyond what
-the row already records.** For these two classes only, `SameDirective`
-now treats an unknown pre-upgrade identity as a match when the fresh
-declaration adds nothing beyond the row (`plainDeclaration`) — linking
+keys are different: they never carry an obligation declaration, and the
+accepted attributes a Working line may take (`ttl`, `scope`, `kind`) are
+all reflected in the row itself (TTL, scope, kind), as is a tool-written
+agent key's content (`attributeFreeIdentity`,
+`internal/graph/duplicate.go`: a Working snapshot member,
+`Section == SectionWorking`, or a tool-written agent key,
+`AuthorityAgent`, `Section == SectionNone`).** For these two classes
+only, `SameDirective` treats an unknown pre-upgrade identity as a match
+when the fresh declaration adds nothing beyond the row
+(`plainDeclaration`) **and neither side carries a TURN/TTL eligibility
+origin** (`originFree`: no TTL, not TURN-scoped). A new or dropped TTL
+or TURN origin is a meaningful identity change (C-1), so that
+restatement is a new version that supersedes normally (SPEC-3.1, PR #6
+round 3, commit `1a3e4a4`). Otherwise the match links
 `DUPLICATE_OF`, never replacing, re-filing, or rebinding it, closing both
 SPEC-2.9's Working-snapshot-abort failure and SPEC-2.10's
 agent-key-returns-an-error failure with the same successful dedup G5
