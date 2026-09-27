@@ -172,9 +172,14 @@ func (c GCFailureCode) Valid() bool {
 	return false
 }
 
+// GCResult is a GC request's terminal outcome (H3): COLLECTED names the
+// final batch's CollectReceipt; FAILED names a closed reason and no
+// receipt. Either removes the request from the pending queue for good.
 type GCResult struct {
 	SemanticMeta
 	GCRequestID, CollectReceiptID string
+	Outcome                       GCOutcome
+	Reason                        GCFailureCode
 }
 
 func (r GCResult) Validate() error {
