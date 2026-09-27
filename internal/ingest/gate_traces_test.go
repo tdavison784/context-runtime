@@ -360,7 +360,26 @@ func TestGateT06_AllLifecyclePathsAuthorize(t *testing.T) {
 			})
 		})
 	})
-	t.Run("matcher grant on exact version satisfies with proof", func(t *testing.T) { pending(t, depW4+"; "+depW2) })
+	t.Run("matcher grant on exact version satisfies with proof", func(t *testing.T) {
+		semanticStores(t, func(t *testing.T, f *fixture) {
+			// Trusted tool evidence satisfies O only through the SYSTEM
+			// matcher grant on O's exact version; the TOOL text itself
+			// gains no lifecycle authority.
+			w := newT07(t, f, true, 1)
+			w.run(t07Target(nil), fingerprint("W1"))
+			o := w.status()
+			if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
+				t.Fatalf("granted matcher did not satisfy with a proof: %+v", o)
+			}
+			for _, it := range f.items() {
+				// obs-state/1 TOOL task state keyed in OBSERVATION is
+				// expected (C-6); a directive key, pin or goal is not.
+				if it.Authority == domain.AuthorityTool && (it.Namespace == domain.NamespaceDirective || it.IsPinned() || it.Kind == domain.KindGoal) {
+					t.Fatalf("tool text gained lifecycle standing: %+v", it)
+				}
+			}
+		})
+	})
 }
 
 // TestGateT16_CheckpointFrontier: T16 items beyond
