@@ -53,7 +53,10 @@ const maxGCPagesPerCall = 64
 // a quarantined one reports ErrGCRequestFailed. seq 0 allocates only after
 // the replay check. The collector is an authenticated SYSTEM/HARNESS
 // principal supplied by the embedding; for task-scoped requests it must
-// belong to that task. A failure rolls back only this batch: CollectPending
+// belong to that task. Continuation binds to that authority class plus
+// task, never to the principal that ran an earlier batch: any authorized
+// collector may continue a pending request (SEC-4.5). A failure rolls back
+// only this batch: CollectPending
 // records the attempt or quarantine in its own transaction.
 func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRequestID string, seq uint64) (out MutationOutcome, err error) {
 	defer func() {
@@ -113,22 +116,6 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 	progress, err := gcProgress(sem, req.ID)
 	if err != nil {
 		return out, err
-	}
-	if progress.Batches > 0 {
-		firstID, e := req.BatchRequestID(1)
-		if domain.ValidateCallerRequestID(req.RequestID) == nil {
-			firstID = req.RequestID
-		}
-		if e != nil {
-			return out, e
-		}
-		first, e := sem.CollectReceipt(collectReceiptID(req.SessionID, firstID))
-		if e != nil {
-			return out, e
-		}
-		if first.Principal != collector {
-			return out, ErrGCConfiguration
-		}
 	}
 	i := req.CollectIntent
 	if i.RequestID, err = req.BatchRequestID(progress.Batches + 1); err != nil {
