@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/gcqueue"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -14,65 +15,19 @@ import (
 var ErrGCTriggerDisabled = fmt.Errorf("lifecycle: GC trigger disabled by policy: %w", domain.ErrInvalidTransition)
 
 // EnqueueGC persists a durable GC request in the producer's transaction
-// (P3-39). The request ID derives from the trigger identity, so a duplicate
-// trigger is one request; the same identity with different content conflicts.
-// Manual collection calls Collect directly and is never enqueued. The origin is
-// recorded as context only: it never becomes the collecting principal. A
-// supersession/TTL/policy trigger outside the enabled set persists nothing and
-// returns an empty ID; task completion always persists its request (P3-39),
-// which then waits, pending, until its trigger is enabled.
-func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain.GCTrigger, scope domain.CollectScope, taskID, triggerID string) (id string, err error) {
-	// Like every lifecycle entry point, a failure poisons the producer's
-	// transaction, so its write never commits without the durable trigger
-	// (DUR-1.11, P3-1/39). A disabled trigger's "", nil is not a failure.
-	defer func() {
-		if err != nil {
-			tx.Poison(err)
-			id = ""
-		}
-	}()
-	sem, err := store.Semantic(tx)
-	if err != nil {
-		return "", err
+// (P3-39) under this executor's policy; it is a thin wrapper over
+// gcqueue.Enqueue, which producers below lifecycle call directly with their
+// event's recorded policy (SPEC-2.11). A session-scoped (task-less) trigger
+// produces nothing: Phase 3 has no session-scoped GC (H4).
+func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain.GCTrigger, scope domain.CollectScope, taskID, triggerID string) (string, error) {
+	switch scope {
+	case domain.CollectTask:
+		return gcqueue.Enqueue(tx, s.policy, origin, trigger, taskID, triggerID)
+	case domain.CollectSession:
+		return "", nil // no session-scoped GC in Phase 3 (H4)
 	}
-	return s.enqueueGC(tx, sem, origin, trigger, scope, taskID, triggerID)
-}
-
-func (s *Service) enqueueGC(tx store.Tx, sem store.SemanticTx, origin domain.Principal, trigger domain.GCTrigger, scope domain.CollectScope, taskID, triggerID string) (string, error) {
-	if trigger == domain.GCManual || triggerID == "" {
-		return "", domain.ErrInvalidRecord
-	}
-	if !trigger.Valid() {
-		return "", domain.ErrInvalidRecord
-	}
-	if err := origin.Validate(); err != nil {
-		return "", err
-	}
-	if origin.SessionID != tx.SessionID() {
-		return "", domain.ErrNotFound
-	}
-	if trigger != domain.GCTaskCompletion && !s.policy.GCTriggerEnabled(trigger) {
-		return "", nil
-	}
-	requestID := "gc_" + domain.NewCanonicalEncoder("context-runtime/gc-trigger/v1").String(origin.SessionID).String(string(trigger)).String(triggerID).Hash()
-	r := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: gcRequestID(origin.SessionID, requestID), SessionID: origin.SessionID, SchemaVersion: domain.SemanticSchemaV1},
-		CollectIntent: domain.CollectIntent{RequestID: requestID, Scope: scope, TaskID: taskID, Trigger: trigger}, Origin: origin, PolicyVersion: s.policy.Version}
-	prior, err := sem.GCRequest(r.ID)
-	if err == nil {
-		r.Seq = prior.Seq
-		if prior != r {
-			return "", domain.ErrEventIDConflict
-		}
-		return r.ID, nil
-	}
-	if !errors.Is(err, domain.ErrNotFound) {
-		return "", err
-	}
-	r.Seq = tx.NextSeq()
-	if err := sem.InsertGCRequest(r); err != nil {
-		return "", err
-	}
-	return r.ID, nil
+	tx.Poison(domain.ErrInvalidRecord)
+	return "", domain.ErrInvalidRecord
 }
 
 // ExecuteGCRequest runs one durable request idempotently after its producer

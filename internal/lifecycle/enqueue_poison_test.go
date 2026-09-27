@@ -30,8 +30,15 @@ func TestEnqueueGCFailurePoisons(t *testing.T) {
 			s, _ := New(mem, testPolicy())
 			p := storetest.NewPrincipal("s", domain.AuthoritySystem)
 			ctx := context.Background()
+			// H4: no session-scoped requests exist, so the conflicting
+			// identity is the same trigger for another stored task.
 			if err := mem.Update(ctx, "s", func(tx store.Tx) error {
-				_, err := s.EnqueueGC(tx, p, domain.GCSupersession, domain.CollectSession, "", "event-1")
+				for _, id := range []string{"task", "other"} {
+					if _, err := tx.PutTask(storetest.NewTask("s", id), 0, storetest.NewLifecycleEvent("s", "created-"+id, tx.NextSeq(), domain.TargetTask, id)); err != nil {
+						return err
+					}
+				}
+				_, err := s.EnqueueGC(tx, p, domain.GCSupersession, domain.CollectTask, "other", "event-1")
 				return err
 			}); err != nil {
 				t.Fatal(err)

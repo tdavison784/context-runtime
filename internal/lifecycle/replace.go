@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/gcqueue"
 	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -137,7 +138,8 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 	}
 	// The supersession is a durable GC trigger (P3-39, SPEC-1.6); its
 	// identity is the new occurrence, so the trigger fires exactly once.
-	if _, err = s.enqueueGC(tx, sem, p, domain.GCSupersession, domain.CollectTask, old.TaskID, fresh.ID); err != nil {
+	// A task-less directive's supersession produces no request (H4).
+	if _, err = gcqueue.Enqueue(tx, s.policy, p, domain.GCSupersession, old.TaskID, fresh.ID); err != nil {
 		return out, err
 	}
 	out.Result.Records = &domain.RecordResult{Kind: recordReplacement, IDs: []string{fresh.ID, created.ID, old.ID}}

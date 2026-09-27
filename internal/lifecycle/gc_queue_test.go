@@ -11,11 +11,17 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
 
-// enqueue persists a SUPERSESSION request for session scope.
+// enqueue persists a SUPERSESSION request for task "task" (stored on first
+// use); Phase 3 has no session-scoped requests (H4).
 func enqueue(t *testing.T, db store.Store, s *Service, trigger string) {
 	t.Helper()
 	if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
-		_, err := s.EnqueueGC(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), domain.GCSupersession, domain.CollectSession, "", trigger)
+		if _, err := tx.Task("task"); errors.Is(err, domain.ErrNotFound) {
+			if _, err := tx.PutTask(storetest.NewTask("s", "task"), 0, storetest.NewLifecycleEvent("s", "created", tx.NextSeq(), domain.TargetTask, "task")); err != nil {
+				return err
+			}
+		}
+		_, err := s.EnqueueGC(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), domain.GCSupersession, domain.CollectTask, "task", trigger)
 		return err
 	}); err != nil {
 		t.Fatal(err)
