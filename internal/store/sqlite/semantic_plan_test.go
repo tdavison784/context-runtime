@@ -335,3 +335,97 @@ func TestLiveProofPathReadsSeek(t *testing.T) {
 	q := "SELECT dependents FROM lookup_live_dependents WHERE session_id=? AND resource_id=?"
 	assertIndexed(t, s, []string{"session_id", "resource_id"}, q, "s", "repo")
 }
+
+// TestCursorPagesSeekRange checks DUR-3.5: a page resumed from a cursor
+// seeks its (seq, id) keyset in the index, (seq,id)>(?,?) or <(?,?) in the
+// search constraint, so a page costs the same at any depth instead of
+// re-scanning every row before the cursor.
+func TestCursorPagesSeekRange(t *testing.T) {
+	s, _ := openTemp(t)
+	page := store.Page{Limit: 5, After: store.Cursor{Seq: 7, ID: "x"}}
+	viewer := domain.Principal{SessionID: "s", Authority: domain.AuthorityHarness}
+	reads := map[string]func(r store.SemanticReader) error{
+		"PendingGCRequests": func(r store.SemanticReader) error { _, err := r.PendingGCRequests(page); return err },
+		"CoveragesBySource": func(r store.SemanticReader) error {
+			_, err := r.CoveragesBySource("i", domain.CoverageProvenance, page)
+			return err
+		},
+		"CurrentProofsByDependency(path)": func(r store.SemanticReader) error {
+			_, err := r.CurrentProofsByDependency("repo", "k", page)
+			return err
+		},
+		"CurrentProofsByDependency(all)": func(r store.SemanticReader) error {
+			_, err := r.CurrentProofsByDependency("repo", "", page)
+			return err
+		},
+		"SubjectStatesByResource": func(r store.SemanticReader) error { _, err := r.SubjectStatesByResource("repo", page); return err },
+		"ResourceUpdatesAffectingPath": func(r store.SemanticReader) error {
+			_, err := r.ResourceUpdatesAffectingPath("repo", "src/a.go", page)
+			return err
+		},
+		"CurrentWorkspaceBindingsByContext": func(r store.SemanticReader) error {
+			_, err := r.CurrentWorkspaceBindingsByContext("", "task", "", page)
+			return err
+		},
+		"ResourceUpdates":   func(r store.SemanticReader) error { _, err := r.ResourceUpdates("repo", page); return err },
+		"RunsBySubject":     func(r store.SemanticReader) error { _, err := r.RunsBySubject("sub", page); return err },
+		"ObservationsByRun": func(r store.SemanticReader) error { _, err := r.ObservationsByRun("run", page); return err },
+		"ExchangesByConversation": func(r store.SemanticReader) error {
+			_, err := r.ExchangesByConversation("conv", page)
+			return err
+		},
+		"MembershipsByItem": func(r store.SemanticReader) error { _, err := r.MembershipsByItem("i", page); return err },
+		"TransitionsByVersion": func(r store.SemanticReader) error {
+			_, err := r.TransitionsByVersion(domain.ObligationRef{SessionID: "s", ObligationID: "o", Version: 1}, page)
+			return err
+		},
+		"CheckpointsByConversation(descending)": func(r store.SemanticReader) error {
+			_, err := r.CheckpointsByConversation(viewer, "conv", page)
+			return err
+		},
+	}
+	for name, read := range reads {
+		var q string
+		if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+			r, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			if err := read(r); err != nil {
+				return err
+			}
+			q = tx.(*transaction).lastQuery
+			return nil
+		}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		args := make([]any, strings.Count(q, "?"))
+		for i := range args {
+			args[i] = "x"
+		}
+		plan := explain(t, s, q, args...)
+		if !strings.Contains(plan, ")>(?,?)") && !strings.Contains(plan, ")<(?,?)") {
+			t.Errorf("%s does not seek its cursor: %q\nplan: %s", name, q, plan)
+		}
+	}
+}
+
+// explain is q's query plan, one step per line.
+func explain(t *testing.T, s *Store, q string, args ...any) string {
+	t.Helper()
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	return strings.Join(plan, "\n")
+}
