@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -23,6 +24,16 @@ type lifecycleCall struct {
 type fakeLifecycle struct {
 	calls *[]lifecycleCall
 	deny  error
+	pol   *domain.Phase3Policy // the policy it reports; nil is the default
+}
+
+// Policy reports the fake's policy, so ingest's recorded-policy check
+// (SPEC-3.5) routes to it like a real executor.
+func (l fakeLifecycle) Policy() domain.Phase3Policy {
+	if l.pol != nil {
+		return l.pol.Clone()
+	}
+	return policy.DefaultPhase3Policy()
 }
 
 func (l fakeLifecycle) Resolve(tx store.Tx, actor domain.Principal, in domain.ResolveIntent, seq uint64) (LifecycleOutcome, error) {
@@ -81,7 +92,7 @@ func (l fakeLifecycle) apply(tx store.Tx, a domain.LifecycleAction, actor domain
 func TestCommandsV2_ExecuteInSourceOrder(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
 		var calls []lifecycleCall
-		f.in.Lifecycle = fakeLifecycle{calls: &calls}
+		f.in.Lifecycle = fakeLifecycle{calls: &calls, pol: f.in.Semantic}
 		sys := principal(domain.AuthoritySystem)
 		e := sysEvent("cmd-order", "## Goal [g]\nShip.\n## Resolve [g]\n## Resolve [g]\n")
 		r := f.mustIngest(sys, e)
@@ -130,7 +141,7 @@ func TestCommandsV2_ExecuteInSourceOrder(t *testing.T) {
 // successful Resolve is indistinguishable from a command naming nothing.
 func TestCommandsV2_DetailRedaction(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
-		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall), pol: f.in.Semantic}
 		f.gcTriggersOff() // commands under test, not the GC producer
 		a := principal(domain.AuthorityUser)
 		f.mustIngest(a, userEvent("priv", "## Pinned\n- [p] {scope=AGENT} private rule\n", true))
@@ -188,7 +199,7 @@ func TestCommandsV2_AbortsAtomically(t *testing.T) {
 		}
 
 		var calls []lifecycleCall
-		f.in.Lifecycle = fakeLifecycle{calls: &calls}
+		f.in.Lifecycle = fakeLifecycle{calls: &calls, pol: f.in.Semantic}
 		f.requireAtomic(domain.ErrInvalidAuthorityPromotion, func() error {
 			_, err := f.ingest(user, userEvent("deny", "## Remember\n- n\n## Resolve [G]\n", true))
 			return err
@@ -198,7 +209,7 @@ func TestCommandsV2_AbortsAtomically(t *testing.T) {
 		if len(calls) != 1 {
 			t.Fatalf("executor calls = %d", len(calls))
 		}
-		f.in.Lifecycle = fakeLifecycle{calls: &calls, deny: domain.ErrInvalidAuthorityPromotion}
+		f.in.Lifecycle = fakeLifecycle{calls: &calls, deny: domain.ErrInvalidAuthorityPromotion, pol: f.in.Semantic}
 		f.requireAtomic(domain.ErrInvalidAuthorityPromotion, func() error {
 			_, err := f.ingest(sys, sysEvent("late-deny", "## Remember\n- n\n## Resolve [G]\n"))
 			return err

@@ -23,7 +23,7 @@ func phase3Stores(t *testing.T, fn func(t *testing.T, f *fixture)) {
 		t.Cleanup(func() { ms.Close() })
 		f := newFixture(t, ms)
 		pol := testPolicy()
-		f.in.Semantic = &pol
+		f.usePolicy(pol)
 		fn(t, f)
 	})
 }
@@ -135,7 +135,7 @@ func TestV3_RetryUsesRecordedPolicy(t *testing.T) {
 		r := f.mustIngest(user, e)
 		tight := testPolicy()
 		tight.MaxOperations = 1
-		f.in.Semantic = &tight
+		f.usePolicy(tight)
 		seq := f.lastSeq()
 		if got := f.mustIngest(user, e); !reflect.DeepEqual(normReceipt(got), normReceipt(r)) {
 			t.Fatalf("retry under a tightened policy did not replay")
