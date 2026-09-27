@@ -118,3 +118,29 @@ func TestTurnOwnershipAndTTL(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyToolResultTranscriptsQualifyAsEvidenceSupport(t *testing.T) {
+	semantic := ContextItem{Role: RoleSemantic, Authority: AuthorityUser, Kind: KindFact}
+	if !semantic.QualifiesAsEvidenceSupport() {
+		t.Fatal("semantic item rejected as support")
+	}
+	for _, tc := range []struct {
+		authority Authority
+		kind      Kind
+		want      bool
+	}{
+		{AuthorityTool, KindToolResult, true},
+		{AuthorityTool, KindEvidence, false},
+		{AuthorityUser, KindToolResult, false},
+		{AuthorityUser, KindUserMessage, false},
+		{AuthorityAgent, KindAssistantMessage, false},
+		{AuthoritySystem, KindConversation, false},
+		{AuthorityHarness, KindConversation, false},
+		{AuthorityRetrievedContent, KindEvidence, false},
+	} {
+		it := ContextItem{Role: RoleTranscript, Authority: tc.authority, Kind: tc.kind}
+		if got := it.QualifiesAsEvidenceSupport(); got != tc.want {
+			t.Errorf("%s %s transcript: support = %v, want %v", tc.authority, tc.kind, got, tc.want)
+		}
+	}
+}
