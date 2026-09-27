@@ -473,11 +473,14 @@ func (r *run) reportUnverified(si, pi int, rng domain.ByteRange, access domain.A
 var _ graph.PendingSettler = (*obligation.Service)(nil)
 
 // graphOptions are the options of every graph supersession this run makes:
-// the obligation service settles before retirement (M2, K1 A3). Without an
-// obligation service graph fails closed on a pending settlement.
+// the run's obligation service (the configured one, or one built from the
+// recorded policy) settles before retirement (M2, K1 A3). A run with no
+// semantic policy has no obligation service, and graph fails closed on a
+// pending settlement.
 func (r *run) graphOptions() []graph.Option {
-	if r.g.Obligations == nil {
+	svc, err := r.obligations()
+	if err != nil {
 		return nil
 	}
-	return []graph.Option{graph.WithPendingSettler(r.g.Obligations)}
+	return []graph.Option{graph.WithPendingSettler(svc)}
 }

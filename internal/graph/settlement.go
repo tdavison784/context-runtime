@@ -45,8 +45,6 @@ func collectOptions(opts []Option) options {
 var ErrPendingSettlement = fmt.Errorf("graph: obligation version has a pending resource-invalidation settlement: %w", domain.ErrVersionConflict)
 
 // proofDerivedValid is the shared K1 A1 validity rule,
-// store.ProofDerivedValid(r, proofID) per K1-api.md. It is a seam until that
-// function lands (W2c): replace the body with a call to it.
-var proofDerivedValid = func(r store.SemanticReader, proofID string) (bool, error) {
-	return true, nil
-}
+// store.ProofDerivedValid. It is a variable only so graph tests can force a
+// derived-invalid proof.
+var proofDerivedValid = store.ProofDerivedValid
