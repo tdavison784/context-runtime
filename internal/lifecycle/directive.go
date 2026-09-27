@@ -43,8 +43,16 @@ func (s *Service) executeDirective(tx store.Tx, p domain.Principal, i domain.Ite
 	if !p.Authority.CanHoldLifecycleAuthority() {
 		return itemEffect{}, domain.ErrInvalidAuthorityPromotion
 	}
+	// Resolve targets DIRECTIVE goals only. Unpin also reaches the unkeyed
+	// semantic items Promote may pin, since PINNED→DURABLE is exclusively
+	// Unpin (P3-8/10, SPEC-1.8).
 	ns, keyed := it.DirectiveNamespace()
-	if !keyed || ns != domain.NamespaceDirective {
+	currentness := domain.ItemCurrent
+	switch {
+	case keyed && ns == domain.NamespaceDirective:
+	case !keyed && it.DirectiveID == "" && action == domain.ActionUnpin && it.Role == domain.RoleSemantic:
+		currentness = domain.ItemUnkeyed
+	default:
 		return itemEffect{}, domain.ErrNotFound
 	}
 	current, err := graph.IsCurrent(tx, it.ID)
@@ -88,5 +96,5 @@ func (s *Service) executeDirective(tx store.Tx, p domain.Principal, i domain.Ite
 	if err != nil {
 		return itemEffect{}, err
 	}
-	return itemEffect{before: it, after: after, audit: ev, current: domain.ItemCurrent}, nil
+	return itemEffect{before: it, after: after, audit: ev, current: currentness}, nil
 }
