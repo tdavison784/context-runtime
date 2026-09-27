@@ -166,8 +166,9 @@ reports (`final-p3-w4.md`, `final-p3-w5.md`, `final-p3-w7.md`) and the
 later commander rulings recorded there. New at this pass:
 
 - [0003](0003-sqlite-driver-and-migrations.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
-  Phase 3's thirty forward migrations, 0018 through 0047 (PR #6 round 4,
-  SPEC-4.4/DUR-4.10: corrected from a stale "twenty-seven ... 0018
+  Phase 3's thirty-one forward migrations, 0018 through 0048 (K1:
+  corrected from a stale "thirty ... 0018 through 0047", itself PR #6
+  round 4's SPEC-4.4/DUR-4.10 correction of a stale "twenty-seven ... 0018
   through 0044," itself PR #6 round 3's correction of a stale
   "eleven ... 0018 through 0028").
 - [0017](0017-call-ledger.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
