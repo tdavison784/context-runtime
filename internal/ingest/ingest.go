@@ -147,8 +147,9 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	}
 	e = e.Clone()
 	// Structure and authority only: configured limits apply after the
-	// idempotency lookup, to new events (F3).
-	if err := validateRequest(e, p, retryCeiling(g.Limits), ceilingPolicy(g.semantic())); err != nil {
+	// idempotency lookup, to new events (F3). An EventID in a reserved
+	// namespace is checked in apply, after its receipt lookup (DUR-2.8).
+	if err := validateRequest(withoutEventID(e), p, retryCeiling(g.Limits), ceilingPolicy(g.semantic())); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	var anonymous string
@@ -197,12 +198,15 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 			return domain.IngestReceipt{}, err
 		}
 		b, m, p = &o.binding, o.membership, o.binding.Principal
-	} else if isOutcomeEventID(e.EventID) {
-		// The outcome- namespace belongs to the outcome path (SEC-1.4, G3):
-		// a plain event can neither squat a call's output or tool-result
-		// EventID nor leave a receipt the outcome path would replay.
-		return domain.IngestReceipt{}, domain.ErrInvalidRecord
 	}
+	// The outcome- namespace belongs to the outcome path (SEC-1.4, G3) and
+	// the runtime prefixes to the runtime (R20.1, H5): a plain event can
+	// never create a record under one. It may only replay the receipt of a
+	// recorded plain event that Phase 2 accepted before the namespace was
+	// reserved (DUR-2.8), so structure is validated without the EventID,
+	// which is a lookup key and never payload, and a reserved EventID with
+	// no receipt is rejected after the lookup, before anything is written.
+	reserved := o == nil && (isOutcomeEventID(e.EventID) || domain.ReservedIDPrefix(e.EventID))
 	limits := g.Limits.Effective()
 	// Admission from lengths alone (SEC-2.1), as in Ingest: over the
 	// configured limits, only the retry of a known EventID may proceed, and
@@ -221,7 +225,11 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 		validation, pol = retryCeiling(g.Limits), ceilingPolicy(g.semantic())
 	}
 	e = e.Clone()
-	if err := validateRequest(e, p, validation, pol); err != nil {
+	shape := e
+	if reserved {
+		shape = withoutEventID(e)
+	}
+	if err := validateRequest(shape, p, validation, pol); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	if tx.SessionID() != p.SessionID {
@@ -253,6 +261,9 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 		if r, found, err := lookupReceipt(tx, p, occurrence, e, o); found || err != nil {
 			return r, err
 		}
+	}
+	if reserved {
+		return domain.IngestReceipt{}, domain.ErrInvalidRecord
 	}
 	// Only a new occurrence is held to the currently configured limits and
 	// policy (F3, SPEC-1.7, DUR-1.2): a retry above replayed its receipt
@@ -296,7 +307,10 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.
 		if r.Principal != p {
 			return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
 		}
-		if h, err := recordedHash(e, p, r); err != nil || h != r.PayloadHash {
+		// The EventID is the lookup key, never payload, so the retry is
+		// canonicalized without it: a recorded EventID that a later phase
+		// reserved still replays (DUR-2.8).
+		if h, err := recordedHash(withoutEventID(e), p, r); err != nil || h != r.PayloadHash {
 			return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
 		}
 		if o != nil {
@@ -314,6 +328,13 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.
 		return domain.IngestReceipt{}, true, err
 	}
 	return domain.IngestReceipt{}, false, nil
+}
+
+// withoutEventID is e with its EventID cleared, for structural validation
+// and payload hashing, neither of which the EventID takes part in.
+func withoutEventID(e domain.Event) domain.Event {
+	e.EventID = ""
+	return e
 }
 
 // retryCeiling returns the version-independent limits an event is validated

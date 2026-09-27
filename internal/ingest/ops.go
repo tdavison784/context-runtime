@@ -36,9 +36,6 @@ type OperationOutcome struct {
 type LifecycleExecutor interface {
 	Resolve(tx store.Tx, actor domain.Principal, intent domain.ResolveIntent, seq uint64) (LifecycleOutcome, error)
 	Unpin(tx store.Tx, actor domain.Principal, intent domain.UnpinIntent, seq uint64) (LifecycleOutcome, error)
-	// EnqueueGC persists a durable GC trigger in the event's transaction
-	// (P3-39, SPEC-1.6); see lifecycle.Service.EnqueueGC.
-	EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain.GCTrigger, scope domain.CollectScope, taskID, triggerID string) (string, error)
 }
 
 // LifecycleOutcome is an executed command's committed receipt, the grant
