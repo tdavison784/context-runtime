@@ -454,3 +454,36 @@ func TestSEC18DeadSubjectStatesDoNotWedgeReports(t *testing.T) {
 		t.Errorf("report wedged by dead subject states: %v", err)
 	}
 }
+
+// DUR-1.5 (G2, W4 half): a declaration never binds more obligation versions
+// to one source than ObligationDeclarationLimit, the tightest by-source read
+// of any consumer, so extra declarations cannot lock the source against
+// replacement, demotion, archival or GC. The refusal writes nothing.
+func TestDUR15DeclarationLimitPerSource(t *testing.T) {
+	f := newFixture(t) // "pu" already carries its slot-0 obligation
+	limit := testPolicy().ObligationDeclarationLimit()
+	for slot := 1; slot < limit; slot++ {
+		if _, err := f.s.declare(t, f.st, f.harness, harnessDecl(fmt.Sprintf("dl-%d", slot), "pu", 1, fmt.Sprint(slot))); err != nil {
+			t.Fatalf("declaration %d within the limit: %v", slot, err)
+		}
+	}
+	count := func() int {
+		var n int
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			vs, err := tx.ObligationsBySource("pu", domain.MaxObligationsPerSource)
+			n = len(vs)
+			return err
+		})
+		return n
+	}
+	if got := count(); got != limit {
+		t.Fatalf("bound obligations = %d, want %d", got, limit)
+	}
+	before := f.lastSeq(t)
+	if _, err := f.s.declare(t, f.st, f.harness, harnessDecl("dl-over", "pu", 1, fmt.Sprint(limit))); !errors.Is(err, domain.ErrResourceLimit) {
+		t.Errorf("declaration beyond the per-source limit: %v", err)
+	}
+	if got := count(); got != limit || f.lastSeq(t) != before {
+		t.Errorf("refused declaration wrote: %d obligations, seq %d -> %d", got, before, f.lastSeq(t))
+	}
+}
