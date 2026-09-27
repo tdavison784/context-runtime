@@ -184,3 +184,49 @@ func TestDUR38HistorySatisfiesPages(t *testing.T) {
 		}
 	}
 }
+
+// DUR-3.1 (A), commander ruling: a KNOWN, non-ALL report reads only what it
+// can affect — live CURRENT_PATH proofs at or below each changed path, and
+// WORKSPACE proofs only when the fingerprint changes — never the resource's
+// whole live proof set. Directory changes still reach the files below them.
+func TestDUR31ReportsReadOnlyAffectedProofs(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	file := f.fileObligation(t, "32")
+	f.matcherGrant(t, "g-file", file, FileReadV1, f.userP)
+	f.resourceReport(t, "W1", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	runN++
+	run, err := f.registerRun(t, f.harness, runIntent(fmt.Sprintf("run-%d", runN), fmt.Sprintf("exec-%d", runN), fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.report(t, run, domain.OutcomePass, hashOf("H1"), nil)
+	for _, ref := range []domain.ObligationRef{f.sysTests, file} {
+		if o := f.status(t, ref); o.Status != domain.ObligationSatisfied {
+			t.Fatalf("setup %s = %+v", ref.ObligationID, o)
+		}
+	}
+	f.st.counting.Store(true)
+	step := func(name string, fp string, changed []string, wantWorkspace bool, tests, fileStatus domain.ObligationStatus) {
+		t.Helper()
+		f.st.wholeReads.Store(0)
+		f.st.workspaceReads.Store(0)
+		f.resourceReport(t, fp, false, false, changed)
+		if n := f.st.wholeReads.Load(); n != 0 {
+			t.Errorf("%s: %d whole-resource proof reads", name, n)
+		}
+		if got := f.st.workspaceReads.Load() > 0; got != wantWorkspace {
+			t.Errorf("%s: workspace proofs read = %v, want %v", name, got, wantWorkspace)
+		}
+		if o := f.status(t, f.sysTests); o.Status != tests {
+			t.Errorf("%s: tests obligation = %s, want %s", name, o.Status, tests)
+		}
+		if o := f.status(t, file); o.Status != fileStatus {
+			t.Errorf("%s: file obligation = %s, want %s", name, o.Status, fileStatus)
+		}
+	}
+	step("unrelated path, same fingerprint", "W1", []string{"other/z.md"}, false, domain.ObligationSatisfied, domain.ObligationSatisfied)
+	step("containing directory, same fingerprint", "W1", []string{"docs"}, false, domain.ObligationSatisfied, domain.ObligationUnresolved)
+	step("new fingerprint", "W2", []string{"other/z.md"}, true, domain.ObligationUnresolved, domain.ObligationUnresolved)
+}

@@ -36,6 +36,11 @@ type testStore struct {
 	// failAt, when positive, fails the failAt-th semantic write of the next
 	// Update with errInjected.
 	failAt atomic.Int64
+	// counting routes every Update through the wrapper so wholeReads and
+	// workspaceReads count the report's whole-resource and workspace proof
+	// reads (DUR-3.1 (A)).
+	counting                   atomic.Bool
+	wholeReads, workspaceReads atomic.Int64
 }
 
 func newTestStore(t *testing.T) *testStore {
@@ -45,17 +50,18 @@ func newTestStore(t *testing.T) *testStore {
 
 func (f *testStore) Update(ctx context.Context, session string, fn func(store.Tx) error) error {
 	failAt := int(f.failAt.Swap(0))
-	if failAt == 0 {
+	if failAt == 0 && !f.counting.Load() {
 		return f.Store.Update(ctx, session, fn)
 	}
 	return f.Store.Update(ctx, session, func(tx store.Tx) error {
-		return fn(&faultTx{Tx: tx, failAt: failAt})
+		return fn(&faultTx{Tx: tx, failAt: failAt, store: f})
 	})
 }
 
 type faultTx struct {
 	store.Tx
 	failAt, writes int
+	store          *testStore
 }
 
 func (t *faultTx) SemanticTransaction() (store.SemanticTx, error) {
@@ -79,6 +85,22 @@ func (t *faultTx) SemanticReadBackend() store.SemanticReader {
 type faultSem struct {
 	store.SemanticTx
 	tx *faultTx
+}
+
+// CurrentProofsByDependency counts whole-resource reads (pathKey "").
+func (s *faultSem) CurrentProofsByDependency(resourceID, pathKey string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	if pathKey == "" && s.tx.store != nil {
+		s.tx.store.wholeReads.Add(1)
+	}
+	return s.SemanticTx.CurrentProofsByDependency(resourceID, pathKey, p)
+}
+
+// LiveWorkspaceProofs counts workspace-dependency reads.
+func (s *faultSem) LiveWorkspaceProofs(resourceID string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	if s.tx.store != nil {
+		s.tx.store.workspaceReads.Add(1)
+	}
+	return s.SemanticTx.LiveWorkspaceProofs(resourceID, p)
 }
 
 // fault counts one write and reports whether it is the injected failure.

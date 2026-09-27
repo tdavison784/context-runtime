@@ -164,6 +164,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"DUR31ReportsIgnoreUntouchedLiveState", TestDUR31ReportsIgnoreUntouchedLiveState, true},
 		{"DUR31SubjectApplicabilityIsDerived", TestDUR31SubjectApplicabilityIsDerived, true},
 		{"DUR38HistorySatisfiesPages", TestDUR38HistorySatisfiesPages, true},
+		{"DUR31ReportsReadOnlyAffectedProofs", TestDUR31ReportsReadOnlyAffectedProofs, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {
