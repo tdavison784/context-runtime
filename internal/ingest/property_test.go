@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 )
 
 // Generated-history properties over ingestion (gate: INV-04/06/08/09 and
@@ -95,15 +97,25 @@ func genHistory(seed uint64, n int) []genStep {
 	return out
 }
 
-func newPropertyFixture(t *testing.T) *fixture {
+// propertyStore opens a fresh store of one backend for a property run.
+type propertyStore func(t *testing.T) store.Store
+
+func memoryPropertyStore(t *testing.T) store.Store {
 	ms := memory.New()
 	t.Cleanup(func() { ms.Close() })
+	return ms
+}
+
+func sqlitePropertyStore(t *testing.T) store.Store { return sqlitetest.Open(t) }
+
+func newPropertyFixture(t *testing.T, open propertyStore) *fixture {
+	s := open(t)
 	// Without the Phase 3 facet every event is rejected and the invariants
 	// would hold vacuously.
-	if !hasSemantic(ms) {
+	if !hasSemantic(s) {
 		t.Skip("GATE-PENDING: needs " + depW2)
 	}
-	f := newFixture(t, ms)
+	f := newFixture(t, s)
 	pol := testPolicy()
 	f.in.Semantic = &pol
 	return f
@@ -309,42 +321,93 @@ func checkInvariants(t *testing.T, f *fixture, step int, resolved map[string]boo
 // TestProperty_GeneratedHistories checks the invariants after every step
 // of many generated histories, then INV-09: replaying a history into a
 // fresh store yields identical receipts and state, and retrying every
-// committed event afterwards replays its receipt without side effects.
+// committed event afterwards replays its receipt without side effects. It
+// runs on both backends (TEST-1.6), SQLite with fewer, parallel seeds for runtime,
+// and a SQLite history must also replay identically into the memory store.
 func TestProperty_GeneratedHistories(t *testing.T) {
-	seeds := 24
-	if testing.Short() {
-		seeds = 4
-	}
-	for seed := range uint64(seeds) {
-		t.Run(fmt.Sprint(seed), func(t *testing.T) {
-			h := genHistory(seed, 40)
-			f := newPropertyFixture(t)
-			got := runHistory(t, f, h)
-
-			g := newPropertyFixture(t)
-			replay := runHistory(t, g, h)
-			for i := range got {
-				if (got[i] == nil) != (replay[i] == nil) || got[i] != nil && !reflect.DeepEqual(normReceipt(*got[i]), normReceipt(*replay[i])) {
-					t.Fatalf("step %d: replay diverged", i)
-				}
+	for _, b := range []struct {
+		name  string
+		open  propertyStore
+		seeds int
+	}{{"memory", memoryPropertyStore, 24}, {"sqlite", sqlitePropertyStore, 6}} {
+		t.Run(b.name, func(t *testing.T) {
+			seeds := b.seeds
+			if testing.Short() {
+				seeds = min(seeds, 4)
 			}
-			if !reflect.DeepEqual(normGolden(snapshotPhase2(t, f.s)), normGolden(snapshotPhase2(t, g.s))) {
-				t.Fatalf("replayed state diverged")
-			}
-
-			last := f.lastSeq()
-			for i, st := range h {
-				if got[i] == nil {
-					continue
-				}
-				r, err := f.ingest(st.p, st.e)
-				if err != nil || !reflect.DeepEqual(normReceipt(r), normReceipt(*got[i])) {
-					t.Fatalf("step %d retry: %v", i, err)
-				}
-			}
-			if f.lastSeq() != last {
-				t.Fatalf("retries allocated sequences")
+			for seed := range uint64(seeds) {
+				t.Run(fmt.Sprint(seed), func(t *testing.T) {
+					// SQLite histories are commit-bound, not CPU-bound.
+					if b.name == "sqlite" {
+						t.Parallel()
+					}
+					checkGeneratedHistory(t, genHistory(seed, 40), b.open, b.name == "sqlite")
+				})
 			}
 		})
 	}
+}
+
+// checkGeneratedHistory runs h on a fresh store from open, replays it into
+// another (and, crossBackend, into a memory store too), and checks INV-09.
+func checkGeneratedHistory(t *testing.T, h []genStep, open propertyStore, crossBackend bool) {
+	f := newPropertyFixture(t, open)
+	got := runHistory(t, f, h)
+
+	replays := []*fixture{newPropertyFixture(t, open)}
+	if crossBackend {
+		replays = append(replays, newPropertyFixture(t, memoryPropertyStore))
+	}
+	for _, g := range replays {
+		replay := runHistory(t, g, h)
+		for i := range got {
+			if (got[i] == nil) != (replay[i] == nil) || got[i] != nil && !reflect.DeepEqual(normReceipt(*got[i]), normReceipt(*replay[i])) {
+				t.Fatalf("step %d: replay diverged", i)
+			}
+		}
+		if !reflect.DeepEqual(backendNeutral(snapshotPhase2(t, f.s)), backendNeutral(snapshotPhase2(t, g.s))) {
+			t.Fatalf("replayed state diverged")
+		}
+	}
+
+	last := f.lastSeq()
+	for i, st := range h {
+		if got[i] == nil {
+			continue
+		}
+		r, err := f.ingest(st.p, st.e)
+		if err != nil || !reflect.DeepEqual(normReceipt(r), normReceipt(*got[i])) {
+			t.Fatalf("step %d retry: %v", i, err)
+		}
+	}
+	if f.lastSeq() != last {
+		t.Fatalf("retries allocated sequences")
+	}
+}
+
+// backendNeutral is v as generic JSON with empty lists folded to null: the
+// backends differ only in returning an empty or a nil slice for no rows,
+// which is not a state difference.
+func backendNeutral(v any) any {
+	b, _ := json.Marshal(v)
+	var out any
+	_ = json.Unmarshal(b, &out)
+	var fold func(any) any
+	fold = func(v any) any {
+		switch x := v.(type) {
+		case []any:
+			if len(x) == 0 {
+				return nil
+			}
+			for i := range x {
+				x[i] = fold(x[i])
+			}
+		case map[string]any:
+			for k := range x {
+				x[k] = fold(x[k])
+			}
+		}
+		return v
+	}
+	return fold(out)
 }
