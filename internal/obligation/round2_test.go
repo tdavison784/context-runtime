@@ -302,3 +302,29 @@ func TestH2BindingVersionsDoNotWedgeDeclaration(t *testing.T) {
 		t.Errorf("obligation = %+v %v, want bound to ws1 v%d", o, err, h2History)
 	}
 }
+
+// H1 (commander ruling): a covering, subject-matched complete FAIL newer
+// than the proof's run rejects the SATISFIED proof whatever fingerprint it
+// observed; ordering is by ordinal only. A newer PASS at another fingerprint
+// rejects nothing, and a FAIL private to another agent still covers nothing.
+func TestH1NewerFailAtOtherFingerprintRejects(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W-other"), nil)
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Fatalf("newer PASS at another fingerprint rejected the proof: %+v", o)
+	}
+	f.reportPrivate(t, "b-other-fail", domain.OutcomeFail, hashOf("W-other"))
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Fatalf("agent-private FAIL rejected the TASK-wide proof: %+v", o)
+	}
+	fail := f.report(t, f.newRun(t), domain.OutcomeFail, hashOf("W-other"), nil)
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("newer complete FAIL at another fingerprint kept the proof: %+v", o)
+	}
+	h := f.history(t, f.sysTests)
+	if last := h[len(h)-1]; last.Cause != domain.CauseProofRejected || last.CauseRecordID != fail.ID || last.GrantID != "" {
+		t.Errorf("rejection = %+v", last)
+	}
+}

@@ -154,6 +154,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"H1StalePassAfterRevert", TestH1StalePassAfterRevert, true},
 		{"H1StalePassAfterInapplicableFail", TestH1StalePassAfterInapplicableFail, true},
 		{"H1PrivateFailDoesNotOutrankTaskPass", TestH1PrivateFailDoesNotOutrankTaskPass, true},
+		{"H1NewerFailAtOtherFingerprintRejects", TestH1NewerFailAtOtherFingerprintRejects, true},
 		{"H2PathCurrencyIgnoresLaterUnrelatedEdits", TestH2PathCurrencyIgnoresLaterUnrelatedEdits, true},
 		{"H2InvalidationIgnoresTransitionHistory", TestH2InvalidationIgnoresTransitionHistory, true},
 		{"H2PartialReportsDoNotWedgeRun", TestH2PartialReportsDoNotWedgeRun, true},
