@@ -79,7 +79,7 @@ func (s semTx) InsertCollectReceipt(c domain.CollectReceipt) error {
 	}
 	if c.GCRequestID != "" {
 		var g domain.GCRequest
-		if err := t.get("gc_request", c.GCRequestID, 0, &g); err != nil || g.RequestID != c.RequestID {
+		if err := t.get("gc_request", c.GCRequestID, 0, &g); err != nil || !store.CollectReceiptOf(g, c.RequestID) {
 			return notStored(errors.Join(err, domain.ErrNotFound), "collect receipt %s: GC request %s is not stored with its request identity", c.ID, c.GCRequestID)
 		}
 	}
@@ -109,9 +109,11 @@ func (s semTx) InsertGCResult(g domain.GCResult) error {
 	if err := t.get("gc_request", g.GCRequestID, 0, &req); err != nil {
 		return notStored(err, "GC result %s: request %s is not stored", g.ID, g.GCRequestID)
 	}
-	var c domain.CollectReceipt
-	if err := t.get("collect_receipt", g.CollectReceiptID, 0, &c); err != nil || c.GCRequestID != g.GCRequestID {
-		return notStored(errors.Join(err, domain.ErrNotFound), "GC result %s: receipt %s is not its request's collect receipt", g.ID, g.CollectReceiptID)
+	if g.Outcome == domain.GCCollected {
+		var c domain.CollectReceipt
+		if err := t.get("collect_receipt", g.CollectReceiptID, 0, &c); err != nil || c.GCRequestID != g.GCRequestID {
+			return notStored(errors.Join(err, domain.ErrNotFound), "GC result %s: receipt %s is not its request's collect receipt", g.ID, g.CollectReceiptID)
+		}
 	}
 	return t.atomic(func() error {
 		if err := t.put("gc_result", g.GCRequestID, 0, g, false); err != nil {

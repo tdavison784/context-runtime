@@ -87,7 +87,7 @@ func proofWorld(t *testing.T, s store.Store) domain.ObligationVersion {
 		noErr(t, sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 1, tx.NextSeq())))
 		run := NewObservationRun(t, sessA, "run1", "repo", "wb", tx.NextSeq())
 		noErr(t, sem.InsertObservationRun(run))
-		ev := ToolEvidence(sessA, "ev1", tx.NextSeq())
+		ev := ProducedEvidence(sessA, "ev1", tx.NextSeq(), run.ExecutionID)
 		noErr(t, tx.InsertItem(ev))
 		noErr(t, sem.InsertObservation(NewObservation(run, "obs1", "ev1", tx.NextSeq(), fpA)))
 		cov, members := NewCoverage(t, sessA, "evcov", tx.NextSeq(), domain.CoverageEvidenceSupport, ContentRef(ev))

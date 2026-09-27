@@ -19,6 +19,9 @@ type ProofReader interface {
 	CurrentProofsByDependency(resourceID, pathKey string, page Page) (ResultPage[domain.ApplicabilityProof], error)
 	// No access filter: completion must inspect all declared TURN/TASK owners.
 	ObligationsByTaskOwner(taskID string, page Page) (ResultPage[domain.ObligationVersion], error)
+	// ObligationTransition is one transition by its exact ID (H2): a
+	// proof's satisfying transition without paging the version's history.
+	ObligationTransition(id string) (domain.ObligationTransition, error)
 	TransitionsByVersion(target domain.ObligationRef, page Page) (ResultPage[domain.ObligationTransition], error)
 	Satisfies(viewer domain.Principal, target domain.ObligationRef, currentOnly bool, page Page) (ResultPage[domain.SatisfiesRelation], error)
 }

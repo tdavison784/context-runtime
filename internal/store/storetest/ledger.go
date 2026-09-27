@@ -197,10 +197,11 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 	}{
 		{"t1", domain.ObligationUnresolved, domain.ObligationBlocked},
 		{"t2", domain.ObligationBlocked, domain.ObligationUnresolved},
-		{"t3", domain.ObligationUnresolved, domain.ObligationSatisfied},
-		{"t4", domain.ObligationSatisfied, domain.ObligationUnresolved},
-		{"t5", domain.ObligationUnresolved, domain.ObligationSatisfied},
-		{"t6", domain.ObligationSatisfied, domain.ObligationWaived},
+		// The raw path never satisfies (INV-16, DUR-2.12).
+		{"t3", domain.ObligationUnresolved, domain.ObligationBlocked},
+		{"t4", domain.ObligationBlocked, domain.ObligationUnresolved},
+		{"t5", domain.ObligationUnresolved, domain.ObligationBlocked},
+		{"t6", domain.ObligationBlocked, domain.ObligationWaived},
 	}
 	var history []domain.ObligationTransition
 	for i, st := range steps {
@@ -234,7 +235,7 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 			return NewTransition(sessA, "x", "o", 1, seq, domain.ObligationWaived, domain.ObligationUnresolved)
 		}, domain.ErrInvalidTransition},
 		{"from is not current status", func(seq uint64) domain.ObligationTransition {
-			return NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationSatisfied)
+			return NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
 		}, domain.ErrInvalidTransition},
 		{"missing version", func(seq uint64) domain.ObligationTransition {
 			return NewTransition(sessA, "x", "o", 2, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
@@ -633,30 +634,27 @@ func testConversations(t *testing.T, s store.Store) {
 	})
 }
 
-// testMatcherTransition checks that a matcher's satisfaction is stored
-// with the grant it acted under (AUTH-2.3); whether the grant is in force
-// is the caller's check.
+// testMatcherTransition checks that the raw Phase 2 path refuses a
+// matcher's satisfaction with or without its grant (INV-16, DUR-2.12): a
+// matcher satisfies only through AppendSemanticObligationTransition with
+// its proof (testSemanticMatcherProof).
 func testMatcherTransition(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		return tx.InsertObligationVersion(NewObligation(sessA, "o", 1, tx.NextSeq(), "src"))
 	})
-	var tr domain.ObligationTransition
-	update(t, s, sessA, func(tx store.Tx) error {
-		tr = NewTransition(sessA, "t", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied)
-		tr.Matcher = &domain.MatcherRef{Name: "tests_pass", Version: "1"}
-		wantErr(t, errOf(tx.AppendObligationTransition(tr, 1)), domain.ErrInvalidRecord)
-		tr.GrantID = "g1"
-		got, err := tx.AppendObligationTransition(tr, 1)
-		noErr(t, err)
-		if got.Status != domain.ObligationSatisfied || !slices.Equal(got.EvidenceIDs, tr.EvidenceIDs) {
-			t.Errorf("obligation after matcher transition = %+v", got)
-		}
-		return nil
-	})
+	for _, grant := range []string{"", "g1"} {
+		rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+			tr := NewTransition(sessA, "t", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied)
+			tr.Matcher, tr.GrantID = &domain.MatcherRef{Name: "tests_pass", Version: "1"}, grant
+			return errOf(tx.AppendObligationTransition(tr, 1))
+		})
+	}
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		got, err := tx.ObligationTransitions("o")
 		noErr(t, err)
-		assertEqual(t, "matcher transition", got, []domain.ObligationTransition{tr})
+		if len(got) != 0 {
+			t.Errorf("a refused matcher transition was stored: %+v", got)
+		}
 		return nil
 	})
 }

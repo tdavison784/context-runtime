@@ -121,7 +121,9 @@ func testByteExactStringLists(t *testing.T, s store.Store) {
 		wantGrant = NewGrant(sessA, "g", tx.NextSeq(), confusableIDs[1])
 		noErr(t, tx.InsertGrant(wantGrant))
 		noErr(t, tx.InsertObligationVersion(NewObligation(sessA, "o", 1, tx.NextSeq(), "tagged")))
-		wantTransition = NewTransition(sessA, "tr", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied)
+		// BLOCKED: the raw path never satisfies (DUR-2.12); the transition
+		// still carries its evidence and fingerprint lists.
+		wantTransition = NewTransition(sessA, "tr", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationBlocked)
 		wantTransition.EvidenceIDs = []string{confusableIDs[1]}
 		wantTransition.Fingerprints = []string{"fp\xff"}
 		wantObligation, err = tx.AppendObligationTransition(wantTransition, 1)

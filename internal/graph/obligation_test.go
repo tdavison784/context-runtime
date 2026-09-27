@@ -37,8 +37,8 @@ func obligation(t *testing.T, tx store.ReadTx, id string) domain.ObligationVersi
 // TestD13_ReplacementRetiresBoundObligations is D13/FR-OBL-006: replacing a
 // source directive retires, in the same transaction, every current
 // obligation version bound to the retired source, including when the
-// replacement declares no obligation, preserving status, evidence, and
-// transition history, with an audit record per retirement. Obligations of
+// replacement declares no obligation, preserving status and transition
+// history, with an audit record per retirement. Obligations of
 // other sources are untouched, and no replacement version is invented.
 func TestD13_ReplacementRetiresBoundObligations(t *testing.T) {
 	eachStore(t, func(t *testing.T, s store.Store) {
@@ -47,7 +47,8 @@ func TestD13_ReplacementRetiresBoundObligations(t *testing.T) {
 		update(t, s, sess, func(tx store.Tx) error {
 			pinWithObligations(t, tx, actor, "p1", "tests", "o1", "o2")
 			pinWithObligations(t, tx, actor, "q1", "other", "o3")
-			tr := storetest.NewTransition(sess, "tr-1", "o2", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied)
+			// BLOCKED: the raw path never satisfies (INV-16, DUR-2.12).
+			tr := storetest.NewTransition(sess, "tr-1", "o2", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationBlocked)
 			_, err := tx.AppendObligationTransition(tr, 1)
 			return err
 		})
@@ -69,8 +70,8 @@ func TestD13_ReplacementRetiresBoundObligations(t *testing.T) {
 			if o := obligation(t, tx, "o1"); o.Status != domain.ObligationUnresolved {
 				t.Errorf("o1 status = %s, want UNRESOLVED preserved", o.Status)
 			}
-			if o := obligation(t, tx, "o2"); o.Status != domain.ObligationSatisfied || len(o.EvidenceIDs) == 0 {
-				t.Errorf("o2 = %s %v, want SATISFIED with its evidence preserved", o.Status, o.EvidenceIDs)
+			if o := obligation(t, tx, "o2"); o.Status != domain.ObligationBlocked {
+				t.Errorf("o2 = %s, want BLOCKED preserved", o.Status)
 			}
 			if trs, err := tx.ObligationTransitions("o2"); err != nil || len(trs) != 1 {
 				t.Errorf("o2 transitions = %d, %v; want history preserved", len(trs), err)

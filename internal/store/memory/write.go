@@ -404,6 +404,11 @@ func (t *tx) AppendObligationTransition(tr domain.ObligationTransition, expected
 	if tr.Cause != "" {
 		return domain.ObligationVersion{}, invalid("obligation transition %s: a semantic transition requires its detail", tr.ID)
 	}
+	// INV-16 (DUR-2.12): this path carries no proof or assertion, so it
+	// never satisfies; satisfaction is AppendSemanticObligationTransition's.
+	if tr.To == domain.ObligationSatisfied {
+		return domain.ObligationVersion{}, invalid("obligation transition %s: SATISFIED requires a proof or assertion", tr.ID)
+	}
 	if cur, ok := t.obligations.peek(obligationKey{tr.ObligationID, tr.Version}); ok && cur.DeclarationKind != "" {
 		return domain.ObligationVersion{}, invalid("obligation %s/%d: a declared version transitions only with its detail", tr.ObligationID, tr.Version)
 	}

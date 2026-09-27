@@ -12,7 +12,9 @@ import (
 func TestPhase3RowsCarrySemanticSeq(t *testing.T) {
 	legacy := map[string]bool{"item": true, "relationship": true, "event": true, "obligation": true, "obligation_transition": true,
 		"grant": true, "task": true, "lifecycle": true, "conversation": true, "call": true, "attempt": true, "envelope": true,
-		"receipt": true, "receipt_item": true, "diagnostic": true, "command": true, "reference": true}
+		"receipt": true, "receipt_item": true, "diagnostic": true, "command": true, "reference": true,
+		// GC progress is unsequenced operational metadata (H3), like the call ledger.
+		"gc_progress": true}
 	seqer := reflect.TypeOf((*interface{ SemanticSeq() uint64 })(nil)).Elem()
 	for kind, s := range schemas {
 		if !legacy[kind] && !s.typ.Implements(seqer) {
