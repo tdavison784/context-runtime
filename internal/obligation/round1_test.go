@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 func (f *evalFixture) newRun(t *testing.T) domain.ObservationRun {
@@ -409,5 +410,47 @@ func TestSEC17PathCurrencyIgnoresEarlierHistory(t *testing.T) {
 	f.resourceReport(t, "W-now", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
 	if err := f.assertPath(t, ref, f.r.auth, "H1"); err != nil {
 		t.Fatalf("path currency wedged by earlier update history: %v", err)
+	}
+}
+
+// SEC-1.8/DUR-1.2 (G2): dead (STALE/UNKNOWN) subject states must not count
+// against a report's work bound; only live dependents do. Needs W2's
+// live-only SubjectStatesByResource read; skipped until the backend stops
+// returning dead states.
+func TestSEC18DeadSubjectStatesDoNotWedgeReports(t *testing.T) {
+	f := newEvalFixture(t)
+	states := func(from int, fp string) {
+		for i := range 25 {
+			target := testsTarget(func(v *domain.TestsTarget) { v.SuiteSpec = fmt.Sprintf("suite-%d", from+i) })
+			runN++
+			run, err := f.registerRun(t, f.harness, runIntent(fmt.Sprintf("run-%d", runN), fmt.Sprintf("exec-%d", runN), target))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.report(t, run, domain.OutcomePass, hashOf(fp), nil)
+		}
+	}
+	states(0, "W1")
+	f.r.set(t, f.fixture, hashOf("W2"), false) // those 25 go STALE (dead)
+	states(100, "W2")                          // 25 live states
+	dead := false
+	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		r, _ := store.ReadSemantic(tx)
+		pg, _ := r.SubjectStatesByResource("repo1", store.Page{Limit: 5})
+		for _, st := range pg.Records {
+			if st.Applicability != domain.ApplicabilityCurrent {
+				dead = true
+			}
+		}
+		return nil
+	})
+	if dead {
+		t.Skip("awaiting W2 live-only SubjectStatesByResource (G2 store half)")
+	}
+	f.r.n++
+	in := domain.ReportResourceChangeIntent{RequestID: "after-dead", ResourceID: "repo1", ExpectedRevision: f.r.rev,
+		ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf("W3"), AllPaths: true}
+	if _, err := f.s.report(t, f.st, f.harness, in); err != nil {
+		t.Errorf("report wedged by dead subject states: %v", err)
 	}
 }
