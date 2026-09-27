@@ -229,3 +229,33 @@ func GCBatchRequestID(gcRequestID string, batch uint64) (string, error) {
 	}
 	return id, nil
 }
+
+const (
+	gcTriggerRequestPrefix = "gc_"
+	gcRequestRecordPrefix  = "gcq_"
+)
+
+// GCTriggerRequestID is the runtime collection request ID of a GC trigger
+// (H5, SEC-2.6): it binds the authenticated principal whose action raised
+// the trigger (a task completion or supersession) and the trigger identity.
+// "gc_" is a reserved runtime namespace, so no caller can name or squat it.
+func GCTriggerRequestID(origin Principal, trigger GCTrigger, triggerID string) (string, error) {
+	if err := validateIngestPrincipal(origin); err != nil {
+		return "", err
+	}
+	if !trigger.Valid() || !semanticID(triggerID) {
+		return "", invalid("GC trigger request: trigger and trigger identity required")
+	}
+	e := NewCanonicalEncoder("context-runtime/gc-trigger/v2")
+	encodePrincipal(e, origin)
+	return gcTriggerRequestPrefix + e.String(string(trigger)).String(triggerID).Hash(), nil
+}
+
+// GCRequestRecordID is the record ID of the GC request whose collection
+// request ID is requestID, in the reserved "gcq_" namespace.
+func GCRequestRecordID(session, requestID string) (string, error) {
+	if !semanticID(session) || !semanticID(requestID) {
+		return "", invalid("GC request identity: session and request required")
+	}
+	return gcRequestRecordPrefix + NewCanonicalEncoder("context-runtime/gc-request/v1").String(session).String(requestID).Hash(), nil
+}

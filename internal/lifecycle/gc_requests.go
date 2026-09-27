@@ -54,8 +54,17 @@ func (s *Service) enqueueGC(tx store.Tx, sem store.SemanticTx, origin domain.Pri
 	if trigger != domain.GCTaskCompletion && !s.policy.GCTriggerEnabled(trigger) {
 		return "", nil
 	}
-	requestID := "gc_" + domain.NewCanonicalEncoder("context-runtime/gc-trigger/v1").String(origin.SessionID).String(string(trigger)).String(triggerID).Hash()
-	r := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: gcRequestID(origin.SessionID, requestID), SessionID: origin.SessionID, SchemaVersion: domain.SemanticSchemaV1},
+	// Runtime GC IDs bind the authenticated origin and live in reserved
+	// namespaces no caller can name (H5, SEC-2.6).
+	requestID, err := domain.GCTriggerRequestID(origin, trigger, triggerID)
+	if err != nil {
+		return "", err
+	}
+	recordID, err := domain.GCRequestRecordID(origin.SessionID, requestID)
+	if err != nil {
+		return "", err
+	}
+	r := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: recordID, SessionID: origin.SessionID, SchemaVersion: domain.SemanticSchemaV1},
 		CollectIntent: domain.CollectIntent{RequestID: requestID, Scope: scope, TaskID: taskID, Trigger: trigger}, Origin: origin, PolicyVersion: s.policy.Version}
 	prior, err := sem.GCRequest(r.ID)
 	if err == nil {

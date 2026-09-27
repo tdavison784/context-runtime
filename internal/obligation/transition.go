@@ -34,7 +34,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	if res, ok, err := replay(sem, actor, req); ok || err != nil {
+	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
 	// Current limits bound new work only; an admitted request replays above.
@@ -138,7 +138,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 		Target: in.Target, BeforeRevision: o.Revision, AfterRevision: after.Revision, Status: after.Status,
 		TransitionIDs: []string{t.ID}, ProofID: t.ProofID, AssertionID: d.AssertionID,
 	}}
-	if err := s.recordReceipt(sem, actor, req, seq, result); err != nil {
+	if err := s.recordReceipt(tx, sem, actor, req, seq, result); err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
 	return result, nil

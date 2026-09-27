@@ -28,7 +28,7 @@ func (s *Service) RegisterResourceTx(tx store.Tx, actor domain.Principal, in dom
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	if res, ok, err := replay(sem, actor, req); ok || err != nil {
+	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
 	b, err := s.registerResource(tx, sem, actor, in, seq)
@@ -36,7 +36,7 @@ func (s *Service) RegisterResourceTx(tx store.Tx, actor domain.Principal, in dom
 		return domain.MutationResult{}, err
 	}
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: resultResourceBinding, IDs: []string{b.ID}}}
-	if err := s.recordReceipt(sem, actor, req, seq, result); err != nil {
+	if err := s.recordReceipt(tx, sem, actor, req, seq, result); err != nil {
 		tx.Poison(err)
 		return domain.MutationResult{}, err
 	}
@@ -101,7 +101,7 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	if res, ok, err := replay(sem, actor, req); ok || err != nil {
+	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
 	bind, err := sem.ResourceBinding(in.ResourceID)
@@ -177,7 +177,7 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 		return domain.MutationResult{}, w.fail(err)
 	}
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: "RESOURCE_UPDATE", IDs: []string{u.ID}}}
-	if err := s.recordReceipt(sem, actor, req, seq, result); err != nil {
+	if err := s.recordReceipt(tx, sem, actor, req, seq, result); err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
 	return result, nil

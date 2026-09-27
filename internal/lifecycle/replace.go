@@ -147,12 +147,15 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 	if err = s.finish(tx, sem, p, domain.MutationLifecycle, method, i.RequestID, args, out.Result); err != nil {
 		return out, err
 	}
-	out.MutationReceiptID, err = domain.MutationReceiptID(p, domain.MutationLifecycle, i.RequestID)
+	out.MutationReceiptID, err = domain.MutationReceiptID(tx, p, domain.MutationLifecycle, i.RequestID)
 	return out, err
 }
 
 func (s *Service) ReplaceDirectiveStandalone(ctx context.Context, p domain.Principal, i domain.ReplaceDirectiveIntent) (MutationOutcome, error) {
 	var out MutationOutcome
+	if err := domain.ValidateCallerRequestID(i.RequestID); err != nil {
+		return out, err // callers never name runtime namespaces (H5, SEC-2.2)
+	}
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
 		_, _, prior, err := s.begin(tx, p, domain.MutationLifecycle, string(domain.ActionReplaceDirective), i.RequestID, i)
 		if err != nil {

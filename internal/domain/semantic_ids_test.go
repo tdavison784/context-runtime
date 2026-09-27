@@ -4,8 +4,8 @@ import "testing"
 
 func TestSemanticIDsSeparateFamiliesAndExactVersions(t *testing.T) {
 	p := Principal{SessionID: "s", Authority: AuthorityHarness}
-	a, _ := MutationReceiptID(p, MutationResourceReport, "r")
-	b, _ := MutationReceiptID(p, MutationResourceResync, "r")
+	a, _ := MutationReceiptID(nil, p, MutationResourceReport, "r")
+	b, _ := MutationReceiptID(nil, p, MutationResourceResync, "r")
 	if a == b {
 		t.Fatal("receipt families collide")
 	}

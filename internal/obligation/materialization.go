@@ -25,7 +25,7 @@ func (s *Service) SetMaterializationTx(tx store.Tx, actor domain.Principal, in d
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	if res, ok, err := replay(sem, actor, req); ok || err != nil {
+	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
 	if in.Target.SessionID != actor.SessionID {
@@ -70,7 +70,7 @@ func (s *Service) SetMaterializationTx(tx store.Tx, actor domain.Principal, in d
 		return domain.MutationResult{}, w.fail(err)
 	}
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: "MATERIALIZATION", IDs: []string{ev.ID}}}
-	if err := s.recordReceipt(sem, actor, req, seq, result); err != nil {
+	if err := s.recordReceipt(tx, sem, actor, req, seq, result); err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
 	return result, nil

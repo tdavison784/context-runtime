@@ -135,9 +135,11 @@ func (d IDDomain) Valid() bool { return slices.Contains(idDomains, d) }
 // and lifecycle-audit ("evt") IDs, and internal/invocation derives call
 // lifecycle-event ("lce") IDs; all three are reserved here too because the
 // domain cannot import either package (SPEC-1.13: "lce" was missing).
-// "req_" is the runtime-derived operation request namespace (G3, SEC-1.2).
+// "req_" is the runtime-derived operation request namespace (G3, SEC-1.2);
+// "gc_" and "gcq_" are the runtime GC collection-request and GC-request
+// namespaces (H5, SEC-2.6).
 var reservedIDPrefixes = func() []string {
-	out := []string{callerOccurrencePrefix, anonymousOccurrencePrefix + "_", "itm_", "call_", "turn_", "obl_", "rel_", "evt_", "lce_", operationRequestPrefix}
+	out := []string{callerOccurrencePrefix, anonymousOccurrencePrefix + "_", "itm_", "call_", "turn_", "obl_", "rel_", "evt_", "lce_", operationRequestPrefix, gcTriggerRequestPrefix, gcRequestRecordPrefix}
 	for _, d := range idDomains {
 		out = append(out, string(d)+"_")
 	}
