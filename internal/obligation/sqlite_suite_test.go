@@ -149,6 +149,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"RegisterResourceReceipt", TestRegisterResourceReceipt, false},
 		{"ConcurrentINV16", TestConcurrentINV16, true},
 		{"DeferredSeqAllocatedAfterReplay_DUR214", TestDeferredSeqAllocatedAfterReplay_DUR214, false},
+		{"ObservationStateSupersessionEnqueuesGC_SPEC23", TestObservationStateSupersessionEnqueuesGC_SPEC23, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {

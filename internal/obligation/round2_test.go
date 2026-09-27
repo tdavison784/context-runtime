@@ -43,3 +43,40 @@ func TestDeferredSeqAllocatedAfterReplay_DUR214(t *testing.T) {
 		return nil
 	})
 }
+
+// SPEC-2.3 (P3-39, H4): an observation-state supersession produces one
+// SUPERSESSION GC request for the run's task under the recorded policy; the
+// first state of a subject supersedes nothing and produces none.
+func TestObservationStateSupersessionEnqueuesGC_SPEC23(t *testing.T) {
+	f := newFixture(t)
+	var r repo1
+	target := testsTarget(nil)
+	r.set(t, f, hashOf("W1"), true)
+	requests := func() []domain.GCRequest {
+		var out []domain.GCRequest
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			rd, _ := store.ReadSemantic(tx)
+			pg, err := rd.PendingGCRequests(store.Page{Limit: 16})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, g := range pg.Records {
+				if g.Trigger == domain.GCSupersession {
+					out = append(out, g)
+				}
+			}
+			return nil
+		})
+		return out
+	}
+	f.observeTests(t, target, domain.OutcomeFail, hashOf("W1"), nil)
+	if got := requests(); len(got) != 0 {
+		t.Fatalf("first subject state enqueued %+v", got)
+	}
+	r.set(t, f, hashOf("W2"), false)
+	f.observeTests(t, target, domain.OutcomePass, hashOf("W2"), nil)
+	got := requests()
+	if len(got) != 1 || got[0].Scope != domain.CollectTask || got[0].TaskID != "task" || got[0].PolicyVersion != testPolicy().Version {
+		t.Fatalf("supersession requests = %+v", got)
+	}
+}
