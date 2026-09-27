@@ -2,6 +2,9 @@ package tools
 
 import (
 	"errors"
+	"github.com/tdavison784/context-runtime/internal/store/memory"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -118,4 +121,47 @@ func prevExchange(t *testing.T, tx store.Tx, issuing domain.ToolInvocation) stri
 	}
 	t.Fatal("no previous round")
 	return ""
+}
+
+// XREV-2.3 / SPEC-2.7: later uncovered rounds cannot change the answer. One
+// checkpoint covers X1; adding rounds through X20 leaves the same lookup,
+// at the same limits, returning that checkpoint — on memory and SQLite.
+func TestCheckpointLookupUnchangedByLaterUncoveredRounds(t *testing.T) {
+	for _, backend := range []string{"memory", "sqlite"} {
+		t.Run(backend, func(t *testing.T) {
+			var st store.Store = memory.New()
+			if backend == "sqlite" {
+				var err error
+				if st, err = sqlite.Open(testContext, filepath.Join(t.TempDir(), "lookup.db")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Cleanup(func() { st.Close() })
+			i := seedToolFixture(t, st)
+			s := testService(t)
+			remember(t, st, s, i, keyed("r1", "db", "postgres"))
+			cur, manifest := nextRound(t, st, i, "2", true)
+			k := runTool(t, st, func(tx store.Tx) (domain.ToolResult, error) {
+				return s.CreateCheckpoint(tx, dispatcher(cur), Request[domain.CheckpointIntent]{cur, summary("k", manifest, "summary")}, 0)
+			})
+			lookup := func() {
+				t.Helper()
+				update(t, st, func(tx store.Tx) error {
+					got, err := graph.CheckpointsCoveringItem(tx, cur.Principal, "output", 1, 16)
+					if err != nil || len(got) != 1 || got[0].ID != k.CheckpointID {
+						t.Fatalf("lookup: %+v, %v", got, err)
+					}
+					return nil
+				})
+			}
+			lookup()
+			for n := 3; n <= 20; n++ {
+				cur, _ = nextRound(t, st, cur, strconv.Itoa(n), true)
+				runTool(t, st, func(tx store.Tx) (domain.ToolResult, error) {
+					return s.UpdateState(tx, dispatcher(cur), Request[domain.KeyedWriteIntent]{cur, domain.KeyedWriteIntent{RequestID: "u" + strconv.Itoa(n), Key: "progress", Kind: domain.KindTaskState, Parts: keyed("", "", strconv.Itoa(n)).Parts}}, 0)
+				})
+			}
+			lookup()
+		})
+	}
 }
