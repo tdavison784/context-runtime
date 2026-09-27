@@ -129,6 +129,20 @@ both forms share.
   refreshes TTL, restores currentness, or waives an obligation
   (`TestGenerationPairsFollowClosedPolicy`). Raw `ItemChange` remains an
   internal storage mechanism, never a public mutation surface.
+- **Unpin now reaches any current PINNED semantic item, not only a keyed
+  DIRECTIVE (PR #6 round 1, SPEC-1.8).** Promote's DURABLE→PINNED path
+  (above) can pin an *unkeyed* semantic item — exactly the SYSTEM/HARNESS
+  residual instructions/constraints production actually creates — but
+  Unpin originally resolved only a keyed item in the DIRECTIVE namespace,
+  so a Promote-pinned instruction could never be unpinned (Demote also
+  forbids PINNED→DURABLE, since that transition is exclusively Unpin's).
+  `lifecycle.directive`'s target-resolution switch
+  (`internal/lifecycle/directive.go:46-55`) now accepts an unkeyed,
+  `RoleSemantic` item specifically for `ActionUnpin` (never for Resolve,
+  which still targets DIRECTIVE goals only) — the keyed/DIRECTIVE
+  restriction stays exactly as strict for every other case, including
+  AGENT_KEY and OBSERVATION items and every stale/superseded/lower-authority
+  target. `TestPromotedUnkeyedPinCanBeUnpinned`.
 - **Grant issuance/revocation are authenticated intents with runtime-derived
   attribution, not caller-certified fields (P3-11).** `lifecycle.Service.IssueGrant`/
   `RevokeGrant` (`internal/lifecycle/grants.go`) take `domain.GrantIntent`/
@@ -178,6 +192,23 @@ both forms share.
   (P3-39's "task completion always persists its request"), then waits
   pending until an operator or a later policy enables its actual
   collection.
+  **Default enabled set and its producers (PR #6 round 1/2, SPEC-2.13).**
+  `policy.DefaultPhase3Policy()` (`internal/policy/phase3.go`) enables
+  `{MANUAL, SUPERSESSION, TASK_COMPLETION, TTL}` — **not**
+  `domain.DefaultGCTriggers()`'s all-five set, which also includes `POLICY`.
+  The stated rule is that only a trigger with a producer on every path that
+  can raise it is enabled by default (`FR-GC-004` permits a disabled
+  trigger); `POLICY` has no producer yet, so it stays off. **This rule is
+  presently violated for SUPERSESSION (SPEC-2.3, open, assigned W7):** two
+  supersession paths — agent keyed writes (`internal/tools/keyed.go`, via
+  `graph.ReplaceDirective`) and observation-state supersession
+  (`graph.FileObservationState`, via `internal/obligation/subject_state.go`)
+  — currently produce no `GCRequest` even though SUPERSESSION is enabled by
+  default; fixing this means either adding the missing producers or
+  disabling the trigger until they exist. An enabled trigger whose executor
+  cannot run it (a stale `PolicyVersion` on the request, or a missing
+  authorized collector) fails that attempt closed rather than silently
+  succeeding; it stays pending for a later, correctly-configured attempt.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
   idempotently after producer commit, never inline with it. Tests:
   `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,
