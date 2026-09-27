@@ -52,8 +52,9 @@ type SatisfiesView struct {
 }
 
 // Satisfies returns the SATISFIES view of target for viewer. A version the
-// viewer cannot access is ErrNotFound. The history view continues after the
-// cursor after.
+// viewer cannot access is ErrNotFound. The current view is one keyed read;
+// the history view returns one page of the version's transitions after the
+// cursor after, with Next/More to continue.
 func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target domain.ObligationRef, currentOnly bool, after store.Cursor) (SatisfiesView, error) {
 	if err := viewer.Validate(); err != nil {
 		return SatisfiesView{}, err
@@ -119,25 +120,21 @@ func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target dom
 		}
 		return view, nil
 	}
-	work := s.newBudget()
-	err = s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
-		pg, err := r.TransitionsByVersion(target, p)
-		if err != nil {
-			return 0, store.Cursor{}, false, err
-		}
-		for _, t := range pg.Records {
-			if t.To != domain.ObligationSatisfied || t.ProofID == "" {
-				continue
-			}
-			if err := add(t, isCurrent && o.CurrentProofID == t.ProofID); err != nil {
-				return 0, store.Cursor{}, false, err
-			}
-		}
-		return len(pg.Records), pg.Next, pg.More, nil
-	})
+	// History is served one store page per call, continued by cursor, so
+	// its cost is bounded whatever the version's history (DUR-3.8).
+	pg, err := r.TransitionsByVersion(target, store.Page{After: after, Limit: s.policy.MaxPageSize})
 	if err != nil {
 		return SatisfiesView{}, err
 	}
+	for _, t := range pg.Records {
+		if t.To != domain.ObligationSatisfied || t.ProofID == "" {
+			continue
+		}
+		if err := add(t, isCurrent && o.CurrentProofID == t.ProofID); err != nil {
+			return SatisfiesView{}, err
+		}
+	}
+	view.Next, view.More = pg.Next, pg.More
 	return view, nil
 }
 
