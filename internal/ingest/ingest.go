@@ -120,7 +120,10 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 }
 
 func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event, o *outcome) (domain.IngestReceipt, error) {
-	if o == nil && isOutcomeEventID(e.EventID) {
+	// A runtime-derived outcome EventID is refused on the plain path before
+	// any read, so no principal learns whether an outcome was recorded
+	// (SEC-3.3); see apply.
+	if o == nil && isRuntimeOutcomeEventID(e.EventID) {
 		return domain.IngestReceipt{}, domain.ErrInvalidRecord
 	}
 
@@ -195,8 +198,14 @@ func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 }
 
 func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string, o *outcome) (domain.IngestReceipt, error) {
-	// Outcome IDs never belonged to plain events, including Phase 2.
-	if o == nil && isOutcomeEventID(e.EventID) {
+	// An EventID with the exact shape the outcome path derives (outcome-
+	// plus 64 hex, or that plus "/" and a tool call ID) names only an
+	// outcome occurrence; looking it up on the plain path would tell any
+	// principal whether that outcome was recorded (SEC-3.3), so it is refused
+	// before any read. Phase 2 never derived those shapes. Other outcome-
+	// names are ordinary reserved EventIDs below, which Phase 2 did accept as
+	// plain events (DUR-2.8).
+	if o == nil && isRuntimeOutcomeEventID(e.EventID) {
 		return domain.IngestReceipt{}, domain.ErrInvalidRecord
 	}
 
@@ -215,7 +224,7 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	// reserved (DUR-2.8), so structure is validated without the EventID,
 	// which is a lookup key and never payload, and a reserved EventID with
 	// no receipt is rejected after the lookup, before anything is written.
-	reserved := o == nil && (isOutcomeEventID(e.EventID) || domain.ReservedIDPrefix(e.EventID))
+	reserved := o == nil && reservedEventID(e.EventID)
 	limits := g.Limits.Effective()
 	// Admission from lengths alone (SEC-2.1), as in Ingest: over the
 	// configured limits, only the retry of a known EventID may proceed, and
@@ -314,7 +323,7 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.
 		// Principal before detail: another principal's EventID is a bare
 		// conflict before anything of the request is canonicalized.
 		if r.Principal != p {
-			if domain.ReservedIDPrefix(e.EventID) {
+			if reservedEventID(e.EventID) {
 				return domain.IngestReceipt{}, true, domain.ErrInvalidRecord
 			}
 			return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
@@ -335,7 +344,7 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.
 		return domain.IngestReceipt{}, true, err
 	}
 	if _, err := tx.Event(e.EventID); err == nil {
-		if domain.ReservedIDPrefix(e.EventID) {
+		if reservedEventID(e.EventID) {
 			return domain.IngestReceipt{}, true, domain.ErrInvalidRecord
 		}
 		return domain.IngestReceipt{}, true, domain.ErrEventIDConflict

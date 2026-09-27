@@ -91,6 +91,31 @@ func checkOutcome(b domain.OutcomeBinding, e domain.Event) error {
 // which only the outcome path may use (SEC-1.4).
 func isOutcomeEventID(id string) bool { return strings.HasPrefix(id, "outcome-") }
 
+// isRuntimeOutcomeEventID reports whether id has the exact shape of a
+// runtime-derived outcome EventID: domain.OutcomeEventID's "outcome-" plus
+// 64 lowercase hex, or domain.ToolOutcomeEventID's form of it (SEC-3.3).
+func isRuntimeOutcomeEventID(id string) bool {
+	if _, _, err := domain.ParseToolOutcomeEventID(id); err == nil {
+		return true
+	}
+	const prefix = "outcome-"
+	if len(id) != len(prefix)+64 || !strings.HasPrefix(id, prefix) {
+		return false
+	}
+	for _, c := range id[len(prefix):] {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// reservedEventID reports whether a new plain event may not claim id: the
+// outcome- namespace or any runtime prefix (R20.1, G3, H5). A recorded
+// plain event under such an ID still replays to its own principal only
+// (DUR-2.8); anyone else gets the uniform ErrInvalidRecord (SEC-3.3).
+func reservedEventID(id string) bool { return isOutcomeEventID(id) || domain.ReservedIDPrefix(id) }
+
 // checkOutcomeReplay requires a stored receipt under an outcome's EventID
 // to be one this outcome produced (SEC-1.4, DUR-1.7): every item carries
 // the binding's turn, and the receipt registered exactly o's membership —

@@ -33,7 +33,8 @@ func reservedLegacyEvents() []domain.Event {
 // reserved-namespace check, so Phase 2 history under an EventID that a later
 // phase reserved still replays verbatim, allocating nothing. A changed
 // request under such an ID is a conflict, and a new event can still never
-// claim a reserved namespace.
+// claim a reserved namespace. Another principal cannot tell a recorded
+// reserved EventID from an absent one (SEC-3.3).
 func TestReservedNamespaceReceiptsReplay_DUR28(t *testing.T) {
 	var golden map[string]domain.IngestReceipt
 	b, err := os.ReadFile(filepath.Join(phase2Dir, "reserved.golden.json"))
@@ -70,6 +71,15 @@ func TestReservedNamespaceReceiptsReplay_DUR28(t *testing.T) {
 	}
 	if f.lastSeq() != seq {
 		t.Fatalf("retries allocated sequences: %d -> %d", seq, f.lastSeq())
+	}
+	// No oracle (SEC-3.3): another principal gets the same bare invalid
+	// record for a recorded reserved EventID as for an absent one.
+	other := principal(domain.AuthorityUser)
+	other.AgentID = "B"
+	for _, e := range append(reservedLegacyEvents()[1:], userEvent("outcome-absent", "x", false), userEvent("req_absent", "x", false)) {
+		if _, err := f.ingest(other, e); !errors.Is(err, domain.ErrInvalidRecord) || errors.Is(err, domain.ErrEventIDConflict) {
+			t.Errorf("%s by another principal = %v, want the uniform invalid record", e.EventID, err)
+		}
 	}
 	for _, id := range []string{"outcome-new", "req_new", "gc_new"} {
 		f.requireAtomic(domain.ErrInvalidRecord, func() error {
