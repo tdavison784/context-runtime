@@ -255,8 +255,16 @@ func (s *Service) currentPathState(r store.SemanticReader, work *budget, loc dom
 		return domain.ResourcePathState{}, false, nil
 	}
 	full := path.Join(loc.BaseDir, loc.Path)
+	// Only updates after the one that recorded this content can supersede
+	// it; start paging there instead of at the start of history (SEC-1.7,
+	// DUR-1.2). A fully bounded read awaits W2's indexed path-change read.
+	recorded, err := r.ResourceUpdate(ps.ResourceUpdateID)
+	if err != nil {
+		return domain.ResourcePathState{}, false, err
+	}
+	after := store.Cursor{Seq: recorded.Seq, ID: recorded.ID}
 	stale := false
-	err = s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
+	err = s.eachPageFrom(work, after, func(p store.Page) (int, store.Cursor, bool, error) {
 		pg, err := r.ResourceUpdates(loc.ResourceID, p)
 		if err != nil {
 			return 0, store.Cursor{}, false, err

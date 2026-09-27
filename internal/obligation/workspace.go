@@ -185,7 +185,12 @@ func (b *budget) spend(n int) error {
 // eachPage exhausts a paged read under the policy's page size, charging each
 // page and its records to b.
 func (s *Service) eachPage(b *budget, next func(store.Page) (n int, after store.Cursor, more bool, err error)) error {
-	p := store.Page{Limit: s.policy.MaxPageSize}
+	return s.eachPageFrom(b, store.Cursor{}, next)
+}
+
+// eachPageFrom is eachPage starting strictly after cursor from.
+func (s *Service) eachPageFrom(b *budget, from store.Cursor, next func(store.Page) (n int, after store.Cursor, more bool, err error)) error {
+	p := store.Page{After: from, Limit: s.policy.MaxPageSize}
 	for {
 		n, after, more, err := next(p)
 		if err != nil {
