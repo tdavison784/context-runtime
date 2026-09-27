@@ -57,6 +57,12 @@ func (t *transaction) indexProofDeps(proofID string, live bool) error {
 	} else if err != nil {
 		return err
 	}
+	// The audit worker's index holds every live proof — the current proof
+	// of a current obligation version — FIXED_CONTENT-only ones included
+	// (K1 A4, K1-api.2).
+	if err := t.noteLiveProofID(p, live); err != nil {
+		return err
+	}
 	seen, paths, resources := map[[2]string]bool{}, map[[2]string]bool{}, map[string]int{}
 	for _, id := range p.DependencyIDs {
 		var d domain.ProofDependency
