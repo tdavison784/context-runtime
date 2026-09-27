@@ -93,7 +93,7 @@ const (
 func (r DiagnosticReason) Valid() bool {
 	switch r {
 	case ReasonNone, ReasonSourceNotCapable, ReasonIndented, ReasonFencedCode, ReasonBlockQuote, ReasonHTMLComment, ReasonInvalidSyntax, ReasonInvalidID, ReasonEmptyItem, ReasonHeadingIDOnList, ReasonUnknownAttribute, ReasonDisallowedAttribute, ReasonInvalidAttribute, ReasonScopeWidening, ReasonUnsupportedLifecycle, ReasonUnknownTarget, ReasonAmbiguousTarget, ReasonLimit, ReasonDerivedID,
-		ReasonDuplicateAttribute, ReasonDuplicateID, ReasonNestedHeading, ReasonUnverifiedItem, ReasonReferenceLinksTruncated:
+		ReasonDuplicateAttribute, ReasonDuplicateID, ReasonNestedHeading, ReasonUnverifiedItem, ReasonReferenceLinksTruncated, ReasonUnknownIdentity:
 		return true
 	}
 	return r == ReasonBoundaryConflict || r == ReasonTargetMismatch
@@ -148,6 +148,7 @@ var reasonCode = map[DiagnosticReason]DiagnosticCode{
 	ReasonUnverifiedItem:   ItemUnverified,
 
 	ReasonReferenceLinksTruncated: ReferenceLinksTruncated,
+	ReasonUnknownIdentity:         ErrUnsupportedDirective,
 }
 
 // Message is the diagnostic's fixed template. It never echoes source text,
@@ -170,6 +171,10 @@ const (
 	ReasonUnverifiedItem DiagnosticReason = "unverified_item"
 	// ReasonReferenceLinksTruncated pairs with ReferenceLinksTruncated.
 	ReasonReferenceLinksTruncated DiagnosticReason = "reference_links_truncated"
+	// ReasonUnknownIdentity: an identical restatement of a version whose
+	// creation identity is unknown (pre-upgrade) is neither a duplicate nor a
+	// replacement; the line is dropped (SPEC-1.3, C-1).
+	ReasonUnknownIdentity DiagnosticReason = "unknown_identity"
 )
 
 // DiagnosticSchemaVersion versions the persisted DiagnosticRecord layout.

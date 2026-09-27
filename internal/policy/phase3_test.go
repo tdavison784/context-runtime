@@ -17,10 +17,10 @@ func TestDefaultPhase3PolicyIsFiniteAndPinsRegistries(t *testing.T) {
 	if p.MaxCheckpointSemanticBytes != 16*1024 || p.CheckpointGeneration == domain.GenerationPinned || p.DefaultLeaseCalls != 2 || p.MaxLeaseCalls != 8 {
 		t.Fatal("unsafe defaults")
 	}
-	// SPEC-1.6: every enabled trigger must have a producer; supersession, TTL
-	// and policy triggers join the default set when theirs exist everywhere.
+	// SPEC-1.6: every enabled trigger must have a producer. Ingest now
+	// produces SUPERSESSION and TTL; POLICY has none yet and stays disabled.
 	for _, trigger := range domain.DefaultGCTriggers() {
-		want := trigger == domain.GCManual || trigger == domain.GCTaskCompletion
+		want := trigger != domain.GCPolicy
 		if p.GCTriggerEnabled(trigger) != want {
 			t.Fatalf("default manifest: %s enabled=%v, want %v", trigger, !want, want)
 		}

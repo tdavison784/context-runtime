@@ -102,6 +102,17 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		}
 		return err
 	}
+	// An identical restatement of a version whose creation identity is
+	// unknown (pre-upgrade, unreconciled) is neither a duplicate nor a
+	// replacement (SPEC-1.3, C-1): only this line is dropped, with a
+	// diagnostic, before anything is written for it; the rest of the event
+	// proceeds. The check is a read, so it never poisons the transaction.
+	if cur, unknown, err := r.unknownIdentityRestatement(c.actor, it); err != nil {
+		return err
+	} else if unknown {
+		r.diagnose(c, item, r.causeAccess(it.Access, []domain.AccessBoundary{cur.Access}), domain.ErrUnsupportedDirective, domain.ReasonUnknownIdentity)
+		return nil
+	}
 	// Insert, declare, then compare (W1 6594958): duplicate detection
 	// compares immutable creation declarations, so the new occurrence's
 	// declaration must exist before SameDirective sees it.
@@ -140,6 +151,11 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 	if prev != "" {
 		r.rels++
 		r.repls = append(r.repls, domain.IngestLink{ItemID: it.ID, TargetID: prev})
+		// The supersession is a durable GC trigger identified by the new
+		// version, as in lifecycle.ReplaceDirective (P3-39, SPEC-1.6).
+		if err := r.enqueueGC(c.actor, domain.GCSupersession, it.TaskID, it.ID); err != nil {
+			return err
+		}
 	}
 	if r.pol != nil && it.Section == domain.SectionPinned {
 		// P3-12: the new, current, nonduplicate Pinned source declares its
@@ -165,6 +181,38 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		return r.declareReference(c, it)
 	}
 	return nil
+}
+
+// unknownIdentityRestatement reports whether it, a prospective directive
+// item, restates its key's current version (visible to actor) row for row
+// while that version's creation declaration is missing or records unknown
+// identity: the case graph.SameDirective and graph.ReplaceDirective refuse
+// with graph.ErrUnknownDeclaration. Phase 2 (v2) history has no
+// declarations to compare, so it is never checked.
+func (r *run) unknownIdentityRestatement(actor domain.Principal, it domain.ContextItem) (domain.ContextItem, bool, error) {
+	if r.pol == nil {
+		return domain.ContextItem{}, false, nil
+	}
+	it = r.fill(it)
+	cur, err := graph.CurrentVersionFor(r.tx, actor, it)
+	if isNotFound(err) {
+		return domain.ContextItem{}, false, nil
+	}
+	if err != nil || !graph.SameDirectiveSemantics(it, cur) {
+		return domain.ContextItem{}, false, err
+	}
+	sem, err := store.ReadSemantic(r.tx)
+	if err != nil {
+		return domain.ContextItem{}, false, err
+	}
+	d, err := sem.CreationDeclaration(cur.ID)
+	if isNotFound(err) {
+		return cur, true, nil
+	}
+	if err != nil {
+		return domain.ContextItem{}, false, err
+	}
+	return cur, !d.LegacyKnown, nil
 }
 
 // duplicateOf returns its key's current version, if any, and whether it

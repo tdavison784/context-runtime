@@ -28,7 +28,7 @@ func FuzzIngest(f *testing.F) {
 	f.Fuzz(func(t *testing.T, text string, capable bool) {
 		s := memory.New()
 		defer s.Close()
-		in := Ingester{IDs: &domain.SequentialIDs{}}
+		in := Ingester{IDs: &domain.SequentialIDs{}, Lifecycle: lifecycleFor(t, s)}
 		sys := principal(domain.AuthoritySystem)
 		if _, err := in.Ingest(ctx, s, sys, userEvent("open", "turn", false)); err != nil {
 			t.Fatal(err)

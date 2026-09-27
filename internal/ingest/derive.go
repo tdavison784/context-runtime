@@ -287,6 +287,12 @@ func (r *run) workingSection(c unitCtx, si int) error {
 	if r.rels > r.limits.MaxRelationships {
 		return errLimit("MaxRelationships")
 	}
+	if len(res.Supersedes) > 0 {
+		// A snapshot that retires members is one durable SUPERSESSION
+		// trigger, identified by its first new member, however many it
+		// retires (P3-39, SPEC-1.6).
+		return r.enqueueGC(c.actor, domain.GCSupersession, r.p.TaskID, ids[0])
+	}
 	return nil
 }
 

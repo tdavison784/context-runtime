@@ -30,6 +30,11 @@ func (l fakeLifecycle) Resolve(tx store.Tx, actor domain.Principal, in domain.Re
 	return l.apply(tx, domain.LifecycleResolve, actor, in, seq, domain.ItemChange{GoalStatus: &resolved, Retention: &high})
 }
 
+// EnqueueGC fails closed: the routing fake produces no durable triggers.
+func (l fakeLifecycle) EnqueueGC(store.Tx, domain.Principal, domain.GCTrigger, domain.CollectScope, string, string) (string, error) {
+	return "", domain.ErrUnsupportedSchema
+}
+
 func (l fakeLifecycle) Unpin(tx store.Tx, actor domain.Principal, in domain.UnpinIntent, seq uint64) (LifecycleOutcome, error) {
 	durable, high := domain.GenerationDurable, domain.RetentionHigh
 	return l.apply(tx, domain.LifecycleUnpin, actor, in, seq, domain.ItemChange{Generation: &durable, Retention: &high})
@@ -131,6 +136,7 @@ func TestCommandsV2_ExecuteInSourceOrder(t *testing.T) {
 func TestCommandsV2_DetailRedaction(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
 		f.in.Lifecycle = fakeLifecycle{calls: new([]lifecycleCall)}
+		f.gcTriggersOff() // commands under test, not the GC producer
 		a := principal(domain.AuthorityUser)
 		f.mustIngest(a, userEvent("priv", "## Pinned\n- [p] {scope=AGENT} private rule\n", true))
 		hidden := f.mustIngest(a, userEvent("res-hidden", "## Unpin [p]\n", true))
@@ -176,6 +182,7 @@ func TestCommandsV2_AbortsAtomically(t *testing.T) {
 		f.mustIngest(sys, sysEvent("g", "## Goal [G]\nShip.\n"))
 
 		f.in.Lifecycle = nil
+		f.gcTriggersOff() // the missing command executor must fail, not the GC producer
 		f.requireAtomic(domain.ErrUnsupportedSchema, func() error {
 			_, err := f.ingest(sys, sysEvent("no-exec", "## Remember\n- n\n## Resolve [G]\n"))
 			return err
