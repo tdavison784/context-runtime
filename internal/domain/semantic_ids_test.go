@@ -3,8 +3,9 @@ package domain
 import "testing"
 
 func TestSemanticIDsSeparateFamiliesAndExactVersions(t *testing.T) {
-	a, _ := MutationReceiptID("s", MutationResourceReport, "r")
-	b, _ := MutationReceiptID("s", MutationResourceResync, "r")
+	p := Principal{SessionID: "s", Authority: AuthorityHarness}
+	a, _ := MutationReceiptID(p, MutationResourceReport, "r")
+	b, _ := MutationReceiptID(p, MutationResourceResync, "r")
 	if a == b {
 		t.Fatal("receipt families collide")
 	}

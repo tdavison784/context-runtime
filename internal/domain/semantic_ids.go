@@ -1,5 +1,7 @@
 package domain
 
+import "strings"
+
 func (m SemanticMeta) SemanticSeq() uint64 { return m.Seq }
 func (m SemanticMeta) Clone() SemanticMeta { return m }
 
@@ -25,11 +27,25 @@ func (f MutationFamily) HashDomain() string {
 	}
 	return ""
 }
-func MutationReceiptID(session string, family MutationFamily, requestID string) (string, error) {
-	if !semanticID(session) || !family.Valid() || !semanticID(requestID) {
+
+// MutationReceiptID is the receipt identity of (session, family, requestID).
+// It takes the authenticated principal that owns the receipt: a request ID
+// in the runtime req_ namespace is accepted only if it was derived for that
+// exact principal, and is rejected before any receipt lookup otherwise. A
+// foreign principal presenting another's derived ID therefore learns
+// nothing and can never occupy it (G3, SEC-1.2). Receipt ID values are
+// unchanged by the principal binding.
+func MutationReceiptID(p Principal, family MutationFamily, requestID string) (string, error) {
+	if err := validateIngestPrincipal(p); err != nil {
+		return "", err
+	}
+	if !family.Valid() || !semanticID(requestID) {
 		return "", invalid("receipt identity: exact session/family/request required")
 	}
-	return "mut_" + shortHash(NewCanonicalEncoder("context-runtime/mutation-receipt-id/v1").String(session).String(string(family)).String(requestID)), nil
+	if strings.HasPrefix(requestID, operationRequestPrefix) && !runtimeRequestIDFor(p, requestID) {
+		return "", invalid("receipt identity: runtime request ID not derived for this principal")
+	}
+	return "mut_" + shortHash(NewCanonicalEncoder("context-runtime/mutation-receipt-id/v1").String(p.SessionID).String(string(family)).String(requestID)), nil
 }
 func ApplicabilityProofID(target ObligationRef, transitionID string) (string, error) {
 	if err := target.Validate(); err != nil {
@@ -43,11 +59,39 @@ func ApplicabilityProofID(target ObligationRef, transitionID string) (string, er
 
 const operationRequestPrefix = "req_"
 
-func OperationRequestID(session, occurrence string, operation, command uint64) (string, error) {
-	if !semanticID(session) || !ValidOccurrenceID(occurrence) {
+// OperationRequestID derives the runtime request ID of one operation or
+// command of an event occurrence, owned by principal p (the principal whose
+// mutation receipt it names). The ID is req_<inner>.<tag>: inner binds the
+// principal, occurrence and ordinals; tag binds inner to the principal, so
+// MutationReceiptID can verify ownership without a secret (G3, SEC-1.2).
+func OperationRequestID(p Principal, occurrence string, operation, command uint64) (string, error) {
+	if err := validateIngestPrincipal(p); err != nil {
+		return "", err
+	}
+	if !ValidOccurrenceID(occurrence) {
 		return "", invalid("operation request: occurrence required")
 	}
-	return operationRequestPrefix + shortHash(NewCanonicalEncoder("context-runtime/operation-request-id/v1").String(session).String(occurrence).Uint(operation).Uint(command)), nil
+	e := NewCanonicalEncoder("context-runtime/operation-request-id/v2")
+	encodePrincipal(e, p)
+	inner := shortHash(e.String(occurrence).Uint(operation).Uint(command))
+	return operationRequestPrefix + inner + "." + operationRequestTag(p, inner), nil
+}
+
+func operationRequestTag(p Principal, inner string) string {
+	e := NewCanonicalEncoder("context-runtime/operation-request-binding/v1")
+	encodePrincipal(e, p)
+	return shortHash(e.String(inner))
+}
+
+// runtimeRequestIDFor reports whether id is a runtime request ID derived
+// for exactly p.
+func runtimeRequestIDFor(p Principal, id string) bool {
+	body, ok := strings.CutPrefix(id, operationRequestPrefix)
+	if !ok {
+		return false
+	}
+	inner, tag, ok := strings.Cut(body, ".")
+	return ok && len(inner) == 32 && isLowerHex(inner) && tag == operationRequestTag(p, inner)
 }
 
 // These records contain value fields only. Explicit Clone methods give stores

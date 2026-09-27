@@ -147,7 +147,7 @@ func (r *run) typedOperation(oi int, op domain.SemanticOperation) error {
 	if err != nil {
 		return err
 	}
-	req, err := domain.OperationRequestID(r.p.SessionID, r.occurrence, uint64(oi), 0)
+	req, err := domain.OperationRequestID(actor, r.occurrence, uint64(oi), 0)
 	if err != nil {
 		return err
 	}

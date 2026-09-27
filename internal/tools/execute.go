@@ -76,7 +76,7 @@ func executeSourced[I any](s *Service, tx store.Tx, dispatcher domain.Principal,
 		return result, err
 	}
 	invocationID, _ := i.ID()
-	mutationID, err := domain.MutationReceiptID(tx.SessionID(), domain.MutationTool, requestID)
+	mutationID, err := domain.MutationReceiptID(i.Principal, domain.MutationTool, requestID)
 	if err != nil {
 		return result, err
 	}

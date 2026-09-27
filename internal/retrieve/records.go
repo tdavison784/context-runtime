@@ -148,7 +148,7 @@ func buildRetrievalRecords(in recordInput) (retrievalRecords, error) {
 	if err != nil {
 		return retrievalRecords{}, err
 	}
-	receiptID, err := domain.MutationReceiptID(session, domain.MutationRetrieval, request)
+	receiptID, err := domain.MutationReceiptID(in.Actor, domain.MutationRetrieval, request)
 	if err != nil {
 		return retrievalRecords{}, err
 	}
