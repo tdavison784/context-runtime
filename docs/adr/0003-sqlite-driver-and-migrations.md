@@ -5,11 +5,11 @@ Date: 2026-09-25
 
 ## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
 
-Phase 3 (worker W2, `internal/store`) adds seventeen forward migrations, 0018
-through 0034 (0018-0028 from the initial Phase 3 merge; 0029-0034 added
-fixing PR #6 round-1 review findings), after this ADR's Phase 2 migrations
-(0001 unchanged, per this ADR's own rule). The full record/column/index
-manifest is
+Phase 3 (worker W2, `internal/store`) adds twenty-three forward migrations,
+0018 through 0040 (0018-0028 from the initial Phase 3 merge; 0029-0034
+fixing PR #6 round-1 review findings; 0035-0040 fixing round-2 findings),
+after this ADR's Phase 2 migrations (0001 unchanged, per this ADR's own
+rule). The full record/column/index manifest is
 `docs/phase3-schema-manifest.md` (P3-41); this section records the
 migration list itself and its upgrade-parity tests, matching how this ADR
 already tracks 0001-0017 above.
@@ -36,6 +36,10 @@ input changed in this same window with no schema-version dispatch, so a
 tool receipt written before that change also conflicts on retry — the same
 exception covers it. None of this affects the frozen Phase 2 fixture
 (`TestPhase2FixtureReplay`), which predates every Phase 3 migration.
+W2's own `internal/store/sqlite/CONFORMANCE_NOTES.md` (PR #6 round 2)
+records this same exception, naming 0021's root cause precisely: its
+legacy grant backfill inserted duplicate `TargetIDs` twice and failed
+before any later migration could run.
 
 - `0018_phase3_row_fields.sql` — Phase 3 fields on existing record tables
   (P3-3/5/6/12/13/35/40/41): item `Namespace`, decoded grant `Targets`, and
@@ -133,6 +137,35 @@ exception covers it. None of this affects the frozen Phase 2 fixture
   `internal/store/sqlite`'s `TestUpgradeReconcilesLegacyCreation`;
   `internal/ingest`'s `TestLegacyRestatementDedupsAfterUpgrade` and
   `TestUpgradeRestatesEveryCurrentDirective_G5`.
+- `0035_item_exchange_index.sql` (PR #6 round 2, H2/SPEC-2.7) — an item's
+  exchange within a conversation, by ordinal: `EarliestExchangeWithItem`
+  answers which exchange first holds an item with one keyed `LIMIT 1`
+  search, independent of the conversation's length (closing the
+  checkpoint-coverage-lookup cost growth SPEC-2.7 found). A member's
+  exchange row is written when the member is inserted; pre-migration rows
+  are backfilled from the member/exchange tables.
+- `0036_grant_target_liveness_ranges.sql` (PR #6 round 2, H2/DUR-2.10) —
+  replaces 0031's single OR-based index (which still scanned and sorted
+  every revoked/expired row) with three disjoint live-grant ranges
+  `LiveGrantsFor` reads directly, so the cost is the live grants, not the
+  target's whole history.
+- `0037_subject_high_water.sql` (PR #6 round 2, H1/SEC-2.1/SPEC-2.1/DUR-2.1)
+  — the per-`(subject, task, access)`-partition high-water mark (ADR 8 §6):
+  the highest run ordinal with a complete PASS or FAIL, raised by every
+  such observation whatever its fingerprint or applicability.
+- `0038_current_workspace_binding.sql` (PR #6 round 2, H2) — one row per
+  workspace binding ID at its latest version, in that version's context
+  (ADR 8 §10): a page counts live bindings, not historical versions, and a
+  rebind moves the row to the new context, retiring it from the old one.
+- `0039_gc_result_outcome.sql` (PR #6 round 2, H3/SEC-2.4/SPEC-2.4/DUR-2.7)
+  — `GCResult` gains a closed `Outcome` (`COLLECTED`/`FAILED`) and failure
+  `Reason`; every pre-migration result is backfilled `COLLECTED` with no
+  reason, since every such result already linked a collect receipt.
+- `0040_gc_progress.sql` (PR #6 round 2, H3) — one CAS-written row per
+  pending GC request holding the durable `(Seq, ID)` candidate cursor,
+  completed batches, and attempts; operational metadata only, never a
+  substitute for a batch's collect receipt or the request's result, and
+  carries no semantic sequence.
 
 **Tests that lock this list (all in `internal/store/sqlite`, extending this
 ADR's existing migration-checksum/upgrade discipline):**
