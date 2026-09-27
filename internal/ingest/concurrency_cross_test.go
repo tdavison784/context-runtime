@@ -8,6 +8,7 @@ import (
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/invocation"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -225,9 +226,22 @@ func TestConcurrency_InvalidationVsObservation(t *testing.T) {
 				if err != nil {
 					return err
 				}
+				// INV-16 (K1 A5): stored SATISFIED is effective SATISFIED or
+				// pending settlement, and effective SATISFIED rests on a
+				// proof valid at read.
 				o, err := sem.ExactObligation(w.ref)
-				if err != nil || o.Status != domain.ObligationSatisfied {
+				if err != nil {
 					return err
+				}
+				eff, pending, err := obligation.EffectiveStatus(sem, o)
+				if err != nil {
+					return err
+				}
+				if o.CurrentProofID != "" && eff != domain.ObligationSatisfied && !pending {
+					t.Fatalf("round %d: stored SATISFIED is effectively %s without pending settlement", i, eff)
+				}
+				if eff != domain.ObligationSatisfied {
+					return nil
 				}
 				satisfied++
 				p, err := sem.ApplicabilityProof(o.CurrentProofID)

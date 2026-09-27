@@ -262,7 +262,7 @@ func (r *run) workingSection(c unitCtx, si int) error {
 		}
 		ids = append(ids, it.ID)
 	}
-	res, err := graph.SupersedeSnapshot(r.tx, c.actor, ids, r.p.TaskID, r.graphEventID())
+	res, err := graph.SupersedeSnapshot(r.tx, c.actor, ids, r.p.TaskID, r.graphEventID(), r.graphOptions()...)
 	if err != nil {
 		return err
 	}

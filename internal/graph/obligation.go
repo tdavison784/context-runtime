@@ -26,19 +26,24 @@ const maxBoundObligations = domain.MaxObligationsPerSource
 // authority at least its source authority, or an in-force replace_directive
 // grant naming it. It writes nothing, so a denial fails the replacement
 // before anything is written.
-func planObligationRetirement(tx store.Tx, actor domain.Principal, oldID string) ([]obligationRetirement, error) {
-	versions, err := tx.ObligationsBySource(oldID, maxBoundObligations)
-	if err != nil {
+//
+// Before anything is planned, each current version is settled (M2, K1 A3):
+// the injected settler writes a pending RESOURCE_INVALIDATION in this
+// transaction, so history never reads SATISFIED -> retired over a pending
+// settlement, and the versions are read again because settling bumps their
+// revision. Without a settler a derived-invalid SATISFIED version is refused.
+func planObligationRetirement(tx store.Tx, actor domain.Principal, oldID string, settler PendingSettler) ([]obligationRetirement, error) {
+	bound, err := currentBoundVersions(tx, oldID)
+	if err != nil || len(bound) == 0 {
 		return nil, err
 	}
-	var bound []domain.ObligationVersion
-	for _, v := range versions {
-		if v.Current {
-			bound = append(bound, v)
-		}
+	if err := settleBeforeRetirement(tx, settler, bound); err != nil {
+		return nil, err
 	}
-	if len(bound) == 0 {
-		return nil, nil
+	if settler != nil {
+		if bound, err = currentBoundVersions(tx, oldID); err != nil || len(bound) == 0 {
+			return nil, err
+		}
 	}
 
 	plan := make([]obligationRetirement, 0, len(bound))
@@ -78,6 +83,53 @@ func retireObligations(tx store.Tx, actor domain.Principal, plan []obligationRet
 		}
 		if _, err := tx.RetireObligationVersion(o.ObligationID, o.Version, o.Revision, ev); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// currentBoundVersions are the current obligation versions bound to oldID.
+func currentBoundVersions(tx store.Tx, oldID string) ([]domain.ObligationVersion, error) {
+	versions, err := tx.ObligationsBySource(oldID, maxBoundObligations)
+	if err != nil {
+		return nil, err
+	}
+	var bound []domain.ObligationVersion
+	for _, v := range versions {
+		if v.Current {
+			bound = append(bound, v)
+		}
+	}
+	return bound, nil
+}
+
+// settleBeforeRetirement hands every current version to the settler, which
+// settles a pending invalidation or does nothing. With no settler it fails
+// closed: a stored-SATISFIED version whose proof is derived invalid (or
+// unreadable) is never retired (ErrPendingSettlement). This is settlement
+// machinery, the one graph reader of stored status (K1 A2 allowlist).
+func settleBeforeRetirement(tx store.Tx, settler PendingSettler, bound []domain.ObligationVersion) error {
+	for _, v := range bound {
+		if settler != nil {
+			ref := domain.ObligationRef{SessionID: v.SessionID, ObligationID: v.ObligationID, Version: v.Version}
+			if err := settler.SettleBeforeRetireTx(tx, ref); err != nil {
+				return err
+			}
+			continue
+		}
+		if v.Status != domain.ObligationSatisfied || v.CurrentProofID == "" {
+			continue
+		}
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		valid, err := proofDerivedValid(r, v.CurrentProofID)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return ErrPendingSettlement
 		}
 	}
 	return nil

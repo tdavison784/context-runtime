@@ -136,8 +136,9 @@ func currentness(tx store.ReadTx, it domain.ContextItem) (domain.ItemCurrentness
 
 // protectedRequirement reports whether archiving it removes a current
 // requirement from ordinary new selection: a pin, an OPEN goal, a SYSTEM
-// instruction/constraint, or the source of a current unresolved/blocked
-// obligation. The flag only discloses; it never substitutes for authority.
+// instruction/constraint, or the source of a current effectively
+// unresolved/blocked obligation. The flag only discloses; it never
+// substitutes for authority.
 // Overflowing the bounded source read fails rather than guessing.
 func (s *Service) protectedRequirement(tx store.ReadTx, it domain.ContextItem, current domain.ItemCurrentness) (bool, error) {
 	if current != domain.ItemCurrent && current != domain.ItemUnkeyed {
@@ -154,9 +155,14 @@ func (s *Service) protectedRequirement(tx store.ReadTx, it domain.ContextItem, c
 	if err != nil {
 		return false, err
 	}
+	sem, err := store.ReadSemantic(tx)
+	if err != nil {
+		return false, err
+	}
 	for _, o := range obs {
-		if o.Current && (o.Status == domain.ObligationUnresolved || o.Status == domain.ObligationBlocked) {
-			return true, nil
+		// Effective status (K1 A2); unreadable validity fails the archive.
+		if open, err := openObligation(sem, o); err != nil || open {
+			return open, err
 		}
 	}
 	return false, nil

@@ -156,6 +156,26 @@ func (s semTx) PutResourceState(st domain.ResourceState, expectedRevision uint64
 	if found && st.AuthoritativeRevision <= cur.AuthoritativeRevision {
 		return domain.ResourceState{}, transition("resource state %s: revision %d does not advance %d", st.ResourceID, st.AuthoritativeRevision, cur.AuthoritativeRevision)
 	}
+	// K1 A1 write-time pointer raises, in the report's own transaction and
+	// without any dependent fan-out: the divergence pointer rises on lost
+	// freshness or a changed fingerprint (the first report's fingerprint is
+	// a change), the ALL affecting key rises on UNKNOWN and ALL-paths
+	// reports, and each changed path's exact key rises unless this
+	// transaction records the path's prior content for this update. The
+	// path keys resolve at commit, after the report's content writes.
+	if u.Freshness == domain.ResourceUnknown || u.WorkspaceFingerprint != cur.WorkspaceFingerprint {
+		if err := t.raiseDivergence(u); err != nil {
+			return domain.ResourceState{}, err
+		}
+	}
+	if u.Freshness == domain.ResourceUnknown || u.AllPaths {
+		if err := t.raiseAffectingAll(u); err != nil {
+			return domain.ResourceState{}, err
+		}
+	}
+	for _, q := range u.ChangedPaths {
+		t.addPathRaise(pathRaise{resource: u.ResourceID, path: q, updateID: u.ID, revision: u.ResultingAuthoritativeRevision})
+	}
 	st.Revision = expectedRevision + 1
 	if err := t.put("resource_state", st.ResourceID, 0, st, found); err != nil {
 		return domain.ResourceState{}, err
@@ -197,6 +217,12 @@ func (s semTx) PutResourcePathState(st domain.ResourcePathState, expectedRevisio
 	if found && st.ResourceRevision <= cur.ResourceRevision {
 		return domain.ResourcePathState{}, transition("path state %s: revision %d does not advance %d", st.Locator.Path, st.ResourceRevision, cur.ResourceRevision)
 	}
+	// K1 A1: the write settles whether this update's pending raise of the
+	// path stands — recording the row's prior content spares the raise,
+	// changing it forces it (resolved at commit, so write order inside the
+	// report's transaction does not matter).
+	t.recordPathWrite(pathWrite{resource: st.Locator.ResourceID, path: joinedPath(st.Locator),
+		updateID: st.ResourceUpdateID, revision: st.ResourceRevision, same: found && cur.ContentHash == st.ContentHash})
 	st.Revision = expectedRevision + 1
 	if err := t.put("path_state", key, 0, pathStateRow{SessionID: t.session, LocatorKey: key, State: st}, found); err != nil {
 		return domain.ResourcePathState{}, err
@@ -451,8 +477,11 @@ func (s semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 	if err != nil {
 		return out, err
 	}
-	// Only CURRENT states, through migration 0032's partial index (G2).
-	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND f_state_applicability='CURRENT' AND (f_first_seq, f_state_semantic_meta_id) > (?, ?) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
+	// Every state filed for the resource pages, whatever its applicability:
+	// applicability is a filing-time fact, not a read-time filter (L1,
+	// SEC-4.11, DUR-4.7), so migration 0032's CURRENT-only partial index no
+	// longer bounds this read.
+	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND (f_first_seq, f_state_semantic_meta_id) > (?, ?) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
 		t.session, resourceID, p.After.Seq, p.After.ID, p.Limit+1)
 	if err != nil {
 		return out, err
@@ -660,4 +689,20 @@ func (s semRead) CurrentWorkspaceBindingsByContext(sourceItemID, taskID, convers
 		out.Next = store.Cursor{Seq: r.seq, ID: r.id}
 	}
 	return out, nil
+}
+
+// LatestWorkspaceBinding implements store.ResourceReader: one keyed read
+// of migration 0038's current pointer, then the exact version (SEC-4.10,
+// SPEC-4.8).
+func (s semRead) LatestWorkspaceBinding(id string) (domain.WorkspaceBinding, error) {
+	var b domain.WorkspaceBinding
+	var version, seq uint64
+	err := s.t.conn.QueryRowContext(s.t.ctx, latestBindingVersion, s.t.session, id).Scan(&version, &seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return b, fmt.Errorf("workspace binding %s: %w", id, domain.ErrNotFound)
+	}
+	if err != nil {
+		return b, err
+	}
+	return b, s.t.get("workspace_binding", id, int(version), &b)
 }

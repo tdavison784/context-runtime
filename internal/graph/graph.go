@@ -189,13 +189,13 @@ func CheckBoundaryConflict(tx store.ReadTx, actor domain.Principal, it domain.Co
 // ruleVersion names the deterministic rule that produced the edge (FR-REL-
 // 007); pass "" for an edge created directly from an authorized event, such
 // as a directive replacement.
-func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (rel domain.Relationship, err error) {
+func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string, opts ...Option) (rel domain.Relationship, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
 		}
 	}()
-	p, err := planSupersession(tx, actor, newID, oldID, eventID, ruleVersion)
+	p, err := planSupersession(tx, actor, newID, oldID, eventID, ruleVersion, collectOptions(opts))
 	if err != nil {
 		return domain.Relationship{}, err
 	}
@@ -210,7 +210,7 @@ type supersessionPlan struct {
 
 // Reserve each actual audit/edge sequence once, before authorization and writes.
 // A Working snapshot plans every retirement before applying the first one.
-func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (supersessionPlan, error) {
+func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string, o options) (supersessionPlan, error) {
 	newItem, err := loadAccessible(tx, actor, newID)
 	if err != nil {
 		return supersessionPlan{}, err
@@ -261,7 +261,7 @@ func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID
 		GrantID:    grantID,
 		EventID:    eventID,
 	}
-	obligations, err := planObligationRetirement(tx, actor, oldID)
+	obligations, err := planObligationRetirement(tx, actor, oldID, o.settler)
 	if err != nil {
 		return supersessionPlan{}, err
 	}
@@ -295,7 +295,7 @@ func applySupersession(tx store.Tx, p supersessionPlan) (domain.Relationship, er
 // a silent fork into two current versions. Both writes commit atomically
 // within the caller's transaction. previousID is "" when newItemID is the
 // directive's first version at that boundary.
-func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string) (result string, err error) {
+func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string, opts ...Option) (result string, err error) {
 	defer poisonGraphError(tx, &err)
 	newItem, err := loadAccessible(tx, actor, newItemID)
 	if err != nil {
@@ -366,7 +366,7 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 				}
 			}
 		}
-		if _, err := Supersede(tx, actor, newItemID, previousID, eventID, ""); err != nil {
+		if _, err := Supersede(tx, actor, newItemID, previousID, eventID, "", opts...); err != nil {
 			return "", err
 		}
 	}

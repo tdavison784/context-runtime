@@ -88,7 +88,7 @@ type snapshotPartition struct {
 // in source order, and duplicate links follow. Callers run it inside
 // store.Store.Update and abort the event on any error. An empty section
 // does nothing.
-func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, taskID, eventID string) (result SnapshotResult, err error) {
+func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, taskID, eventID string, opts ...Option) (result SnapshotResult, err error) {
 	defer poisonGraphError(tx, &err)
 	if len(newIDs) == 0 {
 		return SnapshotResult{}, nil
@@ -179,7 +179,7 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	slices.SortFunc(olds, bySeqID)
 	plans := make([]supersessionPlan, 0, len(olds))
 	for _, old := range olds {
-		plan, err := planSupersession(tx, actor, retire[old.ID].ID, old.ID, eventID, "")
+		plan, err := planSupersession(tx, actor, retire[old.ID].ID, old.ID, eventID, "", collectOptions(opts))
 		if err != nil {
 			return SnapshotResult{}, err
 		}

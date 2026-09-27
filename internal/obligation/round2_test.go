@@ -227,9 +227,22 @@ func TestH2InvalidationIgnoresTransitionHistory(t *testing.T) {
 		}
 		fp = fmt.Sprintf("C%d", i)
 		f.r.set(t, f.fixture, hashOf(fp), false)
-		if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved {
-			t.Fatalf("cycle %d: workspace change kept the proof: %+v", i, o)
+		if st, pending := f.effective(t, f.sysTests); st != domain.ObligationUnresolved || !pending {
+			t.Fatalf("cycle %d: workspace change kept the proof: %s pending=%v", i, st, pending)
 		}
+	}
+	// Each cycle's proof was settled (inline by the next PASS, the last by
+	// the worker), each settlement reading its origin by key over a growing
+	// history (K1 A3/A4).
+	f.wantInvalidated(t, f.sysTests, "repo1", "last cycle")
+	settlements := 0
+	for _, tr := range f.history(t, f.sysTests) {
+		if tr.Cause == domain.CauseResourceInvalidation {
+			settlements++
+		}
+	}
+	if settlements != h2History/2 {
+		t.Errorf("%d settlements, want one per cycle (%d)", settlements, h2History/2)
 	}
 }
 

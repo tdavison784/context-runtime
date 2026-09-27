@@ -57,6 +57,12 @@ func (t *transaction) indexProofDeps(proofID string, live bool) error {
 	} else if err != nil {
 		return err
 	}
+	// The audit worker's index holds every live proof — the current proof
+	// of a current obligation version — FIXED_CONTENT-only ones included
+	// (K1 A4, K1-api.2).
+	if err := t.noteLiveProofID(p, live); err != nil {
+		return err
+	}
 	seen, paths, resources := map[[2]string]bool{}, map[[2]string]bool{}, map[string]int{}
 	for _, id := range p.DependencyIDs {
 		var d domain.ProofDependency
@@ -606,7 +612,12 @@ func (s semTx) AppendSemanticObligationTransition(tr domain.ObligationTransition
 				return notStored(errors.Join(err, domain.ErrNotFound), "transition %s: assertion %s is not stored for it", tr.ID, d.AssertionID)
 			}
 		}
-		return t.checkProofNotStale(ref, tr.ProofID)
+		if err := t.checkProofNotStale(ref, tr.ProofID); err != nil {
+			return err
+		}
+		// The A5 commit guard refuses a SATISFIED write resting on a
+		// derived-invalid proof (K1 A5, semantic_k1.go).
+		return t.checkProofDerivedValid(ref, tr.ProofID)
 	})
 	return next.Clone(), nil
 }

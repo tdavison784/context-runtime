@@ -10,48 +10,22 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
-// applicability derives whether a stored observation describes the current
-// authoritative resource state of its subject, with the state it was judged
-// against (DUR-3.1 (B)): UNKNOWN while the resource is unregistered or not
-// KNOWN, CURRENT when a tests run's fingerprint or a file read's content
-// equals the authoritative one, STALE otherwise. It is exact and costs a
-// few keyed reads, so no report ever marks subject states.
-func (s *Service) applicability(r store.SemanticReader, work *budget, obs domain.ObservationRecord, run domain.ObservationRun) (domain.ApplicabilityState, *domain.ResourceState, *domain.ResourcePathState, error) {
-	resource := targetResource(run.Subject.Target)
-	rs, err := r.ResourceState(resource)
-	if errors.Is(err, domain.ErrNotFound) {
-		return domain.ApplicabilityUnknown, nil, nil, nil
+// applicability is the shared subject-applicability rule
+// (store.ObservationApplicability, L1): CURRENT only when the observation
+// describes the current authoritative resource state; it fails closed. It
+// is charged to the transaction's work budget.
+func (s *Service) applicability(r store.SemanticReader, work *budget, obs domain.ObservationRecord, run domain.ObservationRun) (domain.ApplicabilityState, error) {
+	if err := work.spend(1); err != nil {
+		return domain.ApplicabilityUnknown, err
 	}
-	if err != nil {
-		return "", nil, nil, err
-	}
-	if !knownResource(&rs, resource) {
-		return domain.ApplicabilityUnknown, &rs, nil, nil
-	}
-	if !obs.TerminalComplete() {
-		return domain.ApplicabilityStale, &rs, nil, nil
-	}
-	if run.Subject.Family == domain.ObservationTests {
-		if obs.ObservedWorkspaceFingerprint == rs.WorkspaceFingerprint {
-			return domain.ApplicabilityCurrent, &rs, nil, nil
-		}
-		return domain.ApplicabilityStale, &rs, nil, nil
-	}
-	ps, ok, err := s.currentPathState(r, work, run.Subject.Target.File.Locator, rs)
-	if err != nil {
-		return "", &rs, nil, err
-	}
-	if !ok || obs.ObservedContentHash != ps.ContentHash {
-		return domain.ApplicabilityStale, &rs, nil, nil
-	}
-	return domain.ApplicabilityCurrent, &rs, &ps, nil
+	return store.ObservationApplicability(r, obs, run)
 }
 
 // applicableNow reports whether a stored observation describes the current
 // authoritative resource state of its subject. Only terminal complete
 // results can be applicable.
 func (s *Service) applicableNow(r store.SemanticReader, work *budget, obs domain.ObservationRecord, run domain.ObservationRun) (bool, error) {
-	a, _, _, err := s.applicability(r, work, obs, run)
+	a, err := s.applicability(r, work, obs, run)
 	return a == domain.ApplicabilityCurrent, err
 }
 

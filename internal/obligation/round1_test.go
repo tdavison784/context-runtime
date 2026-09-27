@@ -126,9 +126,7 @@ func TestXREV11StalePathClaim(t *testing.T) {
 	// The path changes without new content: the proof is invalidated and a
 	// new assertion of the old revision/content is refused.
 	f.resourceReport(t, "W3", false, false, []string{"docs/a.md"})
-	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
-		t.Fatalf("path change kept proof: %+v", o)
-	}
+	f.wantInvalidated(t, ref, "repo1", "path change kept proof")
 	if err := f.assertPath(t, ref, rev, "H1"); !errors.Is(err, domain.ErrUnknownApplicability) {
 		t.Errorf("stale path claim after a changed-path report: %v", err)
 	}
@@ -278,9 +276,7 @@ func TestSPEC118DirectoryChangeIntersectsFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.resourceReport(t, "W2e", false, false, []string{"docs"})
-	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
-		t.Fatalf("directory change kept a proof on a file under it: %+v", o)
-	}
+	f.wantInvalidated(t, ref, "repo1", "directory change kept a proof on a file under it")
 	if err := f.assertPath(t, ref, rev, "H1"); !errors.Is(err, domain.ErrUnknownApplicability) {
 		t.Errorf("path content under a changed directory still current: %v", err)
 	}
@@ -349,8 +345,9 @@ func TestDUR12ReevaluateScalesWithLiveState(t *testing.T) {
 }
 
 // DUR-1.12 (P3-39): one transaction-wide work budget. Recording path content
-// and invalidating proofs each fit the bound alone but not together, so the
-// report is rejected atomically instead of doing ~2x the bound.
+// in one report exceeds the bound, so the report is rejected atomically,
+// changing no state or status. (Under K1 a report no longer invalidates, so
+// the path contents alone carry the report past its one budget.)
 func TestDUR112OneBudgetPerTransaction(t *testing.T) {
 	f := newEvalFixture(t)
 	for _, ref := range []domain.ObligationRef{f.user, f.sysTests} {
@@ -363,7 +360,7 @@ func TestDUR112OneBudgetPerTransaction(t *testing.T) {
 		}
 	}
 	var contents []domain.ResourcePathContent
-	for i := range 60 {
+	for i := range 70 {
 		contents = append(contents, domain.ResourcePathContent{Path: fmt.Sprintf("f%02d.txt", i), ContentHash: hashOf(fmt.Sprint(i))})
 	}
 	f.r.n++
@@ -376,6 +373,9 @@ func TestDUR112OneBudgetPerTransaction(t *testing.T) {
 	for _, ref := range []domain.ObligationRef{f.user, f.sysTests} {
 		if o := f.status(t, ref); o.Status != domain.ObligationSatisfied {
 			t.Errorf("rejected report changed %s: %+v", ref.ObligationID, o)
+		}
+		if st, pending := f.effective(t, ref); st != domain.ObligationSatisfied || pending {
+			t.Errorf("rejected report invalidated %s at read: %s pending=%v", ref.ObligationID, st, pending)
 		}
 	}
 }
