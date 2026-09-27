@@ -2,6 +2,7 @@ package obligation
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -105,5 +106,15 @@ func TestSPEC410ReevaluationSelectsOnlyCurrentEvidence(t *testing.T) {
 	}
 	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
 		t.Errorf("current evidence did not satisfy: %+v", o)
+	}
+}
+
+// GLM-1: the service exposes no viewer-less subject-applicability read.
+// Consumers derive applicability with store.SubjectApplicability over a
+// state they have already access-checked; the service's own derivation is
+// internal.
+func TestNoViewerlessSubjectApplicability_GLM1(t *testing.T) {
+	if _, ok := reflect.TypeOf(&Service{}).MethodByName("SubjectApplicability"); ok {
+		t.Error("obligation.Service.SubjectApplicability is exported without a viewer")
 	}
 }
