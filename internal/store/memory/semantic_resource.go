@@ -687,3 +687,8 @@ func (r semRead) CurrentWorkspaceBindingsByContext(sourceItemID, taskID, convers
 		return r.bindingAt(ref.id, ref.seq)
 	})
 }
+
+// LatestWorkspaceBinding implements store.ResourceReader.
+func (r semRead) LatestWorkspaceBinding(id string) (domain.WorkspaceBinding, error) {
+	return domain.WorkspaceBinding{}, domain.ErrUnsupportedSchema
+}
