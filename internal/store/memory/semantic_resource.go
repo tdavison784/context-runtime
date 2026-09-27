@@ -384,6 +384,15 @@ func (t *semTx) InsertObservationRun(run domain.ObservationRun) error {
 	if t.r.sem.res.runs.has(run.ID) {
 		return immutable("observation run", run.ID)
 	}
+	// (subject, Ordinal) is the run's second key (SEC-1.13); IDs are never
+	// empty, so the first entry after (Ordinal, "") shares the ordinal if
+	// any does.
+	for r := range t.r.sem.res.runsBySubj.after(run.SubjectKey, seqRef{seq: run.Ordinal}) {
+		if r.seq == run.Ordinal {
+			return invalid("observation run %s: subject ordinal %d is already run %s", run.ID, run.Ordinal, r.id)
+		}
+		break
+	}
 	if !t.r.tasks.has(run.TaskID) {
 		return invalid("observation run %s: task %s is not stored", run.ID, run.TaskID)
 	}

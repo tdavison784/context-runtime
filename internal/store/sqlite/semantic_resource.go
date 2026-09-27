@@ -260,6 +260,14 @@ func (s semTx) InsertObservationRun(run domain.ObservationRun) error {
 	if ok, err := t.exists("observation_run", run.ID); err != nil || ok {
 		return errors.Join(err, immutableIf(ok, "observation run", run.ID))
 	}
+	// (subject, Ordinal) is the run's second key (SEC-1.13), backed by the
+	// unique index of migration 0029.
+	var other domain.ObservationRun
+	if err := t.getWhere("observation_run", "f_subject_key=? AND f_ordinal=?", &other, run.SubjectKey, run.Ordinal); err == nil {
+		return invalid("observation run %s: subject ordinal %d is already run %s", run.ID, run.Ordinal, other.ID)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
+	}
 	if ok, err := t.exists("task", run.TaskID); err != nil || !ok {
 		return errors.Join(err, invalidIf(!ok, "observation run %s: task %s is not stored", run.ID, run.TaskID))
 	}
