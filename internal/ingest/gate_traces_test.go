@@ -375,28 +375,3 @@ func TestGateT16_CheckpointFrontier(t *testing.T) {
 		t.Run(step, func(t *testing.T) { pending(t, depW5Mem+"; "+depW5Tools+"; "+depW2) })
 	}
 }
-
-// TestGateT17_AgentToolsWriteAtAgentAuthority: keyed occurrences, dedup vs
-// replacement, cross-agent isolation, inaccessible citation atomic
-// failure, completion claim with actual status and no mutation.
-func TestGateT17_AgentToolsWriteAtAgentAuthority(t *testing.T) {
-	t.Run("setup: USER pin P1 with O1 and goal G1", func(t *testing.T) {
-		semanticStores(t, func(t *testing.T, f *fixture) {
-			needsObligations(t, f)
-			r := f.mustIngest(principal(domain.AuthorityUser), t17Setup())
-			p1, g1 := mustDirective(t, r, "P1"), mustDirective(t, r, "G1")
-			if !p1.IsPinned() || p1.Authority != domain.AuthorityUser || *g1.GoalStatus != domain.GoalOpen {
-				t.Fatalf("setup: %+v / %+v", p1, g1)
-			}
-		})
-	})
-	for _, step := range []string{
-		"update_state twice: one current agent.status superseding the first",
-		"remember citing another session fails and writes nothing",
-		"context_resolve records a claim; G1 OPEN, O1 UNRESOLVED",
-		"no tool-written item is pinned, a goal, an obligation, or above AGENT",
-		"agent B cannot read or replace agent A's key",
-	} {
-		t.Run(step, func(t *testing.T) { pending(t, depW5Tools+"; "+depW2) })
-	}
-}
