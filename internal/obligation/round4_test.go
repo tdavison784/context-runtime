@@ -77,3 +77,33 @@ func TestEffectiveStatusPassThrough(t *testing.T) {
 	}
 	check("attestation", f.user, domain.ObligationSatisfied)
 }
+
+// SPEC-4.10 (P3-22): reevaluation selects only evidence whose derived
+// applicability is CURRENT; a subject state stale at read is never selected
+// or named in the receipt, and a current one still is.
+func TestSPEC410ReevaluationSelectsOnlyCurrentEvidence(t *testing.T) {
+	f := newEvalFixture(t)
+	obs := f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	f.r.set(t, f.fixture, hashOf("W2"), false) // the PASS no longer describes the workspace
+	res, err := f.reevaluate(t, f.harness, f.sysTests, f.status(t, f.sysTests).Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range res.Records.IDs {
+		if id == obs.ID {
+			t.Errorf("reevaluation selected stale evidence %s: %v", obs.ID, res.Records.IDs)
+		}
+	}
+	f.r.set(t, f.fixture, hashOf("W1"), false) // the same PASS is current again
+	res, err = f.reevaluate(t, f.harness, f.sysTests, f.status(t, f.sysTests).Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := res.Records.IDs; len(ids) != 2 || ids[1] != obs.ID {
+		t.Errorf("reevaluation of current evidence = %v, want it to name %s", ids, obs.ID)
+	}
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Errorf("current evidence did not satisfy: %+v", o)
+	}
+}
