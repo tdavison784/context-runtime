@@ -189,7 +189,7 @@ func CheckBoundaryConflict(tx store.ReadTx, actor domain.Principal, it domain.Co
 // ruleVersion names the deterministic rule that produced the edge (FR-REL-
 // 007); pass "" for an edge created directly from an authorized event, such
 // as a directive replacement.
-func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (rel domain.Relationship, err error) {
+func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string, opts ...Option) (rel domain.Relationship, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
@@ -295,7 +295,7 @@ func applySupersession(tx store.Tx, p supersessionPlan) (domain.Relationship, er
 // a silent fork into two current versions. Both writes commit atomically
 // within the caller's transaction. previousID is "" when newItemID is the
 // directive's first version at that boundary.
-func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string) (result string, err error) {
+func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string, opts ...Option) (result string, err error) {
 	defer poisonGraphError(tx, &err)
 	newItem, err := loadAccessible(tx, actor, newItemID)
 	if err != nil {
