@@ -1010,3 +1010,69 @@ func TestUpgradeGCResultOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeLiveProofPaths checks migration 0045's step on a database
+// migrated through 0044 (DUR-3.1): a live proof stored before it is filed
+// under every ancestor of its CURRENT_PATH dependency and in the workspace
+// bucket, its two live dependency rows are counted, and its FIXED_CONTENT dependency leaves the live
+// index; a proof no version rests on is not live.
+func TestUpgradeLiveProofPaths(t *testing.T) {
+	l := openLegacy(t, 44)
+	o := storetest.BoundObligation(t, "s", "o1", 1, 3, "src")
+	o.Status, o.CurrentProofID, o.Revision = domain.ObligationSatisfied, "proof-1", 2
+	l.insert("obligation", o, nil)
+	fp := domain.HashBytes([]byte("w"))
+	dep := func(id, proof string, kind domain.ProofDependencyKind, p string) domain.ProofDependency {
+		d := domain.ProofDependency{SemanticMeta: storetest.Meta("s", id, 4), ProofID: proof, ResourceID: "repo", Kind: kind, ResourceRevision: 1, Fingerprint: fp, Access: o.Access}
+		if p != "" {
+			d.Locator = &domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: p}
+		}
+		return d
+	}
+	for _, p := range []struct{ id, deps string }{{"proof-1", "d1,d2,d3"}, {"proof-dead", "d4"}} {
+		l.insert("proof", domain.ApplicabilityProof{SemanticMeta: storetest.Meta("s", p.id, 4), ResourceID: "repo", Fingerprint: fp, ResourceRevision: 1,
+			Target: storetest.Ref(o), TransitionID: "tr", RuleVersion: "rule/1", AssertionID: "a", DependencyIDs: strings.Split(p.deps, ","), Access: o.Access}, nil)
+	}
+	for _, d := range []domain.ProofDependency{
+		dep("d1", "proof-1", domain.DependencyCurrentPath, "src/sub/a.go"),
+		dep("d2", "proof-1", domain.DependencyWorkspace, ""),
+		dep("d3", "proof-1", domain.DependencyFixedContent, "docs/fixed.md"),
+		dep("d4", "proof-dead", domain.DependencyCurrentPath, "src/sub/a.go"),
+	} {
+		l.insert("proof_dependency", d, nil)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := func(pg store.ResultPage[domain.ApplicabilityProof], err error) string {
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, p := range pg.Records {
+				out = append(out, p.ID)
+			}
+			return strings.Join(out, ",")
+		}
+		for _, p := range []string{"src", "src/sub", "src/sub/a.go"} {
+			if got := ids(r.LiveProofsByPath("repo", p, store.Page{Limit: 5})); got != "proof-1" {
+				t.Errorf("LiveProofsByPath(%s) after 0045 = %q, want proof-1", p, got)
+			}
+		}
+		if got := ids(r.LiveProofsByPath("repo", "docs", store.Page{Limit: 5})); got != "" {
+			t.Errorf("FIXED_CONTENT dependency is live after 0045: %q", got)
+		}
+		if got := ids(r.LiveWorkspaceProofs("repo", store.Page{Limit: 5})); got != "proof-1" {
+			t.Errorf("LiveWorkspaceProofs after 0045 = %q, want proof-1", got)
+		}
+		if n, err := r.LiveProofDependents("repo"); err != nil || n != 2 {
+			t.Errorf("LiveProofDependents after 0045 = %d (%v), want 2 (path and workspace rows)", n, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

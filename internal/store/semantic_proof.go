@@ -26,8 +26,9 @@ type ProofReader interface {
 	// LiveWorkspaceProofs pages the live proofs with a WORKSPACE dependency
 	// on resourceID, read only when the workspace fingerprint changes.
 	LiveWorkspaceProofs(resourceID string, page Page) (ResultPage[domain.ApplicabilityProof], error)
-	// LiveProofDependents is the write-time count of live proofs with a
-	// CURRENT_PATH or WORKSPACE dependency on resourceID (0 when none).
+	// LiveProofDependents is the write-time count of live CURRENT_PATH and
+	// WORKSPACE dependency rows on resourceID across live proofs (0 when
+	// none), the input to the per-resource policy cap.
 	LiveProofDependents(resourceID string) (uint64, error)
 	// No access filter: completion must inspect all declared TURN/TASK owners.
 	ObligationsByTaskOwner(taskID string, page Page) (ResultPage[domain.ObligationVersion], error)

@@ -82,7 +82,8 @@ func waive(t *testing.T, s store.Store, o domain.ObligationVersion) {
 // (DUR-3.1): a changed path (file or directory) finds exactly the live
 // proofs with a CURRENT_PATH dependency at or below it by one key; the
 // workspace bucket holds WORKSPACE dependents; FIXED_CONTENT dependencies
-// are in no live index; a write-time counter tracks live dependents; and a
+// are in no live index; a write-time counter tracks live dependency rows;
+// and a
 // proof leaves all of them when its version stops resting on it.
 func testSemanticLiveProofsByPath(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
@@ -146,8 +147,8 @@ func testSemanticLiveProofsByPath(t *testing.T, s store.Store) {
 	if got := workspace(); !slicesEqual(got, []string{"o-w", "o-both"}) {
 		t.Errorf("LiveWorkspaceProofs = %v, want [o-w o-both]", got)
 	}
-	if n := dependents(); n != 4 {
-		t.Errorf("LiveProofDependents = %d, want 4 (FIXED_CONTENT-only o-f is not a dependent)", n)
+	if n := dependents(); n != 5 {
+		t.Errorf("LiveProofDependents = %d, want 5 dependency rows (o-both has two; FIXED_CONTENT o-f has none)", n)
 	}
 	all := targets(func(r store.SemanticReader, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
 		return r.CurrentProofsByDependency("repo", "", p)
@@ -161,8 +162,8 @@ func testSemanticLiveProofsByPath(t *testing.T, s store.Store) {
 	if got := byPath("src"); !slicesEqual(got, []string{"o-both"}) {
 		t.Errorf("after waiving o-a: LiveProofsByPath(repo, src) = %v, want [o-both]", got)
 	}
-	if n := dependents(); n != 3 {
-		t.Errorf("after waiving o-a: LiveProofDependents = %d, want 3", n)
+	if n := dependents(); n != 4 {
+		t.Errorf("after waiving o-a: LiveProofDependents = %d, want 4", n)
 	}
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		_, err := readSemantic(t, tx).LiveProofsByPath("repo", "../x", store.Page{Limit: 1})

@@ -20,6 +20,7 @@ import (
 var committedSteps = map[int]struct{ id, fn, file, sum string }{
 	11: {"0011/item-sources/reference-locator-v1", "backfillItemSourcesV1", "steps_0011.go", "e99a25b0aa67a7d3d2388fb739fe0d941430f38a09a61e89726008d23ab1c409"}, 26: {"0026/obligations/reconcile-matcher-satisfaction-v1", "reconcileMatcherSatisfactionV1", "steps_0026.go", "15dbb840e8117e40ef37234ff68500595f61c017bc35c62088ee154745eaec75"},
 	34: {"0034/declarations/reconcile-legacy-creation-v1", "reconcileLegacyCreationV1", "steps_0034.go", "d7bf035db9e8547bb3f999bbc42081183e6190fcd9ded662560f4a5ce102bccb"},
+	45: {"0045/proofs/reconcile-live-proof-paths-v1", "reconcileLiveProofPathsV1", "steps_0045.go", "db16cba458b94703c57eb06e5b4e92e7ea253acbad2172f46f2e8a9b99b97728"},
 }
 
 const pkgPath = "github.com/tdavison784/context-runtime/internal/store/sqlite"
