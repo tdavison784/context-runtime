@@ -79,7 +79,8 @@ func (s *Service) gcBase(tx store.Tx, sem store.SemanticReader, it domain.Contex
 // gcProtection completes a possibly-archivable candidate's snapshot from
 // exhausted indexed reads: the complete source-obligation set, newest
 // checkpoint, open/unacknowledged exchange membership and every holder's
-// lease via policy.LeaseLive. Overflow aborts; unknown holder state protects.
+// lease via policy.LeaseLive, all at the current sequence. Overflow aborts;
+// unknown holder state protects.
 func (s *Service) gcProtection(tx store.Tx, sem store.SemanticReader, it domain.ContextItem, out *policy.GCSnapshot, b *workBudget) error {
 	if err := b.spend(3); err != nil {
 		return err
@@ -116,7 +117,9 @@ func (s *Service) gcProtection(tx store.Tx, sem store.SemanticReader, it domain.
 	if out.OpenExchange, err = s.inOpenExchange(sem, it.ID, b); err != nil {
 		return err
 	}
-	out.LiveLease, err = s.leasedContent(tx, sem, domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash}, out.Seq, b)
+	// J2 freezes only the candidate set: protections read current state, so a
+	// lease issued after the request's snapshot still protects (SEC-4.2).
+	out.LiveLease, err = s.leasedContent(tx, sem, domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash}, tx.LastSeq(), b)
 	return err
 }
 
