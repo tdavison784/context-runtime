@@ -688,7 +688,19 @@ func (r semRead) CurrentWorkspaceBindingsByContext(sourceItemID, taskID, convers
 	})
 }
 
-// LatestWorkspaceBinding implements store.ResourceReader.
+// LatestWorkspaceBinding implements store.ResourceReader through the
+// binding's latest-version pointer (SEC-4.10, SPEC-4.8).
 func (r semRead) LatestWorkspaceBinding(id string) (domain.WorkspaceBinding, error) {
-	return domain.WorkspaceBinding{}, domain.ErrUnsupportedSchema
+	if err := r.r.check(); err != nil {
+		return domain.WorkspaceBinding{}, err
+	}
+	latest, ok := r.r.sem.res.wbLatest.get(id)
+	if !ok {
+		return domain.WorkspaceBinding{}, notFound("workspace binding", id)
+	}
+	b, ok := r.r.sem.res.wbindings.get(wbKey{id, latest})
+	if !ok {
+		return b, notFound("workspace binding", id)
+	}
+	return b, nil
 }

@@ -662,7 +662,18 @@ func (s semRead) CurrentWorkspaceBindingsByContext(sourceItemID, taskID, convers
 	return out, nil
 }
 
-// LatestWorkspaceBinding implements store.ResourceReader.
-func (r semRead) LatestWorkspaceBinding(id string) (domain.WorkspaceBinding, error) {
-	return domain.WorkspaceBinding{}, domain.ErrUnsupportedSchema
+// LatestWorkspaceBinding implements store.ResourceReader: one keyed read
+// of migration 0038's current pointer, then the exact version (SEC-4.10,
+// SPEC-4.8).
+func (s semRead) LatestWorkspaceBinding(id string) (domain.WorkspaceBinding, error) {
+	var b domain.WorkspaceBinding
+	var version, seq uint64
+	err := s.t.conn.QueryRowContext(s.t.ctx, latestBindingVersion, s.t.session, id).Scan(&version, &seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return b, fmt.Errorf("workspace binding %s: %w", id, domain.ErrNotFound)
+	}
+	if err != nil {
+		return b, err
+	}
+	return b, s.t.get("workspace_binding", id, int(version), &b)
 }
