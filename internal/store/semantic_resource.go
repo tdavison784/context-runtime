@@ -19,15 +19,35 @@ type ResourceReader interface {
 	// path or one of its ancestor directories. Its cost scales with those,
 	// not with unrelated edits (G2, SEC-1.7, DUR-1.2).
 	ResourceUpdatesAffectingPath(resourceID, path string, page Page) (ResultPage[domain.ResourceUpdate], error)
+	// LatestResourceUpdateAffectingPath is the newest update of resourceID
+	// that may change path (ALL-paths, or naming path or an ancestor
+	// directory), ErrNotFound when none: one keyed lookup per path
+	// component, independent of history (H2, DUR-2.2).
+	LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error)
 	ResourcePathState(locator domain.ResourceLocator) (domain.ResourcePathState, error)
 	WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error)
 	WorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
+	// CurrentWorkspaceBindingsByContext lists each binding ID once, at its
+	// latest version, while that version is in the context, in (Seq, ID)
+	// order of that version: a write-time pointer, so pages count live
+	// bindings, not versions (H2).
+	CurrentWorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
 	Observation(id string) (domain.ObservationRecord, error)
 	ObservationRun(id string) (domain.ObservationRun, error)
 	// Run ordinal is the allocated registration Seq (W4 Q-5), so Page's
 	// (Seq, ID) cursor is also the deterministic pre-execution run order.
 	RunsBySubject(subjectKey string, page Page) (ResultPage[domain.ObservationRun], error)
 	ObservationsByRun(runID string, page Page) (ResultPage[domain.ObservationRecord], error)
+	// ClosingObservation is the run's closing observation (ClosesRun),
+	// ErrNotFound while the run is open: one keyed lookup, independent of
+	// the run's partial reports (H2, DUR-2.6).
+	ClosingObservation(runID string) (domain.ObservationRecord, error)
+	// SubjectHighWater is the highest run ordinal with a complete PASS or
+	// FAIL (TerminalComplete) among runs of exactly (subjectKey, taskID,
+	// access), ErrNotFound when none. It is raised at write time by every
+	// such observation, whatever its fingerprint or applicability, and read
+	// with one keyed lookup (H1, H2).
+	SubjectHighWater(subjectKey, taskID string, access domain.AccessBoundary) (uint64, error)
 	SubjectState(subjectKey, taskID string, access domain.AccessBoundary) (domain.SubjectState, error)
 	// Only CURRENT states, in first-filing order: STALE/UNKNOWN history is
 	// not a live dependent and never counts toward a page (G2, SEC-1.8).
@@ -68,4 +88,38 @@ func PathAffectKeys(p string) ([]string, error) {
 		}
 	}
 	return append(keys, p), nil
+}
+
+// Partition is one (task, access) subject partition of a subject key.
+type Partition struct {
+	TaskID string
+	Access domain.AccessBoundary
+}
+
+// ProofRankPartitions are the subject partitions whose high-water marks
+// can outrank a proof resting on run for obligation o (H1, SEC-2.9): the
+// run's own partition, and each TASK partition of o's task (workflow in
+// {"", o's}, agent in {"", o's}) whose boundary covers o's, so a result
+// private to another agent never outranks a proof it does not cover.
+func ProofRankPartitions(run domain.ObservationRun, o domain.ObligationVersion) []Partition {
+	out := []Partition{{run.TaskID, run.Access}}
+	if o.TaskID == "" {
+		return out
+	}
+	for _, wf := range uniqueOf("", o.Access.WorkflowID) {
+		for _, agent := range uniqueOf("", o.Access.AgentID) {
+			p := Partition{o.TaskID, domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: o.SessionID, TaskID: o.TaskID, WorkflowID: wf, AgentID: agent}}
+			if o.Access.Within(p.Access) && p != out[0] {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+func uniqueOf(a, b string) []string {
+	if a == b {
+		return []string{a}
+	}
+	return []string{a, b}
 }

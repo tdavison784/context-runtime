@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -238,7 +239,18 @@ func (s semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 	if ok, err := t.exists("resource_binding", b.ResourceID); err != nil || !ok {
 		return errors.Join(err, invalidIf(!ok, "workspace binding %s: resource %s is not registered", b.ID, b.ResourceID))
 	}
-	return t.put("workspace_binding", b.ID, int(b.Version), b, false)
+	return t.atomic(func() error {
+		if err := t.put("workspace_binding", b.ID, int(b.Version), b, false); err != nil {
+			return err
+		}
+		// Move the binding's current pointer to this version (0038).
+		if _, err := t.conn.ExecContext(t.ctx, "DELETE FROM lookup_current_workspace_binding WHERE session_id=? AND binding_id=?", t.session, b.ID); err != nil {
+			return err
+		}
+		_, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_current_workspace_binding(session_id,context_kind,context_id,seq,binding_id,version) VALUES(?,?,?,?,?,?)",
+			t.session, string(b.Context.Kind), b.Context.ID, b.Seq, b.ID, b.Version)
+		return err
+	})
 }
 
 func (s semRead) WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error) {
@@ -315,7 +327,19 @@ func (s semTx) InsertObservation(o domain.ObservationRecord) error {
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return err
 	}
-	return t.put("observation", o.ID, 0, o, false)
+	return t.atomic(func() error {
+		if err := t.put("observation", o.ID, 0, o, false); err != nil {
+			return err
+		}
+		if !o.TerminalComplete() {
+			return nil
+		}
+		// Raise the run partition's high-water mark (H1, migration 0037).
+		_, err := t.conn.ExecContext(t.ctx, `INSERT INTO lookup_subject_high_water(session_id,partition_key,high_water) VALUES(?,?,?)
+ON CONFLICT(session_id,partition_key) DO UPDATE SET high_water = MAX(high_water, excluded.high_water)`,
+			t.session, subjectPartitionKey(run.SubjectKey, run.TaskID, run.Access), run.Ordinal)
+		return err
+	})
 }
 
 func (s semRead) Observation(id string) (domain.ObservationRecord, error) {
@@ -512,6 +536,119 @@ func (s semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.P
 		}
 		out.Records = append(out.Records, u)
 		out.Next = c
+	}
+	return out, nil
+}
+
+// LatestResourceUpdateAffectingPath implements store.ResourceReader: one
+// newest-first LIMIT 1 search of migration 0033's index per affecting key
+// (ALL and each path component), O(depth) and independent of history.
+func (s semRead) LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error) {
+	t := s.t
+	affect, err := store.PathAffectKeys(path)
+	if err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	keys := []string{"all"}
+	for _, k := range affect {
+		keys = append(keys, updatePathKey(k))
+	}
+	var best store.Cursor
+	for _, k := range keys {
+		var c store.Cursor
+		err := t.conn.QueryRowContext(t.ctx, "SELECT seq, update_id FROM lookup_resource_update_path WHERE session_id=? AND resource_id=? AND path_key=? ORDER BY seq DESC, update_id DESC LIMIT 1",
+			t.session, resourceID, k).Scan(&c.Seq, &c.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return domain.ResourceUpdate{}, err
+		}
+		if c.Seq > best.Seq || c.Seq == best.Seq && c.ID > best.ID {
+			best = c
+		}
+	}
+	if best.ID == "" {
+		return domain.ResourceUpdate{}, fmt.Errorf("resource update affecting %s: %w", path, domain.ErrNotFound)
+	}
+	var u domain.ResourceUpdate
+	if err := t.get("resource_update", best.ID, 0, &u); err != nil {
+		return domain.ResourceUpdate{}, fmt.Errorf("%w: path index names missing update %s", domain.ErrIntegrity, best.ID)
+	}
+	return u, nil
+}
+
+// ClosingObservation implements store.ResourceReader: a keyed search of
+// migration 0030's partial unique index, which holds at most one row per
+// run.
+func (s semRead) ClosingObservation(runID string) (domain.ObservationRecord, error) {
+	var o domain.ObservationRecord
+	return o, s.t.getWhere("observation", "f_run_id=? AND "+closingObservation, &o, runID)
+}
+
+// SubjectHighWater implements store.ResourceReader: one primary-key read
+// of migration 0037's mark.
+func (s semRead) SubjectHighWater(subjectKey, taskID string, access domain.AccessBoundary) (uint64, error) {
+	var hw uint64
+	err := s.t.conn.QueryRowContext(s.t.ctx, "SELECT high_water FROM lookup_subject_high_water WHERE session_id=? AND partition_key=?",
+		s.t.session, subjectPartitionKey(subjectKey, taskID, access)).Scan(&hw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("subject high-water mark %s: %w", subjectKey, domain.ErrNotFound)
+	}
+	return hw, err
+}
+
+// currentBindingPage is the keyed page read of migration 0038's pointers.
+const currentBindingPage = "SELECT seq, binding_id, version FROM lookup_current_workspace_binding WHERE session_id=? AND context_kind=? AND context_id=? AND (seq>? OR (seq=? AND binding_id>?)) ORDER BY seq, binding_id LIMIT ?"
+
+// CurrentWorkspaceBindingsByContext implements store.ResourceReader over
+// migration 0038's one-row-per-binding pointers.
+func (s semRead) CurrentWorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, p store.Page) (store.ResultPage[domain.WorkspaceBinding], error) {
+	t := s.t
+	var out store.ResultPage[domain.WorkspaceBinding]
+	if p.Limit <= 0 {
+		return out, invalid("page limit must be positive")
+	}
+	var ctx []domain.WorkspaceSourceContext
+	for _, c := range []domain.WorkspaceSourceContext{{Kind: domain.WorkspaceSource, ID: sourceItemID}, {Kind: domain.WorkspaceTask, ID: taskID}, {Kind: domain.WorkspaceConversation, ID: conversationID}} {
+		if c.ID != "" {
+			ctx = append(ctx, c)
+		}
+	}
+	if len(ctx) != 1 {
+		return out, invalid("workspace bindings: exactly one context required")
+	}
+	rows, err := t.query(currentBindingPage, t.session, string(ctx[0].Kind), ctx[0].ID, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	if err != nil {
+		return out, err
+	}
+	type ref struct {
+		seq     uint64
+		id      string
+		version int
+	}
+	var refs []ref
+	for rows.Next() {
+		var r ref
+		if err := rows.Scan(&r.seq, &r.id, &r.version); err != nil {
+			rows.Close()
+			return out, err
+		}
+		refs = append(refs, r)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+	if len(refs) > p.Limit {
+		refs, out.More = refs[:p.Limit], true
+	}
+	for _, r := range refs {
+		var b domain.WorkspaceBinding
+		if err := t.get("workspace_binding", r.id, r.version, &b); err != nil {
+			return out, fmt.Errorf("%w: current binding pointer names missing %s/%d", domain.ErrIntegrity, r.id, r.version)
+		}
+		out.Records = append(out.Records, b)
+		out.Next = store.Cursor{Seq: r.seq, ID: r.id}
 	}
 	return out, nil
 }

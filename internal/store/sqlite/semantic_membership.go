@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -316,7 +317,14 @@ func (s semTx) InsertExchangeMember(m domain.ExchangeMember) error {
 			return notStored(errors.Join(err, domain.ErrNotFound), "exchange member %s: admission %s is not stored for its exchange", m.ID, m.AdmissionID)
 		}
 	}
-	return t.put("exchange_member", m.ID, 0, m, false)
+	return t.atomic(func() error {
+		if err := t.put("exchange_member", m.ID, 0, m, false); err != nil {
+			return err
+		}
+		_, err := t.conn.ExecContext(t.ctx, "INSERT OR IGNORE INTO lookup_item_exchange(session_id,item_id,conversation_id,ordinal,exchange_id) VALUES(?,?,?,?,?)",
+			t.session, m.Source.ItemID, x.ConversationID, x.Ordinal, x.ID)
+		return err
+	})
 }
 
 func (s semTx) InsertExchangeAcknowledgment(a domain.ExchangeAcknowledgment) error {
@@ -559,4 +567,24 @@ func (s semTx) InsertOwnerRegistration(o domain.OwnerRegistration) error {
 func (s semRead) OwnerRegistration(kind domain.OwnerKind, ownerID string) (domain.OwnerRegistration, error) {
 	var o domain.OwnerRegistration
 	return o, s.t.getWhere("owner", "f_kind=? AND f_owner_id=?", &o, string(kind), ownerID)
+}
+
+// EarliestExchangeWithItem implements store.MembershipReader: one keyed
+// LIMIT 1 search of migration 0035's index.
+func (s semRead) EarliestExchangeWithItem(conversationID, itemID string) (domain.LogicalExchange, error) {
+	t := s.t
+	var id string
+	err := t.conn.QueryRowContext(t.ctx, "SELECT exchange_id FROM lookup_item_exchange WHERE session_id=? AND item_id=? AND conversation_id=? ORDER BY ordinal, exchange_id LIMIT 1",
+		t.session, itemID, conversationID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.LogicalExchange{}, fmt.Errorf("exchange with item %s: %w", itemID, domain.ErrNotFound)
+	}
+	if err != nil {
+		return domain.LogicalExchange{}, err
+	}
+	var x domain.LogicalExchange
+	if err := t.get("exchange", id, 0, &x); err != nil {
+		return x, fmt.Errorf("%w: item exchange index names missing exchange %s", domain.ErrIntegrity, id)
+	}
+	return x, nil
 }
