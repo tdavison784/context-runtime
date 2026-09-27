@@ -806,3 +806,86 @@ func TestUpgradeResourceUpdatePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeReconcilesLegacyCreation checks migration 0034's step on a
+// database migrated through 0033 (G5, P3-41): a pre-upgrade directive whose
+// receipt snapshot matches gets a known declaration carrying its Pinned
+// claim; an agent key, a receiptless item, a disagreeing snapshot and an
+// ambiguous claim each get an unknown one; an item with an explicit
+// namespace and an unkeyed item get none.
+func TestUpgradeReconcilesLegacyCreation(t *testing.T) {
+	l := openLegacy(t, 33)
+	pin := func(id string, seq uint64) domain.ContextItem {
+		it := storetest.NewItem("s", id, seq, "rule "+id)
+		it.DirectiveID, it.Section, it.Kind = id, domain.SectionPinned, domain.KindConstraint
+		return it
+	}
+	receipt := func(it domain.ContextItem, occurrence string) {
+		l.insert("receipt_item", receiptItem{SessionID: "s", OccurrenceID: occurrence, Ordinal: 0, Item: it}, nil)
+	}
+	claim := func(obl, source, c string, seq uint64) {
+		o := storetest.NewObligation("s", obl, 1, seq, source)
+		o.Claim = c
+		l.insert("obligation", o, nil)
+	}
+	known := pin("known", 1)
+	l.insert("item", known, nil)
+	receipt(known, "occ-known")
+	claim("o-known", "known", "lint.clean", 2)
+
+	agent := storetest.NewItem("s", "agentkey", 3, "status")
+	agent.DirectiveID = "agent.status"
+	l.insert("item", agent, nil)
+	receipt(agent, "occ-agent")
+
+	receiptless := pin("receiptless", 4)
+	l.insert("item", receiptless, nil)
+
+	disagreeing := pin("disagreeing", 5)
+	l.insert("item", disagreeing, nil)
+	other := disagreeing
+	other.ContentHash = domain.HashBytes([]byte("other"))
+	receipt(other, "occ-disagreeing")
+
+	ambiguous := pin("ambiguous", 6)
+	l.insert("item", ambiguous, nil)
+	receipt(ambiguous, "occ-ambiguous")
+	claim("o-amb-1", "ambiguous", "a", 7)
+	claim("o-amb-2", "ambiguous", "b", 8)
+
+	explicit := pin("explicit", 9)
+	explicit.Namespace = domain.NamespaceDirective
+	l.insert("item", explicit, nil)
+	receipt(explicit, "occ-explicit")
+
+	unkeyed := storetest.NewItem("s", "unkeyed", 10, "fact")
+	l.insert("item", unkeyed, nil)
+	receipt(unkeyed, "occ-unkeyed")
+
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := r.CreationDeclaration("known")
+		if err != nil || d.Validate() != nil || !d.LegacyKnown || d.Seq != 1 ||
+			!reflect.DeepEqual(d.AcceptedSemantics.AcceptedAttributes, []string{"obligation=lint.clean"}) {
+			t.Errorf("known: %+v (%v)", d, err)
+		}
+		for _, id := range []string{"agentkey", "receiptless", "disagreeing", "ambiguous"} {
+			d, err := r.CreationDeclaration(id)
+			if err != nil || d.Validate() != nil || d.LegacyKnown || d.Signature != "" {
+				t.Errorf("%s: want an unknown declaration, got %+v (%v)", id, d, err)
+			}
+		}
+		for _, id := range []string{"explicit", "unkeyed"} {
+			if _, err := r.CreationDeclaration(id); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("%s: declaration after upgrade: %v", id, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
