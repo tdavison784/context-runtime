@@ -111,10 +111,8 @@ func TestGateT17_AgentToolsThroughPipeline(t *testing.T) {
 		})
 
 		// context_resolve(G1) citing evidence records a claim; G1 and O1
-		// are untouched. The cited evidence is a semantic item the agent
-		// can see: W1's graph refuses any transcript, including a TOOL
-		// result like T17's X9, as evidence support (ruling requested; see
-		// TestGateT17_ToolResultAsEvidence).
+		// are untouched. (A TOOL result as evidence is covered by
+		// TestGateT17_ToolResultAsEvidence.)
 		x9 := second.Keyed.ItemID
 		claim, err := tools.Execute(ctx, f.s, sess, func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
 			return svc.RecordCompletionClaim(tx, dispatcher, tools.Request[domain.CompletionClaimIntent]{Invocation: invocation("resolve"),
@@ -174,10 +172,34 @@ func notFoundOrFixed(err error) error {
 	return err
 }
 
-// TestGateT17_ToolResultAsEvidence: T16/T17 cite tool exchange results (X3,
-// X9) as evidence, but W1's graph refuses every transcript, TOOL results
-// included, as EVIDENCE_SUPPORT coverage, so a context_resolve or
-// context_remember citing a raw tool result fails INVALID_ARGUMENT.
+// TestGateT17_ToolResultAsEvidence (P3-25, ruling): a TOOL result
+// transcript qualifies as evidence support; a conversation transcript (the
+// user's) does not, and citing it fails INVALID_ARGUMENT with nothing
+// written.
 func TestGateT17_ToolResultAsEvidence(t *testing.T) {
-	pending(t, "ruling: may TOOL-authority result transcripts qualify as evidence support (P3-25/C-19)? graph/coverage_plan.go rejects every transcript")
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		needsObligations(t, f)
+		c := newT16(t, f)
+		x1, _ := c.round(1)
+		c.keyed(x1, false, "progress", "Checked the API.")
+		x2, _ := c.round(2)
+		userTranscript := f.items()[0].ID
+		before := f.lastSeq()
+		_, err := tools.Execute(ctx, f.s, sess, func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
+			return c.svc.Remember(tx, c.dispatcher, tools.Request[domain.KeyedWriteIntent]{Invocation: c.invocation(x2), Intent: domain.KeyedWriteIntent{
+				RequestID: "req-bad", Key: "api-note", Kind: domain.KindFact, Parts: textParts("The API uses v3."), EvidenceIDs: []string{userTranscript}}}, seq)
+		})
+		var te *tools.Error
+		if !errors.As(err, &te) || te.Code() != domain.ToolErrorInvalidArgument || f.lastSeq() != before {
+			t.Fatalf("user transcript as evidence: %v, seq %d -> %d", err, before, f.lastSeq())
+		}
+		// The rejected call wrote nothing, so its tool call is still
+		// unanswered; the round closes only once it has a result.
+		c.keyed(x2, false, "progress", "Retrying with evidence.")
+		x3, _ := c.round(3)
+		fact := c.keyed(x3, true, "api-note", "The API uses v3.", c.toolResult(x1))
+		if fact.Keyed == nil || !f.isCurrent(fact.Keyed.ItemID) {
+			t.Fatalf("TOOL-result-supported fact = %+v", fact.Keyed)
+		}
+	})
 }
