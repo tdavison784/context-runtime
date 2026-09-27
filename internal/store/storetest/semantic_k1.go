@@ -380,12 +380,16 @@ func testSemanticProofDerivedValid(t *testing.T, s store.Store) {
 	k1Setup(t, s)
 	// u1 establishes the resource at revision 1 (divergence rises to 1).
 	report(t, s, "u1", 0, fpA, []string{"src/a.go"}, map[string]string{"src/a.go": "v1"})
+	// One view resolves the obligation's current proof and derives its
+	// validity; the sqlite store serves one view at a time, so a helper
+	// that opened a second view here would deadlock.
 	valid := func(id string) bool {
 		t.Helper()
 		var ok bool
 		view(t, s, sessA, func(tx store.ReadTx) error {
-			var err error
-			ok, err = store.ProofDerivedValid(readSemantic(t, tx), k1ProofID(t, s, id))
+			o, err := readSemantic(t, tx).ExactObligation(domain.ObligationRef{SessionID: sessA, ObligationID: id, Version: 1})
+			noErr(t, err)
+			ok, err = store.ProofDerivedValid(readSemantic(t, tx), o.CurrentProofID)
 			noErr(t, err)
 			return nil
 		})
@@ -447,20 +451,4 @@ func testSemanticProofDerivedValid(t *testing.T, s store.Store) {
 		}
 		return nil
 	})
-}
-
-// k1ProofID derives the proof ID of k1AssertedProof's obligation id.
-func k1ProofID(t *testing.T, s store.Store, id string) string {
-	t.Helper()
-	var proofID string
-	view(t, s, sessA, func(tx store.ReadTx) error {
-		o, err := readSemantic(t, tx).ExactObligation(domain.ObligationRef{SessionID: sessA, ObligationID: id, Version: 1})
-		noErr(t, err)
-		proofID = o.CurrentProofID
-		if proofID == "" {
-			t.Fatalf("obligation %s has no current proof", id)
-		}
-		return nil
-	})
-	return proofID
 }

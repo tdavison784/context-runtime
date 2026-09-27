@@ -156,6 +156,26 @@ func (s semTx) PutResourceState(st domain.ResourceState, expectedRevision uint64
 	if found && st.AuthoritativeRevision <= cur.AuthoritativeRevision {
 		return domain.ResourceState{}, transition("resource state %s: revision %d does not advance %d", st.ResourceID, st.AuthoritativeRevision, cur.AuthoritativeRevision)
 	}
+	// K1 A1 write-time pointer raises, in the report's own transaction and
+	// without any dependent fan-out: the divergence pointer rises on lost
+	// freshness or a changed fingerprint (the first report's fingerprint is
+	// a change), the ALL affecting key rises on UNKNOWN and ALL-paths
+	// reports, and each changed path's exact key rises unless this
+	// transaction records the path's prior content for this update. The
+	// path keys resolve at commit, after the report's content writes.
+	if u.Freshness == domain.ResourceUnknown || u.WorkspaceFingerprint != cur.WorkspaceFingerprint {
+		if err := t.raiseDivergence(u); err != nil {
+			return domain.ResourceState{}, err
+		}
+	}
+	if u.Freshness == domain.ResourceUnknown || u.AllPaths {
+		if err := t.raiseAffectingAll(u); err != nil {
+			return domain.ResourceState{}, err
+		}
+	}
+	for _, q := range u.ChangedPaths {
+		t.addPathRaise(pathRaise{resource: u.ResourceID, path: q, updateID: u.ID, revision: u.ResultingAuthoritativeRevision})
+	}
 	st.Revision = expectedRevision + 1
 	if err := t.put("resource_state", st.ResourceID, 0, st, found); err != nil {
 		return domain.ResourceState{}, err
@@ -197,6 +217,12 @@ func (s semTx) PutResourcePathState(st domain.ResourcePathState, expectedRevisio
 	if found && st.ResourceRevision <= cur.ResourceRevision {
 		return domain.ResourcePathState{}, transition("path state %s: revision %d does not advance %d", st.Locator.Path, st.ResourceRevision, cur.ResourceRevision)
 	}
+	// K1 A1: the write settles whether this update's pending raise of the
+	// path stands — recording the row's prior content spares the raise,
+	// changing it forces it (resolved at commit, so write order inside the
+	// report's transaction does not matter).
+	t.recordPathWrite(pathWrite{resource: st.Locator.ResourceID, path: joinedPath(st.Locator),
+		updateID: st.ResourceUpdateID, revision: st.ResourceRevision, same: found && cur.ContentHash == st.ContentHash})
 	st.Revision = expectedRevision + 1
 	if err := t.put("path_state", key, 0, pathStateRow{SessionID: t.session, LocatorKey: key, State: st}, found); err != nil {
 		return domain.ResourcePathState{}, err
