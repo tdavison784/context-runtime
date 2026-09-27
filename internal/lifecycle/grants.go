@@ -123,7 +123,7 @@ func (s *Service) issueGrant(tx store.Tx, sem store.SemanticReader, p domain.Pri
 	}
 	// Capacity only after authority: an unauthorized issuer learns nothing
 	// about the target's grant load (SEC-2.3).
-	if err := s.liveGrantRoom(sem, i.Action, i.Targets, seq); err != nil {
+	if err := s.liveGrantRoom(sem, p, i.Action, i.Targets, seq); err != nil {
 		return domain.RecordResult{}, err
 	}
 	if err := tx.InsertGrant(grant); err != nil {
@@ -169,8 +169,12 @@ func (s *Service) revokeGrant(tx store.Tx, sem store.SemanticReader, p domain.Pr
 // authorization reads at most MaxTargets live grants per (action, target),
 // so issuance refuses a grant that would exceed that many live at seq. The
 // read is the store's live-only index, so revoked or expired history never
-// counts and can never block issuance (SEC-2.3, DUR-2.4).
-func (s *Service) liveGrantRoom(sem store.SemanticReader, action domain.Action, targets []domain.GrantTarget, seq uint64) error {
+// counts and can never block issuance (SEC-2.3, DUR-2.4). The live set is
+// also shared (SEC-2.7): one issuer holds at most a quarter of it, and the
+// last quarter is reserved for SYSTEM, so no lower-authority issuer, alone
+// or together, can deny issuance to everyone.
+func (s *Service) liveGrantRoom(sem store.SemanticReader, issuer domain.Principal, action domain.Action, targets []domain.GrantTarget, seq uint64) error {
+	share := max(1, s.policy.MaxTargets/4)
 	for _, t := range targets {
 		live, err := sem.LiveGrantsFor(action, t, seq, s.policy.MaxTargets)
 		if errors.Is(err, store.ErrLimitExceeded) {
@@ -179,7 +183,17 @@ func (s *Service) liveGrantRoom(sem store.SemanticReader, action domain.Action, 
 		if err != nil {
 			return err
 		}
-		if len(live) >= s.policy.MaxTargets {
+		mine := 0
+		for _, g := range live {
+			if g.Issuer == issuer {
+				mine++
+			}
+		}
+		room := s.policy.MaxTargets
+		if issuer.Authority != domain.AuthoritySystem {
+			room -= share
+		}
+		if len(live) >= room || issuer.Authority != domain.AuthoritySystem && mine >= share {
 			return domain.ErrResourceLimit
 		}
 	}
