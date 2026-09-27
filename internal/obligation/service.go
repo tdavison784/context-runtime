@@ -34,15 +34,22 @@ func New(policy domain.Phase3Policy, reg *Registry) (*Service, error) {
 }
 
 // request is one mutation's stable identity and canonical arguments (P3-2).
+// overLimit marks a request whose arguments exceed today's limit: it may
+// still replay a committed receipt, but is refused as a new request (DUR-1.8).
 type request struct {
-	family domain.MutationFamily
-	id     string
-	method string
-	args   []byte
+	family    domain.MutationFamily
+	id        string
+	method    string
+	args      []byte
+	intent    any
+	overLimit bool
 }
 
 func (s *Service) newRequest(family domain.MutationFamily, id, method string, intent any) (request, error) {
 	args, err := domain.CanonicalSemanticArguments(intent, s.policy.MaxReceiptBytes)
+	if errors.Is(err, domain.ErrResourceLimit) {
+		return request{family: family, id: id, method: method, intent: intent, overLimit: true}, nil
+	}
 	if err != nil {
 		return request{}, err
 	}
@@ -55,12 +62,23 @@ func (s *Service) newRequest(family domain.MutationFamily, id, method string, in
 func replay(r store.SemanticReader, actor domain.Principal, req request) (domain.MutationResult, bool, error) {
 	rec, err := r.MutationReceipt(req.family, req.id)
 	if errors.Is(err, domain.ErrNotFound) {
+		if req.overLimit {
+			return domain.MutationResult{}, false, domain.ErrResourceLimit // a new request is held to today's limit
+		}
 		return domain.MutationResult{}, false, nil
 	}
 	if err != nil {
 		return domain.MutationResult{}, false, err
 	}
-	if err := rec.CheckReplay(actor, req.family, req.method, req.args); err != nil {
+	args := req.args
+	if req.overLimit {
+		// Re-encode for comparison only, bounded by the stored request plus
+		// the encoder's headroom; a larger retry cannot match anyway.
+		if args, err = domain.CanonicalSemanticArguments(req.intent, 2*len(rec.CanonicalArguments)+256); err != nil {
+			return domain.MutationResult{}, false, domain.ErrEventIDConflict
+		}
+	}
+	if err := rec.CheckReplay(actor, req.family, req.method, args); err != nil {
 		return domain.MutationResult{}, false, domain.ErrEventIDConflict
 	}
 	return rec.Result.Clone(), true, nil
