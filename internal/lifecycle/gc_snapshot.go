@@ -9,13 +9,23 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
-// gcSnapshot assembles policy.GCSnapshot for one candidate from exact and
-// indexed bounded reads in the collecting transaction. Every protection fact
-// comes from an exhausted read; overflow aborts, and a lease whose holder
-// state is unknown counts as possibly live.
-func (s *Service) gcSnapshot(tx store.Tx, sem store.SemanticReader, it domain.ContextItem, snapSeq uint64, b *workBudget) (policy.GCSnapshot, error) {
+// gcCache memoizes the per-collection task and owner reads that many
+// candidates share; every value comes from the collecting transaction.
+type gcCache struct {
+	tasks  map[string]*domain.TaskState
+	owners map[domain.OwnerKind]map[string]*domain.OwnerRegistration
+}
+
+func newGCCache() *gcCache {
+	return &gcCache{tasks: map[string]*domain.TaskState{}, owners: map[domain.OwnerKind]map[string]*domain.OwnerRegistration{}}
+}
+
+// gcBase reads the cheap facts every candidate needs: currentness, the
+// originating task and the declared broad-scope owner. Protection facts are
+// left absent; policy.MayArchive decides whether they must be read.
+func (s *Service) gcBase(tx store.Tx, sem store.SemanticReader, it domain.ContextItem, snapSeq uint64, c *gcCache, b *workBudget) (policy.GCSnapshot, error) {
 	out := policy.GCSnapshot{OwnerSnapshot: policy.OwnerSnapshot{Seq: snapSeq}, Item: domain.ItemRevisionRef{ItemID: it.ID, Version: it.Version}}
-	if err := b.spend(4); err != nil {
+	if err := b.spend(1); err != nil {
 		return out, err
 	}
 	var err error
@@ -23,36 +33,66 @@ func (s *Service) gcSnapshot(tx store.Tx, sem store.SemanticReader, it domain.Co
 		return out, err
 	}
 	if it.TaskID != "" {
-		t, err := tx.Task(it.TaskID)
-		switch {
-		case err == nil:
-			out.Task = &t
-		case !errors.Is(err, domain.ErrNotFound):
-			return out, err
+		t, seen := c.tasks[it.TaskID]
+		if !seen {
+			if err := b.spend(1); err != nil {
+				return out, err
+			}
+			v, err := tx.Task(it.TaskID)
+			switch {
+			case err == nil:
+				t = &v
+			case !errors.Is(err, domain.ErrNotFound):
+				return out, err
+			}
+			c.tasks[it.TaskID] = t
 		}
+		out.Task = t
 	}
 	if it.Scope == domain.ScopeWorkflow || it.Scope == domain.ScopeAgent {
 		kind, id := domain.OwnerWorkflow, it.Access.WorkflowID
 		if it.Scope == domain.ScopeAgent {
 			kind, id = domain.OwnerAgent, it.Access.AgentID
 		}
-		o, err := sem.OwnerRegistration(kind, id)
-		switch {
-		case err == nil:
-			out.Owner = &o
-		case !errors.Is(err, domain.ErrNotFound):
-			return out, err
+		if c.owners[kind] == nil {
+			c.owners[kind] = map[string]*domain.OwnerRegistration{}
 		}
+		o, seen := c.owners[kind][id]
+		if !seen {
+			if err := b.spend(1); err != nil {
+				return out, err
+			}
+			v, err := sem.OwnerRegistration(kind, id)
+			switch {
+			case err == nil:
+				o = &v
+			case !errors.Is(err, domain.ErrNotFound):
+				return out, err
+			}
+			c.owners[kind][id] = o
+		}
+		out.Owner = o
+	}
+	return out, nil
+}
+
+// gcProtection completes a possibly-archivable candidate's snapshot from
+// exhausted indexed reads: the complete source-obligation set, newest
+// checkpoint, open/unacknowledged exchange membership and every holder's
+// lease via policy.LeaseLive. Overflow aborts; unknown holder state protects.
+func (s *Service) gcProtection(tx store.Tx, sem store.SemanticReader, it domain.ContextItem, out *policy.GCSnapshot, b *workBudget) error {
+	if err := b.spend(3); err != nil {
+		return err
 	}
 	obs, err := tx.ObligationsBySource(it.ID, s.policy.MaxTargets)
 	if errors.Is(err, store.ErrLimitExceeded) {
-		return out, domain.ErrResourceLimit
+		return domain.ErrResourceLimit
 	}
 	if err != nil {
-		return out, err
+		return err
 	}
 	if err := b.spend(len(obs)); err != nil {
-		return out, err
+		return err
 	}
 	out.ObligationsKnown = true
 	for _, o := range obs {
@@ -60,14 +100,14 @@ func (s *Service) gcSnapshot(tx store.Tx, sem store.SemanticReader, it domain.Co
 	}
 	if it.Role == domain.RoleCheckpoint {
 		if out.NewestCheckpoint, err = s.newestCheckpoint(tx, it, b); err != nil {
-			return out, err
+			return err
 		}
 	}
 	if out.OpenExchange, err = s.inOpenExchange(sem, it.ID, b); err != nil {
-		return out, err
+		return err
 	}
-	out.LiveLease, err = s.leasedContent(tx, sem, domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash}, snapSeq, b)
-	return out, err
+	out.LiveLease, err = s.leasedContent(tx, sem, domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash}, out.Seq, b)
+	return err
 }
 
 // checkpointOfItem is W5's bounded item→checkpoint lookup; tests replace it.

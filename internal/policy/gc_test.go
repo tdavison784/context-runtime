@@ -147,3 +147,27 @@ func TestCollectDecisionRejectsIncompleteSnapshot(t *testing.T) {
 		}
 	}
 }
+
+// SPEC-1.15: only a current *eligible* SYSTEM instruction is protected; an
+// expired TTL ends protection exactly as it ends ordinary eligibility.
+func TestCollectDecisionExpiredTTLSystemInstructionIsNotProtected(t *testing.T) {
+	ttl := 1
+	it := gcItem(func(it *domain.ContextItem) {
+		it.Kind, it.Authority, it.TTLTurns = domain.KindInstruction, domain.AuthoritySystem, &ttl
+		it.Scope, it.Access.Scope, it.Access.TaskID = domain.ScopeSession, domain.ScopeSession, ""
+	})
+	task := gcTask(domain.TaskActive, 3)
+	s := gcSnap(it, task, domain.ItemUnkeyed)
+	code, reason, err := CollectDecision(it, s)
+	if err != nil || code != domain.GCArchive || reason != GCReasonExpiredTTL {
+		t.Fatalf("expired SYSTEM instruction: %s/%s %v", code, reason, err)
+	}
+	p := domain.Principal{SessionID: "s", WorkflowID: "wf", TaskID: "t", AgentID: "a", Authority: domain.AuthorityAgent}
+	if ok, why := OrdinaryLifetime(it, s.OwnerSnapshot, p, task.TurnID); ok || why != ReasonExpiredTTL {
+		t.Fatalf("eligibility disagrees: %v %s", ok, why)
+	}
+	ttl = 5
+	if code, reason, _ := CollectDecision(it, s); code != domain.GCProtected || reason != GCReasonRequirement {
+		t.Fatalf("live SYSTEM instruction: %s/%s", code, reason)
+	}
+}

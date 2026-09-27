@@ -115,6 +115,9 @@ func (s *Service) issueGrant(tx store.Tx, sem store.SemanticReader, p domain.Pri
 	if err != nil {
 		return domain.RecordResult{}, err
 	}
+	if err := s.liveGrantRoom(sem, i.Action, i.Targets, seq); err != nil {
+		return domain.RecordResult{}, err
+	}
 	g := i.Clone()
 	grant := domain.MutationGrant{ID: g.GrantID, SessionID: p.SessionID, Action: g.Action, Targets: g.Targets, Issuer: p,
 		Grantee: g.Grantee, Matcher: g.Matcher, IssuedSeq: seq, ExpiresAtSeq: g.ExpiresAtSeq}
@@ -158,6 +161,33 @@ func (s *Service) revokeGrant(tx store.Tx, sem store.SemanticReader, p domain.Pr
 		return domain.RecordResult{}, err
 	}
 	return domain.RecordResult{Kind: "GRANT", IDs: []string{g.ID}}, nil
+}
+
+// liveGrantRoom keeps producers within their consumer's bound (G2):
+// authorization reads at most MaxTargets grants per (action, target), so
+// issuance refuses a grant that would exceed that many live at seq. Grants
+// revoked or expired by seq do not count; excluding them from the read
+// itself is the store's live-only index.
+func (s *Service) liveGrantRoom(sem store.SemanticReader, action domain.Action, targets []domain.GrantTarget, seq uint64) error {
+	for _, t := range targets {
+		found, err := sem.GrantsFor(action, t, s.policy.MaxTargets)
+		if errors.Is(err, store.ErrLimitExceeded) {
+			return domain.ErrResourceLimit
+		}
+		if err != nil {
+			return err
+		}
+		live := 0
+		for _, g := range found {
+			if (g.RevokedSeq == 0 || seq < g.RevokedSeq) && (g.ExpiresAtSeq == 0 || seq <= g.ExpiresAtSeq) {
+				live++
+			}
+		}
+		if live >= s.policy.MaxTargets {
+			return domain.ErrResourceLimit
+		}
+	}
+	return nil
 }
 
 // grantTargets resolves exact stored targets. Missing, cross-session and

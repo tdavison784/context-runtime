@@ -57,6 +57,9 @@ func TestCollectDecisionSafetyProperties(t *testing.T) {
 		if err != nil {
 			t.Fatalf("case %d: %v", n, err)
 		}
+		if pre, _, err := MayArchive(it, s); err != nil || pre != domain.GCArchive && code == domain.GCArchive {
+			t.Fatalf("case %d: MayArchive=%s but CollectDecision=ARCHIVE (%v)", n, pre, err)
+		}
 		if again, againReason, _ := CollectDecision(it, s); again != code || againReason != reason {
 			t.Fatalf("case %d: nondeterministic decision", n)
 		}
@@ -76,7 +79,7 @@ func TestCollectDecisionSafetyProperties(t *testing.T) {
 			t.Fatalf("case %d: archived the newest checkpoint of a live conversation", n)
 		case life == domain.ExpiryUnknown && current(s.Currentness):
 			t.Fatalf("case %d: archived a current item of unknown lifetime", n)
-		case life == domain.ExpiryLive && (s.OpenObligationSource || current(s.Currentness) && requirement(it)):
+		case life == domain.ExpiryLive && (s.OpenObligationSource || current(s.Currentness) && requirement(it, ttlExpired(it, task))):
 			t.Fatalf("case %d: archived a live requirement (%s)", n, reason)
 		}
 	}

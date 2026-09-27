@@ -76,7 +76,8 @@ func (s *Service) enqueueGC(tx store.Tx, sem store.SemanticTx, origin domain.Pri
 }
 
 // ExecuteGCRequest runs one durable request idempotently after its producer
-// committed. The collector is an authenticated SYSTEM/HARNESS principal
+// committed. seq 0 allocates only after the replay check. The collector is
+// an authenticated SYSTEM/HARNESS principal
 // supplied by the embedding; for task-scoped requests it must belong to that
 // task. A failure rolls back only this attempt: the request stays pending and
 // producer state is untouched. The request→result link commits with the
@@ -123,38 +124,78 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 }
 
 // CollectPending executes up to max pending requests, each in its own
-// transaction. collectorFor supplies the authenticated collector for a
-// request, or false to leave it pending; disabled triggers stay pending too. The first failure stops the batch
-// and leaves that request pending.
+// transaction, paging through the whole queue (G2). collectorFor supplies
+// the authenticated collector for a request, or false to leave it pending;
+// disabled triggers and requests already collected by another worker stay
+// uncounted. A failing request never blocks later ones: its error is joined
+// into the result and the request stays pending for a later attempt.
 func (s *Service) CollectPending(ctx context.Context, session string, collectorFor func(domain.GCRequest) (domain.Principal, bool), max int) (int, error) {
 	if collectorFor == nil || max <= 0 {
 		return 0, domain.ErrInvalidRecord
 	}
-	var pending []domain.GCRequest
-	if err := s.store.View(ctx, session, func(tx store.ReadTx) error {
-		sem, err := store.ReadSemantic(tx)
+	done := 0
+	var failures []error
+	var after store.Cursor
+	for done < max {
+		var page store.ResultPage[domain.GCRequest]
+		if err := s.store.View(ctx, session, func(tx store.ReadTx) error {
+			sem, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			page, err = sem.PendingGCRequests(store.Page{After: after, Limit: s.policy.MaxPageSize})
+			return err
+		}); err != nil {
+			return done, errors.Join(append(failures, err)...)
+		}
+		for _, r := range page.Records {
+			after = store.Cursor{Seq: r.Seq, ID: r.ID}
+			if done == max {
+				break
+			}
+			p, ok := collectorFor(r)
+			if !ok || !s.policy.GCTriggerEnabled(r.Trigger) {
+				continue
+			}
+			executed, err := s.collectPendingOne(ctx, session, p, r.ID)
+			if err != nil {
+				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, err))
+				continue
+			}
+			if executed {
+				done++
+			}
+		}
+		if !page.More {
+			break
+		}
+		if len(page.Records) == 0 {
+			return done, errors.Join(append(failures, domain.ErrIntegrity)...)
+		}
+	}
+	return done, errors.Join(failures...)
+}
+
+// collectPendingOne runs one request in its own transaction. Under the
+// session writer, a request another worker already collected is skipped: no
+// sequence, no count (DUR-1.3).
+func (s *Service) collectPendingOne(ctx context.Context, session string, p domain.Principal, id string) (bool, error) {
+	executed := false
+	err := s.store.Update(ctx, session, func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
 		if err != nil {
 			return err
 		}
-		page, err := sem.PendingGCRequests(store.Page{Limit: min(max, s.policy.MaxPageSize)})
-		pending = page.Records
-		return err
-	}); err != nil {
-		return 0, err
-	}
-	done := 0
-	for _, r := range pending {
-		p, ok := collectorFor(r)
-		if !ok || !s.policy.GCTriggerEnabled(r.Trigger) {
-			continue
-		}
-		if err := s.store.Update(ctx, session, func(tx store.Tx) error {
-			_, err := s.ExecuteGCRequest(tx, p, r.ID, tx.NextSeq())
+		if _, err := sem.GCResult(id); err == nil {
+			return nil
+		} else if !errors.Is(err, domain.ErrNotFound) {
 			return err
-		}); err != nil {
-			return done, err
 		}
-		done++
-	}
-	return done, nil
+		if _, err := s.ExecuteGCRequest(tx, p, id, 0); err != nil {
+			return err
+		}
+		executed = true
+		return nil
+	})
+	return executed && err == nil, err
 }

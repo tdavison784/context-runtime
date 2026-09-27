@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -134,4 +135,88 @@ func TestRevokeGrantNeedsDirectAuthorityAndEndsAuthorization(t *testing.T) {
 	if _, err := s.ArchiveStandalone(ctx, harness, domain.ArchiveIntent{RequestID: "a", ItemID: "sys", ExpectedVersion: 1}); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 		t.Fatalf("revoked grant authorized archive: %v", err)
 	}
+}
+
+// SEC-1.5 / DUR-1.4 (G2, producer half): issuance never creates more live
+// grants per (action, target) than authorization's bounded read accepts, so
+// issued grants can never wedge authorization of the target.
+func TestIssuanceCapsLiveGrantsAtTheAuthorizationReadLimit(t *testing.T) {
+	ctx := context.Background()
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxTargets = 3
+		s, _ := New(db, pol)
+		sys := storetest.NewItem("s", "sys", 0, "system fact")
+		sys.Authority = domain.AuthoritySystem
+		seedItem(t, db, sys)
+		system := storetest.NewPrincipal("s", domain.AuthoritySystem)
+		grantee := func(n int) domain.Principal {
+			p := storetest.NewPrincipal("s", domain.AuthorityHarness)
+			p.AgentID = fmt.Sprintf("agent-%d", n)
+			return p
+		}
+		for n := range pol.MaxTargets {
+			if _, err := s.IssueGrantStandalone(ctx, system, archiveGrant(fmt.Sprintf("g%d", n), fmt.Sprintf("grant-%d", n), "sys", grantee(n))); err != nil {
+				t.Fatalf("grant %d: %v", n, err)
+			}
+		}
+		if _, err := s.IssueGrantStandalone(ctx, system, archiveGrant("over", "grant-over", "sys", grantee(99))); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("live grant beyond the read limit issued: %v", err)
+		}
+		if _, err := s.ArchiveStandalone(ctx, grantee(0), domain.ArchiveIntent{RequestID: "a", ItemID: "sys", ExpectedVersion: 1}); err != nil {
+			t.Fatalf("authorization with a full live set: %v", err)
+		}
+	})
+}
+
+// SEC-1.5 (G2): one target whose grant history exceeds the bounded read is
+// not archived, but it cannot abort the rest of the collection.
+func TestGrantHistoryOverflowDoesNotAbortCollection(t *testing.T) {
+	ctx := context.Background()
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxTargets = 3
+		s, _ := New(db, pol)
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			task := storetest.NewTask("s", "task")
+			task.Turn, task.TurnID = 2, "turn-2"
+			if _, err := tx.PutTask(task, 0, storetest.NewLifecycleEvent("s", "created", tx.NextSeq(), domain.TargetTask, "task")); err != nil {
+				return err
+			}
+			for _, id := range []string{"sys", "plain"} {
+				it := storetest.NewItem("s", id, tx.NextSeq(), id)
+				it.Generation = domain.GenerationEphemeral // ended turn: collectible
+				if id == "sys" {
+					it.Authority = domain.AuthoritySystem
+				}
+				if err := tx.InsertItem(it); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		system, harness := storetest.NewPrincipal("s", domain.AuthoritySystem), storetest.NewPrincipal("s", domain.AuthorityHarness)
+		for n := range pol.MaxTargets + 1 {
+			id := fmt.Sprintf("grant-%d", n)
+			if _, err := s.IssueGrantStandalone(ctx, system, archiveGrant("g-"+id, id, "sys", harness)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.RevokeGrantStandalone(ctx, system, domain.RevokeGrantIntent{RequestID: "r-" + id, GrantID: id}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out, err := collect(newFacets(), db, s, harness, domain.CollectIntent{RequestID: "c", Scope: domain.CollectSession, Trigger: domain.GCManual})
+		if err != nil {
+			t.Fatalf("collection aborted by one target's grant history: %v", err)
+		}
+		got := map[string]domain.GCDecisionCode{}
+		for _, d := range out.Result.Collect.Decisions {
+			got[d.Target.ItemID] = d.Code
+		}
+		if got["sys"] != domain.GCIneligible || got["plain"] != domain.GCArchive {
+			t.Fatalf("decisions: %v", got)
+		}
+	})
 }
