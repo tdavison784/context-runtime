@@ -66,6 +66,55 @@ func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target dom
 		return SatisfiesView{}, notFound(err)
 	}
 	var view SatisfiesView
+	add := func(t domain.ObligationTransition, current bool) error {
+		proof, err := r.ApplicabilityProof(t.ProofID)
+		if err != nil {
+			return err
+		}
+		if !proof.Access.Permits(viewer) {
+			view.Truncated = true
+			return nil
+		}
+		for _, id := range proof.EvidenceIDs {
+			ev, err := tx.Item(id)
+			if err != nil || !ev.Access.Permits(viewer) {
+				view.Truncated = true
+				continue
+			}
+			view.Relations = append(view.Relations, domain.SatisfiesRelation{
+				Evidence:     domain.ItemContentRef{ItemID: ev.ID, ContentHash: ev.ContentHash},
+				Target:       target,
+				TransitionID: t.ID,
+				ProofID:      proof.ID,
+				Current:      current,
+				Access:       proof.Access,
+			})
+		}
+		return nil
+	}
+	isCurrent := o.Current && o.Status == domain.ObligationSatisfied && o.CurrentProofID != ""
+	if currentOnly {
+		// The present proof and its installing transition, by key: never
+		// the version's history (H2).
+		if !isCurrent {
+			return view, nil
+		}
+		proof, err := r.ApplicabilityProof(o.CurrentProofID)
+		if err != nil {
+			return SatisfiesView{}, err
+		}
+		t, err := r.ObligationTransition(proof.TransitionID)
+		if err != nil {
+			return SatisfiesView{}, err
+		}
+		if t.To != domain.ObligationSatisfied || t.ProofID != proof.ID {
+			return SatisfiesView{}, domain.ErrIntegrity
+		}
+		if err := add(t, true); err != nil {
+			return SatisfiesView{}, err
+		}
+		return view, nil
+	}
 	work := s.newBudget()
 	err = s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
 		pg, err := r.TransitionsByVersion(target, p)
@@ -76,32 +125,8 @@ func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target dom
 			if t.To != domain.ObligationSatisfied || t.ProofID == "" {
 				continue
 			}
-			current := o.Current && o.Status == domain.ObligationSatisfied && o.CurrentProofID == t.ProofID
-			if currentOnly && !current {
-				continue
-			}
-			proof, err := r.ApplicabilityProof(t.ProofID)
-			if err != nil {
+			if err := add(t, isCurrent && o.CurrentProofID == t.ProofID); err != nil {
 				return 0, store.Cursor{}, false, err
-			}
-			if !proof.Access.Permits(viewer) {
-				view.Truncated = true
-				continue
-			}
-			for _, id := range proof.EvidenceIDs {
-				ev, err := tx.Item(id)
-				if err != nil || !ev.Access.Permits(viewer) {
-					view.Truncated = true
-					continue
-				}
-				view.Relations = append(view.Relations, domain.SatisfiesRelation{
-					Evidence:     domain.ItemContentRef{ItemID: ev.ID, ContentHash: ev.ContentHash},
-					Target:       target,
-					TransitionID: t.ID,
-					ProofID:      proof.ID,
-					Current:      current,
-					Access:       proof.Access,
-				})
 			}
 		}
 		return len(pg.Records), pg.Next, pg.More, nil

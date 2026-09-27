@@ -148,6 +148,18 @@ func TestSQLiteSuite(t *testing.T) {
 		{"RunAndObservationReceipts", TestRunAndObservationReceipts, true},
 		{"RegisterResourceReceipt", TestRegisterResourceReceipt, false},
 		{"ConcurrentINV16", TestConcurrentINV16, true},
+		{"DeferredSeqAllocatedAfterReplay_DUR214", TestDeferredSeqAllocatedAfterReplay_DUR214, false},
+		{"ObservationStateSupersessionEnqueuesGC_SPEC23", TestObservationStateSupersessionEnqueuesGC_SPEC23, true},
+		{"PrivateFailNeverRejectsTaskProof_SEC29", TestPrivateFailNeverRejectsTaskProof_SEC29, true},
+		{"H1StalePassAfterRevert", TestH1StalePassAfterRevert, true},
+		{"H1StalePassAfterInapplicableFail", TestH1StalePassAfterInapplicableFail, true},
+		{"H1PrivateFailDoesNotOutrankTaskPass", TestH1PrivateFailDoesNotOutrankTaskPass, true},
+		{"H1NewerFailAtOtherFingerprintRejects", TestH1NewerFailAtOtherFingerprintRejects, true},
+		{"H2PathCurrencyIgnoresLaterUnrelatedEdits", TestH2PathCurrencyIgnoresLaterUnrelatedEdits, true},
+		{"H2InvalidationIgnoresTransitionHistory", TestH2InvalidationIgnoresTransitionHistory, true},
+		{"H2PartialReportsDoNotWedgeRun", TestH2PartialReportsDoNotWedgeRun, true},
+		{"H2CurrentSatisfiesIgnoresHistory", TestH2CurrentSatisfiesIgnoresHistory, true},
+		{"H2BindingVersionsDoNotWedgeDeclaration", TestH2BindingVersionsDoNotWedgeDeclaration, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {

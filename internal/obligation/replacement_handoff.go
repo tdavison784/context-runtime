@@ -23,7 +23,7 @@ type ReplacementHandoff struct{ PriorID, ReplacementID string }
 // has authority over the source. The replacement must preserve the prior's
 // authority, key and boundary.
 func (s *Service) DeclareForAuthorizedReplacementTx(tx store.Tx, actor domain.Principal, h ReplacementHandoff, seq uint64) (*domain.ObligationRef, error) {
-	sem, err := begin(tx, actor, seq)
+	sem, err := beginAt(tx, actor, seq)
 	if err != nil {
 		return nil, err
 	}

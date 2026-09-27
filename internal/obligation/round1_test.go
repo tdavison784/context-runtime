@@ -414,9 +414,10 @@ func TestSEC17PathCurrencyIgnoresEarlierHistory(t *testing.T) {
 }
 
 // SEC-1.8/DUR-1.2 (G2): dead (STALE/UNKNOWN) subject states must not count
-// against a report's work bound; only live dependents do. Needs W2's
-// live-only SubjectStatesByResource read; skipped until the backend stops
-// returning dead states.
+// against a report's work bound; only live dependents do. The store's
+// live-only SubjectStatesByResource read is part of the fix, so a backend
+// that returns dead states fails here rather than skipping (SEC-2.10,
+// DUR-2.13).
 func TestSEC18DeadSubjectStatesDoNotWedgeReports(t *testing.T) {
 	f := newEvalFixture(t)
 	states := func(from int, fp string) {
@@ -445,7 +446,7 @@ func TestSEC18DeadSubjectStatesDoNotWedgeReports(t *testing.T) {
 		return nil
 	})
 	if dead {
-		t.Skip("awaiting W2 live-only SubjectStatesByResource (G2 store half)")
+		t.Errorf("SubjectStatesByResource returned dead (STALE/UNKNOWN) states")
 	}
 	f.r.n++
 	in := domain.ReportResourceChangeIntent{RequestID: "after-dead", ResourceID: "repo1", ExpectedRevision: f.r.rev,
