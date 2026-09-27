@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 // P3-20: unknown symlink/alias mapping is conservative uncertainty, not
@@ -72,4 +73,50 @@ func testP3_20UncertainAliases(t *testing.T) {
 	if st, _ := f.effective(t, ref); st != domain.ObligationSatisfied {
 		t.Fatalf("fresh read of restored content: %s", st)
 	}
+}
+
+// P3-20: resource control runs independently of task creation/turn
+// advancement/completion, so completed tasks cannot suppress cross-task
+// invalidation. After the task an obligation is bound to completes, an
+// authorized resource report is still accepted and still invalidates its
+// satisfied proof; the trusted control actor still needs reporting
+// authority, completed task or not.
+func TestP3_20_CompletedTaskDoesNotSuppressInvalidation(t *testing.T) {
+	p342BothStores(t, testP3_20CompletedTask)
+}
+
+func testP3_20CompletedTask(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g-p320b", f.sysTests, TestsPassV1, f.system)
+	f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
+	if st, pending := f.effective(t, f.sysTests); st != domain.ObligationSatisfied || pending {
+		t.Fatalf("setup: effective %s pending=%v", st, pending)
+	}
+	// Complete the task the obligation is bound to.
+	mustUpdate(t, f.st, func(tx store.Tx) error {
+		task, err := tx.Task("task")
+		if err != nil {
+			return err
+		}
+		seq := tx.NextSeq()
+		done := task
+		done.Status, done.CompletedSeq, done.Version = domain.TaskCompleted, seq, task.Version+1
+		_, err = tx.PutTask(done, task.Version, domain.LifecycleEvent{ID: "p320-complete", SessionID: testSession, Seq: seq,
+			TargetKind: domain.TargetTask, TargetID: "task", Action: "completed", Actor: f.system})
+		return err
+	})
+	// A principal without resource-reporting authority is still refused and
+	// changes nothing, completed task or not.
+	f.r.n++
+	refused := domain.ReportResourceChangeIntent{RequestID: fmt.Sprintf("rr-%d", f.r.n), ResourceID: "repo1", ExpectedRevision: f.r.rev,
+		ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf("W2")}
+	if _, err := f.s.report(t, f.st, f.userP, refused); err == nil {
+		t.Fatal("USER report of the bound resource accepted")
+	}
+	if rs, err := p342ResourceState(t, f.st); err != nil || rs.WorkspaceFingerprint != hashOf("W1") {
+		t.Fatalf("refused report changed the state: %+v err=%v", rs, err)
+	}
+	// The authorized report lands and invalidates the completed task's proof.
+	f.r.set(t, f.fixture, hashOf("W2"), false)
+	f.wantInvalidated(t, f.sysTests, "repo1", "completed task suppressed cross-task invalidation")
 }
