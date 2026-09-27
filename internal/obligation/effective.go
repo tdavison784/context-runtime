@@ -1,6 +1,7 @@
 package obligation
 
 import (
+	"errors"
 	"path"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -37,9 +38,68 @@ func proofDerivedValid(r store.SemanticReader, proofID string) (bool, error) {
 }
 
 // SettlePendingTx is one bounded pass of the asynchronous settlement worker
-// (K1 A4).
+// (K1 A4): as the session's SYSTEM runtime, it audits up to max live proofs
+// after the durable settlement cursor and settles each pending one through
+// the same exact-keyed path as the inline settle, so the two are
+// idempotent with each other. Settled, re-satisfied, waived and retired
+// versions are skipped (LiveProofs holds only current proofs of current
+// versions, and settle re-checks validity at write time). The cursor is
+// CAS-advanced and wraps to the start when the scan ends; more reports
+// whether the scan continues. It never touches or blocks a report, and
+// correctness never depends on it having run.
 func (s *Service) SettlePendingTx(tx store.Tx, actor domain.Principal, max int) (settled int, more bool, err error) {
-	return 0, false, nil
+	if err := actor.Validate(); err != nil {
+		return 0, false, err
+	}
+	if actor.SessionID != tx.SessionID() {
+		return 0, false, domain.ErrNotFound
+	}
+	if actor.Authority != domain.AuthoritySystem {
+		return 0, false, domain.ErrInvalidAuthorityPromotion
+	}
+	if max <= 0 {
+		return 0, false, domain.ErrInvalidRecord
+	}
+	sem, err := store.Semantic(tx)
+	if err != nil {
+		return 0, false, err
+	}
+	cur, err := sem.SettlementCursor()
+	if errors.Is(err, domain.ErrNotFound) {
+		cur = store.SettlementCursor{Session: tx.SessionID()}
+	} else if err != nil {
+		return 0, false, err
+	}
+	pg, err := sem.LiveProofs(store.Page{After: cur.After, Limit: min(max, s.policy.MaxPageSize)})
+	if err != nil {
+		return 0, false, err
+	}
+	work := s.newBudget()
+	for _, p := range pg.Records {
+		o, err := sem.ExactObligation(p.Target)
+		if err != nil {
+			return 0, false, err
+		}
+		if !o.Current || o.CurrentProofID != p.ID {
+			continue
+		}
+		_, did, err := s.settle(tx, sem, work, o)
+		if err != nil {
+			return 0, false, err
+		}
+		if did {
+			settled++
+		}
+	}
+	next := store.SettlementCursor{Session: tx.SessionID(), After: pg.Next}
+	if !pg.More {
+		next.After = store.Cursor{} // wrap: the next pass starts over
+	}
+	if _, err := sem.PutSettlementCursor(next, cur.Revision); err != nil {
+		tx.Poison(err)
+		return 0, false, err
+	}
+	return settled, pg.More, nil
 }
 
 // SettleBeforeRetireTx is graph's PendingSettler hook (K1 A3, ruling M2):
@@ -97,24 +157,12 @@ func (s *Service) settle(tx store.Tx, sem store.SemanticTx, work *budget, o doma
 	return after, true, nil
 }
 
-// k1Pointers are the write-time pointer reads of K1-api (W2c). The
-// assertion falls away once they are part of store.SemanticReader.
-type k1Pointers interface {
-	LastWorkspaceDivergenceRev(resourceID string) (uint64, error)
-	LastAffectingRev(resourceID, key string) (uint64, error)
-	FirstWorkspaceDivergenceAfter(resourceID string, rev uint64) (domain.ResourceUpdate, error)
-	FirstAffectingUpdateAfter(resourceID, key string, rev uint64) (domain.ResourceUpdate, error)
-}
-
 // settlementCause is the earliest update, by session (Seq, ID), that fired
 // any of the proof's dependency pointers (K1-api.2): deterministic, so the
 // inline path and the worker agree. A derived-invalid proof with no fired
 // pointer is an integrity failure.
 func settlementCause(r store.SemanticReader, proofID string) (domain.ResourceUpdate, error) {
-	pr, ok := r.(k1Pointers)
-	if !ok {
-		return domain.ResourceUpdate{}, domain.ErrUnsupportedSchema
-	}
+	pr := r
 	var best *domain.ResourceUpdate
 	consider := func(u domain.ResourceUpdate) {
 		if best == nil || u.Seq < best.Seq || u.Seq == best.Seq && u.ID < best.ID {
