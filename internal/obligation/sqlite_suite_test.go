@@ -150,6 +150,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"ConcurrentINV16", TestConcurrentINV16, true},
 		{"DeferredSeqAllocatedAfterReplay_DUR214", TestDeferredSeqAllocatedAfterReplay_DUR214, false},
 		{"ObservationStateSupersessionEnqueuesGC_SPEC23", TestObservationStateSupersessionEnqueuesGC_SPEC23, true},
+		{"PrivateFailNeverRejectsTaskProof_SEC29", TestPrivateFailNeverRejectsTaskProof_SEC29, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {

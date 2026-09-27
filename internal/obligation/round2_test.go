@@ -1,6 +1,7 @@
 package obligation
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -78,5 +79,53 @@ func TestObservationStateSupersessionEnqueuesGC_SPEC23(t *testing.T) {
 	got := requests()
 	if len(got) != 1 || got[0].Scope != domain.CollectTask || got[0].TaskID != "task" || got[0].PolicyVersion != testPolicy().Version {
 		t.Fatalf("supersession requests = %+v", got)
+	}
+}
+
+// reportPrivate registers and reports a run private to agent b on the
+// fixture's subject, returning the observation's record ID.
+func (f *evalFixture) reportPrivate(t *testing.T, name string, outcome domain.ObservationOutcome, fp string) string {
+	t.Helper()
+	b := domain.Principal{SessionID: testSession, WorkflowID: "wf", TaskID: "task", AgentID: "b", Authority: domain.AuthorityHarness}
+	private := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: testSession, TaskID: "task", AgentID: "b"}
+	ev := seedEvidenceAs(t, f.st, "ev-"+name, private, "exec-"+name)
+	runN++
+	in := runIntent(fmt.Sprintf("run-%d", runN), "exec-"+name, f.target)
+	in.Access = private
+	run, err := f.registerRun(t, b, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.observe(t, b, obsIntent("obs-"+name, run, ev.ID, outcome, fp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.ID
+}
+
+// SEC-2.9 (H1): a FAIL is applicable to a proof only if its evidence
+// boundary covers the proof's boundary. A newer FAIL private to another
+// agent never rejects a TASK-wide proof, and its ID is never recorded in the
+// task's visible transition history.
+func TestPrivateFailNeverRejectsTaskProof_SEC29(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Fatalf("setup = %+v", o)
+	}
+	private := f.reportPrivate(t, "b-fail", domain.OutcomeFail, hashOf("W1"))
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Errorf("agent-private FAIL rejected the TASK-wide proof: %+v", o)
+	}
+	for _, tr := range f.history(t, f.sysTests) {
+		if tr.CauseRecordID == private || tr.RequestID == private {
+			t.Errorf("transition %s records the private observation %s", tr.ID, private)
+		}
+	}
+	// Control: a newer task-wide FAIL still rejects.
+	f.report(t, f.newRun(t), domain.OutcomeFail, hashOf("W1"), nil)
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved {
+		t.Errorf("task-wide FAIL did not reject: %+v", o)
 	}
 }
