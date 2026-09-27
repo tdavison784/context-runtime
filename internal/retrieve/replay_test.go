@@ -78,3 +78,30 @@ func TestRetrievalReceiptReplayPrecedesCurrentState(t *testing.T) {
 		}
 	}
 }
+
+// SEC-2.8: another principal's derived request ID is no receipt existence
+// oracle; ownership is checked before the receipt can affect the outcome.
+func TestForeignDerivedRequestIDIsNoReceiptOracle(t *testing.T) {
+	owner := storetest.NewPrincipal("s", domain.AuthorityHarness)
+	request, err := domain.OperationRequestID(owner, domain.CallerOccurrenceID("s", "event-1"), 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := owner
+	foreign.AgentID = "other"
+	i := AdmissionIntent{Rehydrate: domain.RehydrateIntent{RequestID: request, ItemID: "source"},
+		Origin: domain.RetrievalOrigin{Holder: foreign, ConversationID: domain.ConversationIDFor(foreign.TaskID, foreign.AgentID), TurnID: "turn"}, Method: "rehydrate"}
+	receipt := domain.MutationReceipt{SemanticMeta: domain.SemanticMeta{ID: "receipt", SessionID: "s", Seq: 3, SchemaVersion: domain.SemanticSchemaV1},
+		Family: domain.MutationRetrieval, RequestID: request, Principal: owner, CanonicalMethod: "rehydrate",
+		Result: domain.MutationResult{Tool: &domain.ToolResult{RetrievalResultID: "result"}}}
+	_, okPresent, present := replayRetrieval(replayReader{receipt: receipt}, foreign, i, leasePolicy())
+	_, okAbsent, absent := replayRetrieval(replayReader{}, foreign, i, leasePolicy())
+	if present == nil || absent == nil || okPresent || okAbsent || errors.Is(present, domain.ErrEventIDConflict) || present.Error() != absent.Error() {
+		t.Fatalf("receipt existence observable: present=%v absent=%v", present, absent)
+	}
+	// The owner's own derived ID still reaches exact replay checking.
+	i.Origin.Holder, i.Origin.ConversationID = owner, domain.ConversationIDFor(owner.TaskID, owner.AgentID)
+	if _, _, err := replayRetrieval(replayReader{}, owner, i, leasePolicy()); err != nil {
+		t.Fatalf("owner derived ID rejected: %v", err)
+	}
+}
