@@ -7,6 +7,12 @@ type ResourceReader interface {
 	ResourceState(resourceID string) (domain.ResourceState, error)
 	ResourceUpdate(id string) (domain.ResourceUpdate, error)
 	ResourceUpdates(resourceID string, page Page) (ResultPage[domain.ResourceUpdate], error)
+	// ResourceUpdatesAffectingPath pages, in (Seq, ID) order, only the
+	// updates of resourceID that may change the canonical resource-relative
+	// path: ALL-paths (including every UNKNOWN) updates and updates naming
+	// path or one of its ancestor directories. Its cost scales with those,
+	// not with unrelated edits (G2, SEC-1.7, DUR-1.2).
+	ResourceUpdatesAffectingPath(resourceID, path string, page Page) (ResultPage[domain.ResourceUpdate], error)
 	ResourcePathState(locator domain.ResourceLocator) (domain.ResourcePathState, error)
 	WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error)
 	WorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)

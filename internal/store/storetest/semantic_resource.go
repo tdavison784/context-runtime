@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -597,4 +598,47 @@ func slicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// testSemanticResourceUpdatesAffectingPath checks the indexed path-change
+// read (G2, SEC-1.7, DUR-1.2): only updates that may change a path, those
+// naming it or an ancestor directory and every ALL-paths update, in
+// (Seq, ID) order and paged; unrelated edits, sibling prefixes and other
+// resources never appear.
+func testSemanticResourceUpdatesAffectingPath(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq())))
+		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "other", tx.NextSeq())))
+		for i, paths := range [][]string{{"docs/b.md"}, {"src/a.go"}, {"src"}, nil, {"docs/b.md", "src/a.go.bak"}, {"src/a.go", "src/z.go"}} {
+			noErr(t, sem.InsertResourceUpdate(NewResourceUpdate(sessA, fmt.Sprintf("u%d", i+1), "repo", tx.NextSeq(), uint64(i), fpA, paths...)))
+		}
+		return sem.InsertResourceUpdate(NewResourceUpdate(sessA, "o1", "other", tx.NextSeq(), 0, fpA, "src/a.go"))
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		r := readSemantic(t, tx)
+		var ids []string
+		p := store.Page{Limit: 2}
+		for {
+			pg, err := r.ResourceUpdatesAffectingPath("repo", "src/a.go", p)
+			noErr(t, err)
+			for _, u := range pg.Records {
+				ids = append(ids, u.ID)
+			}
+			if !pg.More {
+				break
+			}
+			p.After = pg.Next
+		}
+		if !slicesEqual(ids, []string{"u2", "u3", "u4", "u6"}) {
+			t.Errorf("ResourceUpdatesAffectingPath(repo, src/a.go) = %v, want [u2 u3 u4 u6]", ids)
+		}
+		for _, bad := range []string{"", ".", "../x", "/abs", "src/./a.go"} {
+			_, err := r.ResourceUpdatesAffectingPath("repo", bad, store.Page{Limit: 2})
+			if !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Errorf("path %q: error = %v, want ErrInvalidRecord", bad, err)
+			}
+		}
+		return nil
+	})
 }

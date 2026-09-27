@@ -543,3 +543,8 @@ func (r semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 		return st, ok && st.Applicability == domain.ApplicabilityCurrent
 	})
 }
+
+// ResourceUpdatesAffectingPath implements store.ResourceReader.
+func (r semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.Page) (store.ResultPage[domain.ResourceUpdate], error) {
+	return store.ResultPage[domain.ResourceUpdate]{}, domain.ErrUnsupportedSchema
+}
