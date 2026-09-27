@@ -67,7 +67,8 @@ func (s *Service) enqueueGC(tx store.Tx, sem store.SemanticTx, origin domain.Pri
 }
 
 // ExecuteGCRequest runs one durable request idempotently after its producer
-// committed. The collector is an authenticated SYSTEM/HARNESS principal
+// committed. seq 0 allocates only after the replay check. The collector is
+// an authenticated SYSTEM/HARNESS principal
 // supplied by the embedding; for task-scoped requests it must belong to that
 // task. A failure rolls back only this attempt: the request stays pending and
 // producer state is untouched. The request→result link commits with the
@@ -139,13 +140,30 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 		if !ok || !s.policy.GCTriggerEnabled(r.Trigger) {
 			continue
 		}
+		executed := false
 		if err := s.store.Update(ctx, session, func(tx store.Tx) error {
-			_, err := s.ExecuteGCRequest(tx, p, r.ID, tx.NextSeq())
-			return err
+			// Under the session writer, a request another worker already
+			// collected is skipped: no sequence, no count (DUR-1.3).
+			sem, err := store.Semantic(tx)
+			if err != nil {
+				return err
+			}
+			if _, err := sem.GCResult(r.ID); err == nil {
+				return nil
+			} else if !errors.Is(err, domain.ErrNotFound) {
+				return err
+			}
+			if _, err := s.ExecuteGCRequest(tx, p, r.ID, 0); err != nil {
+				return err
+			}
+			executed = true
+			return nil
 		}); err != nil {
 			return done, err
 		}
-		done++
+		if executed {
+			done++
+		}
 	}
 	return done, nil
 }

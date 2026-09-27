@@ -41,7 +41,11 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	if err = i.Validate(); err != nil {
 		return out, err
 	}
-	if !tx.Allocated(seq) || seq == 0 {
+	// seq 0 defers allocation until after the replay check above, so a
+	// replay allocates nothing (DUR-1.3); an explicit seq must be allocated.
+	if seq == 0 {
+		seq = tx.NextSeq()
+	} else if !tx.Allocated(seq) {
 		return out, domain.ErrInvalidRecord
 	}
 	if p.Authority != domain.AuthoritySystem && p.Authority != domain.AuthorityHarness {
@@ -57,7 +61,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 			return out, err
 		}
 	}
-	receipt, effects, err := s.planCollection(tx, sem, p, i, seq)
+	receipt, effects, spare, err := s.planCollection(tx, sem, p, i, seq)
 	if err != nil {
 		return out, err
 	}
@@ -71,7 +75,11 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 		receipt.ArchivedRefs = append(receipt.ArchivedRefs, domain.ItemRevisionRef{ItemID: e.after.ID, Version: e.after.Version})
 	}
 	receipt.GCRequestID = gcRequestID
-	receipt.SemanticMeta = domain.SemanticMeta{ID: collectReceiptID(p.SessionID, i.RequestID), SessionID: p.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()}
+	// An allocated sequence no archive consumed records the receipt itself.
+	if spare == 0 {
+		spare = tx.NextSeq()
+	}
+	receipt.SemanticMeta = domain.SemanticMeta{ID: collectReceiptID(p.SessionID, i.RequestID), SessionID: p.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: spare}
 	if err = sem.InsertCollectReceipt(receipt); err != nil {
 		return out, err
 	}
@@ -94,7 +102,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 // caller's seq authorizes the first archive; a candidate whose authorization
 // fails returns its reserved seq for the next one. Candidates the collector
 // may access but not archive are recorded INELIGIBLE, never forced.
-func (s *Service) planCollection(tx store.Tx, sem store.SemanticReader, p domain.Principal, i domain.CollectIntent, seq uint64) (domain.CollectReceipt, []itemEffect, error) {
+func (s *Service) planCollection(tx store.Tx, sem store.SemanticReader, p domain.Principal, i domain.CollectIntent, seq uint64) (domain.CollectReceipt, []itemEffect, uint64, error) {
 	snap := seq - 1
 	r := domain.CollectReceipt{RequestID: i.RequestID, PolicyVersion: s.policy.Version, Principal: p, SnapshotSeq: snap}
 	b := workBudget{remaining: s.policy.MaxTransactionWork, pageSize: s.policy.MaxPageSize}
@@ -102,7 +110,7 @@ func (s *Service) planCollection(tx store.Tx, sem store.SemanticReader, p domain
 		return sem.GCCandidates(store.GCCandidateFilter{Viewer: p, Scope: i.Scope, TaskID: i.TaskID, SnapshotSeq: snap, Page: page})
 	})
 	if err != nil {
-		return r, nil, err
+		return r, nil, 0, err
 	}
 	var effects []itemEffect
 	spare := seq
@@ -117,16 +125,16 @@ func (s *Service) planCollection(tx store.Tx, sem store.SemanticReader, p domain
 	seen := map[string]bool{}
 	for _, it := range candidates {
 		if seen[it.ID] || it.SessionID != p.SessionID || it.Seq > snap || !it.Access.Permits(p) || i.Scope == domain.CollectTask && it.TaskID != i.TaskID {
-			return r, nil, domain.ErrIntegrity
+			return r, nil, 0, domain.ErrIntegrity
 		}
 		seen[it.ID] = true
 		gs, err := s.gcSnapshot(tx, sem, it, snap, &b)
 		if err != nil {
-			return r, nil, err
+			return r, nil, 0, err
 		}
 		code, _, err := policy.CollectDecision(it, gs)
 		if err != nil {
-			return r, nil, err
+			return r, nil, 0, err
 		}
 		ref := domain.ItemRevisionRef{ItemID: it.ID, Version: it.Version}
 		if code == domain.GCArchive {
@@ -137,10 +145,10 @@ func (s *Service) planCollection(tx store.Tx, sem store.SemanticReader, p domain
 			case errors.Is(err, domain.ErrInvalidAuthorityPromotion):
 				code, spare = domain.GCIneligible, at
 			case err != nil:
-				return r, nil, err
+				return r, nil, 0, err
 			default:
 				if err := b.spend(3); err != nil {
-					return r, nil, err
+					return r, nil, 0, err
 				}
 				id := "life_" + domain.NewCanonicalEncoder("context-runtime/collect-audit/v1").String(p.SessionID).String(i.RequestID).String(it.ID).Hash()
 				effects = append(effects, itemEffect{before: it, current: gs.Currentness, audit: domain.LifecycleEvent{ID: id, SessionID: p.SessionID, Seq: at,
@@ -151,7 +159,7 @@ func (s *Service) planCollection(tx store.Tx, sem store.SemanticReader, p domain
 		r.CandidateRefs = append(r.CandidateRefs, ref)
 		r.Decisions = append(r.Decisions, domain.GCDecision{Target: ref, Code: code})
 	}
-	return r, effects, nil
+	return r, effects, spare, nil
 }
 
 func ptr[T any](v T) *T { return &v }
