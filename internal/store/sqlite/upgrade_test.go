@@ -956,3 +956,35 @@ func TestUpgradeSubjectHighWater(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeCurrentWorkspaceBindings checks migration 0038 on a database
+// migrated through 0037 (H2): only each binding's latest version is filed
+// under its context.
+func TestUpgradeCurrentWorkspaceBindings(t *testing.T) {
+	l := openLegacy(t, 37)
+	for _, b := range []domain.WorkspaceBinding{
+		storetest.NewWorkspaceBinding("s", "wb1", "repo", 1, 1),
+		storetest.NewWorkspaceBinding("s", "wb2", "repo", 1, 2),
+		storetest.NewWorkspaceBinding("s", "wb1", "repo", 2, 3),
+	} {
+		l.insert("workspace_binding", b, nil)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pg, err := r.CurrentWorkspaceBindingsByContext("", "task", "", store.Page{Limit: 5})
+		var got []string
+		for _, b := range pg.Records {
+			got = append(got, fmt.Sprintf("%s/%d", b.ID, b.Version))
+		}
+		if err != nil || strings.Join(got, ",") != "wb2/1,wb1/2" {
+			t.Errorf("CurrentWorkspaceBindingsByContext after 0038 = %v (%v), want [wb2/1 wb1/2]", got, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

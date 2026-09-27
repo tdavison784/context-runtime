@@ -239,7 +239,18 @@ func (s semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 	if ok, err := t.exists("resource_binding", b.ResourceID); err != nil || !ok {
 		return errors.Join(err, invalidIf(!ok, "workspace binding %s: resource %s is not registered", b.ID, b.ResourceID))
 	}
-	return t.put("workspace_binding", b.ID, int(b.Version), b, false)
+	return t.atomic(func() error {
+		if err := t.put("workspace_binding", b.ID, int(b.Version), b, false); err != nil {
+			return err
+		}
+		// Move the binding's current pointer to this version (0038).
+		if _, err := t.conn.ExecContext(t.ctx, "DELETE FROM lookup_current_workspace_binding WHERE session_id=? AND binding_id=?", t.session, b.ID); err != nil {
+			return err
+		}
+		_, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_current_workspace_binding(session_id,context_kind,context_id,seq,binding_id,version) VALUES(?,?,?,?,?,?)",
+			t.session, string(b.Context.Kind), b.Context.ID, b.Seq, b.ID, b.Version)
+		return err
+	})
 }
 
 func (s semRead) WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error) {
@@ -587,7 +598,57 @@ func (s semRead) SubjectHighWater(subjectKey, taskID string, access domain.Acces
 	return hw, err
 }
 
-// CurrentWorkspaceBindingsByContext implements store.ResourceReader.
+// currentBindingPage is the keyed page read of migration 0038's pointers.
+const currentBindingPage = "SELECT seq, binding_id, version FROM lookup_current_workspace_binding WHERE session_id=? AND context_kind=? AND context_id=? AND (seq>? OR (seq=? AND binding_id>?)) ORDER BY seq, binding_id LIMIT ?"
+
+// CurrentWorkspaceBindingsByContext implements store.ResourceReader over
+// migration 0038's one-row-per-binding pointers.
 func (s semRead) CurrentWorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, p store.Page) (store.ResultPage[domain.WorkspaceBinding], error) {
-	return store.ResultPage[domain.WorkspaceBinding]{}, domain.ErrUnsupportedSchema
+	t := s.t
+	var out store.ResultPage[domain.WorkspaceBinding]
+	if p.Limit <= 0 {
+		return out, invalid("page limit must be positive")
+	}
+	var ctx []domain.WorkspaceSourceContext
+	for _, c := range []domain.WorkspaceSourceContext{{Kind: domain.WorkspaceSource, ID: sourceItemID}, {Kind: domain.WorkspaceTask, ID: taskID}, {Kind: domain.WorkspaceConversation, ID: conversationID}} {
+		if c.ID != "" {
+			ctx = append(ctx, c)
+		}
+	}
+	if len(ctx) != 1 {
+		return out, invalid("workspace bindings: exactly one context required")
+	}
+	rows, err := t.query(currentBindingPage, t.session, string(ctx[0].Kind), ctx[0].ID, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	if err != nil {
+		return out, err
+	}
+	type ref struct {
+		seq     uint64
+		id      string
+		version int
+	}
+	var refs []ref
+	for rows.Next() {
+		var r ref
+		if err := rows.Scan(&r.seq, &r.id, &r.version); err != nil {
+			rows.Close()
+			return out, err
+		}
+		refs = append(refs, r)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+	if len(refs) > p.Limit {
+		refs, out.More = refs[:p.Limit], true
+	}
+	for _, r := range refs {
+		var b domain.WorkspaceBinding
+		if err := t.get("workspace_binding", r.id, r.version, &b); err != nil {
+			return out, fmt.Errorf("%w: current binding pointer names missing %s/%d", domain.ErrIntegrity, r.id, r.version)
+		}
+		out.Records = append(out.Records, b)
+		out.Next = store.Cursor{Seq: r.seq, ID: r.id}
+	}
+	return out, nil
 }

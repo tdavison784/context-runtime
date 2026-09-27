@@ -50,6 +50,7 @@ type resState struct {
 	wbindings    map[wbKey]domain.WorkspaceBinding
 	wbLatest     map[string]uint64
 	wbByContext  map[wsContext][]seqRef
+	wbCurrent    map[wsContext][]seqRef // latest version of each binding, by its context (H2)
 	runs         map[string]domain.ObservationRun
 	runsBySubj   map[string][]seqRef
 	observations map[string]domain.ObservationRecord
@@ -66,7 +67,7 @@ func newResState() resState {
 		bindings: map[string]domain.ResourceBinding{}, bindingIDs: map[string]string{}, updates: map[string]domain.ResourceUpdate{},
 		updByRes: map[string][]seqRef{}, updByPath: map[resPath][]seqRef{}, updRequests: map[resRequest]string{}, states: map[string]domain.ResourceState{},
 		paths: map[string]domain.ResourcePathState{}, wbindings: map[wbKey]domain.WorkspaceBinding{}, wbLatest: map[string]uint64{},
-		wbByContext: map[wsContext][]seqRef{}, runs: map[string]domain.ObservationRun{}, runsBySubj: map[string][]seqRef{},
+		wbByContext: map[wsContext][]seqRef{}, wbCurrent: map[wsContext][]seqRef{}, runs: map[string]domain.ObservationRun{}, runsBySubj: map[string][]seqRef{},
 		observations: map[string]domain.ObservationRecord{}, obsByRun: map[string][]seqRef{}, runClosing: map[string]string{}, highWater: map[subjectKey]uint64{}, subjects: map[subjectKey]domain.SubjectState{},
 		subjByRes: map[string][]seqRef{}, subjIDs: map[string]subjectKey{},
 	}
@@ -84,6 +85,7 @@ type resView struct {
 	wbindings    table[wbKey, domain.WorkspaceBinding]
 	wbLatest     table[string, uint64]
 	wbByContext  orderedIndex[wsContext]
+	wbCurrent    orderedIndex[wsContext]
 	runs         table[string, domain.ObservationRun]
 	runsBySubj   orderedIndex[string]
 	observations table[string, domain.ObservationRecord]
@@ -103,7 +105,8 @@ func newResView(st *resState, w bool) resView {
 		updRequests: newTable(st.updRequests, w, same[string]), states: newTable(st.states, w, domain.ResourceState.Clone),
 		paths: newTable(st.paths, w, domain.ResourcePathState.Clone), wbindings: newTable(st.wbindings, w, domain.WorkspaceBinding.Clone),
 		wbLatest: newTable(st.wbLatest, w, same[uint64]), wbByContext: newOrderedIndex(st.wbByContext, w),
-		runs: newTable(st.runs, w, domain.ObservationRun.Clone), runsBySubj: newOrderedIndex(st.runsBySubj, w),
+		wbCurrent: newOrderedIndex(st.wbCurrent, w),
+		runs:      newTable(st.runs, w, domain.ObservationRun.Clone), runsBySubj: newOrderedIndex(st.runsBySubj, w),
 		observations: newTable(st.observations, w, domain.ObservationRecord.Clone), obsByRun: newOrderedIndex(st.obsByRun, w),
 		runClosing: newTable(st.runClosing, w, same[string]),
 		highWater:  newTable(st.highWater, w, same[uint64]),
@@ -129,6 +132,7 @@ func (v *resView) commit() {
 	v.wbindings.commit()
 	v.wbLatest.commit()
 	v.wbByContext.commit()
+	v.wbCurrent.commit()
 	v.runs.commit()
 	v.runsBySubj.commit()
 	v.observations.commit()
@@ -346,6 +350,11 @@ func (t *semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 	t.r.sem.res.wbindings.put(wbKey{b.ID, b.Version}, b)
 	t.r.sem.res.wbLatest.put(b.ID, b.Version)
 	t.r.sem.res.wbByContext.add(wsContext{b.Context.Kind, b.Context.ID}, seqRef{b.Seq, b.ID})
+	// The current pointer moves to the new version, in its own context.
+	if prev, ok := t.r.sem.res.wbindings.peek(wbKey{b.ID, last}); ok {
+		t.r.sem.res.wbCurrent.remove(wsContext{prev.Context.Kind, prev.Context.ID}, seqRef{prev.Seq, prev.ID})
+	}
+	t.r.sem.res.wbCurrent.add(wsContext{b.Context.Kind, b.Context.ID}, seqRef{b.Seq, b.ID})
 	t.t.sequencedWrite(b.Seq)
 	return nil
 }
@@ -661,7 +670,17 @@ func (r semRead) SubjectHighWater(subject, taskID string, access domain.AccessBo
 	return hw, nil
 }
 
-// CurrentWorkspaceBindingsByContext implements store.ResourceReader.
+// CurrentWorkspaceBindingsByContext implements store.ResourceReader over
+// the current-version index InsertWorkspaceBinding maintains.
 func (r semRead) CurrentWorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, p store.Page) (store.ResultPage[domain.WorkspaceBinding], error) {
-	return store.ResultPage[domain.WorkspaceBinding]{}, domain.ErrUnsupportedSchema
+	if err := r.r.check(); err != nil {
+		return store.ResultPage[domain.WorkspaceBinding]{}, err
+	}
+	ctx, err := workspaceContext(sourceItemID, taskID, conversationID)
+	if err != nil {
+		return store.ResultPage[domain.WorkspaceBinding]{}, err
+	}
+	return pageRefs(p, r.r.sem.res.wbCurrent.after(ctx, cursorRef(p.After)), func(ref seqRef) (domain.WorkspaceBinding, bool) {
+		return r.bindingAt(ref.id, ref.seq)
+	})
 }
