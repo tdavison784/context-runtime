@@ -437,3 +437,29 @@ func testSemanticObservations(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// testSemanticRunOrdinalUnique checks the run key (subject, Ordinal)
+// (P3-22, SEC-1.13): two runs of one subject never share an ordinal, so
+// run order is never ambiguous; runs of different subjects may.
+func testSemanticRunOrdinalUnique(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		putTask(t, tx)
+		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq())))
+		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "other", tx.NextSeq())))
+		noErr(t, sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 1, tx.NextSeq())))
+		return sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb-other", "other", 1, tx.NextSeq()))
+	})
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		seq := tx.NextSeq()
+		noErr(t, sem.InsertObservationRun(NewObservationRun(t, sessA, "run1", "repo", "wb", seq)))
+		return sem.InsertObservationRun(NewObservationRun(t, sessA, "run2", "repo", "wb", seq))
+	})
+	update(t, s, sessA, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		seq := tx.NextSeq()
+		noErr(t, sem.InsertObservationRun(NewObservationRun(t, sessA, "run1", "repo", "wb", seq)))
+		return sem.InsertObservationRun(NewObservationRun(t, sessA, "run2", "other", "wb-other", seq))
+	})
+}
