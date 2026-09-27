@@ -255,6 +255,7 @@ func (t *semTx) InsertExchangeMember(m domain.ExchangeMember) error {
 	t.r.sem.memberPos.put(exchangePos{m.ExchangeID, m.Position}, m.ID)
 	t.r.sem.membersByEx.add(m.ExchangeID, ref)
 	t.r.sem.membersByIt.add(m.Source.ItemID, ref)
+	t.r.sem.itemExchange.add(itemConv{x.ConversationID, m.Source.ItemID}, seqRef{x.Ordinal, x.ID})
 	t.t.sequencedWrite(m.Seq)
 	return nil
 }
@@ -545,7 +546,22 @@ func (r semRead) OwnerRegistration(kind domain.OwnerKind, ownerID string) (domai
 	return o, nil
 }
 
-// EarliestExchangeWithItem implements store.MembershipReader.
+// itemConv keys the checkpoint-coverage index: an item's memberships in
+// one conversation, ordered by exchange (ordinal, ID).
+type itemConv struct{ conversation, item string }
+
+// EarliestExchangeWithItem implements store.MembershipReader: the first
+// entry of the item's index in the conversation.
 func (r semRead) EarliestExchangeWithItem(conversationID, itemID string) (domain.LogicalExchange, error) {
-	return domain.LogicalExchange{}, domain.ErrUnsupportedSchema
+	if err := r.r.check(); err != nil {
+		return domain.LogicalExchange{}, err
+	}
+	for ref := range r.r.sem.itemExchange.after(itemConv{conversationID, itemID}, seqRef{}) {
+		x, ok := r.r.sem.exchanges.get(ref.id)
+		if !ok {
+			return domain.LogicalExchange{}, domain.ErrIntegrity
+		}
+		return x, nil
+	}
+	return domain.LogicalExchange{}, notFound("exchange with item", itemID)
 }
