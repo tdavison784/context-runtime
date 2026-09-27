@@ -55,9 +55,18 @@ func TestLifecycleDerivedRequestIDIsNoExistenceOracle(t *testing.T) {
 		// precedes the current-transaction check (DUR-2.8).
 		i := intent
 		i.RequestID = registered
-		again, err := s.ArchiveStandalone(ctx, owner, i)
-		if err != nil || again.AuditID != first.Result.AuditID {
-			t.Fatalf("owner replay: %+v %v", again, err)
+		if _, err := s.ArchiveStandalone(ctx, owner, i); !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Fatalf("caller named a current runtime ID: %v", err)
+		}
+		// Runtime replay remains available inside the authenticated executor path.
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			again, err := s.Archive(tx, owner, i, 0)
+			if err == nil && again.Result.AuditID != first.Result.AuditID {
+				t.Fatal("runtime replay changed")
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
 		}
 	})
 }
