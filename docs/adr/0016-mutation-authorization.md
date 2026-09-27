@@ -207,16 +207,42 @@ both forms share.
   state occurrence, under the service's own recorded policy — a first state
   (nothing to supersede) enqueues nothing, and a task-less trigger persists
   nothing per H4 (`internal/gcqueue`, W4b). Tests:
-  `TestObservationStateSupersessionEnqueuesGC_SPEC23`. Agent keyed writes
-  (`internal/tools/keyed.go`, via `graph.ReplaceDirective`) have the
-  equivalent fix on W5's branch (`63efafd fix(tools): keyed replacements
-  enqueue a SUPERSESSION GC request`), not yet merged into this
-  reconciliation as of this pass — until it lands, a keyed replacement
-  still produces no `GCRequest` even though SUPERSESSION is enabled by
-  default. An enabled trigger whose executor
+  `TestObservationStateSupersessionEnqueuesGC_SPEC23`. **Both SPEC-2.3
+  paths are now landed.** Agent keyed writes (`internal/tools/keyed.go`,
+  via `graph.ReplaceDirective`) and task-less directive replacement
+  (`internal/lifecycle/replace.go`) also enqueue through `gcqueue.Enqueue`
+  now, closing the round-1/round-2 gap where a keyed replacement or a
+  session-scoped directive replacement produced no `GCRequest`, or failed
+  outright, despite SUPERSESSION being enabled by default. An enabled
+  trigger whose executor
   cannot run it (a stale `PolicyVersion` on the request, or a missing
   authorized collector) fails that attempt closed rather than silently
   succeeding; it stays pending for a later, correctly-configured attempt.
+  **GC requests quarantine on permanent failure and collect large
+  candidate sets in durable batches (H3/SEC-2.4/SPEC-2.4/DUR-2.7, commit
+  `e68ce80`).** `classifyGCFailure` (`internal/lifecycle/gc_failure.go`)
+  sorts an attempt's error into not-charged (cancelled, contended, trigger
+  disabled — stays pending), transient (counts toward a bounded attempt
+  limit, then quarantines `ATTEMPTS_EXHAUSTED`), or permanent
+  (`ErrUnsupportedSchema`/`ErrIntegrity`/`ErrInvalidRecord`/`ErrNotFound` —
+  quarantines at once with a closed `GCFailureCode`). `ExecuteGCRequest`
+  runs the next batch from the request's `GCProgress` cursor
+  (`GCBatchRequestID(n)`), advancing it by CAS, so one oversized request
+  can never wedge the whole queue or exceed the per-call work bound.
+  Quarantined and completed requests leave `PendingGCRequests`, so one
+  permanently failing request no longer blocks every later one. Tests:
+  `TestClassifyGCFailure`, `TestFailingGCRequestsAreQuarantined`,
+  `TestLargeGCRequestCollectsAcrossBatches`,
+  `TestCollectionPlansInBoundedBatches`,
+  `TestOverflowingCandidateIsIneligibleNotAWedge`,
+  `TestBatchFitsTheReceiptLimit`.
+  **Grant issuance shares its live-count cap fairly and reserves room for
+  SYSTEM (SEC-2.7).** `liveGrantRoom` (`internal/lifecycle/grants.go`)
+  limits any one issuer to at most a quarter of the policy's live-grant
+  cap per `(action, target)`, with the last quarter reserved for SYSTEM —
+  so no lower-authority issuer, alone or in combination, can exhaust the
+  cap and deny issuance to everyone else. Test:
+  `TestLiveGrantCapIsSharedFairly`.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
   idempotently after producer commit, never inline with it. Tests:
   `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,
