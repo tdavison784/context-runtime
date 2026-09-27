@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -189,6 +190,156 @@ func TestManualCollectDoesNotWedgeTaskCompletion_SEC48(t *testing.T) {
 		}
 		if res, ok := gcResult(t, db, manualID); !ok || res.Outcome != domain.GCCollected {
 			t.Fatalf("manual request not collected: %+v %v", res, ok)
+		}
+	})
+}
+
+// seedHeavyAt commits task "task" at turn 2 with n light ended-turn
+// ephemeral items and one heavy item carrying obligations obligations at
+// the given position in (Seq, ID) order.
+func seedHeavyAt(t *testing.T, db store.Store, n, obligations, position int) {
+	t.Helper()
+	if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+		task := storetest.NewTask("s", "task")
+		task.Turn, task.TurnID = 2, "turn-2"
+		if _, err := tx.PutTask(task, 0, storetest.NewLifecycleEvent("s", "created", tx.NextSeq(), domain.TargetTask, "task")); err != nil {
+			return err
+		}
+		light := func(i int) error {
+			it := storetest.NewItem("s", fmt.Sprintf("eph-%03d", i), tx.NextSeq(), "scratch")
+			it.Generation = domain.GenerationEphemeral
+			return tx.InsertItem(it)
+		}
+		for i := range position {
+			if err := light(i); err != nil {
+				return err
+			}
+		}
+		it := storetest.NewItem("s", "heavy", tx.NextSeq(), "heavy")
+		it.Generation = domain.GenerationEphemeral
+		if err := tx.InsertItem(it); err != nil {
+			return err
+		}
+		for i := range obligations {
+			if err := tx.InsertObligationVersion(storetest.NewObligation("s", fmt.Sprintf("ho%d", i), 1, tx.NextSeq(), "heavy")); err != nil {
+				return err
+			}
+		}
+		for i := position; i < n; i++ {
+			if err := light(i); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// requestProgress reads the request's stored progress.
+func requestProgress(t *testing.T, db store.Store, id string) domain.GCProgress {
+	t.Helper()
+	var p domain.GCProgress
+	readSemantic(t, db, func(sem store.SemanticReader) error {
+		q, err := sem.GCProgress(id)
+		if err == nil {
+			p = q
+		}
+		return err
+	})
+	return p
+}
+
+// DUR-4.4: an item's own deterministic read bound — obligations beyond
+// MaxTargets — is an immediate SKIP_RESOURCE_LIMIT. Halving cannot help (the
+// bound is the item's, not the batch's), and the halving pinned every later
+// batch: 21 candidates took 24 batches, 3 of them empty receipts, against
+// about 3 ideal.
+func TestHeavyItemSkipsWithoutShrinkingEveryBatch_DUR44(t *testing.T) {
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxGCDecisions = 8
+		s, _ := New(db, pol)
+		seedHeavyAt(t, db, 20, pol.MaxTargets+1, 0) // heavy first, beyond the read bound
+		id := enqueueScratch(t, db, s)
+		runGC(t, db, s, id, 30)
+		p := requestProgress(t, db, id)
+		if p.Batches > 6 {
+			t.Fatalf("one heavy item shrank every batch: %+v", p)
+		}
+		if p.BatchSize != 0 && p.BatchSize < pol.MaxGCDecisions {
+			t.Fatalf("heavy item pinned the batch size at %d: %+v", p.BatchSize, p)
+		}
+		// Every committed batch decided at least one candidate: no empty
+		// halving receipts; the heavy item skipped in the first batch.
+		readSemantic(t, db, func(sem store.SemanticReader) error {
+			req, err := sem.GCRequest(id)
+			if err != nil {
+				return err
+			}
+			for batch := uint64(1); batch <= p.Batches; batch++ {
+				request, err := domain.GCBatchRequestID(req.RequestID, batch)
+				if err != nil {
+					return err
+				}
+				c, err := sem.CollectReceipt(collectReceiptID("s", request))
+				if err != nil {
+					return err
+				}
+				if len(c.Decisions) == 0 {
+					t.Fatalf("batch %d committed an empty receipt", batch)
+				}
+				if batch == 1 && (len(c.Decisions) == 0 || c.Decisions[0].Target.ItemID != "heavy" || c.Decisions[0].Code != domain.GCSkipResourceLimit) {
+					t.Fatalf("heavy not skipped in batch 1: %+v", c.Decisions)
+				}
+			}
+			return nil
+		})
+		if err := db.View(context.Background(), "s", func(tx store.ReadTx) error {
+			for n := range 20 {
+				it, err := tx.Item(fmt.Sprintf("eph-%03d", n))
+				if err != nil {
+					return err
+				}
+				if it.Residency != domain.ResidencyArchived {
+					t.Errorf("%s skipped", it.ID)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// SEC-4.7: after a mid-batch work halving (J3), a batch that fills its
+// quota with budget to spare doubles back toward MaxGCDecisions, so one
+// heavy item never pins the request's batch size for the rest of its life.
+func TestBatchSizeRecoversAfterAWorkHalving_SEC47(t *testing.T) {
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxGCDecisions, pol.MaxTransactionWork = 4, 64
+		s, _ := New(db, pol)
+		seedHeavyAt(t, db, 20, 60, 1) // heavy second: under the read bound, over half a fresh budget
+		id := enqueueScratch(t, db, s)
+		runGC(t, db, s, id, 30)
+		p := requestProgress(t, db, id)
+		if p.BatchSize != pol.MaxGCDecisions {
+			t.Fatalf("batch size pinned at %d after the heavy item passed: %+v", p.BatchSize, p)
+		}
+		if err := db.View(context.Background(), "s", func(tx store.ReadTx) error {
+			for n := range 20 {
+				it, err := tx.Item(fmt.Sprintf("eph-%03d", n))
+				if err != nil {
+					return err
+				}
+				if it.Residency != domain.ResidencyArchived {
+					t.Errorf("%s skipped", it.ID)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
 	})
 }
