@@ -86,8 +86,14 @@ func pendingOrDone(t *testing.T, db store.Store, s *Service) string {
 	t.Helper()
 	var id string
 	readSemantic(t, db, func(sem store.SemanticReader) error {
-		id = gcRequestID("s", "gc_"+domain.NewCanonicalEncoder("context-runtime/gc-trigger/v1").String("s").String(string(domain.GCTaskCompletion)).String("task").Hash())
-		_, err := sem.GCRequest(id)
+		request, err := domain.GCTriggerRequestID(storetest.NewPrincipal("s", domain.AuthorityUser), domain.GCTaskCompletion, "task")
+		if err != nil {
+			return err
+		}
+		if id, err = domain.GCRequestRecordID("s", request); err != nil {
+			return err
+		}
+		_, err = sem.GCRequest(id)
 		return err
 	})
 	return id

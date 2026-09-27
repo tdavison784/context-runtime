@@ -137,7 +137,7 @@ func (s *Service) DeclareObligationTx(tx store.Tx, actor domain.Principal, in do
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	if res, ok, err := replay(sem, actor, req); ok || err != nil {
+	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
 	if !trustedControl(actor) {
@@ -179,7 +179,7 @@ func (s *Service) DeclareObligationTx(tx store.Tx, actor domain.Principal, in do
 		return domain.MutationResult{}, err
 	}
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: "OBLIGATION_DECLARATION", IDs: []string{declarationID(ref)}}}
-	if err := s.recordReceipt(sem, actor, req, seq, result); err != nil {
+	if err := s.recordReceipt(tx, sem, actor, req, seq, result); err != nil {
 		tx.Poison(err)
 		return domain.MutationResult{}, err
 	}

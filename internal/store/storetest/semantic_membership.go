@@ -578,7 +578,7 @@ func testSemanticReceipts(t *testing.T, s store.Store) {
 	principal := AgentPrincipal(sessA, "task", "agent")
 	args := []byte("canonical-args")
 	receipt := func(seq uint64, requestID string) domain.MutationReceipt {
-		id, err := domain.MutationReceiptID(principal, domain.MutationTool, requestID)
+		id, err := domain.MutationReceiptKey(sessA, domain.MutationTool, requestID)
 		noErr(t, err)
 		h, err := domain.MutationRequestHash(principal, domain.MutationTool, "context_remember", args)
 		noErr(t, err)

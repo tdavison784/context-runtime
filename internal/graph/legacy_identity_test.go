@@ -86,13 +86,14 @@ func TestIdenticalRestatementOfUnknownIdentityFailsClosed(t *testing.T) {
 	}
 }
 
-// TestSnapshotWithUnknownIdentityFailsClosedOnlyWhenIdentical: a Working
-// snapshot over undeclared legacy members is a duplicate candidate only if
-// every member is semantically identical; then it fails closed. A changed
-// snapshot supersedes normally even when an unchanged member is legacy.
-func TestSnapshotWithUnknownIdentityFailsClosedOnlyWhenIdentical(t *testing.T) {
+// TestIdenticalSnapshotOverUnknownIdentityIsDuplicate is the approved G5
+// residual rule (SPEC-2.9): Working snapshot members carry no attributes, so
+// an identical snapshot over pre-upgrade members with unknown identity is a
+// DUPLICATE_OF restatement: nothing is replaced, re-filed or rebound, and it
+// never errors. A changed snapshot still supersedes normally.
+func TestIdenticalSnapshotOverUnknownIdentityIsDuplicate(t *testing.T) {
 	eachStore(t, func(t *testing.T, s store.Store) {
-		const sess = "sess-spec13-snapshot"
+		const sess = "sess-spec29-snapshot"
 		actor := principal(sess, domain.AuthorityUser)
 		update(t, s, sess, func(tx store.Tx) error {
 			a, b := member(sess, "a0", tx.NextSeq(), "A"), member(sess, "b0", tx.NextSeq(), "B")
@@ -100,18 +101,76 @@ func TestSnapshotWithUnknownIdentityFailsClosedOnlyWhenIdentical(t *testing.T) {
 			mustFile(t, tx, a, b)
 			return nil
 		})
-		err := s.Update(ctx, sess, func(tx store.Tx) error {
-			a, b := member(sess, "a1", tx.NextSeq(), "A"), member(sess, "b1", tx.NextSeq(), "B")
-			mustCreate(t, tx, a, b)
-			_, err := SupersedeSnapshot(tx, actor, []string{"a1", "b1"}, "task", "evt-same")
-			return err
-		})
-		if !errors.Is(err, ErrUnknownDeclaration) {
-			t.Fatalf("identical snapshot over unknown identity: err = %v; want ErrUnknownDeclaration", err)
+		res := snapshot(t, s, actor, "evt-same", m(sess, "a1", "A"), m(sess, "b1", "B"))
+		if got, want := edges(res.Duplicates), []string{"a1->a0", "b1->b0"}; len(res.Supersedes) != 0 || len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("identical snapshot: supersedes %v duplicates %v; want duplicates %v", edges(res.Supersedes), got, want)
 		}
-		res := snapshot(t, s, actor, "evt-changed", m(sess, "a2", "A"), m(sess, "b2", "B changed"))
+		cur := currentSet(t, s, sess, "a0", "b0", "a1", "b1")
+		if !cur["a0"] || !cur["b0"] || cur["a1"] || cur["b1"] {
+			t.Fatalf("identical snapshot re-filed or replaced legacy members: %v", cur)
+		}
+		res = snapshot(t, s, actor, "evt-changed", m(sess, "a2", "A"), m(sess, "b2", "B changed"))
 		if len(res.Duplicates) != 0 || len(res.Supersedes) != 2 {
 			t.Fatalf("changed snapshot: supersedes %v duplicates %v", edges(res.Supersedes), edges(res.Duplicates))
 		}
+	})
+}
+
+// TestIdenticalAgentKeyOverUnknownIdentityIsDuplicate: a tool-written agent
+// key is attribute-free, so an identical write over the owner's pre-upgrade
+// key with unknown identity links DUPLICATE_OF and never replaces it (the
+// replacement backstop refuses); a write that cites new support is a real
+// new version and replaces it (SPEC-2.10, C-19).
+func TestIdenticalAgentKeyOverUnknownIdentityIsDuplicate(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess = "sess-spec210"
+		agent := principalWithAgent(sess, domain.AuthorityAgent, "agent")
+		var legacy domain.ContextItem
+		update(t, s, sess, func(tx store.Tx) error {
+			legacy = legacyAgentKey(sess, "old", "status", tx.NextSeq())
+			setText(&legacy, "status: idle")
+			mustInsert(t, tx, legacy)
+			mustFile(t, tx, legacy)
+			return nil
+		})
+		update(t, s, sess, func(tx store.Tx) error {
+			fresh := agentDirective(sess, "same", legacy.DirectiveID, tx.NextSeq())
+			setText(&fresh, "status: idle")
+			mustCreate(t, tx, fresh)
+			if same, err := SameDirective(tx, fresh, "", legacy); !same || err != nil {
+				t.Errorf("SameDirective = %v, %v; want an attribute-free duplicate", same, err)
+			}
+			_, err := LinkDuplicate(tx, agent, fresh.ID, legacy.ID, "evt-same", "", "")
+			return err
+		})
+		err := s.Update(ctx, sess, func(tx store.Tx) error {
+			fresh := agentDirective(sess, "same-2", legacy.DirectiveID, tx.NextSeq())
+			setText(&fresh, "status: idle")
+			mustCreate(t, tx, fresh)
+			_, err := ReplaceDirective(tx, agent, fresh.TaskID, fresh.DirectiveID, fresh.ID, "evt-replace-same")
+			return err
+		})
+		if !errors.Is(err, ErrUnknownDeclaration) {
+			t.Fatalf("identical agent-key replacement over unknown identity: err = %v; want refused", err)
+		}
+		update(t, s, sess, func(tx store.Tx) error {
+			evidence := taskItem(sess, "log", tx.NextSeq(), domain.AuthorityUser)
+			evidence.Kind = domain.KindEvidence
+			mustInsert(t, tx, evidence)
+			cited := agentDirective(sess, "cited", legacy.DirectiveID, tx.NextSeq())
+			setText(&cited, "status: idle")
+			mustInsert(t, tx, cited)
+			if _, err := DeclareCreation(tx, cited, CreationAcceptance{PolicyVersion: testDeclarationPolicy, SupportIDs: []string{evidence.ID}}); err != nil {
+				return err
+			}
+			if same, err := SameDirective(tx, cited, "", legacy); same || err != nil {
+				t.Errorf("SameDirective with new support = %v, %v; want a distinct version", same, err)
+			}
+			prev, err := ReplaceDirective(tx, agent, cited.TaskID, cited.DirectiveID, cited.ID, "evt-cited")
+			if err == nil && prev != legacy.ID {
+				t.Errorf("replaced %q, want the legacy key", prev)
+			}
+			return err
+		})
 	})
 }

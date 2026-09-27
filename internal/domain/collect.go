@@ -1,6 +1,9 @@
 package domain
 
-import "slices"
+import (
+	"slices"
+	"strconv"
+)
 
 type CollectScope string
 
@@ -141,6 +144,34 @@ func (r CollectReceipt) Validate() error {
 	return nil
 }
 
+// GCOutcome is a GC request's terminal outcome (H3). A request has at most
+// one GCResult; a FAILED request is quarantined and never retried
+// automatically; re-arming requires a new request identity.
+type GCOutcome string
+
+const (
+	GCCollected GCOutcome = "COLLECTED"
+	GCFailed    GCOutcome = "FAILED"
+)
+
+// GCFailureCode is the closed reason set of a FAILED GC request (H3).
+type GCFailureCode string
+
+const (
+	GCFailurePolicyMismatch    GCFailureCode = "POLICY_MISMATCH"
+	GCFailureInvalidRequest    GCFailureCode = "INVALID_REQUEST"
+	GCFailureIntegrity         GCFailureCode = "INTEGRITY"
+	GCFailureAttemptsExhausted GCFailureCode = "ATTEMPTS_EXHAUSTED"
+)
+
+func (c GCFailureCode) Valid() bool {
+	switch c {
+	case GCFailurePolicyMismatch, GCFailureInvalidRequest, GCFailureIntegrity, GCFailureAttemptsExhausted:
+		return true
+	}
+	return false
+}
+
 type GCResult struct {
 	SemanticMeta
 	GCRequestID, CollectReceiptID string
@@ -154,4 +185,77 @@ func (r GCResult) Validate() error {
 		return invalid("GC result: request and effect receipt required")
 	}
 	return nil
+}
+
+// GCCursor is a position in (Seq, ID) candidate order; the zero cursor
+// precedes every candidate.
+type GCCursor struct {
+	Seq uint64
+	ID  string
+}
+
+// GCProgress is operational claim metadata for one GC request processed in
+// bounded batches across passes (H3, P3-39): the durable candidate cursor,
+// completed batches and attempts. It is CAS-written on Revision and is never
+// a substitute for a batch's CollectReceipt or the request's GCResult.
+type GCProgress struct {
+	SessionID, GCRequestID      string
+	Cursor                      GCCursor
+	Batches, Attempts, Revision uint64
+}
+
+func (p GCProgress) Clone() GCProgress { return p }
+
+func (p GCProgress) Validate() error {
+	if !semanticID(p.SessionID) || !semanticID(p.GCRequestID) || p.Revision == 0 {
+		return invalid("GC progress: session, request and revision required")
+	}
+	if p.Cursor.Seq == 0 && p.Cursor.ID != "" || p.Cursor.Seq != 0 && !semanticID(p.Cursor.ID) {
+		return invalid("GC progress: invalid cursor")
+	}
+	if p.Batches == 0 && p.Cursor != (GCCursor{}) {
+		return invalid("GC progress: a cursor advances only with a completed batch")
+	}
+	return nil
+}
+
+// GCBatchRequestID is the CollectReceipt request ID of batch n (from 1) of a
+// GC request: request + "/batch/" + n. It inherits the GC request's
+// reserved runtime namespace, so no caller can name it.
+func GCBatchRequestID(gcRequestID string, batch uint64) (string, error) {
+	id := gcRequestID + "/batch/" + strconv.FormatUint(batch, 10)
+	if !semanticID(gcRequestID) || batch == 0 || !semanticID(id) {
+		return "", invalid("GC batch request: request and batch number required")
+	}
+	return id, nil
+}
+
+const (
+	gcTriggerRequestPrefix = "gc_"
+	gcRequestRecordPrefix  = "gcq_"
+)
+
+// GCTriggerRequestID is the runtime collection request ID of a GC trigger
+// (H5, SEC-2.6): it binds the authenticated principal whose action raised
+// the trigger (a task completion or supersession) and the trigger identity.
+// "gc_" is a reserved runtime namespace, so no caller can name or squat it.
+func GCTriggerRequestID(origin Principal, trigger GCTrigger, triggerID string) (string, error) {
+	if err := validateIngestPrincipal(origin); err != nil {
+		return "", err
+	}
+	if !trigger.Valid() || !semanticID(triggerID) {
+		return "", invalid("GC trigger request: trigger and trigger identity required")
+	}
+	e := NewCanonicalEncoder("context-runtime/gc-trigger/v2")
+	encodePrincipal(e, origin)
+	return gcTriggerRequestPrefix + e.String(string(trigger)).String(triggerID).Hash(), nil
+}
+
+// GCRequestRecordID is the record ID of the GC request whose collection
+// request ID is requestID, in the reserved "gcq_" namespace.
+func GCRequestRecordID(session, requestID string) (string, error) {
+	if !semanticID(session) || !semanticID(requestID) {
+		return "", invalid("GC request identity: session and request required")
+	}
+	return gcRequestRecordPrefix + NewCanonicalEncoder("context-runtime/gc-request/v1").String(session).String(requestID).Hash(), nil
 }

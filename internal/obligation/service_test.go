@@ -88,10 +88,10 @@ func TestReceiptReplayAndConflict(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, ok, err := replay(sem, actor, req); ok || err != nil {
+		if _, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 			t.Fatalf("fresh request replayed: %v %v", ok, err)
 		}
-		return s.recordReceipt(sem, actor, req, tx.LastSeq(), result)
+		return s.recordReceipt(tx, sem, actor, req, tx.LastSeq(), result)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestReceiptReplayAndConflict(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			res, ok, err = replay(sem, actor, req)
+			res, ok, err = replay(tx, sem, actor, req)
 			return err
 		})
 		return res, ok, err

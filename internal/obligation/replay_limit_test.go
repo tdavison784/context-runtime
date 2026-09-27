@@ -27,7 +27,7 @@ func TestReceiptReplaysAfterLowerLimit(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return s.recordReceipt(sem, actor, req, tx.LastSeq(), result)
+		return s.recordReceipt(tx, sem, actor, req, tx.LastSeq(), result)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestReceiptReplaysAfterLowerLimit(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			_, ok, err = replay(sem, actor, r)
+			_, ok, err = replay(tx, sem, actor, r)
 			return err
 		})
 		return ok, err

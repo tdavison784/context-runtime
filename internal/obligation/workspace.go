@@ -24,7 +24,7 @@ func (s *Service) BindWorkspaceTx(tx store.Tx, actor domain.Principal, in domain
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	if res, ok, err := replay(sem, actor, req); ok || err != nil {
+	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
 	if !trustedControl(actor) {
@@ -61,7 +61,7 @@ func (s *Service) BindWorkspaceTx(tx store.Tx, actor domain.Principal, in domain
 		return domain.MutationResult{}, w.fail(err)
 	}
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: "WORKSPACE_BINDING", IDs: []string{in.BindingID}}}
-	if err := s.recordReceipt(sem, actor, req, seq, result); err != nil {
+	if err := s.recordReceipt(tx, sem, actor, req, seq, result); err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
 	return result, nil

@@ -88,7 +88,7 @@ func (h obligationHandler) Execute(tx store.Tx, actor domain.Principal, op domai
 	if err != nil {
 		return OperationOutcome{}, err
 	}
-	id, err := domain.MutationReceiptID(actor, h.op.family, requestIDOf(op))
+	id, err := domain.MutationReceiptID(tx, actor, h.op.family, requestIDOf(op))
 	if err != nil {
 		return OperationOutcome{}, err
 	}
