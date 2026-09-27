@@ -140,7 +140,7 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 	if err = s.finish(tx, sem, p, domain.MutationLifecycle, method, i.RequestID, args, out.Result); err != nil {
 		return out, err
 	}
-	out.MutationReceiptID, err = domain.MutationReceiptID(p.SessionID, domain.MutationLifecycle, i.RequestID)
+	out.MutationReceiptID, err = domain.MutationReceiptID(p, domain.MutationLifecycle, i.RequestID)
 	return out, err
 }
 

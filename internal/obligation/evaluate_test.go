@@ -2,6 +2,7 @@ package obligation
 
 import (
 	"fmt"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -25,7 +26,7 @@ func newEvalFixture(t *testing.T) *evalFixture {
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		if err := tx.SetCurrentVersion(it.ID); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 			return err
 		}
 		if _, err := f.s.BindWorkspaceTx(tx, f.system, src, tx.NextSeq()); err != nil {

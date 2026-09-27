@@ -23,7 +23,7 @@ func (s *MembershipService) RecordAdmissionCoverage(tx store.Tx, actor, recipien
 	if err = checkMembershipControl(tx.SessionID(), actor, recipient); err != nil {
 		return result, err
 	}
-	if _, err = domain.MutationReceiptID(tx.SessionID(), domain.MutationMembership, requestID); err != nil || len(sources) == 0 {
+	if _, err = domain.MutationReceiptID(actor, domain.MutationMembership, requestID); err != nil || len(sources) == 0 {
 		return result, domain.ErrInvalidRecord
 	}
 	if len(sources) > s.policy.MaxCoverageMembers || len(sources) > s.policy.MaxTransactionWork-2 {

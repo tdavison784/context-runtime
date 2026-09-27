@@ -86,7 +86,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	if err = s.finish(tx, sem, p, domain.MutationCollection, methodCollect, i.RequestID, args, out.Result); err != nil {
 		return out, err
 	}
-	out.MutationReceiptID, err = domain.MutationReceiptID(p.SessionID, domain.MutationCollection, i.RequestID)
+	out.MutationReceiptID, err = domain.MutationReceiptID(p, domain.MutationCollection, i.RequestID)
 	return out, err
 }
 

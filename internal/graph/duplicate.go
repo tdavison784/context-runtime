@@ -2,6 +2,7 @@ package graph
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -19,6 +20,11 @@ var (
 	// makes a directive item permanently non-current, so attaching one to
 	// an existing item would retire it without an authorized supersession.
 	ErrDuplicateNotAtCreation = errors.New("graph: an item can only be classified a duplicate in the transaction that created it")
+	// ErrUnknownDeclaration reports an identical restatement of a version
+	// whose creation identity is missing or unknown (legacy, pre-upgrade).
+	// It is never a silent non-duplicate: the restatement must not replace
+	// or rebind that version (SPEC-1.3, P3-4, C-1, P3-41).
+	ErrUnknownDeclaration = fmt.Errorf("graph: restatement of a version whose creation identity is unknown: %w", domain.ErrUnsupportedSchema)
 )
 
 // SameDirectiveSemantics compares immutable row identity only. It is a necessary
@@ -45,25 +51,28 @@ func SameDirective(tx store.ReadTx, it domain.ContextItem, _ string, canonical d
 	if err != nil {
 		return false, err
 	}
-	fresh, err := checkedDeclaration(r, it)
-	if errors.Is(err, domain.ErrNotFound) {
-		return false, nil
-	}
+	fresh, err := knownDeclaration(r, it)
 	if err != nil {
 		return false, err
 	}
-	prior, err := checkedDeclaration(r, canonical)
-	if errors.Is(err, domain.ErrNotFound) {
-		return false, nil
-	}
+	prior, err := knownDeclaration(r, canonical)
 	if err != nil {
 		return false, err
-	}
-	if !fresh.LegacyKnown || !prior.LegacyKnown {
-		return false, nil
 	}
 	hash, err := fresh.AcceptedSemantics.Signature(prior.PolicyVersion)
 	return hash == prior.Signature, err
+}
+
+// knownDeclaration returns item's verified creation declaration, or
+// ErrUnknownDeclaration when it is missing or records unknown identity: a
+// semantically identical restatement is then neither a duplicate nor a
+// replacement (SPEC-1.3).
+func knownDeclaration(r store.SemanticReader, item domain.ContextItem) (domain.CreationDeclaration, error) {
+	d, err := checkedDeclaration(r, item)
+	if errors.Is(err, domain.ErrNotFound) || err == nil && !d.LegacyKnown {
+		return domain.CreationDeclaration{}, ErrUnknownDeclaration
+	}
+	return d, err
 }
 
 func checkedDeclaration(r store.SemanticReader, item domain.ContextItem) (domain.CreationDeclaration, error) {

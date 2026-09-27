@@ -372,7 +372,7 @@ func AuthorizeSupersession(actor Principal, superseding, superseded ContextItem)
 	switch actor.Authority {
 	case AuthoritySystem, AuthorityHarness, AuthorityUser:
 	case AuthorityAgent:
-		if AuthorizeAgentKeyWrite(actor, superseding) != nil || AuthorizeAgentKeyWrite(actor, superseded) != nil ||
+		if AuthorizeAgentKeyWrite(actor, superseding) != nil || authorizeAgentKeyPrior(actor, superseded) != nil ||
 			superseding.DirectiveID != superseded.DirectiveID ||
 			superseding.TaskID != superseded.TaskID || superseding.AgentID != superseded.AgentID {
 			return ErrInvalidAuthorityPromotion

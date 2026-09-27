@@ -26,7 +26,7 @@ func testSemanticWriteRule(t *testing.T, s store.Store) {
 		name  string
 		write func(tx store.Tx) error
 	}{
-		{"SetCurrentVersion", func(tx store.Tx) error { return tx.SetCurrentVersion("d") }},
+		{"SetCurrentVersion", func(tx store.Tx) error { return UncheckedSetCurrentVersion(tx, "d") }},
 		{"UpdateObligationVersion", func(tx store.Tx) error {
 			next := o.Clone()
 			next.MaterializationDisabled = true

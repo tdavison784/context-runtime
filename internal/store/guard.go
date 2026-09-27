@@ -94,15 +94,6 @@ func (g *Guard) InsertRelationship(r domain.Relationship) error {
 	return err
 }
 
-func (g *Guard) SetCurrentVersion(itemID string) error {
-	if g.err != nil {
-		return g.err
-	}
-	err := g.TxBase.SetCurrentVersion(itemID)
-	g.noteWrite(err)
-	return err
-}
-
 func (g *Guard) InsertBlob(b domain.Blob) error {
 	if g.err != nil {
 		return g.err

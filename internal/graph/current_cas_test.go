@@ -5,6 +5,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 	"testing"
 )
 
@@ -36,7 +37,7 @@ func (b *currentCASBackend) SetCurrentVersion(id, expected string) error {
 	if b.conflict || actual != expected {
 		return domain.ErrVersionConflict
 	}
-	return b.tx.SetCurrentVersion(id)
+	return storetest.UncheckedSetCurrentVersion(b.tx, id)
 }
 
 func TestDirectiveFilingPassesExpectedPriorAndRollsBackCASFailure(t *testing.T) {

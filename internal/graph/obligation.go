@@ -14,10 +14,10 @@ type obligationRetirement struct {
 }
 
 // maxBoundObligations bounds the obligation versions one source may carry
-// (D17, R9). A Pinned directive declares at most one obligation slot, so a
-// real source never approaches it; exceeding it fails the replacement
-// (store.ErrLimitExceeded) rather than retiring only some.
-const maxBoundObligations = 256
+// (D17, R9): domain.MaxObligationsPerSource, which declarations never exceed
+// (Phase3Policy.ObligationDeclarationLimit, DUR-1.5); exceeding it fails the
+// replacement (store.ErrLimitExceeded) rather than retiring only some.
+const maxBoundObligations = domain.MaxObligationsPerSource
 
 // planObligationRetirement finds every current obligation version bound to
 // the source oldID (FR-OBL-006, D13) through the store's bounded

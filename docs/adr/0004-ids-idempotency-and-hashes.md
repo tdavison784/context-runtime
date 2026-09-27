@@ -439,6 +439,8 @@ Phase 3 domain contracts (W1):
 - `context-runtime/obligation-target/v1`
 - `context-runtime/observation-subject/v1`
 - `context-runtime/operation-request-id/v1`
+- `context-runtime/operation-request-id/v2`
+- `context-runtime/operation-request-binding/v1`
 - `context-runtime/proof-id/v1`
 - `context-runtime/resource-locator/v1`
 - `context-runtime/semantic-arguments/v1`
@@ -502,6 +504,20 @@ The kind is encoded first, so records of different kinds never share an ID.
 This domain is separate from W4's per-family request-hash domains
 `context-runtime/w4/<family>/v1`. Family names contain a dot, so no family
 domain can equal it.
+
+### Runtime operation request IDs (G3, SEC-1.2)
+
+`domain.OperationRequestID(p, occurrence, operation, command)` derives
+`req_<inner>.<tag>`. `inner` hashes the owning principal, the occurrence
+and the ordinals under `operation-request-id/v2`. `tag` binds `inner` to
+that principal under `operation-request-binding/v1`. `req_` is a reserved
+prefix, so no caller EventID or standalone RequestID
+(`ValidateCallerRequestID`) can name it. `MutationReceiptID(p, family,
+requestID)` refuses a `req_` ID not derived for `p` before any receipt
+lookup. A foreign principal therefore cannot probe for a hidden executed
+command or occupy another principal's receipt. No secret is involved,
+and receipt ID values stay a hash of (session, family, requestID).
+`operation-request-id/v1` remains registered and is never reused.
 
 ### Tool-outcome EventID format (W7)
 

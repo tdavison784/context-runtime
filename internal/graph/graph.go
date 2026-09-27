@@ -342,6 +342,22 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 	case err != nil:
 		return "", err
 	default:
+		// An identical restatement of a version whose creation identity is
+		// unknown never replaces or rebinds it (SPEC-1.3); explicit
+		// same-content replacement of a known version stays possible (C-1).
+		prior, err := tx.Item(previousID)
+		if err != nil {
+			return "", err
+		}
+		if SameDirectiveSemantics(newItem, prior) {
+			r, err := store.ReadSemantic(tx)
+			if err != nil {
+				return "", err
+			}
+			if _, err := knownDeclaration(r, prior); err != nil {
+				return "", err
+			}
+		}
 		if _, err := Supersede(tx, actor, newItemID, previousID, eventID, ""); err != nil {
 			return "", err
 		}

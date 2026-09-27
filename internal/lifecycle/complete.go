@@ -80,7 +80,7 @@ func (s *Service) CompleteTask(tx store.Tx, p domain.Principal, i domain.Complet
 	if err = s.finish(tx, sem, p, domain.MutationLifecycle, string(domain.ActionCompleteTask), i.RequestID, args, out.Result); err != nil {
 		return out, err
 	}
-	out.MutationReceiptID, err = domain.MutationReceiptID(p.SessionID, domain.MutationLifecycle, i.RequestID)
+	out.MutationReceiptID, err = domain.MutationReceiptID(p, domain.MutationLifecycle, i.RequestID)
 	return out, err
 }
 

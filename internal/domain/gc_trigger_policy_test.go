@@ -43,3 +43,17 @@ func TestSemanticEnvelopeDoesNotAliasGCTriggers(t *testing.T) {
 		t.Fatal("envelope clone aliases policy trigger set")
 	}
 }
+
+// DUR-1.5 / G2: declarations never bind more obligations to a source than
+// the tightest by-source consumer reads, so a source can always be
+// replaced, demoted, archived and collected.
+func TestObligationDeclarationLimitNeverExceedsConsumers(t *testing.T) {
+	p := semanticPolicy()
+	for _, targets := range []int{1, 64, MaxObligationsPerSource, MaxObligationsPerSource + 1, 1 << 20} {
+		p.MaxTargets = targets
+		got := p.ObligationDeclarationLimit()
+		if got > targets || got > MaxObligationsPerSource || got < 1 || got != min(targets, MaxObligationsPerSource) {
+			t.Errorf("MaxTargets %d: declaration limit %d exceeds a consumer bound", targets, got)
+		}
+	}
+}

@@ -24,7 +24,7 @@ func TestKeyedReadsDoNotScan(t *testing.T) {
 			if err := tx.InsertItem(storetest.NewDirective("s", id, id, tx.NextSeq(), id)); err != nil {
 				return err
 			}
-			if err := tx.SetCurrentVersion(id); err != nil {
+			if err := storetest.UncheckedSetCurrentVersion(tx, id); err != nil {
 				return err
 			}
 			if err := tx.InsertObligationVersion(storetest.NewObligation("s", "o"+id, 1, tx.NextSeq(), id)); err != nil {

@@ -333,6 +333,13 @@ func isDuplicateSnapshot(tx store.ReadTx, p *snapshotPartition) (bool, error) {
 	if len(p.prior) == 0 || len(p.prior) != len(p.members) {
 		return false, nil
 	}
+	// Only a snapshot identical row for row is a duplicate candidate; a
+	// changed snapshot never consults (possibly unknown) declarations.
+	for i := range p.members {
+		if !SameDirectiveSemantics(p.members[i], p.prior[i]) {
+			return false, nil
+		}
+	}
 	for i := range p.members {
 		same, err := SameDirective(tx, p.members[i], "", p.prior[i])
 		if err != nil || !same {

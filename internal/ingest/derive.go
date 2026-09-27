@@ -427,7 +427,7 @@ func (r *run) executeCommand(rec *domain.LifecycleCommandRecord, outcome domain.
 	if r.g.Lifecycle == nil {
 		return domain.ErrUnsupportedSchema
 	}
-	req, err := domain.OperationRequestID(r.p.SessionID, r.occurrence, r.unitOp, uint64(rec.Ordinal)+1)
+	req, err := domain.OperationRequestID(rec.Actor, r.occurrence, r.unitOp, uint64(rec.Ordinal)+1)
 	if err != nil {
 		return err
 	}

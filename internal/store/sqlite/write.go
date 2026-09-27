@@ -188,7 +188,15 @@ func (t *transaction) closesSupersessionCycle(from, to string) (cycle bool, visi
 	})
 	return cycle, visited, err
 }
-func (t *transaction) SetCurrentVersion(itemID string) error {
+
+// UncheckedSetCurrentVersion is the raw pointer write behind the semantic
+// facet's CAS. It is not part of store.Tx (SPEC-1.21); only storetest
+// fixtures reach it, to model legacy or corrupted pointer states.
+func (t *transaction) UncheckedSetCurrentVersion(itemID string) error {
+	return t.setCurrentVersion(itemID)
+}
+
+func (t *transaction) setCurrentVersion(itemID string) error {
 	v, err := t.Item(itemID)
 	if err != nil {
 		return err

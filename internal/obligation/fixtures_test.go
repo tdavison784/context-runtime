@@ -59,7 +59,7 @@ func seedPinned(t *testing.T, st store.Store, id, dirID string, a domain.Authori
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		return tx.SetCurrentVersion(it.ID)
+		return storetest.UncheckedSetCurrentVersion(tx, it.ID)
 	})
 	return it
 }
