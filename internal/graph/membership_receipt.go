@@ -14,10 +14,18 @@ func prepareMembershipReceipt(tx store.Tx, actor domain.Principal, requestID, me
 	if err != nil {
 		return nil, receipt, false, err
 	}
-	// Look the receipt up first: a committed request replays under the limit
-	// it was accepted with, and today's limit applies only to new requests
-	// (DUR-1.8).
+	// Look the receipt up first: its owner replays under the limit it was
+	// accepted with, and today's limit applies only to new requests (DUR-1.8);
+	// a pre-derivation Phase 2 receipt still replays for its owner (DUR-2.8).
+	// Anyone else is checked for request-ID ownership before existence can
+	// matter, so another principal's receipt is no oracle (SEC-2.8).
 	receipt, err = sem.MutationReceipt(domain.MutationMembership, requestID)
+	if err == nil && receipt.Principal != actor {
+		if _, idErr := domain.MutationReceiptID(actor, domain.MutationMembership, requestID); idErr != nil {
+			return nil, domain.MutationReceipt{}, false, idErr
+		}
+		return sem, receipt.Clone(), true, domain.ErrEventIDConflict
+	}
 	if err == nil {
 		args, encErr := domain.CanonicalSemanticArguments(intent, ReplayArgumentLimit(policy, receipt.CanonicalArguments))
 		if encErr != nil {
