@@ -87,7 +87,11 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 		// A newer complete applicable FAIL rejects this subject's current
 		// matcher or resource-bound satisfaction through the restricted path
 		// (P3-16, SPEC-1.10). Attestations carry no proof and are untouched.
-		if o.Status == domain.ObligationSatisfied && cur != nil && run.Ordinal > curOrdinal {
+		// Applicable means the FAIL's evidence boundary covers the proof's:
+		// a FAIL private to another agent never rejects a wider proof, and
+		// its ID is never recorded where the proof's readers see it (H1,
+		// SEC-2.9).
+		if o.Status == domain.ObligationSatisfied && cur != nil && run.Ordinal > curOrdinal && failCovers(cur.Access, obs, run) {
 			inv := invalidation{cause: domain.CauseProofRejected, causeRecord: obs.ID, requestID: obs.ID, reason: domain.ReasonProofRejected, rule: ProofRejectionRule}
 			seq := tx.NextSeq()
 			if err := s.invalidateProof(tx, sem, work, actor, seq, *cur, inv); err != nil {
@@ -97,6 +101,13 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 		}
 	}
 	return nil, nil
+}
+
+// failCovers reports whether a FAIL observation's evidence and run
+// boundaries both cover the proof boundary, the same publication rule a PASS
+// must meet to satisfy it (P3-14).
+func failCovers(proof domain.AccessBoundary, obs domain.ObservationRecord, run domain.ObservationRun) bool {
+	return proof.Within(obs.Access) && proof.Within(run.Access)
 }
 
 // subjectWatermark is the highest accepted ordinal among subject states that
