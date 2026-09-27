@@ -122,26 +122,25 @@ func checkWorkspaceContext(tx store.Tx, actor domain.Principal, c domain.Workspa
 // source (P3-12/20). Source-context bindings shadow task-context ones. A
 // binding applies only if its reporter's authority is at least the source's
 // (Q-3: a HARNESS binding cannot choose the suite that satisfies a SYSTEM
-// requirement) and its boundary covers the source's. The latest version of
-// each binding ID is considered. More than one applicable binding is
-// ambiguous; candidates that exist but do not apply yield BINDING_AUTHORITY.
+// requirement) and its boundary covers the source's. Only each binding ID's
+// latest version is considered, and only while that version is in the
+// context. More than one applicable binding is ambiguous; candidates that
+// exist but do not apply yield BINDING_AUTHORITY.
 func (s *Service) resolveWorkspace(r store.SemanticReader, work *budget, source domain.ContextItem) (Workspace, error) {
 	contexts := [][3]string{{source.ID, "", ""}}
 	if source.TaskID != "" {
 		contexts = append(contexts, [3]string{"", source.TaskID, ""})
 	}
 	for _, c := range contexts {
-		latest := map[string]domain.WorkspaceBinding{}
+		// Only each binding's current version is read, so its version
+		// history never counts against the work bound (H2).
+		var latest []domain.WorkspaceBinding
 		err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
-			pg, err := r.WorkspaceBindingsByContext(c[0], c[1], c[2], p)
+			pg, err := r.CurrentWorkspaceBindingsByContext(c[0], c[1], c[2], p)
 			if err != nil {
 				return 0, store.Cursor{}, false, err
 			}
-			for _, b := range pg.Records {
-				if cur, ok := latest[b.ID]; !ok || b.Version > cur.Version {
-					latest[b.ID] = b
-				}
-			}
+			latest = append(latest, pg.Records...)
 			return len(pg.Records), pg.Next, pg.More, nil
 		})
 		if err != nil {
