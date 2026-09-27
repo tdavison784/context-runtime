@@ -177,6 +177,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"K1StableLiveProofsNeverBlockSatisfaction_DUR43", TestK1StableLiveProofsNeverBlockSatisfaction_DUR43, true},
 		{"K1PropertyEffectiveSatisfactionIsValid", TestK1PropertyEffectiveSatisfactionIsValid, true},
 		{"K1SettlementWorker", TestK1SettlementWorker, false},
+		{"K1SettleBeforeRetire", TestK1SettleBeforeRetire, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {

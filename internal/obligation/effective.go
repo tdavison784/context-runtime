@@ -39,3 +39,8 @@ func proofDerivedValid(r store.SemanticReader, proofID string) (bool, error) {
 func (s *Service) SettlePendingTx(tx store.Tx, actor domain.Principal, max int) (settled int, more bool, err error) {
 	return 0, false, nil
 }
+
+// SettleBeforeRetireTx is graph's PendingSettler hook (K1 A3, ruling M2).
+func (s *Service) SettleBeforeRetireTx(tx store.Tx, target domain.ObligationRef) error {
+	return nil
+}

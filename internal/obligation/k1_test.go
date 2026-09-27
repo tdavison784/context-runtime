@@ -394,3 +394,41 @@ func TestK1SettlementWorker(t *testing.T) {
 		t.Errorf("worker touched a re-satisfied version: %+v", o)
 	}
 }
+
+// K1 A3 / ruling M2: before graph retires a version, SettleBeforeRetireTx
+// records the same exact-keyed settlement for a pending one, and does
+// nothing for a valid version or on a repeat call.
+func TestK1SettleBeforeRetire(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	call := func() {
+		t.Helper()
+		if err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+			return f.s.SettleBeforeRetireTx(tx, f.sysTests)
+		}); err != nil {
+			t.Fatalf("SettleBeforeRetireTx: %v", err)
+		}
+	}
+	before := len(f.history(t, f.sysTests))
+	call()
+	if n := len(f.history(t, f.sysTests)); n != before {
+		t.Errorf("valid version: %d new transitions", n-before)
+	}
+	f.r.set(t, f.fixture, hashOf("W2"), false)
+	cause := f.repo1Update()
+	before = len(f.history(t, f.sysTests))
+	call()
+	h := f.history(t, f.sysTests)
+	if len(h) != before+1 {
+		t.Fatalf("pending version: %d new transitions, want 1", len(h)-before)
+	}
+	runtime := domain.Principal{SessionID: testSession, Authority: domain.AuthoritySystem}
+	if last := h[len(h)-1]; last.Cause != domain.CauseResourceInvalidation || last.CauseRecordID != cause || last.Actor != runtime {
+		t.Errorf("settlement = %+v", last)
+	}
+	call()
+	if n := len(f.history(t, f.sysTests)); n != len(h) {
+		t.Errorf("repeat call wrote %d transitions", n-len(h))
+	}
+}
