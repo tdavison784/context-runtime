@@ -122,3 +122,42 @@ func TestDUR31ReportsIgnoreUntouchedLiveState(t *testing.T) {
 		t.Errorf("ALL-paths report kept the file proof: %+v", o)
 	}
 }
+
+// DUR-3.1 (B), commander ruling: subject-state applicability is derived
+// exactly at read from authoritative resource state, never marked by
+// reports. A file state stays CURRENT across unrelated edits, is STALE once
+// its path changes and CURRENT again when the path's content returns; a
+// tests state follows the workspace fingerprint; lost freshness is UNKNOWN.
+func TestDUR31SubjectApplicabilityIsDerived(t *testing.T) {
+	f := newEvalFixture(t)
+	f.resourceReport(t, "W-a", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	file := fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, "")
+	f.observeTests(t, file, domain.OutcomePass, hashOf("H1"), nil)
+	tests := f.target
+	f.observeTests(t, tests, domain.OutcomePass, hashOf("W-a"), nil)
+	want := func(step string, target domain.TargetSpec, a domain.ApplicabilityState) {
+		t.Helper()
+		if st, ok := f.subject(t, target); !ok || st.Applicability != a {
+			t.Errorf("%s: applicability = %s (found %v), want %s", step, st.Applicability, ok, a)
+		}
+	}
+	want("filed", file, domain.ApplicabilityCurrent)
+	want("filed", tests, domain.ApplicabilityCurrent)
+	f.resourceReport(t, "W-b", false, false, []string{"docs/b.md"})
+	want("unrelated edit", file, domain.ApplicabilityCurrent)
+	want("fingerprint moved", tests, domain.ApplicabilityStale)
+	f.resourceReport(t, "W-a", false, false, []string{"docs/a.md"})
+	want("path changed without content", file, domain.ApplicabilityStale)
+	want("fingerprint reverted", tests, domain.ApplicabilityCurrent)
+	f.resourceReport(t, "W-c", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	want("content restored", file, domain.ApplicabilityCurrent)
+	// A skipped revision loses freshness (P3-19).
+	f.r.n++
+	gap := domain.ReportResourceChangeIntent{RequestID: "dur31-gap", ResourceID: "repo1", ExpectedRevision: f.r.rev,
+		ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 2, WorkspaceFingerprint: hashOf("W-c"), ChangedPaths: []string{"docs/b.md"}}
+	if _, err := f.s.report(t, f.st, f.harness, gap); err != nil {
+		t.Fatal(err)
+	}
+	want("freshness lost", file, domain.ApplicabilityUnknown)
+	want("freshness lost", tests, domain.ApplicabilityUnknown)
+}

@@ -174,3 +174,9 @@ func (s *Service) VisibleObligations(tx store.ReadTx, viewer domain.Principal, t
 	}
 	return out, nil
 }
+
+// SubjectApplicability is a subject state's applicability to the current
+// authoritative resource state.
+func (s *Service) SubjectApplicability(tx store.ReadTx, st domain.SubjectState) (domain.ApplicabilityState, error) {
+	return st.Applicability, nil
+}

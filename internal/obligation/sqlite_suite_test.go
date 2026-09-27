@@ -162,6 +162,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"H2BindingVersionsDoNotWedgeDeclaration", TestH2BindingVersionsDoNotWedgeDeclaration, false},
 		{"SEC310BindingVersionNeedsReporterAuthority", TestSEC310BindingVersionNeedsReporterAuthority, false},
 		{"DUR31ReportsIgnoreUntouchedLiveState", TestDUR31ReportsIgnoreUntouchedLiveState, true},
+		{"DUR31SubjectApplicabilityIsDerived", TestDUR31SubjectApplicabilityIsDerived, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {
