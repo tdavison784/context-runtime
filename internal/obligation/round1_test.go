@@ -295,3 +295,54 @@ func TestSPEC118DirectoryChangeIntersectsFiles(t *testing.T) {
 		t.Errorf("sibling-prefix change invalidated: %+v", o)
 	}
 }
+
+// SEC-1.9: reevaluation never selects, returns, or is shadowed by an
+// observation the caller cannot access.
+func TestSEC19ReevaluateIgnoresHiddenObservation(t *testing.T) {
+	f := newEvalFixture(t)
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	// Agent B's private, newer run on the same subject.
+	b := domain.Principal{SessionID: testSession, WorkflowID: "wf", TaskID: "task", AgentID: "b", Authority: domain.AuthorityHarness}
+	private := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: testSession, TaskID: "task", AgentID: "b"}
+	evB := seedEvidenceAs(t, f.st, "ev-b", private)
+	runN++
+	in := runIntent(fmt.Sprintf("run-%d", runN), "exec-b", f.target)
+	in.Access = private
+	runB, err := f.registerRun(t, b, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.observe(t, b, obsIntent("obs-b", runB, evB.ID, domain.OutcomePass, hashOf("W1"))); err != nil {
+		t.Fatal(err)
+	}
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	res, err := f.reevaluate(t, f.harness, f.sysTests, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range res.Records.IDs {
+		if id == "obs-b" || id == recordID("obs_", "observation", "obs-b") {
+			t.Errorf("reevaluation returned a hidden observation: %v", res.Records.IDs)
+		}
+	}
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Errorf("hidden newer run shadowed the accessible PASS: %+v", o)
+	}
+}
+
+// DUR-1.2 (reevaluation half): evidence selection is independent of run
+// history; more runs than the work bound do not wedge reevaluation.
+func TestDUR12ReevaluateScalesWithLiveState(t *testing.T) {
+	f := newEvalFixture(t)
+	for range 70 {
+		f.report(t, f.newRun(t), domain.OutcomeError, "", nil)
+	}
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	if _, err := f.reevaluate(t, f.harness, f.sysTests, 1); err != nil {
+		t.Fatalf("reevaluation wedged by run history: %v", err)
+	}
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Errorf("not satisfied: %+v", o)
+	}
+}

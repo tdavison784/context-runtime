@@ -117,6 +117,8 @@ func TestSQLiteSuite(t *testing.T) {
 		{"SPEC111ClaimsMustCoverTarget", TestSPEC111ClaimsMustCoverTarget, false},
 		{"SPEC111FixedHashTarget", TestSPEC111FixedHashTarget, false},
 		{"SPEC118DirectoryChangeIntersectsFiles", TestSPEC118DirectoryChangeIntersectsFiles, false},
+		{"SEC19ReevaluateIgnoresHiddenObservation", TestSEC19ReevaluateIgnoresHiddenObservation, true},
+		{"DUR12ReevaluateScalesWithLiveState", TestDUR12ReevaluateScalesWithLiveState, true},
 		{"ObservationStateChain", TestObservationStateChain, true},
 		{"ObservationStateGating", TestObservationStateGating, true},
 		{"MatcherGrantT06", TestMatcherGrantT06, true},
