@@ -689,3 +689,63 @@ VALUES('s','task','OBSERVATION','sub','TASK','s','','task','','obs')`); err != n
 		t.Errorf("OBSERVATION pointer after 0027: %v", err)
 	}
 }
+
+// TestInterruptedReconciliationRollsBack checks migration 0026 under a
+// failure after its Go step wrote: the migration's transaction rolls back
+// every reconciliation write, the session sequence and marker, and a later
+// open reconciles exactly once (P3-41, ADR 3 interrupted-migration rule).
+func TestInterruptedReconciliationRollsBack(t *testing.T) {
+	l := openLegacy(t, 25)
+	o := storetest.NewObligation("s", "o-matcher", 1, 1, "src")
+	o.Status, o.EvidenceIDs, o.Revision = domain.ObligationSatisfied, []string{"ev"}, 2
+	l.insert("obligation", o, nil)
+	tr := storetest.NewTransition("s", "t-matcher", "o-matcher", 1, 4, domain.ObligationUnresolved, domain.ObligationSatisfied)
+	tr.EvidenceIDs, tr.Matcher, tr.GrantID = []string{"ev"}, &domain.MatcherRef{Name: "tests_pass", Version: "1"}, "g"
+	l.insert("obligation_transition", tr, nil)
+
+	real := migrationSteps[26]
+	t.Cleanup(func() { migrationSteps[26] = real })
+	migrationSteps[26] = migrationStep{id: real.id, run: func(ctx context.Context, c *sql.Conn) error {
+		if err := real.run(ctx, c); err != nil {
+			return err
+		}
+		return errors.New("crash after the step wrote")
+	}}
+	if _, err := Open(context.Background(), l.path); err == nil {
+		t.Fatal("open succeeded through a failing migration step")
+	}
+	var status string
+	var lastSeq, marker, reconciled int
+	queries := []struct {
+		q   string
+		out any
+	}{
+		{"SELECT f_status FROM rec_obligation WHERE id='o-matcher'", &status},
+		{"SELECT last_seq FROM sessions WHERE session_id='s'", &lastSeq},
+		{"SELECT COUNT(*) FROM schema_migrations WHERE version>=26", &marker},
+		{"SELECT COUNT(*) FROM rec_obligation_transition WHERE f_cause='UPGRADE_RECONCILIATION'", &reconciled},
+	}
+	for _, q := range queries {
+		if err := l.db.QueryRow(q.q).Scan(q.out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status != "SATISFIED" || lastSeq != 100 || marker != 0 || reconciled != 0 {
+		t.Errorf("after a failed step: status %s, last_seq %d, markers %d, reconciliations %d; want SATISFIED, 100, 0, 0", status, lastSeq, marker, reconciled)
+	}
+
+	migrationSteps[26] = real
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		trs, err := tx.ObligationTransitions("o-matcher")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(trs) != 2 || tx.LastSeq() != 101 {
+			t.Errorf("after replay: %d transitions, LastSeq %d; want 2 and 101", len(trs), tx.LastSeq())
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
