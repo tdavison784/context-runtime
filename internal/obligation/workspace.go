@@ -124,8 +124,7 @@ func checkWorkspaceContext(tx store.Tx, actor domain.Principal, c domain.Workspa
 // requirement) and its boundary covers the source's. The latest version of
 // each binding ID is considered. More than one applicable binding is
 // ambiguous; candidates that exist but do not apply yield BINDING_AUTHORITY.
-func (s *Service) resolveWorkspace(r store.SemanticReader, source domain.ContextItem) (Workspace, error) {
-	work := s.newBudget()
+func (s *Service) resolveWorkspace(r store.SemanticReader, work *budget, source domain.ContextItem) (Workspace, error) {
 	contexts := [][3]string{{source.ID, "", ""}}
 	if source.TaskID != "" {
 		contexts = append(contexts, [3]string{"", source.TaskID, ""})

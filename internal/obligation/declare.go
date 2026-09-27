@@ -96,7 +96,7 @@ func (s *Service) declarePinned(tx store.Tx, sem store.SemanticTx, actor domain.
 		return nil, err
 	}
 	text := itemText(src)
-	ws, err := s.resolveWorkspace(sem, src)
+	ws, err := s.resolveWorkspace(sem, s.newBudget(), src)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (s *Service) DeclareObligationTx(tx store.Tx, actor domain.Principal, in do
 	if err := requireCurrent(tx, src.ID); err != nil {
 		return domain.MutationResult{}, err
 	}
-	ws, err := s.declaredWorkspace(sem, src, in.WorkspaceBinding)
+	ws, err := s.declaredWorkspace(sem, s.newBudget(), src, in.WorkspaceBinding)
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
@@ -189,9 +189,9 @@ func (s *Service) DeclareObligationTx(tx store.Tx, actor domain.Principal, in do
 // declaredWorkspace resolves an explicitly named binding version, which must
 // be attached to the source or its task and pass the same authority and
 // boundary test as automatic resolution; otherwise it resolves normally.
-func (s *Service) declaredWorkspace(r store.SemanticReader, src domain.ContextItem, ref *domain.WorkspaceBindingRef) (Workspace, error) {
+func (s *Service) declaredWorkspace(r store.SemanticReader, work *budget, src domain.ContextItem, ref *domain.WorkspaceBindingRef) (Workspace, error) {
 	if ref == nil {
-		return s.resolveWorkspace(r, src)
+		return s.resolveWorkspace(r, work, src)
 	}
 	b, err := r.WorkspaceBinding(*ref)
 	if errors.Is(err, domain.ErrNotFound) {

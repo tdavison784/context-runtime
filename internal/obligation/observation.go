@@ -160,7 +160,8 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 	// A run has one closing outcome (DUR-1.1): once it has reported a
 	// complete PASS/FAIL or an ERROR/TIMEOUT/CANCELLED, a further
 	// (possibly contradictory) observation is rejected.
-	closed, err := s.runClosed(sem, run.ID)
+	work := s.newBudget() // one budget for the whole report (DUR-1.12)
+	closed, err := s.runClosed(sem, work, run.ID)
 	if err != nil {
 		return domain.ObservationRecord{}, err
 	}
@@ -196,10 +197,10 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 	if err := sem.InsertObservation(obs); err != nil {
 		return domain.ObservationRecord{}, w.fail(err)
 	}
-	if err := s.deriveState(tx, sem, actor, obs, run, seq); err != nil {
+	if err := s.deriveState(tx, sem, work, actor, obs, run, seq); err != nil {
 		return domain.ObservationRecord{}, w.fail(err)
 	}
-	if err := s.evaluate(tx, sem, actor, obs, run); err != nil {
+	if err := s.evaluate(tx, sem, work, actor, obs, run); err != nil {
 		return domain.ObservationRecord{}, w.fail(err)
 	}
 	return obs, nil
@@ -228,9 +229,9 @@ func closing(o domain.ObservationRecord) bool {
 }
 
 // runClosed reports whether the run already has a closing observation.
-func (s *Service) runClosed(r store.SemanticReader, runID string) (bool, error) {
+func (s *Service) runClosed(r store.SemanticReader, work *budget, runID string) (bool, error) {
 	closed := false
-	err := s.eachPage(s.newBudget(), func(p store.Page) (int, store.Cursor, bool, error) {
+	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
 		pg, err := r.ObservationsByRun(runID, p)
 		if err != nil {
 			return 0, store.Cursor{}, false, err

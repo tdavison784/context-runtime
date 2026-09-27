@@ -16,8 +16,7 @@ import (
 // naming the exact obligation version and matcher version at the mutation's
 // allocated sequence, and a publishable boundary. Missing authority leaves
 // the observation as evidence for later trusted reevaluation.
-func (s *Service) evaluate(tx store.Tx, sem store.SemanticTx, actor domain.Principal, obs domain.ObservationRecord, run domain.ObservationRun) error {
-	work := s.newBudget()
+func (s *Service) evaluate(tx store.Tx, sem store.SemanticTx, work *budget, actor domain.Principal, obs domain.ObservationRecord, run domain.ObservationRun) error {
 	var candidates []domain.ObligationVersion
 	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
 		pg, err := sem.CurrentBoundObligationsBySubject(run.SubjectKey, p)
@@ -91,7 +90,7 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 		if o.Status == domain.ObligationSatisfied && cur != nil && run.Ordinal > curOrdinal {
 			inv := invalidation{cause: domain.CauseProofRejected, causeRecord: obs.ID, requestID: obs.ID, reason: domain.ReasonProofRejected, rule: ProofRejectionRule}
 			seq := tx.NextSeq()
-			if err := s.invalidateProof(tx, sem, actor, seq, *cur, inv); err != nil {
+			if err := s.invalidateProof(tx, sem, work, actor, seq, *cur, inv); err != nil {
 				return nil, err
 			}
 			return []string{recordID("otr_", string(inv.cause), cur.Target.Target().AuthorizationKey, obs.ID)}, nil

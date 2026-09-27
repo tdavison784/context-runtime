@@ -43,7 +43,7 @@ func resolveFor(t *testing.T, s *Service, st store.Store, source domain.ContextI
 		if err != nil {
 			return err
 		}
-		ws, err = s.resolveWorkspace(r, source)
+		ws, err = s.resolveWorkspace(r, s.newBudget(), source)
 		return err
 	})
 	if err != nil {

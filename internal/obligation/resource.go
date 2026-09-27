@@ -148,6 +148,7 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 			c.paths[p] = true
 		}
 	}
+	work := s.newBudget() // one budget for the whole report (DUR-1.12)
 	w := &writes{tx: tx}
 	w.start()
 	if err := sem.InsertResourceUpdate(u); err != nil {
@@ -167,12 +168,12 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 		return domain.MutationResult{}, w.fail(err)
 	}
 	if u.Freshness == domain.ResourceKnown {
-		if err := s.recordPathContents(sem, u, in.PathContents); err != nil {
+		if err := s.recordPathContents(sem, work, u, in.PathContents); err != nil {
 			return domain.MutationResult{}, w.fail(err)
 		}
 	}
 	inv := invalidation{cause: domain.CauseResourceInvalidation, causeRecord: u.ID, requestID: in.RequestID, reason: domain.ReasonResourceChanged, rule: ResourceInvalidationRule}
-	if err := s.invalidateResource(tx, sem, actor, seq, in.ResourceID, c, inv); err != nil {
+	if err := s.invalidateResource(tx, sem, work, actor, seq, in.ResourceID, c, inv); err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: "RESOURCE_UPDATE", IDs: []string{u.ID}}}
@@ -199,8 +200,7 @@ func canonicalLocator(l domain.ResourceLocator) (domain.ResourceLocator, error) 
 
 // recordPathContents stores the reported authoritative content of each path
 // at the update's resulting revision (P3-19). Missing entries assert nothing.
-func (s *Service) recordPathContents(sem store.SemanticTx, u domain.ResourceUpdate, contents []domain.ResourcePathContent) error {
-	work := s.newBudget()
+func (s *Service) recordPathContents(sem store.SemanticTx, work *budget, u domain.ResourceUpdate, contents []domain.ResourcePathContent) error {
 	for _, c := range contents {
 		if err := work.spend(1); err != nil {
 			return err
