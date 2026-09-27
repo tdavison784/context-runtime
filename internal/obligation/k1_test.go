@@ -236,3 +236,72 @@ func TestK1ReadsUseEffectiveStatus(t *testing.T) {
 		t.Errorf("current SATISFIES of a pending version = %+v, %v", cur, err)
 	}
 }
+
+// DUR-4.2 (superseded by K1): resource-bound proofs that also claim
+// WORKSPACE on other resources never wedge a report. Resync, edit and gap
+// reports on the shared resource all succeed and every obligation derives
+// UNRESOLVED.
+func TestK1MultiResourceProofsNeverWedgeReports_DUR42(t *testing.T) {
+	f := newResourceFixture(t)
+	others := []string{"repo3", "repo4", "repo5", "repo6", "repo7", "repo8", "repo9"}
+	for i, res := range others {
+		seedResource(t, f.st, res, f.reporter)
+		in := domain.ReportResourceChangeIntent{RequestID: fmt.Sprintf("init-%s", res), ResourceID: res, ResultingAuthoritativeRevision: 1,
+			WorkspaceFingerprint: hashOf(fmt.Sprintf("O%d", i)), Resynchronization: true}
+		if _, err := f.s.report(t, f.st, f.reporter, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refs := []domain.ObligationRef{f.user, f.sysTests}
+	for i := range 6 {
+		src := seedPinned(t, f.st, fmt.Sprintf("d42src%d", i), fmt.Sprintf("d42dir%d", i), domain.AuthorityUser, "Keep the suite green.")
+		refs = append(refs, f.repo2Obligation(t, src.ID, f.harness))
+	}
+	for _, ref := range refs {
+		o := f.status(t, ref)
+		rs := f.state(t)
+		in := intent(ref, o.Revision, domain.ObligationSatisfied)
+		in.AssertionMode = domain.AssertionResourceBound
+		in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyWorkspace, ResourceID: "repo2", ResourceRevision: rs.AuthoritativeRevision, Fingerprint: rs.WorkspaceFingerprint}}
+		for i, res := range others {
+			in.Resources = append(in.Resources, domain.ResourceClaim{Kind: domain.DependencyWorkspace, ResourceID: res, ResourceRevision: 1, Fingerprint: hashOf(fmt.Sprintf("O%d", i))})
+		}
+		if _, err := f.s.transition(t, f.st, f.system, in); err != nil {
+			t.Fatalf("multi-resource assertion %s: %v", ref.ObligationID, err)
+		}
+	}
+	f.resync(t, f.auth+1, hashOf("W-resync"))
+	f.edit(t, hashOf("W-edit"))
+	gap := domain.ReportResourceChangeIntent{ExpectedRevision: f.rev, ExpectedAuthoritativeRevision: f.auth, ResultingAuthoritativeRevision: f.auth + 2, WorkspaceFingerprint: hashOf("W-gap")}
+	if _, err := f.send(t, gap); err != nil {
+		t.Fatalf("gap report: %v", err)
+	}
+	for _, ref := range refs {
+		if st, _ := f.effective(t, ref); st != domain.ObligationUnresolved {
+			t.Errorf("%s effective %s after its workspace moved", ref.ObligationID, st)
+		}
+	}
+}
+
+// DUR-4.3 (superseded by K1): live proofs on files that never change never
+// block a new satisfaction on the same resource, and nothing is refused
+// silently.
+func TestK1StableLiveProofsNeverBlockSatisfaction_DUR43(t *testing.T) {
+	f := newEvalFixture(t)
+	f.resourceReport(t, "W1", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	rev := f.r.auth
+	for i := range 8 {
+		ref := f.fileObligation(t, fmt.Sprint(60+i))
+		if err := f.assertPath(t, ref, rev, "H1"); err != nil {
+			t.Fatalf("path assertion %d: %v", i, err)
+		}
+	}
+	for i := range 5 {
+		f.resourceReport(t, "W1", false, false, []string{fmt.Sprintf("other/%d.md", i)})
+	}
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	if st, _ := f.effective(t, f.sysTests); st != domain.ObligationSatisfied {
+		t.Errorf("granted PASS with 8 live path proofs on the resource: effective %s", st)
+	}
+}

@@ -175,6 +175,8 @@ func TestSQLiteSuite(t *testing.T) {
 		{"K1DependencySemantics", TestK1DependencySemantics, true},
 		{"K1InlineSettleBeforeTransition", TestK1InlineSettleBeforeTransition, true},
 		{"K1ReadsUseEffectiveStatus", TestK1ReadsUseEffectiveStatus, true},
+		{"K1MultiResourceProofsNeverWedgeReports_DUR42", TestK1MultiResourceProofsNeverWedgeReports_DUR42, false},
+		{"K1StableLiveProofsNeverBlockSatisfaction_DUR43", TestK1StableLiveProofsNeverBlockSatisfaction_DUR43, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {
