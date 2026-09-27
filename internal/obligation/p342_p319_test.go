@@ -26,11 +26,11 @@ func p342BothStores(t *testing.T, fn func(*testing.T)) {
 }
 
 // p342ResourceState reads repo1's resource state, reporting the read error.
-func p342ResourceState(t *testing.T, f fixture) (domain.ResourceState, error) {
+func p342ResourceState(t *testing.T, st *testStore) (domain.ResourceState, error) {
 	t.Helper()
 	var rs domain.ResourceState
 	var err error
-	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+	_ = st.View(t.Context(), testSession, func(tx store.ReadTx) error {
 		r, _ := store.ReadSemantic(tx)
 		rs, err = r.ResourceState("repo1")
 		return nil
@@ -66,7 +66,7 @@ func testP3_19InitialDelayedW1Pass(t *testing.T) {
 	if stored.ID != obsA.ID || stored.Outcome != domain.OutcomePass {
 		t.Fatalf("delayed PASS not stored as evidence: %+v", stored)
 	}
-	if _, err := p342ResourceState(t, f); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := p342ResourceState(t, f.st); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("PASS before any report established a resource state: %v", err)
 	}
 	if _, ok := f.subject(t, target); ok {
@@ -87,7 +87,7 @@ func testP3_19InitialDelayedW1Pass(t *testing.T) {
 	// state is not replaced by the older fingerprint's newer ordinal.
 	r.set(t, f, hashOf("W2"), false)
 	f.observeTests(t, target, domain.OutcomePass, hashOf("W1"), nil)
-	rs, err := p342ResourceState(t, f)
+	rs, err := p342ResourceState(t, f.st)
 	if err != nil || rs.WorkspaceFingerprint != hashOf("W2") || rs.AuthoritativeRevision != 2 {
 		t.Fatalf("delayed W1 PASS moved the authoritative state: %+v err=%v", rs, err)
 	}
