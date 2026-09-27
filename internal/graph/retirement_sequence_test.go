@@ -52,7 +52,7 @@ func TestRetirementAuthorizesAndWritesSameExactSequence(t *testing.T) {
 	ref := domain.ObligationGrantTarget("s", "o", 2)
 	f := &retirementFixture{last: 10, version: domain.ObligationVersion{SessionID: "s", ObligationID: "o", Version: 2, Revision: 7, Current: true, SourceAuthority: domain.AuthoritySystem, Access: domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: "s"}}}
 	f.grant = domain.MutationGrant{ID: "g", SessionID: "s", Action: domain.ActionReplaceDirective, Targets: []domain.GrantTarget{ref}, Issuer: domain.Principal{SessionID: "s", Authority: domain.AuthoritySystem}, Grantee: &actor, IssuedSeq: 1, ExpiresAtSeq: 11}
-	plan, err := planObligationRetirement(f, actor, "source")
+	plan, err := planObligationRetirement(f, actor, "source", nil)
 	if err != nil || len(plan) != 1 || plan[0].seq != 11 || len(f.written) != 0 {
 		t.Fatalf("plan = %v, %v", plan, err)
 	}
@@ -63,16 +63,16 @@ func TestRetirementAuthorizesAndWritesSameExactSequence(t *testing.T) {
 	if f.written[0].Seq != 11 || f.written[0].GrantID != "g" {
 		t.Fatal("authorization and audit diverged")
 	}
-	if _, err := planObligationRetirement(f, actor, "source"); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+	if _, err := planObligationRetirement(f, actor, "source", nil); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 		t.Fatal("expired grant accepted", err)
 	}
 	f.last, f.grant.ExpiresAtSeq = 10, 0
 	f.grant.Targets = []domain.GrantTarget{domain.ObligationGrantTarget("s", "o", 1)}
-	if _, err := planObligationRetirement(f, actor, "source"); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+	if _, err := planObligationRetirement(f, actor, "source", nil); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 		t.Fatal("grant followed latest version", err)
 	}
 	f.grant.Targets, f.grant.TargetIDs = nil, []string{"o"}
-	if _, err := planObligationRetirement(f, actor, "source"); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+	if _, err := planObligationRetirement(f, actor, "source", nil); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 		t.Fatal("legacy stable-ID grant accepted", err)
 	}
 }

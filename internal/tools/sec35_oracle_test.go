@@ -31,6 +31,10 @@ func TestOversizedCheckpointProbeIsNotAnOracle_SEC35(t *testing.T) {
 			if !errors.Is(err, domain.ErrInvalidRecord) {
 				t.Fatalf("owner registered a checkpoint under a runtime request ID: %v", err)
 			}
+			// The entry refuses runtime IDs, so write the owner's runtime receipt
+			// as ingest's runtime path would; the probes must not tell it apart
+			// from an absent one (SEC-4.11: otherwise both probes miss).
+			insertRuntimeReceipt(t, st, owner, registered)
 			b := seedAgentInvocation(t, st, "b")
 			text := "probe"
 			if big {
@@ -54,4 +58,44 @@ func TestOversizedCheckpointProbeIsNotAnOracle_SEC35(t *testing.T) {
 func securityStores(t *testing.T, f func(*testing.T, store.Store)) {
 	t.Run("memory", func(t *testing.T) { s := memory.New(); t.Cleanup(func() { s.Close() }); f(t, s) })
 	t.Run("sqlite", func(t *testing.T) { f(t, sqlitetest.Open(t)) })
+}
+
+// insertRuntimeReceipt writes a MutationMembership receipt under the
+// current-format runtime request ID registered, owned by owner, in the
+// transaction that allocates a fresh event sequence for it.
+func insertRuntimeReceipt(t *testing.T, st store.Store, owner domain.Principal, registered string) {
+	t.Helper()
+	if err := st.Update(testContext, "s", func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		rid, err := domain.MutationReceiptKey(owner.SessionID, domain.MutationMembership, registered)
+		if err != nil {
+			return err
+		}
+		args := []byte("x")
+		h, err := domain.MutationRequestHash(owner, domain.MutationMembership, methodHarnessCheckpoint, args)
+		if err != nil {
+			return err
+		}
+		return sem.InsertMutationReceipt(domain.MutationReceipt{
+			SemanticMeta: domain.SemanticMeta{ID: rid, SessionID: owner.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+			Family:       domain.MutationMembership, RequestID: registered, Principal: owner, CanonicalMethod: methodHarnessCheckpoint,
+			CanonicalArguments: args, RequestHashVersion: domain.RequestHashV3, RequestHash: h, PolicyVersion: "p",
+			Result: domain.MutationResult{Records: &domain.RecordResult{Kind: "MEMBERSHIP", IDs: []string{"chk_x"}}},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.View(testContext, "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		_, err = r.MutationReceipt(domain.MutationMembership, registered)
+		return err
+	}); err != nil {
+		t.Fatalf("runtime receipt not stored: %v", err)
+	}
 }

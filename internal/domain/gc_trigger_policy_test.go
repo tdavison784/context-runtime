@@ -58,22 +58,21 @@ func TestObligationDeclarationLimitNeverExceedsConsumers(t *testing.T) {
 	}
 }
 
-// MaxLiveProofDependents bounds live non-FIXED proof dependency rows per
-// resource so invalidating all of them fits half the transaction work
-// budget at 5 units per row; it is required and finite.
-func TestMaxLiveProofDependentsFitsTheWorkBudget(t *testing.T) {
+// MaxLiveProofDependents is recorded (migration 0046) but no longer
+// validated: K1 derives proof validity at read from monotone pointers
+// instead of fanning invalidation out over live dependency rows, so a
+// recorded policy validates whatever its dependents count and work budget —
+// including a 0046-backfilled 0 and the smallest work budgets (K1 A6,
+// GLM-2, DUR-4.6).
+func TestMaxLiveProofDependentsRecordedNotValidated(t *testing.T) {
 	p := semanticPolicy()
-	p.MaxTransactionWork = 100 // half = 50, so at most 10 rows
-	for _, n := range []int{1, 10} {
-		p.MaxLiveProofDependents = n
-		if err := p.Validate(); err != nil {
-			t.Errorf("MaxLiveProofDependents %d rejected: %v", n, err)
-		}
-	}
-	for _, n := range []int{0, -1, 11} {
-		p.MaxLiveProofDependents = n
-		if p.Validate() == nil {
-			t.Errorf("MaxLiveProofDependents %d accepted with MaxTransactionWork 100", n)
+	for _, work := range []int{1, 2, 3, 5, 9} {
+		p.MaxTransactionWork = work
+		for _, n := range []int{0, 1, work, 256, 1 << 20} {
+			p.MaxLiveProofDependents = n
+			if err := p.Validate(); err != nil {
+				t.Errorf("MaxTransactionWork %d with MaxLiveProofDependents %d rejected: %v", work, n, err)
+			}
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/gcqueue"
+	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -465,4 +466,21 @@ func (r *run) reportUnverified(si, pi int, rng domain.ByteRange, access domain.A
 		r.unverified[id] = true
 		r.diags.add(domain.Diagnostic{SpanIndex: si, PartIndex: pi, Code: domain.ItemUnverified, Reason: domain.ReasonUnverifiedItem, Range: rng}, access)
 	}
+}
+
+// The obligation service settles pending invalidations inline before graph
+// retires a replaced source's obligations (ruling M2).
+var _ graph.PendingSettler = (*obligation.Service)(nil)
+
+// graphOptions are the options of every graph supersession this run makes:
+// the run's obligation service (the configured one, or one built from the
+// recorded policy) settles before retirement (M2, K1 A3). A run with no
+// semantic policy has no obligation service, and graph fails closed on a
+// pending settlement.
+func (r *run) graphOptions() []graph.Option {
+	svc, err := r.obligations()
+	if err != nil {
+		return nil
+	}
+	return []graph.Option{graph.WithPendingSettler(svc)}
 }

@@ -25,6 +25,32 @@ type ResourceReader interface {
 	// component, independent of history (H2, DUR-2.2).
 	LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error)
 	ResourcePathState(locator domain.ResourceLocator) (domain.ResourcePathState, error)
+	// LastWorkspaceDivergenceRev is resourceID's monotone write-time
+	// divergence pointer (K1 A1): the ResultingAuthoritativeRevision of
+	// the latest update whose workspace fingerprint changed or whose
+	// freshness became UNKNOWN, raised in that report's own O(1)
+	// transaction. 0 when never raised (never an error). The pointer only
+	// rises, so a WORKSPACE dependency's ResourceRevision below it is
+	// invalid for good.
+	LastWorkspaceDivergenceRev(resourceID string) (uint64, error)
+	// LastAffectingRev is the (resourceID, key) monotone write-time
+	// pointer (K1 A1): the latest revision of an update that touched key
+	// with content different from the path's prior content. key is a
+	// canonical resource-relative path or one of its ancestor
+	// directories; "" is the ALL key, raised by every UNKNOWN and
+	// ALL-paths report. A same-content path report does not raise its
+	// key; 0 when never raised (never an error).
+	LastAffectingRev(resourceID, key string) (uint64, error)
+	// FirstWorkspaceDivergenceAfter is the earliest divergence update of
+	// resourceID with resulting revision > rev (K1 A1): a keyset seek
+	// over the divergence raises, never a scan; ErrNotFound when none.
+	// Settlement takes its update ID as the cause (K1-api.2).
+	FirstWorkspaceDivergenceAfter(resourceID string, rev uint64) (domain.ResourceUpdate, error)
+	// FirstAffectingUpdateAfter is the earliest update raising
+	// (resourceID, key)'s pointer with revision > rev (K1 A1): a keyset
+	// seek over that exact key, never a prefix scan; ErrNotFound when
+	// none.
+	FirstAffectingUpdateAfter(resourceID, key string, rev uint64) (domain.ResourceUpdate, error)
 	WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error)
 	WorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
 	// CurrentWorkspaceBindingsByContext lists each binding ID once, at its
@@ -32,6 +58,10 @@ type ResourceReader interface {
 	// order of that version: a write-time pointer, so pages count live
 	// bindings, not versions (H2).
 	CurrentWorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
+	// LatestWorkspaceBinding is the latest version of binding ID id by its
+	// write-time pointer, whatever its context or history, ErrNotFound when
+	// the ID was never bound: one exact-key read (SEC-4.10, SPEC-4.8).
+	LatestWorkspaceBinding(id string) (domain.WorkspaceBinding, error)
 	Observation(id string) (domain.ObservationRecord, error)
 	ObservationRun(id string) (domain.ObservationRun, error)
 	// Run ordinal is the allocated registration Seq (W4 Q-5), so Page's
@@ -49,8 +79,9 @@ type ResourceReader interface {
 	// with one keyed lookup (H1, H2).
 	SubjectHighWater(subjectKey, taskID string, access domain.AccessBoundary) (uint64, error)
 	SubjectState(subjectKey, taskID string, access domain.AccessBoundary) (domain.SubjectState, error)
-	// Only CURRENT states, in first-filing order: STALE/UNKNOWN history is
-	// not a live dependent and never counts toward a page (G2, SEC-1.8).
+	// Every state filed for the resource, whatever its applicability, in
+	// first-filing order: applicability is a filing-time fact, not a
+	// read-time filter (L1, SEC-4.11, DUR-4.7).
 	SubjectStatesByResource(resourceID string, page Page) (ResultPage[domain.SubjectState], error)
 }
 type ResourceWriter interface {
