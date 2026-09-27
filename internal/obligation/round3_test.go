@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
-	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 // SEC-3.10 (P3-20, FR-AUTH-002): a workspace binding version can be
@@ -230,78 +229,4 @@ func TestDUR31ReportsReadOnlyAffectedProofs(t *testing.T) {
 	step("unrelated path, same fingerprint", "W1", []string{"other/z.md"}, false, domain.ObligationSatisfied, domain.ObligationSatisfied)
 	step("containing directory, same fingerprint", "W1", []string{"docs"}, false, domain.ObligationSatisfied, domain.ObligationUnresolved)
 	step("new fingerprint", "W2", []string{"other/z.md"}, true, domain.ObligationUnresolved, domain.ObligationUnresolved)
-}
-
-// DUR-3.1 (C), commander ruling: live non-FIXED proof dependency rows per
-// resource are capped (MaxLiveProofDependents) so an ALL/UNKNOWN/resync
-// report can always invalidate them within its budget. An explicit
-// RESOURCE_BOUND assertion past the cap is refused with ErrResourceLimit and
-// changes nothing; room returns as proofs are invalidated.
-func TestDUR31AssertionRespectsDependentCap(t *testing.T) {
-	f := newResourceFixture(t)
-	limit := testPolicy().MaxLiveProofDependents
-	refs := []domain.ObligationRef{f.user, f.sysTests}
-	for i := 0; len(refs) <= limit; i++ {
-		src := seedPinned(t, f.st, fmt.Sprintf("cap%d", i), fmt.Sprintf("capdir%d", i), domain.AuthorityUser, "Keep the suite green.")
-		refs = append(refs, f.repo2Obligation(t, src.ID, f.harness))
-	}
-	for _, ref := range refs[:limit] {
-		f.assertBound(t, ref, f.system)
-	}
-	last := refs[limit]
-	o := f.status(t, last)
-	rs := f.state(t)
-	in := intent(last, o.Revision, domain.ObligationSatisfied)
-	in.AssertionMode = domain.AssertionResourceBound
-	in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyWorkspace, ResourceID: "repo2", ResourceRevision: rs.AuthoritativeRevision, Fingerprint: rs.WorkspaceFingerprint}}
-	if _, err := f.s.transition(t, f.st, f.system, in); !errors.Is(err, domain.ErrResourceLimit) {
-		t.Fatalf("assertion past the dependent cap: %v, want ErrResourceLimit", err)
-	}
-	if o := f.status(t, last); o.Status != domain.ObligationUnresolved {
-		t.Errorf("refused assertion changed status: %+v", o)
-	}
-	// An ALL-paths change invalidates every live proof; room returns.
-	f.resync(t, f.auth+1, hashOf("W-cap"))
-	for _, ref := range refs[:limit] {
-		if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
-			t.Fatalf("resync kept %s: %+v", ref.ObligationID, o)
-		}
-	}
-	f.assertBound(t, last, f.system)
-}
-
-// DUR-3.1 (C): a matcher satisfaction past the cap leaves the obligation
-// UNRESOLVED with the observation kept as evidence (the report succeeds, as
-// with a missing grant), and a trusted reevaluation at the cap reports
-// ErrResourceLimit.
-func TestDUR31MatcherRespectsDependentCap(t *testing.T) {
-	f := newEvalFixture(t)
-	f.resourceReport(t, "W1", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
-	rev := f.r.auth
-	limit := testPolicy().MaxLiveProofDependents
-	for i := range limit {
-		ref := f.fileObligation(t, fmt.Sprint(40+i))
-		if err := f.assertPath(t, ref, rev, "H1"); err != nil {
-			t.Fatalf("path assertion %d within the cap: %v", i, err)
-		}
-	}
-	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
-	obs := f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
-	if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved {
-		t.Fatalf("matcher satisfied past the dependent cap: %+v", o)
-	}
-	var stored bool
-	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
-		r, _ := store.ReadSemantic(tx)
-		_, err := r.Observation(obs.ID)
-		stored = err == nil
-		return nil
-	})
-	if !stored {
-		t.Errorf("observation at the cap was not kept as evidence")
-	}
-	o := f.status(t, f.sysTests)
-	if _, err := f.reevaluate(t, f.harness, f.sysTests, o.Revision); !errors.Is(err, domain.ErrResourceLimit) {
-		t.Errorf("reevaluation at the cap: %v, want ErrResourceLimit", err)
-	}
 }

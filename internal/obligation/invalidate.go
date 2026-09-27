@@ -188,14 +188,24 @@ func (s *Service) invalidateProof(tx store.Tx, sem store.SemanticTx, work *budge
 	if err != nil {
 		return err
 	}
-	if !o.Current || o.Status != domain.ObligationSatisfied || o.CurrentProofID != p.ID {
-		return nil
+	id := recordID("otr_", string(inv.cause), p.Target.Target().AuthorizationKey, inv.causeRecord)
+	_, err = s.releaseProof(tx, sem, work, actor, seq, o, p, inv, id)
+	return err
+}
+
+// releaseProof writes the restricted SATISFIED->UNRESOLVED transition of
+// version o off proof p with the given identity and returns the updated
+// version. A version that is not current or no longer rests on p is
+// returned unchanged: a current proof is recorded only while SATISFIED, so
+// no stored-status comparison is needed (K1 A2).
+func (s *Service) releaseProof(tx store.Tx, sem store.SemanticTx, work *budget, actor domain.Principal, seq uint64, o domain.ObligationVersion, p domain.ApplicabilityProof, inv invalidation, id string) (domain.ObligationVersion, error) {
+	if !o.Current || o.CurrentProofID == "" || o.CurrentProofID != p.ID {
+		return o, nil
 	}
 	origin, err := s.originOf(sem, work, o, p.TransitionID)
 	if err != nil {
-		return err
+		return o, err
 	}
-	target := p.Target.Target()
 	t := domain.ObligationTransition{
 		Cause:                  inv.cause,
 		PriorProofID:           p.ID,
@@ -203,7 +213,7 @@ func (s *Service) invalidateProof(tx store.Tx, sem store.SemanticTx, work *budge
 		RequestID:              inv.requestID,
 		OriginAuthorizationRef: &origin,
 		ReasonCode:             inv.reason,
-		ID:                     recordID("otr_", string(inv.cause), target.AuthorizationKey, inv.causeRecord),
+		ID:                     id,
 		SessionID:              o.SessionID,
 		ObligationID:           o.ObligationID,
 		Version:                o.Version,
@@ -227,11 +237,12 @@ func (s *Service) invalidateProof(tx store.Tx, sem store.SemanticTx, work *budge
 	} else {
 		d.ObservationID = inv.causeRecord
 	}
-	if _, err := appendTransition(tx, sem, o, t, d, o.Revision); err != nil {
+	after, err := appendTransition(tx, sem, o, t, d, o.Revision)
+	if err != nil {
 		tx.Poison(err)
-		return err
+		return o, err
 	}
-	return nil
+	return after, nil
 }
 
 // originOf returns the historical authorization of the transition that
