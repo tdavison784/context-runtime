@@ -99,9 +99,12 @@ func TestForeignDerivedRequestIDIsNoReceiptOracle(t *testing.T) {
 	if present == nil || absent == nil || okPresent || okAbsent || errors.Is(present, domain.ErrEventIDConflict) || present.Error() != absent.Error() {
 		t.Fatalf("receipt existence observable: present=%v absent=%v", present, absent)
 	}
-	// The owner's own derived ID still reaches exact replay checking.
+	// Retrieval never uses runtime request IDs, so even the owner's derived
+	// ID is refused before any lookup, present or absent (SEC-3.6).
 	i.Origin.Holder, i.Origin.ConversationID = owner, domain.ConversationIDFor(owner.TaskID, owner.AgentID)
-	if _, _, err := replayRetrieval(replayReader{}, owner, i, leasePolicy()); err != nil {
-		t.Fatalf("owner derived ID rejected: %v", err)
+	_, _, ownPresent := replayRetrieval(replayReader{receipt: receipt}, owner, i, leasePolicy())
+	_, _, ownAbsent := replayRetrieval(replayReader{}, owner, i, leasePolicy())
+	if !errors.Is(ownPresent, domain.ErrInvalidRecord) || ownAbsent == nil || ownPresent.Error() != ownAbsent.Error() {
+		t.Fatalf("owner runtime request: present=%v absent=%v", ownPresent, ownAbsent)
 	}
 }

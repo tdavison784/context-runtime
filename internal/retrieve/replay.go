@@ -30,6 +30,11 @@ func replayRetrieval(r retrievalReplayReader, actor domain.Principal, i Admissio
 	// pre-derivation receipt (DUR-2.8). Anyone else, and any new request, is
 	// checked for request-ID ownership before existence can change the
 	// outcome, so another principal's receipt is no oracle (SEC-2.8).
+	// Retrieval never uses runtime request IDs: a nil transaction refuses any
+	// current-format runtime ID before the lookup (SEC-3.6).
+	if err := domain.CheckRequestBeforeLookup(nil, actor, i.Rehydrate.RequestID); err != nil {
+		return domain.RetrievalResult{}, false, err
+	}
 	receipt, err := r.MutationReceipt(domain.MutationRetrieval, i.Rehydrate.RequestID)
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return domain.RetrievalResult{}, false, err
@@ -39,6 +44,10 @@ func replayRetrieval(r retrievalReplayReader, actor domain.Principal, i Admissio
 			return domain.RetrievalResult{}, false, idErr
 		}
 		if err != nil {
+			// A new request: never a reserved runtime namespace (SEC-3.7).
+			if err := domain.ValidateNewRequestID(nil, actor, i.Rehydrate.RequestID); err != nil {
+				return domain.RetrievalResult{}, false, err
+			}
 			return domain.RetrievalResult{}, false, nil
 		}
 		return domain.RetrievalResult{}, false, domain.ErrEventIDConflict

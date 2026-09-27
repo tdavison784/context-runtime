@@ -55,3 +55,12 @@ func (g *semanticGuard) PutGCProgress(v domain.GCProgress, expected uint64) (dom
 	g.base.noteWrite(err)
 	return out, err
 }
+
+func (g *semanticGuard) PutGCQueueCursor(v domain.GCQueueCursor, expected uint64) (domain.GCQueueCursor, error) {
+	if g.base.err != nil {
+		return domain.GCQueueCursor{}, g.base.err
+	}
+	out, err := g.backend.PutGCQueueCursor(v, expected)
+	g.base.noteWrite(err)
+	return out, err
+}

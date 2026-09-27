@@ -66,15 +66,36 @@ func MutationReceiptID(tx SeqAllocator, owner Principal, family MutationFamily, 
 	return MutationReceiptKey(owner.SessionID, family, requestID)
 }
 
-// ValidateCallerReplayID rejects current runtime operation IDs at standalone
-// entry points, before receipt lookup. Their authenticated origin may differ
-// from the lowered actor stored on a receipt (SEC-3.6). Only pre-derivation
-// legacy IDs can qualify for replay-before-namespace compatibility.
-func ValidateCallerReplayID(requestID string) error {
-	if _, ok := runtimeRequestSeq(requestID); ok {
-		return ValidateCallerRequestID(requestID)
+// CheckRequestBeforeLookup runs before any mutation-receipt lookup (SEC-3.6).
+// A current-format runtime request ID is never replayed through a service:
+// an event retry replays the event's own receipt and never re-runs its
+// operations. So such an ID is valid only for its owner and only in the
+// transaction that allocated its event sequence. A caller, even one whose
+// principal equals a relay's lowered actor, can neither replay a runtime
+// receipt nor learn whether it exists. Legacy-format and ordinary caller
+// IDs pass; their owner's exact-replay lookup still comes first (DUR-2.8).
+// A nil tx refuses every current-format runtime ID.
+func CheckRequestBeforeLookup(tx SeqAllocator, owner Principal, requestID string) error {
+	seq, ok := runtimeRequestSeq(requestID)
+	if !ok {
+		return nil
+	}
+	if !runtimeRequestIDFor(owner, requestID) || tx == nil || !tx.Allocated(seq) {
+		return invalid("receipt identity: runtime request ID is not this transaction's")
 	}
 	return nil
+}
+
+// ValidateNewRequestID checks the request ID of a new request (no receipt
+// exists), after the owner's exact-replay lookup (DUR-2.8). A current-format
+// runtime ID is accepted only as this transaction's own (the runtime path,
+// e.g. ingest executing an event's operations); any other ID must be a
+// caller ID outside every reserved runtime namespace (H5, SEC-3.7).
+func ValidateNewRequestID(tx SeqAllocator, owner Principal, requestID string) error {
+	if _, ok := runtimeRequestSeq(requestID); ok {
+		return CheckRequestBeforeLookup(tx, owner, requestID)
+	}
+	return ValidateCallerRequestID(requestID)
 }
 
 // RuntimeRequestOwnedBy fails when requestID is in the runtime req_
