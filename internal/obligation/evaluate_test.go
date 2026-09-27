@@ -98,7 +98,7 @@ func TestMatcherGrantT06(t *testing.T) {
 	f.matcherGrant(t, "g-sys", f.sysTests, TestsPassV1, f.system)
 	_, obs := f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
 	o := f.status(t, f.sysTests)
-	if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" || len(o.EvidenceIDs) != 1 || o.EvidenceIDs[0] != f.evidence.ID {
+	if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" || len(o.EvidenceIDs) != 1 || o.EvidenceIDs[0] != obs.EvidenceItemID {
 		t.Fatalf("granted matcher = %+v", o)
 	}
 	h := f.history(t, f.sysTests)
@@ -217,7 +217,6 @@ func TestPrivateEvidenceNotPublished(t *testing.T) {
 	f := newEvalFixture(t)
 	f.matcherGrant(t, "g-sys", f.sysTests, TestsPassV1, f.system)
 	private := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: testSession, TaskID: "task", AgentID: "agent"}
-	ev := seedEvidence(t, f.st, "ev-agent", private)
 	runN++
 	in := runIntent(fmt.Sprintf("run-%d", runN), "exec-p", f.target)
 	in.Access = private
@@ -225,7 +224,7 @@ func TestPrivateEvidenceNotPublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.observe(t, f.harness, obsIntent("obs-private", run, ev.ID, domain.OutcomePass, hashOf("W1"))); err != nil {
+	if _, err := f.observe(t, f.harness, obsIntent("obs-private", run, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1"))); err != nil {
 		t.Fatal(err)
 	}
 	if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved {

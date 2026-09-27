@@ -122,7 +122,7 @@ func TestReportObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	obs, err := f.observe(t, f.harness, obsIntent("o1", run, f.evidence.ID, domain.OutcomePass, hashOf("W1")))
+	obs, err := f.observe(t, f.harness, obsIntent("o1", run, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestReportObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.observe(t, f.harness, obsIntent("o2", errRun, f.evidence.ID, domain.OutcomeError, "")); err != nil {
+	if _, err := f.observe(t, f.harness, obsIntent("o2", errRun, evidenceFor(t, f.st, errRun).ID, domain.OutcomeError, "")); err != nil {
 		t.Errorf("error outcome rejected: %v", err)
 	}
 
@@ -144,7 +144,7 @@ func TestReportObservation(t *testing.T) {
 	span := 0
 	bySpan := obsIntent("o5", run, "", domain.OutcomePass, hashOf("W1"))
 	bySpan.EvidenceSpanIndex = &span
-	wrongExec := obsIntent("o6", run, f.evidence.ID, domain.OutcomePass, hashOf("W1"))
+	wrongExec := obsIntent("o6", run, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1"))
 	wrongExec.ExecutionID = "exec-9"
 	for name, c := range map[string]struct {
 		actor domain.Principal
@@ -152,15 +152,15 @@ func TestReportObservation(t *testing.T) {
 		want  error
 	}{
 		// A forged PASS from anything but the run's trusted reporter is inert.
-		"USER report":        {f.userP, obsIntent("o3", run, f.evidence.ID, domain.OutcomePass, hashOf("W1")), domain.ErrInvalidAuthorityPromotion},
-		"AGENT report":       {actorOf(domain.AuthorityAgent), obsIntent("o3", run, f.evidence.ID, domain.OutcomePass, hashOf("W1")), domain.ErrInvalidAuthorityPromotion},
-		"other trusted":      {f.system, obsIntent("o4", run, f.evidence.ID, domain.OutcomePass, hashOf("W1")), domain.ErrInvalidAuthorityPromotion},
+		"USER report":        {f.userP, obsIntent("o3", run, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1")), domain.ErrInvalidAuthorityPromotion},
+		"AGENT report":       {actorOf(domain.AuthorityAgent), obsIntent("o3", run, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1")), domain.ErrInvalidAuthorityPromotion},
+		"other trusted":      {f.system, obsIntent("o4", run, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1")), domain.ErrInvalidAuthorityPromotion},
 		"unresolved span":    {f.harness, bySpan, domain.ErrInvalidRecord},
 		"missing evidence":   {f.harness, obsIntent("o7", run, "nope", domain.OutcomePass, hashOf("W1")), domain.ErrInvalidRecord},
 		"non-TOOL evidence":  {f.harness, obsIntent("o8", run, pinned.ID, domain.OutcomePass, hashOf("W1")), domain.ErrInvalidRecord},
 		"boundary mismatch":  {f.harness, obsIntent("o9", run, private.ID, domain.OutcomePass, hashOf("W1")), domain.ErrInvalidRecord},
 		"execution mismatch": {f.harness, wrongExec, domain.ErrInvalidRecord},
-		"unknown run":        {f.harness, obsIntent("o10", domain.ObservationRun{SemanticMeta: domain.SemanticMeta{ID: "run_x"}, ExecutionID: "exec-1", Subject: run.Subject}, f.evidence.ID, domain.OutcomePass, hashOf("W1")), domain.ErrNotFound},
+		"unknown run":        {f.harness, obsIntent("o10", domain.ObservationRun{SemanticMeta: domain.SemanticMeta{ID: "run_x"}, ExecutionID: "exec-1", Subject: run.Subject}, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1")), domain.ErrNotFound},
 	} {
 		if _, err := f.observe(t, c.actor, c.in); !errors.Is(err, c.want) {
 			t.Errorf("%s: %v, want %v", name, err, c.want)
@@ -199,7 +199,7 @@ func TestRunAndObservationReceipts(t *testing.T) {
 		run, _ = r.ObservationRun(res.Records.IDs[0])
 		return nil
 	})
-	obs := obsIntent("o1", run, f.evidence.ID, domain.OutcomePass, hashOf("W1"))
+	obs := obsIntent("o1", run, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1"))
 	report := func(in domain.ObservationIntent) (domain.MutationResult, error) {
 		var out domain.MutationResult
 		err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
@@ -233,7 +233,7 @@ func TestTurnScopedEvidence(t *testing.T) {
 	f := newEvalFixture(t)
 	f.matcherGrant(t, "g-sys", f.sysTests, TestsPassV1, f.system)
 	turn := domain.AccessBoundary{Scope: domain.ScopeTurn, SessionID: testSession, TaskID: "task"}
-	ev := seedEvidence(t, f.st, "ev-turn", turn)
+	ev := seedEvidenceAs(t, f.st, "ev-turn", turn, "exec-turn")
 	runN++
 	run, err := f.registerRun(t, f.harness, runIntent(fmt.Sprintf("run-%d", runN), "exec-turn", f.target))
 	if err != nil {
@@ -264,7 +264,7 @@ func TestTurnScopedEvidence(t *testing.T) {
 		"workflow-narrowed": {Scope: domain.ScopeTask, SessionID: testSession, TaskID: "task", WorkflowID: "wf"},
 		"session scope":     {Scope: domain.ScopeSession, SessionID: testSession},
 	} {
-		bad := seedEvidenceAs(t, f.st, "ev-"+strings.ReplaceAll(name, " ", "-"), access)
+		bad := seedEvidenceAs(t, f.st, "ev-"+strings.ReplaceAll(name, " ", "-"), access, "exec-turn")
 		if _, err := f.observe(t, f.harness, obsIntent("obs-"+strings.ReplaceAll(name, " ", "-"), run, bad.ID, domain.OutcomePass, hashOf("W1"))); !errors.Is(err, domain.ErrInvalidRecord) {
 			t.Errorf("%s evidence: %v, want ErrInvalidRecord", name, err)
 		}

@@ -136,8 +136,8 @@ func equalTargetPtr(a, b *domain.TargetSpec) bool {
 }
 
 // seedEvidenceAs stores TOOL evidence with an arbitrary boundary, aligning
-// the item's owner fields with it.
-func seedEvidenceAs(t *testing.T, st store.Store, id string, access domain.AccessBoundary) domain.ContextItem {
+// the item's owner fields with it, produced by tool call toolCall.
+func seedEvidenceAs(t *testing.T, st store.Store, id string, access domain.AccessBoundary, toolCall string) domain.ContextItem {
 	t.Helper()
 	var it domain.ContextItem
 	mustUpdate(t, st, func(tx store.Tx) error {
@@ -147,6 +147,7 @@ func seedEvidenceAs(t *testing.T, st store.Store, id string, access domain.Acces
 		if it.TaskID == "" {
 			it.TaskID = "task"
 		}
+		it.Source = &domain.SourceRef{Kind: domain.SourceTool, Locator: "tool:" + toolCall, ToolCallID: toolCall}
 		return tx.InsertItem(it)
 	})
 	return it

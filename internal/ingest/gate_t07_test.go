@@ -98,6 +98,8 @@ func (w *t07) observe(runID, exec, fp string, outcome domain.ObservationOutcome,
 	evidence.Alias = "ev"
 	tool := textSpan(domain.AuthorityTool, false, string(outcome)+" 3 tests")
 	tool.Access = access
+	// The evidence is produced by the run's execution (SPEC-1.12).
+	tool.Source = &domain.SourceRef{Kind: domain.SourceTool, Locator: "tool:" + exec, ToolCallID: exec}
 	in := &domain.ObservationIntent{RunID: runID, ExecutionID: exec, ObservedWorkspaceFingerprint: fp, Outcome: outcome, Completeness: complete, Total: 3}
 	switch outcome {
 	case domain.OutcomePass:

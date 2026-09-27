@@ -46,7 +46,7 @@ func (f fixture) observeTests(t *testing.T, target domain.TargetSpec, outcome do
 func (f fixture) report(t *testing.T, run domain.ObservationRun, outcome domain.ObservationOutcome, fp string, mod func(*domain.ObservationIntent)) domain.ObservationRecord {
 	t.Helper()
 	runN++
-	in := obsIntent(fmt.Sprintf("obs-%d", runN), run, f.evidence.ID, outcome, fp)
+	in := obsIntent(fmt.Sprintf("obs-%d", runN), run, evidenceFor(t, f.st, run).ID, outcome, fp)
 	if mod != nil {
 		mod(&in)
 	}

@@ -55,7 +55,7 @@ func TestG1OneTerminalObservationPerRun(t *testing.T) {
 	run := f.newRun(t)
 	f.report(t, run, domain.OutcomeFail, hashOf("W1"), nil)
 	runN++
-	_, err := f.observe(t, f.harness, obsIntent(fmt.Sprintf("obs-%d", runN), run, f.evidence.ID, domain.OutcomePass, hashOf("W1")))
+	_, err := f.observe(t, f.harness, obsIntent(fmt.Sprintf("obs-%d", runN), run, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1")))
 	if !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Errorf("second terminal observation of one run: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestSEC19ReevaluateIgnoresHiddenObservation(t *testing.T) {
 	// Agent B's private, newer run on the same subject.
 	b := domain.Principal{SessionID: testSession, WorkflowID: "wf", TaskID: "task", AgentID: "b", Authority: domain.AuthorityHarness}
 	private := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: testSession, TaskID: "task", AgentID: "b"}
-	evB := seedEvidenceAs(t, f.st, "ev-b", private)
+	evB := seedEvidenceAs(t, f.st, "ev-b", private, "exec-b")
 	runN++
 	in := runIntent(fmt.Sprintf("run-%d", runN), "exec-b", f.target)
 	in.Access = private

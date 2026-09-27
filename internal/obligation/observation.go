@@ -207,12 +207,18 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 }
 
 // evidenceInRun reports whether a TOOL occurrence may evidence a run: same
-// session and task, TASK or TURN scope, and exactly the run's ownership.
+// session and task, produced by the run's execution (Source.ToolCallID equals
+// the run's ExecutionID), TASK or TURN scope, and exactly the run's ownership.
 // TURN narrows only the evidence's lifetime, never its ownership, so derived
 // TASK state publishes nothing narrower (commander ruling on T07). Any change
 // of workflow, agent, task, or session ownership is rejected.
 func evidenceInRun(ev domain.ContextItem, run domain.ObservationRun) bool {
 	if ev.Authority != domain.AuthorityTool || ev.SessionID != run.SessionID || ev.TaskID != run.TaskID {
+		return false
+	}
+	// The occurrence must be produced by the run's own execution: its
+	// recorded producing tool call is the run's execution identity (SPEC-1.12).
+	if ev.Source == nil || ev.Source.ToolCallID == "" || ev.Source.ToolCallID != run.ExecutionID {
 		return false
 	}
 	if ev.Access.Scope != domain.ScopeTask && ev.Access.Scope != domain.ScopeTurn {
