@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -57,11 +58,35 @@ func (s *Service) gcSnapshot(tx store.Tx, sem store.SemanticReader, it domain.Co
 	for _, o := range obs {
 		out.OpenObligationSource = out.OpenObligationSource || o.Current && (o.Status == domain.ObligationUnresolved || o.Status == domain.ObligationBlocked)
 	}
+	if it.Role == domain.RoleCheckpoint {
+		if out.NewestCheckpoint, err = s.newestCheckpoint(tx, it, b); err != nil {
+			return out, err
+		}
+	}
 	if out.OpenExchange, err = s.inOpenExchange(sem, it.ID, b); err != nil {
 		return out, err
 	}
 	out.LiveLease, err = s.leasedContent(tx, sem, domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash}, snapSeq, b)
 	return out, err
+}
+
+// checkpointOfItem is W5's bounded item→checkpoint lookup; tests replace it.
+var checkpointOfItem = graph.CheckpointOfItem
+
+// newestCheckpoint asks, as the conversation's own agent (a session-level or
+// collector principal cannot see task/agent-scoped checkpoints), whether it is
+// its conversation's newest checkpoint. An item that viewer cannot resolve
+// counts as newest, so uncertainty protects; bounds and integrity abort.
+func (s *Service) newestCheckpoint(tx store.ReadTx, it domain.ContextItem, b *workBudget) (bool, error) {
+	if err := b.spend(1); err != nil {
+		return false, err
+	}
+	agent := domain.Principal{SessionID: it.SessionID, WorkflowID: it.WorkflowID, TaskID: it.TaskID, AgentID: it.AgentID, Authority: domain.AuthorityAgent}
+	_, newest, err := checkpointOfItem(tx, agent, it.ID, s.policy.MaxPageSize, b.remaining)
+	if errors.Is(err, domain.ErrNotFound) {
+		return true, nil
+	}
+	return newest, err
 }
 
 // inOpenExchange reports membership in an open, executing, or closed but

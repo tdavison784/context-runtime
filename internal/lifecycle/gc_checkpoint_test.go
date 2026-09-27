@@ -31,7 +31,9 @@ func seedCheckpointItem(t *testing.T, mem store.Store) {
 }
 
 func TestGCProtectsOnlyTheNewestRelevantCheckpoint(t *testing.T) {
-	defer func(orig func(store.ReadTx, domain.Principal, string, int, int) (domain.Checkpoint, bool, error)) { checkpointOfItem = orig }(checkpointOfItem)
+	defer func(orig func(store.ReadTx, domain.Principal, string, int, int) (domain.Checkpoint, bool, error)) {
+		checkpointOfItem = orig
+	}(checkpointOfItem)
 	harness := storetest.NewPrincipal("s", domain.AuthorityHarness)
 	for name, tc := range map[string]struct {
 		newest bool

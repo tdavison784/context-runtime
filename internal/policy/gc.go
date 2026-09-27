@@ -31,6 +31,9 @@ type GCSnapshot struct {
 	OpenObligationSource bool // a current UNRESOLVED/BLOCKED obligation names the item
 	OpenExchange         bool // member of an open, executing or unacknowledged exchange
 	LiveLease            bool // some holder's lease on this exact content may be live
+	// NewestCheckpoint: a CHECKPOINT item is its conversation's newest
+	// checkpoint, or that cannot be established.
+	NewestCheckpoint bool
 }
 
 // CollectDecision is the pure gc/v1 rule (P3-38). It never consults
@@ -54,9 +57,10 @@ func CollectDecision(it domain.ContextItem, s GCSnapshot) (domain.GCDecisionCode
 		return domain.GCProtected, GCReasonLiveLease, nil
 	case task != nil && task.Status == domain.TaskActive && it.TurnID != "" && it.TurnID == task.TurnID:
 		return domain.GCProtected, GCReasonActiveTurn, nil
-	case it.Role == domain.RoleCheckpoint && (task == nil || task.Status == domain.TaskActive):
-		// Without an exact item→checkpoint relevance index, every checkpoint of
-		// an active or unknown conversation owner is conservatively kept.
+	case it.Role == domain.RoleCheckpoint && s.NewestCheckpoint && (task == nil || task.Status == domain.TaskActive):
+		// Only the newest checkpoint of an active (or unknown) conversation is
+		// relevant; older and completed-conversation checkpoints are not kept
+		// forever by kind (C-17).
 		return domain.GCProtected, GCReasonActiveCheckpoint, nil
 	case lifetime == domain.ExpiryLive && s.OpenObligationSource:
 		return domain.GCProtected, GCReasonRequirement, nil
