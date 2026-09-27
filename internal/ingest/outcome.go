@@ -17,17 +17,19 @@ import (
 // current context.
 
 // IngestOutcome ingests e, a provider outcome, for the originating context
-// b in one transaction of b's session. e must be an AGENT or TOOL event
-// with no typed operations, under EventID domain.OutcomeEventID(b), so the
-// whole binding is part of the request identity: the same outcome cannot
-// be retried under another call, exchange, or turn.
+// b in one transaction of b's session: the call's AGENT output under
+// EventID domain.OutcomeEventID(b), or one external tool's TOOL result
+// under ToolResultEventID(b, toolCall), with no typed operations. The whole
+// binding is part of the request identity: the same outcome cannot be
+// retried under another call, exchange, turn, or tool call.
 //
-// With m, the completed output also joins its logical exchange in the same
+// With m, a completed output also joins its logical exchange in the same
 // transaction (P3-7; ruling: tool results are registered under the trusted
 // dispatcher of the producing inference): the event's one AGENT transcript
 // becomes the round's OUTPUT member and each of m.ToolCallIDs a TOOL_CALL
 // member naming it, registered by m.Dispatcher, which must be the completed
-// call's own service actor.
+// call's own service actor. A tool result becomes its tool call's
+// TOOL_RESULT member the same way.
 func (g Ingester) IngestOutcome(ctx context.Context, s store.Store, b domain.OutcomeBinding, e domain.Event, m *OutcomeMembership) (domain.IngestReceipt, error) {
 	if err := checkOutcome(b, e); err != nil {
 		return domain.IngestReceipt{}, err
@@ -61,14 +63,40 @@ func (g Ingester) ApplyOutcome(tx store.Tx, b domain.OutcomeBinding, e domain.Ev
 // whose binding is incomplete or whose event could carry more than
 // provider output.
 func checkOutcome(b domain.OutcomeBinding, e domain.Event) error {
-	if b.Validate() != nil {
+	if b.Validate() != nil || semanticShaped(e) {
 		return domain.ErrInvalidRecord
 	}
 	id, err := domain.OutcomeEventID(b)
-	if err != nil || e.Kind != domain.EventAgent && e.Kind != domain.EventTool || semanticShaped(e) || e.EventID != id {
+	if err != nil {
 		return domain.ErrInvalidRecord
 	}
-	return nil
+	switch e.Kind {
+	case domain.EventAgent:
+		if e.EventID == id {
+			return nil
+		}
+	case domain.EventTool:
+		// An external tool's result: one TOOL span naming the tool call,
+		// under that call's derived EventID.
+		if len(e.Spans) == 1 && e.Spans[0].Authority == domain.AuthorityTool && e.Spans[0].Source != nil &&
+			e.Spans[0].Source.ToolCallID != "" && e.EventID == ToolResultEventID(b, e.Spans[0].Source.ToolCallID) {
+			return nil
+		}
+	}
+	return domain.ErrInvalidRecord
+}
+
+// ToolResultEventID is the EventID of the external tool result for
+// toolCallID of the output bound by b: the output's OutcomeEventID, a
+// slash, and the tool call ID. The fixed-length prefix makes it
+// unambiguous, and it binds the result to exactly one call of one output.
+// It is empty for an invalid binding.
+func ToolResultEventID(b domain.OutcomeBinding, toolCallID string) string {
+	id, err := domain.OutcomeEventID(b)
+	if err != nil {
+		return ""
+	}
+	return id + "/" + toolCallID
 }
 
 // outcomeTask checks the outcome's task without advancing it: the task
@@ -96,13 +124,11 @@ func (r *run) outcomeTask() error {
 // controls the exchange and the round's association rules.
 func (r *run) registerOutput(m OutcomeMembership) error {
 	b := r.binding
-	call, err := r.tx.Call(b.CallID)
-	if err != nil {
+	if err := r.checkDispatcher(m); err != nil {
 		return err
 	}
-	if call.State != domain.CallCompleted || call.Principal != b.Principal || call.ServiceActor != m.Dispatcher ||
-		call.ConversationID != b.ConversationID || !m.Dispatcher.Authority.CanHoldLifecycleAuthority() || m.Dispatcher.Authority == domain.AuthorityUser {
-		return domain.ErrInvalidAuthorityPromotion
+	if r.e.Kind == domain.EventTool {
+		return r.registerToolResult(m)
 	}
 	var output *domain.ContextItem
 	for si := range r.e.Spans {
@@ -157,5 +183,73 @@ func (r *run) registerOutput(m OutcomeMembership) error {
 		}
 		r.mutationReceipts = append(r.mutationReceipts, id)
 	}
+	return nil
+}
+
+// checkDispatcher requires the binding's call to be COMPLETED and
+// dispatched by exactly m.Dispatcher, a trusted SYSTEM or HARNESS actor.
+func (r *run) checkDispatcher(m OutcomeMembership) error {
+	b := r.binding
+	call, err := r.tx.Call(b.CallID)
+	if err != nil {
+		return err
+	}
+	if call.State != domain.CallCompleted || call.Principal != b.Principal || call.ServiceActor != m.Dispatcher ||
+		call.ConversationID != b.ConversationID || !m.Dispatcher.Authority.CanHoldLifecycleAuthority() || m.Dispatcher.Authority == domain.AuthorityUser {
+		return domain.ErrInvalidAuthorityPromotion
+	}
+	return nil
+}
+
+// registerToolResult makes an external tool result the TOOL_RESULT member
+// of the tool call it names in the binding's exchange (P3-7), as the
+// call's dispatcher; the membership service requires that call to have
+// been registered by the round's output.
+func (r *run) registerToolResult(m OutcomeMembership) error {
+	b := r.binding
+	if err := r.checkDispatcher(m); err != nil {
+		return err
+	}
+	if len(m.ToolCallIDs) != 0 || len(r.e.Spans) != 1 {
+		return domain.ErrInvalidRecord
+	}
+	result, ok := r.transcripts[0]
+	if !ok || result.Kind != domain.KindToolResult {
+		return domain.ErrInvalidRecord
+	}
+	svc, err := graph.NewMembershipService(*r.pol)
+	if err != nil {
+		return err
+	}
+	sem, err := store.Semantic(r.tx)
+	if err != nil {
+		return err
+	}
+	x, err := sem.LogicalExchange(b.ExchangeID)
+	if err != nil {
+		return err
+	}
+	members, err := sem.ExchangeMembers(x.ID, store.Page{Limit: r.pol.MaxPageSize})
+	if err != nil {
+		return err
+	}
+	if members.More {
+		return store.ErrLimitExceeded
+	}
+	req, err := domain.OperationRequestID(r.p.SessionID, r.occurrence, 1, 1<<32)
+	if err != nil {
+		return err
+	}
+	in := domain.RegisterExchangeMemberIntent{RequestID: req, ExchangeID: x.ID, ExpectedRevision: x.Revision, Position: uint64(len(members.Records)) + 1,
+		Role: domain.MemberToolResult, Source: domain.ItemContentRef{ItemID: result.ID, ContentHash: result.ContentHash}, CallID: b.CallID,
+		ToolCallID: r.e.Spans[0].Source.ToolCallID}
+	if _, err := svc.RegisterExchangeMember(r.tx, m.Dispatcher, in, r.tx.NextSeq()); err != nil {
+		return err
+	}
+	id, err := domain.MutationReceiptID(r.p.SessionID, domain.MutationMembership, req)
+	if err != nil {
+		return err
+	}
+	r.mutationReceipts = append(r.mutationReceipts, id)
 	return nil
 }

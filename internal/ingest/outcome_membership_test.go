@@ -152,3 +152,50 @@ func TestOutcome_MembershipRequiresTheCallsDispatcher(t *testing.T) {
 		}
 	})
 }
+
+// toolResultEvent is the TOOL outcome carrying an external tool's result
+// for toolCall of b's output.
+func toolResultEvent(b domain.OutcomeBinding, toolCall, text string) domain.Event {
+	span := textSpan(domain.AuthorityTool, false, text)
+	span.Source = &domain.SourceRef{Kind: domain.SourceTool, Locator: "tool:" + toolCall, ToolCallID: toolCall}
+	return domain.Event{EventID: ToolResultEventID(b, toolCall), Kind: domain.EventTool, Spans: []domain.Span{span}}
+}
+
+// TestOutcome_RegistersExternalToolResult (P3-7/21/25): an external tool's
+// result for a tool call the output issued is ingested as a TOOL
+// tool_result transcript and registered as that call's TOOL_RESULT member
+// under the dispatcher; it qualifies as evidence support. A result for a
+// tool call the output never issued, or under the wrong EventID, is
+// rejected with nothing written.
+func TestOutcome_RegistersExternalToolResult(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		f.mustIngest(principal(domain.AuthorityUser), userEvent("q", "Run the tests.", false))
+		agent := agentPrincipal()
+		b := f.inference(agent, "r1")
+		m := &OutcomeMembership{Dispatcher: dispatcherFor(agent), ToolCallIDs: []string{"run-tests"}}
+		if _, err := f.in.IngestOutcome(ctx, f.s, b, outcomeEvent(b, "Running the tests."), m); err != nil {
+			t.Fatal(err)
+		}
+		r, err := f.in.IngestOutcome(ctx, f.s, b, toolResultEvent(b, "run-tests", "PASS 12/12"), &OutcomeMembership{Dispatcher: dispatcherFor(agent)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := r.Items[0]
+		if result.Authority != domain.AuthorityTool || result.Kind != domain.KindToolResult || !result.QualifiesAsEvidenceSupport() || result.CreatedTurn != b.Turn {
+			t.Fatalf("tool result item = %+v", result)
+		}
+		_, ms := f.members(b.ExchangeID)
+		if len(ms) != 3 || ms[2].Role != domain.MemberToolResult || ms[2].ToolCallID != "run-tests" || ms[2].Source.ItemID != result.ID {
+			t.Fatalf("members = %+v", ms)
+		}
+		for name, e := range map[string]domain.Event{
+			"unissued tool call": toolResultEvent(b, "never-issued", "PASS"),
+			"wrong event ID":     func() domain.Event { e := toolResultEvent(b, "run-tests", "PASS"); e.EventID = "chosen"; return e }(),
+		} {
+			before := f.lastSeq()
+			if _, err := f.in.IngestOutcome(ctx, f.s, b, e, &OutcomeMembership{Dispatcher: dispatcherFor(agent)}); err == nil || f.lastSeq() != before {
+				t.Errorf("%s: err %v, seq %d -> %d", name, err, before, f.lastSeq())
+			}
+		}
+	})
+}
