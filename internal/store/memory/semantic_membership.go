@@ -544,3 +544,8 @@ func (r semRead) OwnerRegistration(kind domain.OwnerKind, ownerID string) (domai
 	}
 	return o, nil
 }
+
+// EarliestExchangeWithItem implements store.MembershipReader.
+func (r semRead) EarliestExchangeWithItem(conversationID, itemID string) (domain.LogicalExchange, error) {
+	return domain.LogicalExchange{}, domain.ErrUnsupportedSchema
+}

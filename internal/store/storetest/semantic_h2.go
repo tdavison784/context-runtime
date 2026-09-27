@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -182,6 +183,65 @@ func testSemanticLifecycleEventByID(t *testing.T, s store.Store) {
 	})
 	view(t, s, sessB, func(tx store.ReadTx) error {
 		_, err := readSemantic(t, tx).LifecycleEvent("audit")
+		wantErr(t, err, domain.ErrNotFound)
+		return nil
+	})
+}
+
+// testSemanticEarliestExchangeWithItem checks the checkpoint-coverage index
+// (H2, SPEC-2.7, XREV-2.3): the lowest-ordinal exchange of a conversation
+// with an item as a member is one keyed lookup, independent of how many
+// exchanges the conversation has; other conversations and non-members
+// never answer.
+func testSemanticEarliestExchangeWithItem(t *testing.T, s store.Store) {
+	conv := domain.ConversationIDFor("task", "agent")
+	member := func(tx store.Tx, id, exchange string, pos uint64, it domain.ContextItem) {
+		noErr(t, semantic(t, tx).InsertExchangeMember(domain.ExchangeMember{SemanticMeta: Meta(sessA, id, tx.NextSeq()), ExchangeID: exchange,
+			Position: pos, Role: domain.MemberInput, Source: ContentRef(it)}))
+	}
+	var in, other domain.ContextItem
+	update(t, s, sessA, func(tx store.Tx) error {
+		in = NewItem(sessA, "in", tx.NextSeq(), "input")
+		other = NewItem(sessA, "other", tx.NextSeq(), "other input")
+		noErr(t, tx.InsertItem(in))
+		noErr(t, tx.InsertItem(other))
+		sem := semantic(t, tx)
+		// Another agent's conversation lists the item first.
+		noErr(t, sem.InsertLogicalExchange(NewExchange(sessA, "y1", "task", "agent-2", 1, tx.NextSeq())))
+		member(tx, "my1", "y1", 1, in)
+		return nil
+	})
+	for n := uint64(1); n <= 24; n++ {
+		update(t, s, sessA, func(tx store.Tx) error {
+			id := "x" + strconv.FormatUint(n, 10)
+			noErr(t, semantic(t, tx).InsertLogicalExchange(NewExchange(sessA, id, "task", "agent", n, tx.NextSeq())))
+			switch {
+			case n == 1:
+				member(tx, "m-"+id, id, 1, other)
+			case n == 3 || n > 5:
+				member(tx, "m-"+id, id, 1, in)
+			}
+			return nil
+		})
+	}
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		r := readSemantic(t, tx)
+		x, err := r.EarliestExchangeWithItem(conv, "in")
+		noErr(t, err)
+		if x.ID != "x3" || x.Ordinal != 3 {
+			t.Errorf("EarliestExchangeWithItem(conv, in) = %s/%d, want x3/3", x.ID, x.Ordinal)
+		}
+		x, err = r.EarliestExchangeWithItem(conv, "other")
+		noErr(t, err)
+		if x.ID != "x1" {
+			t.Errorf("EarliestExchangeWithItem(conv, other) = %s, want x1", x.ID)
+		}
+		x, err = r.EarliestExchangeWithItem(domain.ConversationIDFor("task", "agent-2"), "in")
+		noErr(t, err)
+		if x.ID != "y1" {
+			t.Errorf("other conversation = %s, want y1", x.ID)
+		}
+		_, err = r.EarliestExchangeWithItem(conv, "nope")
 		wantErr(t, err, domain.ErrNotFound)
 		return nil
 	})

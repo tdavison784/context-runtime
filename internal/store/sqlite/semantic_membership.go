@@ -560,3 +560,8 @@ func (s semRead) OwnerRegistration(kind domain.OwnerKind, ownerID string) (domai
 	var o domain.OwnerRegistration
 	return o, s.t.getWhere("owner", "f_kind=? AND f_owner_id=?", &o, string(kind), ownerID)
 }
+
+// EarliestExchangeWithItem implements store.MembershipReader.
+func (s semRead) EarliestExchangeWithItem(conversationID, itemID string) (domain.LogicalExchange, error) {
+	return domain.LogicalExchange{}, domain.ErrUnsupportedSchema
+}

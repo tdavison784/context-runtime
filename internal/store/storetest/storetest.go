@@ -125,6 +125,7 @@ var suite = []testCase{
 	{"SemanticLatestUpdateAffectingPath", testSemanticLatestUpdateAffectingPath},
 	{"SemanticClosingObservation", testSemanticClosingObservation},
 	{"SemanticLifecycleEventByID", testSemanticLifecycleEventByID},
+	{"SemanticEarliestExchangeWithItem", testSemanticEarliestExchangeWithItem},
 	{"SemanticIndexedVersions", testSemanticIndexedVersions},
 	{"SemanticWorkspaceBindingCursor", testSemanticWorkspaceBindingCursor},
 	{"SemanticOwnerIDReuse", testSemanticOwnerIDReuse},
