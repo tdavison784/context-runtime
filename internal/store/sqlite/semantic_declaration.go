@@ -326,3 +326,8 @@ func (s semRead) SemanticChanges(viewer domain.Principal, target domain.GrantTar
 		return c.Access.Permits(viewer), nil
 	})
 }
+
+// LifecycleEvent implements store.DeclarationReader.
+func (s semRead) LifecycleEvent(id string) (domain.LifecycleEvent, error) {
+	return domain.LifecycleEvent{}, domain.ErrUnsupportedSchema
+}

@@ -157,3 +157,32 @@ func testSemanticClosingObservation(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// testSemanticLifecycleEventByID checks the exact audit read (H2, DUR-2.11,
+// SPEC-2.6): graph derives a supersession audit's ID, so it is one keyed
+// lookup however long the item's lifecycle history is.
+func testSemanticLifecycleEventByID(t *testing.T, s store.Store) {
+	var want domain.LifecycleEvent
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertItem(NewItem(sessA, "i1", tx.NextSeq(), "fact")))
+		for i := range 40 {
+			noErr(t, tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "hist-"+string(rune('a'+i%26))+string(rune('a'+i/26)), tx.NextSeq(), domain.TargetItem, "i1")))
+		}
+		want = NewLifecycleEvent(sessA, "audit", tx.NextSeq(), domain.TargetItem, "i1")
+		return tx.AppendLifecycleEvent(want)
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		r := readSemantic(t, tx)
+		got, err := r.LifecycleEvent("audit")
+		noErr(t, err)
+		assertEqual(t, "LifecycleEvent", got, want)
+		_, err = r.LifecycleEvent("nope")
+		wantErr(t, err, domain.ErrNotFound)
+		return nil
+	})
+	view(t, s, sessB, func(tx store.ReadTx) error {
+		_, err := readSemantic(t, tx).LifecycleEvent("audit")
+		wantErr(t, err, domain.ErrNotFound)
+		return nil
+	})
+}

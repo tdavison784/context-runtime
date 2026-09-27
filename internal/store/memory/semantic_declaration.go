@@ -147,3 +147,8 @@ func (t *semTx) SetCurrentVersion(itemID, expectedPriorItemID string) error {
 	t.t.markSemantic()
 	return nil
 }
+
+// LifecycleEvent implements store.DeclarationReader.
+func (r semRead) LifecycleEvent(id string) (domain.LifecycleEvent, error) {
+	return domain.LifecycleEvent{}, domain.ErrUnsupportedSchema
+}

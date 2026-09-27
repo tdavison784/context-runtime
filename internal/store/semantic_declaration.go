@@ -8,6 +8,9 @@ import (
 
 type DeclarationReader interface {
 	LifecycleByTarget(kind domain.TargetKind, targetID string, page Page) (ResultPage[domain.LifecycleEvent], error)
+	// LifecycleEvent is one audit event by its exact ID (H2): a derived
+	// audit ID is found without paging its target's history.
+	LifecycleEvent(id string) (domain.LifecycleEvent, error)
 	// Missing creation declaration is ErrNotFound: legacy identity is unknown.
 	CreationDeclaration(itemID string) (domain.CreationDeclaration, error)
 	SnapshotDeclaration(id string) (domain.SnapshotDeclaration, error)
