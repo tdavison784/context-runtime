@@ -117,3 +117,30 @@ func TestGenerationExcludesObligationSourceAndNeedsAuthority(t *testing.T) {
 		t.Fatalf("changed arguments replayed: %v", err)
 	}
 }
+
+// SPEC-1.8: PINNED→DURABLE is exclusively Unpin, so every item Promote can pin
+// (including an unkeyed residual instruction) must be reachable by Unpin.
+func TestPromotedUnkeyedPinCanBeUnpinned(t *testing.T) {
+	ctx := context.Background()
+	eachStore(t, func(t *testing.T, db store.Store) {
+		s, _ := New(db, testPolicy())
+		it := storetest.NewItem("s", "residual", 0, "always cite sources")
+		it.Kind, it.Generation, it.Retention = domain.KindInstruction, domain.GenerationDurable, domain.RetentionHigh
+		seedItem(t, db, it)
+		user := storetest.NewPrincipal("s", domain.AuthorityUser)
+		pin := domain.PromoteIntent{ItemMutationIntent: domain.ItemMutationIntent{RequestID: "p", ItemID: "residual", ExpectedVersion: 1}, Generation: domain.GenerationPinned}
+		if r, err := s.PromoteStandalone(ctx, user, pin); err != nil || r.After.Generation != domain.GenerationPinned {
+			t.Fatalf("promote: %+v %v", r, err)
+		}
+		r, err := s.UnpinStandalone(ctx, user, domain.UnpinIntent{RequestID: "u", ItemID: "residual", ExpectedVersion: 2})
+		if err != nil || r.After.Generation != domain.GenerationDurable || r.Before.Currentness != domain.ItemUnkeyed {
+			t.Fatalf("unpin of promoted unkeyed pin: %+v %v", r, err)
+		}
+		// Resolve keeps its DIRECTIVE-only target rule.
+		goal := storetest.NewGoal("s", "plain-goal", 0, "unkeyed goal")
+		seedItem(t, db, goal)
+		if _, err := s.ResolveStandalone(ctx, user, domain.ResolveIntent{RequestID: "r", ItemID: "plain-goal", ExpectedVersion: 1}); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("resolve reached a non-directive goal: %v", err)
+		}
+	})
+}
