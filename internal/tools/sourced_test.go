@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -25,24 +24,13 @@ func runRetrievalStub(s *Service, tx store.Tx, i domain.ToolInvocation, owner do
 	})
 }
 
-func TestRetrievalResultItemIsTheRegisteredToolResult(t *testing.T) {
+// The positive path (W6's projection registered as the TOOL_RESULT) is
+// covered end to end by TestAgentRetrievalAdmitsOnceAndRegistersTheProjection.
+// A sourced result must name a TOOL item in the caller's conversation and a
+// retrieval result; anything else fails before any receipt.
+func TestRetrievalResultSourceMustBeAConversationToolItem(t *testing.T) {
 	st, i := toolFixture(t)
 	s := testService(t)
-	update(t, st, func(tx store.Tx) error {
-		if _, err := runRetrievalStub(s, tx, i, i.Principal, "rr-1"); err != nil {
-			return err
-		}
-		sem, _ := store.Semantic(tx)
-		members, err := sem.ExchangeMembers(i.ExchangeID, store.Page{Limit: 8})
-		if err != nil || len(members.Records) != 3 || members.Records[2].Role != domain.MemberToolResult || members.Records[2].Source.ItemID != "retrieved-tool" {
-			t.Fatalf("result member: %+v, %v", members, err)
-		}
-		id, _ := i.ID()
-		if _, err := tx.Item(toolID("toolresult", id)); !errors.Is(err, domain.ErrNotFound) {
-			t.Fatal("template transcript written for a retrieval result", err)
-		}
-		return nil
-	})
 	b := seedAgentInvocation(t, st, "b")
 	for name, run := range map[string]func(tx store.Tx) error{
 		"other agent's item": func(tx store.Tx) error {
