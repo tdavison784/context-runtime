@@ -238,10 +238,6 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 		return domain.IngestReceipt{}, domain.ErrInvalidRecord
 	}
 
-	// Idempotency first, before any sequence, turn, item, or diagnostic is
-	// allocated (D14): a retry returns the original receipt as stored,
-	// without reparsing or reading mutable state, canonicalized under the
-	// request schema, limits and policy its receipt recorded (P3-40).
 	// An outcome's dispatcher is authorized before its receipt is looked
 	// up, so an untrusted dispatcher is refused on a retry too (DUR-1.7).
 	if m != nil {
@@ -249,6 +245,10 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 			return domain.IngestReceipt{}, err
 		}
 	}
+	// Idempotency first, before any sequence, turn, item, or diagnostic is
+	// allocated (D14): a retry returns the original receipt as stored,
+	// without reparsing or reading mutable state, canonicalized under the
+	// request schema, limits and policy its receipt recorded (P3-40).
 	if e.EventID != "" {
 		if r, found, err := lookupReceipt(tx, p, occurrence, e, o); found || err != nil {
 			return r, err
