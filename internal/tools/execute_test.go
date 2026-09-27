@@ -174,3 +174,23 @@ func TestExecuteRequiresExactTrustedDispatcherAndAllocatedSequence(t *testing.T)
 		t.Fatalf("unallocated sequence: %v", err)
 	}
 }
+
+// DUR-1.7 (tools half): the trusted dispatcher that registers the result is
+// part of the request identity; a retry through another dispatcher conflicts
+// instead of replaying under an identity that never executed it.
+func TestExecuteBindsTheDispatcherIntoRequestIdentity(t *testing.T) {
+	st, i := toolFixture(t)
+	s := testService(t)
+	intent := stubIntent{RequestID: "request", Value: "v"}
+	var calls int
+	update(t, st, func(tx store.Tx) error { _, err := runStub(s, tx, i, intent, &calls); return err })
+	other := dispatcher(i)
+	other.Authority = domain.AuthoritySystem
+	err := st.Update(testContext, "s", func(tx store.Tx) error {
+		_, err := execute(s, tx, other, Request[stubIntent]{i, intent}, "stub", intent.RequestID, 0, nil)
+		return err
+	})
+	if !errors.Is(err, domain.ErrEventIDConflict) {
+		t.Fatalf("retry through another dispatcher: %v", err)
+	}
+}

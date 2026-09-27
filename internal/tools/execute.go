@@ -32,6 +32,19 @@ type Request[I any] struct {
 	Intent     I
 }
 
+// dispatchedRequest is the canonical request identity: the trusted dispatcher
+// that registers the result is bound with the invocation and intent, so a
+// retry through another dispatcher conflicts instead of replaying (DUR-1.7).
+type dispatchedRequest[I any] struct {
+	Dispatcher domain.Principal
+	Invocation domain.ToolInvocation
+	Intent     I
+}
+
+func bindDispatcher[I any](dispatcher domain.Principal, r Request[I]) dispatchedRequest[I] {
+	return dispatchedRequest[I]{Dispatcher: dispatcher, Invocation: r.Invocation, Intent: r.Intent}
+}
+
 // effect performs one method's writes after authentication. It never runs for
 // a committed request and returns the frozen result to record.
 type effect func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, error)
@@ -82,7 +95,7 @@ func executeSourced[I any](s *Service, tx store.Tx, dispatcher domain.Principal,
 	}
 	prior, err := sem.ToolExecutionReceipt(invocationID)
 	if err == nil {
-		return replayTool(sem, prior, request, method, requestID, mutationID, s.policy)
+		return replayTool(sem, prior, bindDispatcher(dispatcher, request), method, requestID, mutationID, s.policy)
 	}
 	if !errors.Is(err, domain.ErrNotFound) {
 		return result, err
@@ -95,7 +108,7 @@ func executeSourced[I any](s *Service, tx store.Tx, dispatcher domain.Principal,
 	if seq == 0 {
 		seq = tx.NextSeq()
 	}
-	args, err := domain.CanonicalSemanticArguments(request, s.policy.MaxMetadataBytes)
+	args, err := domain.CanonicalSemanticArguments(bindDispatcher(dispatcher, request), s.policy.MaxMetadataBytes)
 	if err != nil {
 		return result, err
 	}
@@ -141,7 +154,7 @@ func executeSourced[I any](s *Service, tx store.Tx, dispatcher domain.Principal,
 
 // replayTool returns the frozen result only for the identical request. It
 // checks no task, turn, target, or policy state and allocates no sequence.
-func replayTool[I any](sem store.SemanticReader, prior domain.ToolExecutionReceipt, request Request[I], method, requestID, mutationID string, policy domain.Phase3Policy) (domain.ToolResult, error) {
+func replayTool[I any](sem store.SemanticReader, prior domain.ToolExecutionReceipt, request dispatchedRequest[I], method, requestID, mutationID string, policy domain.Phase3Policy) (domain.ToolResult, error) {
 	var none domain.ToolResult
 	m, err := sem.MutationReceipt(domain.MutationTool, requestID)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -151,7 +164,7 @@ func replayTool[I any](sem store.SemanticReader, prior domain.ToolExecutionRecei
 		return none, err
 	}
 	// A later, smaller policy limit cannot turn a committed request into a conflict.
-	args, err := domain.CanonicalSemanticArguments(request, max(policy.MaxMetadataBytes, len(m.CanonicalArguments)))
+	args, err := domain.CanonicalSemanticArguments(request, graph.ReplayArgumentLimit(policy, m.CanonicalArguments))
 	if err != nil {
 		return none, domain.ErrEventIDConflict
 	}

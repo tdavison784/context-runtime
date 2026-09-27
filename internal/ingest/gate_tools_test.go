@@ -79,6 +79,13 @@ func TestGateT17_AgentToolsThroughPipeline(t *testing.T) {
 			t.Fatalf("agent.status versions: %+v then %+v", first.Keyed, second.Keyed)
 		}
 
+		// TEST-1.1 (INV-09): an identical tool retry replays and allocates
+		// nothing.
+		seq := f.lastSeq()
+		if again, err := updateState("state-2", "API done; running tests."); err != nil || again.Keyed == nil || *again.Keyed != *second.Keyed || f.lastSeq() != seq {
+			t.Fatalf("update_state retry: %+v (%v), LastSeq %d -> %d", again.Keyed, err, seq, f.lastSeq())
+		}
+
 		// Agent B's own "status" key is independent: B's first write
 		// supersedes nothing and A's version stays current (P3-25).
 		agentB := agent

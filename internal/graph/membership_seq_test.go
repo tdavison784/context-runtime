@@ -32,3 +32,30 @@ func TestMembershipOperationSequenceIsAllocatedOrDeferred(t *testing.T) {
 		return nil
 	})
 }
+
+// DUR-1.8: a committed request replays even after a later policy lowers the
+// argument limit; today's limit applies only to new requests.
+func TestMembershipReceiptReplaysAfterLowerLimit(t *testing.T) {
+	s, service, actor, intent := membershipTestStore(t)
+	var first domain.RecordResult
+	update(t, s, "s", func(tx store.Tx) error {
+		var err error
+		first, err = service.RegisterExchange(tx, actor, intent, 0)
+		return err
+	})
+	lowered := *service
+	lowered.policy.MaxMetadataBytes = 16
+	update(t, s, "s", func(tx store.Tx) error {
+		again, err := lowered.RegisterExchange(tx, actor, intent, 0)
+		if err != nil || !reflect.DeepEqual(again, first) {
+			t.Fatalf("replay under a lower limit: %+v, %v", again, err)
+		}
+		return nil
+	})
+	membershipFails(t, s, domain.ErrResourceLimit, func(tx store.Tx) error {
+		next := intent
+		next.RequestID, next.ExpectedMembershipRevision = "register-new", 1
+		_, err := lowered.RegisterExchange(tx, actor, next, 0)
+		return err
+	})
+}

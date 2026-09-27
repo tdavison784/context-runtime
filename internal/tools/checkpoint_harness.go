@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -43,7 +44,7 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 	}
 	request := HarnessCheckpointRequest{Recipient: recipient, IssuingExchangeID: issuingExchangeID, Intent: intent}
 	if prior, err := sem.MutationReceipt(domain.MutationMembership, intent.RequestID); err == nil {
-		args, err := domain.CanonicalSemanticArguments(request, max(s.policy.MaxMetadataBytes, len(prior.CanonicalArguments)))
+		args, err := domain.CanonicalSemanticArguments(request, graph.ReplayArgumentLimit(s.policy, prior.CanonicalArguments))
 		if err != nil {
 			return "", domain.ErrEventIDConflict
 		}

@@ -73,6 +73,9 @@ func (s *MembershipService) AcknowledgeExchange(tx store.Tx, actor domain.Princi
 	if err = checkRoundConsumed(x, members, call); err != nil {
 		return result, err
 	}
+	if err = checkManifestContainsRound(sem, manifest, members, s.policy.MaxPageSize, min(s.policy.MaxCoverageMembers, s.policy.MaxTransactionWork-12)); err != nil {
+		return result, err
+	}
 	ack := domain.ExchangeAcknowledgment{
 		SemanticMeta: membershipMeta(tx.SessionID(), membershipID("acknowledgment", tx.SessionID(), receipt.ID), seq),
 		ExchangeID:   x.ID, ManifestID: manifest.ID, ConsumingCallID: call.CallID, Actor: actor,
@@ -134,6 +137,46 @@ func checkRoundConsumed(x domain.LogicalExchange, members []domain.ExchangeMembe
 	}
 	for key := range calls {
 		if !results[key] {
+			return domain.ErrIncompleteCoverage
+		}
+	}
+	return nil
+}
+
+// checkManifestContainsRound requires the consuming inference's generation
+// input to contain the exact content of every OUTPUT, TOOL_CALL and
+// TOOL_RESULT member: an unrelated or partial input is not consumption, and a
+// round it did not receive can never become replaceable (SEC-1.10, SPEC-1.17).
+// The round being closed is newer than any checkpoint, so it must be present
+// directly, never through a prior checkpoint.
+func checkManifestContainsRound(sem store.SemanticReader, manifest domain.AdmissionManifest, members []domain.ExchangeMember, pageSize, limit int) error {
+	c, err := sem.Coverage(manifest.CoverageID)
+	if err != nil {
+		return incompleteMembership(err)
+	}
+	if c.Validate() != nil || c.ID != manifest.CoverageID || c.SessionID != manifest.SessionID || c.Purpose != domain.CoverageGenerationInput {
+		return domain.ErrIncompleteCoverage
+	}
+	if c.MemberCount > uint64(max(limit, 0)) {
+		return domain.ErrResourceLimit
+	}
+	admitted, err := collectMembershipPages(pageSize, limit, func(page store.Page) (store.ResultPage[domain.CoverageMember], error) {
+		return sem.CoverageMembers(c.ID, page)
+	})
+	if err != nil {
+		return err
+	}
+	if uint64(len(admitted)) != c.MemberCount {
+		return domain.ErrIncompleteCoverage
+	}
+	received := make(map[domain.ItemContentRef]bool, len(admitted))
+	for _, m := range admitted {
+		if m.Source != nil && m.CoverageID == c.ID {
+			received[*m.Source] = true
+		}
+	}
+	for _, m := range members {
+		if m.Role != domain.MemberInput && !received[m.Source] {
 			return domain.ErrIncompleteCoverage
 		}
 	}

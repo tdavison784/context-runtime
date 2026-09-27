@@ -34,7 +34,7 @@ func TestMembershipAdmissionAndAcknowledgmentPoisonEveryPartialWrite(t *testing.
 				if _, err = membershipCall(tx, r.x, "consume"); err != nil {
 					return err
 				}
-				coverage, err := service.RecordAdmissionCoverage(tx, actor, registration.Principal, "input", []domain.ItemContentRef{storetest.ContentRef(r.toolResult)})
+				coverage, err := service.RecordAdmissionCoverage(tx, actor, registration.Principal, "input", []domain.ItemContentRef{storetest.ContentRef(r.output), storetest.ContentRef(r.toolResult)})
 				if err != nil {
 					return err
 				}

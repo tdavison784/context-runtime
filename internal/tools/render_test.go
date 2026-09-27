@@ -27,3 +27,17 @@ func TestResultTextReportsActualClaimStatusWithoutCopiedContent(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// SPEC-1.19 (P3-26): a superseded or duplicate goal is never labelled OPEN;
+// its text names only its non-current state. The receipt still freezes the
+// observed status for audit.
+func TestResultTextNeverLabelsNonCurrentGoalOpen(t *testing.T) {
+	for _, c := range []domain.ItemCurrentness{domain.ItemHistorical, domain.ItemDuplicate} {
+		for _, status := range []domain.GoalStatus{domain.GoalOpen, domain.GoalResolved} {
+			text := ResultText(domain.ToolResult{Claim: &domain.CompletionClaimResult{ClaimItemID: "claim", TargetItemID: "goal", ObservedVersion: 1, GoalStatus: status, Currentness: c}})
+			if strings.Contains(text, string(domain.GoalOpen)) || strings.Contains(text, "still required") || !strings.Contains(text, "not the current") {
+				t.Fatalf("%s %s goal: %q", c, status, text)
+			}
+		}
+	}
+}

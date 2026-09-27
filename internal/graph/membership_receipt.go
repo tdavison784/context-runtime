@@ -10,16 +10,19 @@ import (
 // Resolve the immutable request before inspecting today's task, turn or CAS.
 func prepareMembershipReceipt(tx store.Tx, actor domain.Principal, requestID, method string, intent any, policy domain.Phase3Policy) (store.SemanticTx, domain.MutationReceipt, bool, error) {
 	var receipt domain.MutationReceipt
-	args, err := domain.CanonicalSemanticArguments(intent, policy.MaxMetadataBytes)
-	if err != nil {
-		return nil, receipt, false, err
-	}
 	sem, err := store.Semantic(tx)
 	if err != nil {
 		return nil, receipt, false, err
 	}
+	// Look the receipt up first: a committed request replays under the limit
+	// it was accepted with, and today's limit applies only to new requests
+	// (DUR-1.8).
 	receipt, err = sem.MutationReceipt(domain.MutationMembership, requestID)
 	if err == nil {
+		args, encErr := domain.CanonicalSemanticArguments(intent, ReplayArgumentLimit(policy, receipt.CanonicalArguments))
+		if encErr != nil {
+			return sem, receipt.Clone(), true, domain.ErrEventIDConflict
+		}
 		err = receipt.CheckReplay(actor, domain.MutationMembership, method, args)
 		if err == nil && (receipt.SessionID != tx.SessionID() || receipt.Result.Records == nil || receipt.Result.Records.Kind != "MEMBERSHIP") {
 			err = domain.ErrIntegrity
@@ -27,6 +30,10 @@ func prepareMembershipReceipt(tx store.Tx, actor domain.Principal, requestID, me
 		return sem, receipt.Clone(), true, err
 	}
 	if !errors.Is(err, domain.ErrNotFound) {
+		return nil, receipt, false, err
+	}
+	args, err := domain.CanonicalSemanticArguments(intent, policy.MaxMetadataBytes)
+	if err != nil {
 		return nil, receipt, false, err
 	}
 	id, err := domain.MutationReceiptID(actor, domain.MutationMembership, requestID)
@@ -52,6 +59,15 @@ func finishMembershipReceipt(tx store.Tx, sem store.SemanticTx, receipt domain.M
 		return err
 	}
 	return sem.InsertMutationReceipt(receipt)
+}
+
+// ReplayArgumentLimit bounds re-encoding a retry for comparison with a
+// committed request: never below today's limit, and always enough for the
+// stored encoding plus the encoder's per-field headroom, so a later, lower
+// policy limit cannot turn a committed request into a failure (DUR-1.8). It
+// stays bounded by the stored size; a larger retry cannot match anyway.
+func ReplayArgumentLimit(policy domain.Phase3Policy, stored []byte) int {
+	return max(policy.MaxMetadataBytes, 2*len(stored)+256)
 }
 
 // checkOperationSeq accepts a caller-allocated operation sequence (W7-5) that

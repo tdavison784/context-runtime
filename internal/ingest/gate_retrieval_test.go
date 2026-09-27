@@ -154,9 +154,9 @@ func TestGateT03_ModelPathRehydrate(t *testing.T) {
 		if after := f.item(e1.ID); after.Version != before.Version || after.Residency != before.Residency {
 			t.Fatalf("rehydration changed E1: %+v -> %+v", before, after)
 		}
-		// A retry replays the result and writes nothing. (tools.Execute
-		// allocates its sequence before replay, so LastSeq may advance.)
-		items, rels := len(f.items()), 0
+		// A retry replays the result, writes nothing and allocates no
+		// sequence (TEST-1.1, INV-09).
+		items, rels, seq := len(f.items()), 0, f.lastSeq()
 		f.view(func(tx store.ReadTx) error {
 			r, err := tx.Relationships(store.RelationshipFilter{})
 			rels = len(r)
@@ -169,8 +169,8 @@ func TestGateT03_ModelPathRehydrate(t *testing.T) {
 			after = len(r)
 			return err
 		})
-		if err != nil || again.RetrievalResultID != res.RetrievalResultID || len(f.items()) != items || after != rels {
-			t.Fatalf("retry: %+v (%v), items %d -> %d, relationships %d -> %d", again, err, items, len(f.items()), rels, after)
+		if err != nil || again.RetrievalResultID != res.RetrievalResultID || len(f.items()) != items || after != rels || f.lastSeq() != seq {
+			t.Fatalf("retry: %+v (%v), items %d -> %d, relationships %d -> %d, LastSeq %d -> %d", again, err, items, len(f.items()), rels, after, seq, f.lastSeq())
 		}
 	})
 }
