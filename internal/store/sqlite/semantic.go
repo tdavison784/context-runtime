@@ -26,6 +26,9 @@ type coverageMemberRow struct {
 	Member     domain.CoverageMember
 }
 
+// SemanticSeq is the member's (and its parent record's) creation sequence.
+func (r coverageMemberRow) SemanticSeq() uint64 { return r.Member.Seq }
+
 // semRead implements store.SemanticReader over a transaction.
 type semRead struct{ t *transaction }
 

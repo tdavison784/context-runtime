@@ -18,6 +18,10 @@ type pathStateRow struct {
 	State      domain.ResourcePathState
 }
 
+// SemanticSeq places the row's sequence in the TargetCall sharing check
+// (P3-1, SPEC-1.4).
+func (r pathStateRow) SemanticSeq() uint64 { return r.State.Seq }
+
 // subjectStateRow is a subject's current state in one (task, boundary)
 // partition, keyed by that partition; Resource and FirstSeq place it in
 // the by-resource index in first-filing order (P3-22).
@@ -28,6 +32,10 @@ type subjectStateRow struct {
 	FirstSeq  uint64
 	State     domain.SubjectState
 }
+
+// SemanticSeq places the row's sequence in the TargetCall sharing check
+// (P3-1, SPEC-1.4).
+func (r subjectStateRow) SemanticSeq() uint64 { return r.State.Seq }
 
 func subjectPartitionKey(subject, task string, a domain.AccessBoundary) string {
 	parts := []string{subject, task, string(a.Scope), a.SessionID, a.WorkflowID, a.TaskID, a.AgentID}

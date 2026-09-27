@@ -17,6 +17,10 @@ type obligationDeclarationRow struct {
 	Declaration  domain.ObligationDeclaration
 }
 
+// SemanticSeq places the row's sequence in the TargetCall sharing check
+// (P3-1, SPEC-1.4).
+func (r obligationDeclarationRow) SemanticSeq() uint64 { return r.Declaration.Seq }
+
 // noteLiveProof keeps lookup_live_dependency in step with a version write:
 // the dependencies of a version's current proof are live exactly while the
 // version is current and names that proof.
