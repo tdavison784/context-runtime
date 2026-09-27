@@ -11,7 +11,7 @@ import (
 )
 
 func membershipTestPolicy() domain.Phase3Policy {
-	return domain.Phase3Policy{MaxPageSize: 16, MaxReceiptBytes: 8192, MaxGCDecisions: 16, CheckpointGeneration: domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh, Version: domain.Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs-state/1", Eligibility: "eligibility/1", Locator: "locator/1", Coverage: "coverage/1", Dedup: "dedup/1", MaxOperations: 16, MaxMetadataBytes: 4096, MaxTargets: 16, MaxEvidence: 16, MaxCoverageMembers: 64, MaxTransactionWork: 128, MaxToolResultBytes: 8192, MaxCheckpointSemanticBytes: 16384, DefaultLeaseCalls: 2, MaxLeaseCalls: 8}
+	return domain.Phase3Policy{MaxPageSize: 16, MaxReceiptBytes: 8192, MaxGCDecisions: 16, CheckpointGeneration: domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh, Version: domain.Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs-state/1", Eligibility: "eligibility/1", Locator: "locator/1", Coverage: "coverage/1", Dedup: "dedup/1", MaxOperations: 16, MaxMetadataBytes: 4096, MaxTargets: 16, MaxEvidence: 16, MaxCoverageMembers: 64, MaxTransactionWork: 128, MaxToolResultBytes: 8192, MaxCheckpointSemanticBytes: 16384, DefaultLeaseCalls: 2, MaxLeaseCalls: 8, GCTriggers: domain.DefaultGCTriggers()}
 }
 
 func membershipTestStore(t *testing.T) (store.Store, *MembershipService, domain.Principal, domain.RegisterExchangeIntent) {
