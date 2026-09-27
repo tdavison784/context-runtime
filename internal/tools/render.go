@@ -25,8 +25,13 @@ func ResultText(r domain.ToolResult) string {
 		return "Stored " + k.ItemID + "."
 	case r.Claim != nil:
 		c := r.Claim
-		return c.Message() + " Goal " + c.TargetItemID + " version " + strconv.FormatUint(c.ObservedVersion, 10) +
-			" is " + string(c.GoalStatus) + " (" + string(c.Currentness) + "); claim " + c.ClaimItemID + "."
+		goal := " Goal " + c.TargetItemID + " version " + strconv.FormatUint(c.ObservedVersion, 10)
+		if c.Currentness != domain.ItemCurrent {
+			// P3-26: a superseded or duplicate goal is never labelled OPEN or
+			// given the replacement's status; the receipt keeps what was observed.
+			return c.Message() + goal + " is not the current goal (" + string(c.Currentness) + "); claim " + c.ClaimItemID + "."
+		}
+		return c.Message() + goal + " is " + string(c.GoalStatus) + " (CURRENT); claim " + c.ClaimItemID + "."
 	case r.CheckpointID != "":
 		return "Checkpoint " + r.CheckpointID + " recorded."
 	}
