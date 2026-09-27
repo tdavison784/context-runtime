@@ -18,11 +18,13 @@ import (
 const recordReplacement = "REPLACEMENT"
 
 // ReplacementObligations is W4's in-transaction declaration of a replacement
-// occurrence's claim (obligation.Service.DeclareForReplacementTx). It reads
-// the claim from the occurrence's creation declaration, after the prior
-// version's obligations were retired; nil means no obligation was declared.
+// occurrence's claim (obligation.Service.DeclareForAuthorizedReplacementTx).
+// It verifies the handoff against this transaction's supersession, so an
+// exact ReplaceDirective grant carries over to the declaration (XREV-1.2),
+// and reads the claim from the occurrence's creation declaration after the
+// prior's obligations were retired; nil means no obligation was declared.
 type ReplacementObligations interface {
-	DeclareForReplacementTx(tx store.Tx, actor domain.Principal, sourceID string, seq uint64) (*domain.ObligationRef, error)
+	DeclareForAuthorizedReplacementTx(tx store.Tx, actor domain.Principal, h obligation.ReplacementHandoff, seq uint64) (*domain.ObligationRef, error)
 }
 
 var _ ReplacementObligations = (*obligation.Service)(nil)
@@ -124,7 +126,7 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 		return out, domain.ErrVersionConflict
 	}
 	if claim || pinned {
-		ref, err := s.obligations.DeclareForReplacementTx(tx, p, fresh.ID, tx.NextSeq())
+		ref, err := s.obligations.DeclareForAuthorizedReplacementTx(tx, p, obligation.ReplacementHandoff{PriorID: old.ID, ReplacementID: fresh.ID}, tx.NextSeq())
 		if err != nil {
 			return out, err
 		}

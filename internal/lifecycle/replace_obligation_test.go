@@ -7,6 +7,7 @@ import (
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/graph"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
 	"github.com/tdavison784/context-runtime/internal/store/storetest"
@@ -23,9 +24,9 @@ type declareHook struct {
 	allocatedAtCall bool
 }
 
-func (h *declareHook) DeclareForReplacementTx(tx store.Tx, actor domain.Principal, sourceID string, seq uint64) (*domain.ObligationRef, error) {
+func (h *declareHook) DeclareForAuthorizedReplacementTx(tx store.Tx, actor domain.Principal, handoff obligation.ReplacementHandoff, seq uint64) (*domain.ObligationRef, error) {
 	h.calls++
-	h.source, h.allocatedAtCall = sourceID, tx.Allocated(seq)
+	h.source, h.allocatedAtCall = handoff.ReplacementID, tx.Allocated(seq)
 	current, err := graph.IsCurrent(tx, "prior")
 	h.priorRetired = err == nil && !current
 	return h.ref, h.err
