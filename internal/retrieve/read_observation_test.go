@@ -91,8 +91,12 @@ func fileObservationState(t *testing.T, s store.Store) domain.ContextItem {
 // observationStateItem renders the fixed obs-state/1 shape the obligation
 // service files, from typed fields only.
 func observationStateItem(run domain.ObservationRun, obs domain.ObservationRecord, seq uint64) domain.ContextItem {
+	identity := obs.ObservedWorkspaceFingerprint
+	if run.Subject.Family == domain.ObservationFileRead {
+		identity = obs.ObservedContentHash
+	}
 	text := fmt.Sprintf("Observed %s %s (%s): %d passed, %d failed, %d skipped of %d; subject %s at %s.",
-		obs.Family, obs.Outcome, obs.Completeness, obs.Passed, obs.Failed, obs.Skipped, obs.Total, run.SubjectKey, obs.ObservedWorkspaceFingerprint)
+		obs.Family, obs.Outcome, obs.Completeness, obs.Passed, obs.Failed, obs.Skipped, obs.Total, run.SubjectKey, identity)
 	parts := []domain.ContentPart{{Type: domain.PartText, MediaType: "text/plain", Text: text}}
 	return domain.ContextItem{
 		ID: "ost-1", EventID: obs.ID, DirectiveID: run.SubjectKey, Namespace: domain.NamespaceObservation,
@@ -170,6 +174,138 @@ func TestGetObservationStateMatchingResourceStaysCurrent(t *testing.T) {
 			t.Fatalf("matching observation state expiry = %s, want LIVE", got.Observed.Expiry)
 		}
 	})
+}
+
+// The file-family counterpart (P3-22, ruling L1.2): a path-content
+// observation is CURRENT while the path's current recorded content is what
+// it observed. A report that names the path and records changed content
+// makes it HISTORICAL; a same-content path report - even with a moved
+// workspace fingerprint - keeps it CURRENT.
+func TestGetFileObservationStateFollowsPathContent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    domain.ItemCurrentness
+	}{
+		{"content-changing path report", "content-v2", domain.ItemHistorical},
+		{"same-content path report", "content-v1", domain.ItemCurrent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			observationStores(t, func(t *testing.T, s store.Store) {
+				it := fileReadObservationState(t, s)
+				reportPathContent(t, s, tc.content)
+				got, err := New(s).Get(context.Background(), storetest.NewPrincipal("s", domain.AuthorityHarness), it.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Observed.Currentness != tc.want {
+					t.Fatalf("Get after %s = %s, want %s", tc.name, got.Observed.Currentness, tc.want)
+				}
+			})
+		})
+	}
+}
+
+// fileReadObservationState files one current obs-state/1 item for a
+// complete PASS file read of "docs/a.md" at content "content-v1", and
+// returns the item.
+func fileReadObservationState(t *testing.T, s store.Store) domain.ContextItem {
+	t.Helper()
+	actor := storetest.TaskHarness("s")
+	subject := domain.ObservationSubject{Family: domain.ObservationFileRead, Target: domain.TargetSpec{File: &domain.FileTarget{
+		Locator: domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: "docs/a.md"}, Mode: domain.FileCurrentContent}}}
+	key, err := subject.Key()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var it domain.ContextItem
+	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.PutTask(storetest.NewTask("s", "task"), 0, domain.LifecycleEvent{ID: "task-open", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: "task", Action: "open", Actor: actor}); err != nil {
+			return err
+		}
+		if err := sem.InsertResourceBinding(storetest.NewResourceBinding("s", "repo", tx.NextSeq())); err != nil {
+			return err
+		}
+		if err := sem.InsertWorkspaceBinding(storetest.NewWorkspaceBinding("s", "wb", "repo", 1, tx.NextSeq())); err != nil {
+			return err
+		}
+		u1 := storetest.NewResourceUpdate("s", "u1", "repo", tx.NextSeq(), 0, observationFP, "docs/a.md")
+		if err := sem.InsertResourceUpdate(u1); err != nil {
+			return err
+		}
+		if _, err := sem.PutResourceState(storetest.StateAfter(u1, tx.NextSeq()), 0); err != nil {
+			return err
+		}
+		if _, err := sem.PutResourcePathState(domain.ResourcePathState{
+			SemanticMeta: storetest.Meta("s", "ps-docs", tx.NextSeq()), Locator: domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: "docs/a.md"},
+			ContentHash: domain.HashBytes([]byte("content-v1")), ResourceUpdateID: u1.ID,
+			ResourceRevision: u1.ResultingAuthoritativeRevision, Revision: 1, Freshness: domain.ResourceKnown,
+		}, 0); err != nil {
+			return err
+		}
+		runSeq := tx.NextSeq()
+		run := domain.ObservationRun{SemanticMeta: storetest.Meta("s", "run-f1", runSeq), Subject: subject, SubjectKey: key, Ordinal: runSeq,
+			ExecutionID: "exec-run-f1", Binding: domain.WorkspaceBindingRef{ID: "wb", Version: 1}, TaskID: "task",
+			Access: domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task"}, Reporter: storetest.HarnessPrincipal("s")}
+		if err := sem.InsertObservationRun(run); err != nil {
+			return err
+		}
+		if err := tx.InsertItem(storetest.ProducedEvidence("s", "ev-f1", tx.NextSeq(), run.ExecutionID)); err != nil {
+			return err
+		}
+		obs := storetest.NewObservation(run, "obs-f1", "ev-f1", tx.NextSeq(), "")
+		obs.ObservedContentHash = domain.HashBytes([]byte("content-v1"))
+		if err := sem.InsertObservation(obs); err != nil {
+			return err
+		}
+		it = observationStateItem(run, obs, tx.NextSeq())
+		if err := tx.InsertItem(it); err != nil {
+			return err
+		}
+		if err := graph.FileObservationState(tx, actor, it.ID, run.SubjectKey, ""); err != nil {
+			return err
+		}
+		_, err = sem.PutSubjectState(domain.SubjectState{
+			SemanticMeta: storetest.Meta("s", "ss-f1", tx.NextSeq()), SubjectKey: run.SubjectKey, TaskID: "task",
+			CurrentItemID: it.ID, ObservationID: obs.ID, Access: run.Access, AcceptedOrdinal: run.Ordinal,
+			Revision: 1, Applicability: domain.ApplicabilityCurrent,
+		}, 0, obs.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return it
+}
+
+// reportPathContent reports "docs/a.md" named on a new update with a moved
+// workspace fingerprint, recording content as the path's current content.
+func reportPathContent(t *testing.T, s store.Store, content string) {
+	t.Helper()
+	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		u2 := storetest.NewResourceUpdate("s", "u2", "repo", tx.NextSeq(), 1, domain.HashBytes([]byte("edited workspace")), "docs/a.md")
+		if err := sem.InsertResourceUpdate(u2); err != nil {
+			return err
+		}
+		if _, err := sem.PutResourceState(storetest.StateAfter(u2, tx.NextSeq()), 1); err != nil {
+			return err
+		}
+		_, err = sem.PutResourcePathState(domain.ResourcePathState{
+			SemanticMeta: storetest.Meta("s", "ps-docs", tx.NextSeq()), Locator: domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: "docs/a.md"},
+			ContentHash: domain.HashBytes([]byte(content)), ResourceUpdateID: u2.ID,
+			ResourceRevision: u2.ResultingAuthoritativeRevision, Revision: 1, Freshness: domain.ResourceKnown,
+		}, 1)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // errResourceUnreadable stands in for a failing resource read.
