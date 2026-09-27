@@ -157,3 +157,31 @@ func TestOnlyToolResultTranscriptsQualifyAsEvidenceSupport(t *testing.T) {
 		}
 	}
 }
+
+// SPEC-1.5: a pre-upgrade agent key (no explicit namespace) is superseded by
+// its exact owner only when the frozen legacy rule classifies it AGENT_KEY;
+// the superseding version must carry the explicit namespace.
+func TestAgentMaySupersedeOnlyItsOwnLegacyKey(t *testing.T) {
+	actor := Principal{SessionID: "s", WorkflowID: "w", TaskID: "t", AgentID: "a", Authority: AuthorityAgent}
+	key := ContextItem{ID: "old", SessionID: "s", WorkflowID: "w", TaskID: "t", AgentID: "a", DirectiveID: AgentKeyID("status"), Authority: AuthorityAgent, Kind: KindTaskState, Scope: ScopeTask,
+		Access: AccessBoundary{Scope: ScopeTask, SessionID: "s", WorkflowID: "w", TaskID: "t", AgentID: "a"}}
+	if err := authorizeAgentKeyPrior(actor, key); err != nil {
+		t.Fatalf("owner refused its legacy key: %v", err)
+	}
+	for name, change := range map[string]func(*ContextItem){
+		"directive section": func(it *ContextItem) { it.Section = SectionPinned },
+		"no directive ID":   func(it *ContextItem) { it.DirectiveID = "" },
+		"other agent":       func(it *ContextItem) { it.AgentID = "b" },
+		"user authority":    func(it *ContextItem) { it.Authority = AuthorityUser },
+		"other namespace":   func(it *ContextItem) { it.Namespace = NamespaceDirective },
+	} {
+		bad := key
+		change(&bad)
+		if authorizeAgentKeyPrior(actor, bad) == nil {
+			t.Errorf("%s: legacy prior accepted", name)
+		}
+	}
+	if AuthorizeAgentKeyWrite(actor, key) == nil {
+		t.Fatal("a new version without the explicit namespace was accepted")
+	}
+}
