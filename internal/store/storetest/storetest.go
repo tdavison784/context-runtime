@@ -128,6 +128,7 @@ var suite = []testCase{
 
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},
+	{"IngestionV3RoundTrip", testIngestionV3RoundTrip},
 	{"ReceiptKeepsOriginalItems", testReceiptKeepsOriginalItems},
 	{"IngestionInsertRules", testIngestionInsertRules},
 	{"AnonymousIngestions", testAnonymousIngestions},

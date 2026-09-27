@@ -301,7 +301,9 @@ func testSemanticChanges(t *testing.T, s store.Store) {
 		noErr(t, tx.AppendLifecycleEvent(NewItemEvent(sessA, "l1", tx.NextSeq(), "p1")))
 		noErr(t, tx.AppendLifecycleEvent(NewItemEvent(sessA, "l2", tx.NextSeq(), "p1")))
 		sem := semantic(t, tx)
-		noErr(t, sem.InsertSemanticChange(change("c1", tx.NextSeq(), "l1", DirectiveBoundary(sessA))))
+		c1 := change("c1", tx.NextSeq(), "l1", DirectiveBoundary(sessA))
+		c1.CauseID = "l2" // a stored audit event may be the cause
+		noErr(t, sem.InsertSemanticChange(c1))
 		return sem.InsertSemanticChange(change("c2", tx.NextSeq(), "l2", private))
 	})
 	for _, tc := range []struct {
@@ -315,6 +317,11 @@ func testSemanticChanges(t *testing.T, s store.Store) {
 		{"missing target", func(seq uint64) domain.SemanticChange {
 			c := change("c3", seq, "l1", DirectiveBoundary(sessA))
 			c.Target = domain.ItemGrantTarget(sessA, "ghost")
+			return c
+		}, domain.ErrInvalidRecord},
+		{"missing cause record", func(seq uint64) domain.SemanticChange {
+			c := change("c3", seq, "l1", DirectiveBoundary(sessA))
+			c.CauseID = "cause-missing"
 			return c
 		}, domain.ErrInvalidRecord},
 		{"missing obligation version", func(seq uint64) domain.SemanticChange {
