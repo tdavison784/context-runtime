@@ -118,11 +118,13 @@ func failCovers(proof domain.AccessBoundary, obs domain.ObservationRecord, run d
 // is one keyed read, independent of run history.
 func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run domain.ObservationRun, o domain.ObligationVersion) (uint64, error) {
 	var high uint64
-	for _, p := range candidatePartitions(run, o) {
+	// The commit guard ranks proofs over exactly these partitions, so the
+	// matcher and the store share one rule (DUR-3.9).
+	for _, p := range store.ProofRankPartitions(run, o) {
 		if err := work.spend(1); err != nil {
 			return 0, err
 		}
-		mark, err := r.SubjectHighWater(run.SubjectKey, p.TaskID, p)
+		mark, err := r.SubjectHighWater(run.SubjectKey, p.TaskID, p.Access)
 		if errors.Is(err, domain.ErrNotFound) {
 			continue
 		}
@@ -132,18 +134,6 @@ func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run dom
 		high = max(high, mark)
 	}
 	return high, nil
-}
-
-// candidatePartitions lists the run's own partition and the obligation's
-// publishable partitions, deduplicated.
-func candidatePartitions(run domain.ObservationRun, o domain.ObligationVersion) []domain.AccessBoundary {
-	out := []domain.AccessBoundary{run.Access}
-	for _, b := range obligationPartitions(o) {
-		if b != run.Access {
-			out = append(out, b)
-		}
-	}
-	return out
 }
 
 // obligationPartitions lists the TASK partitions of the obligation's task
