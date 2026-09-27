@@ -294,3 +294,8 @@ func (s semRead) SemanticChanges(viewer domain.Principal, target domain.GrantTar
 		return c.Access.Permits(viewer), nil
 	})
 }
+
+// LiveGrantsFor implements store.DeclarationReader.
+func (s semRead) LiveGrantsFor(action domain.Action, target domain.GrantTarget, seq uint64, limit int) ([]domain.MutationGrant, error) {
+	return nil, domain.ErrUnsupportedSchema
+}

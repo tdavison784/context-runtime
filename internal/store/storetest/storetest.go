@@ -111,6 +111,7 @@ var suite = []testCase{
 	{"SemanticCurrentPointerCAS", testSemanticCurrentPointerCAS},
 	{"SemanticGrantsFor", testSemanticGrantsFor},
 	{"SemanticGrantDuplicateTargets", testSemanticGrantDuplicateTargets},
+	{"SemanticLiveGrantsFor", testSemanticLiveGrantsFor},
 	{"SemanticChanges", testSemanticChanges},
 	{"SemanticResources", testSemanticResources},
 	{"SemanticResourcePaths", testSemanticResourcePaths},

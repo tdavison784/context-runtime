@@ -16,6 +16,11 @@ type DeclarationReader interface {
 	CoveragesBySource(itemID string, purpose domain.CoveragePurpose, page Page) (ResultPage[domain.CoverageRecord], error)
 	// Indexed exact target/action lookup, checked as a complete bounded set.
 	GrantsFor(action domain.Action, target domain.GrantTarget, limit int) ([]domain.MutationGrant, error)
+	// LiveGrantsFor is GrantsFor restricted to grants in force at seq
+	// (issued by it, not expired before it, not revoked at or before it).
+	// Only those count toward limit, so dead grant history never makes a
+	// live grant unreadable (G2, SEC-1.5, DUR-1.4).
+	LiveGrantsFor(action domain.Action, target domain.GrantTarget, seq uint64, limit int) ([]domain.MutationGrant, error)
 	// Current OPEN goals whose DECLARED owning scope is TURN/TASK. No access
 	// filter: completion must reject hidden requirements using fixed errors.
 	OpenGoalsByTaskOwner(taskID string, page Page) (ResultPage[domain.ContextItem], error)

@@ -66,3 +66,8 @@ func (r semRead) GrantsFor(action domain.Action, target domain.GrantTarget, limi
 	}
 	return out, nil
 }
+
+// LiveGrantsFor implements store.DeclarationReader.
+func (r semRead) LiveGrantsFor(action domain.Action, target domain.GrantTarget, seq uint64, limit int) ([]domain.MutationGrant, error) {
+	return nil, domain.ErrUnsupportedSchema
+}
