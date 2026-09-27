@@ -223,7 +223,8 @@ func TestTraceT02Obligation(t *testing.T) {
 			if _, err := graph.DeclareCreation(tx, it, graph.CreationAcceptance{PolicyVersion: "trace-t02/1"}); err != nil {
 				return err
 			}
-			if _, err := graph.ReplaceDirective(tx, f.system, "task", "t2", it.ID, "evt-"+id); err != nil {
+			// Production passes the obligation service as the settler (M2).
+			if _, err := graph.ReplaceDirective(tx, f.system, "task", "t2", it.ID, "evt-"+id, graph.WithPendingSettler(f.s)); err != nil {
 				return err
 			}
 			var err error
