@@ -316,7 +316,19 @@ func (s semTx) InsertObservation(o domain.ObservationRecord) error {
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return err
 	}
-	return t.put("observation", o.ID, 0, o, false)
+	return t.atomic(func() error {
+		if err := t.put("observation", o.ID, 0, o, false); err != nil {
+			return err
+		}
+		if !o.TerminalComplete() {
+			return nil
+		}
+		// Raise the run partition's high-water mark (H1, migration 0037).
+		_, err := t.conn.ExecContext(t.ctx, `INSERT INTO lookup_subject_high_water(session_id,partition_key,high_water) VALUES(?,?,?)
+ON CONFLICT(session_id,partition_key) DO UPDATE SET high_water = MAX(high_water, excluded.high_water)`,
+			t.session, subjectPartitionKey(run.SubjectKey, run.TaskID, run.Access), run.Ordinal)
+		return err
+	})
 }
 
 func (s semRead) Observation(id string) (domain.ObservationRecord, error) {
@@ -563,7 +575,14 @@ func (s semRead) ClosingObservation(runID string) (domain.ObservationRecord, err
 	return o, s.t.getWhere("observation", "f_run_id=? AND "+closingObservation, &o, runID)
 }
 
-// SubjectHighWater implements store.ResourceReader.
+// SubjectHighWater implements store.ResourceReader: one primary-key read
+// of migration 0037's mark.
 func (s semRead) SubjectHighWater(subjectKey, taskID string, access domain.AccessBoundary) (uint64, error) {
-	return 0, domain.ErrUnsupportedSchema
+	var hw uint64
+	err := s.t.conn.QueryRowContext(s.t.ctx, "SELECT high_water FROM lookup_subject_high_water WHERE session_id=? AND partition_key=?",
+		s.t.session, subjectPartitionKey(subjectKey, taskID, access)).Scan(&hw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("subject high-water mark %s: %w", subjectKey, domain.ErrNotFound)
+	}
+	return hw, err
 }
