@@ -157,6 +157,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"H2PathCurrencyIgnoresLaterUnrelatedEdits", TestH2PathCurrencyIgnoresLaterUnrelatedEdits, true},
 		{"H2InvalidationIgnoresTransitionHistory", TestH2InvalidationIgnoresTransitionHistory, true},
 		{"H2PartialReportsDoNotWedgeRun", TestH2PartialReportsDoNotWedgeRun, true},
+		{"H2CurrentSatisfiesIgnoresHistory", TestH2CurrentSatisfiesIgnoresHistory, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {

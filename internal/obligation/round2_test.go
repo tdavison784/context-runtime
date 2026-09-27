@@ -248,3 +248,26 @@ func TestH2PartialReportsDoNotWedgeRun(t *testing.T) {
 		t.Errorf("final complete PASS after %d partials: %+v", h2History, o)
 	}
 }
+
+// H2: the current SATISFIES view reads the version's current proof by key;
+// accumulated satisfy/invalidate history never wedges it.
+func TestH2CurrentSatisfiesIgnoresHistory(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	fp := "W1"
+	for i := range h2History / 2 {
+		f.report(t, f.newRun(t), domain.OutcomePass, hashOf(fp), nil)
+		fp = fmt.Sprintf("C%d", i)
+		f.r.set(t, f.fixture, hashOf(fp), false)
+	}
+	_, obs := f.observeTests(t, f.target, domain.OutcomePass, hashOf(fp), nil)
+	var v SatisfiesView
+	var err error
+	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		v, err = f.s.Satisfies(tx, f.harness, f.sysTests, true)
+		return nil
+	})
+	if err != nil || len(v.Relations) != 1 || v.Relations[0].Evidence.ItemID != obs.EvidenceItemID || !v.Relations[0].Current {
+		t.Fatalf("current SATISFIES after %d transitions = %+v, %v", h2History, v, err)
+	}
+}
