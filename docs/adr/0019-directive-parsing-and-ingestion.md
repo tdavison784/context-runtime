@@ -108,9 +108,17 @@ P3-35, P3-40) — implemented in `internal/ingest`, this ADR's own package.**
 control, and mutation-intent operations) hashed under
 `ingest-payload/v3` (ADR 4), replacing the frozen v2 encoder for new events
 only — v2 stays frozen and still validated for legacy replay. A submitted
-operation's `RequestID` must be empty; `domain.OperationRequestID(session,
-occurrence, opIndex, ordinal)` derives it only after acceptance, so no
-caller can forge or predict one. Lifecycle-command v2 executes Resolve/Unpin
+operation's `RequestID` must be empty; `domain.OperationRequestID(p
+Principal, occurrence string, operation, command uint64)` derives it only
+after acceptance, so no caller can forge or predict one — its current
+signature binds a full principal, not just a session ID (PR #6 round 1,
+G3/SEC-1.2, fixing the stale `(session, occurrence, opIndex, ordinal)`
+signature this ADR previously described). **Which principal it binds is
+still an open question as of PR #6 round 2 (SEC-2.2/SEC-2.6, H5, assigned
+W1):** `internal/ingest/ops.go`'s `typedOperation` currently passes the
+operation's lowered *source actor*, not the authenticated caller principal
+H5 requires; this ADR's text will need a further correction once that
+lands. Lifecycle-command v2 executes Resolve/Unpin
 in source order at each command's exact, allocated authorization sequence
 (never a predicted one), with C-2's narrowed `DetailAccess` redaction
 applied to the execution outcome itself, not just target resolution. A
