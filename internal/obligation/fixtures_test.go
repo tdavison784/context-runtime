@@ -151,3 +151,28 @@ func seedEvidenceAs(t *testing.T, st store.Store, id string, access domain.Acces
 	})
 	return it
 }
+
+// evidenceItem builds TOOL evidence produced by the run's execution: its
+// source records the producing tool call (SPEC-1.12), in the run's boundary.
+func evidenceItem(seq uint64, run domain.ObservationRun) domain.ContextItem {
+	it := storetest.NewItem(testSession, "ev-"+run.ExecutionID, seq, "PASS 42 tests")
+	it.Kind, it.Authority, it.Scope, it.Access = domain.KindToolResult, domain.AuthorityTool, run.Access.Scope, run.Access
+	it.TaskID, it.WorkflowID, it.AgentID = run.Access.TaskID, run.Access.WorkflowID, run.Access.AgentID
+	it.Source = &domain.SourceRef{Kind: domain.SourceTool, Locator: "tool:" + run.ExecutionID, ToolCallID: run.ExecutionID}
+	return it
+}
+
+// evidenceFor stores the run's evidence occurrence once and returns it.
+func evidenceFor(t *testing.T, st store.Store, run domain.ObservationRun) domain.ContextItem {
+	t.Helper()
+	var it domain.ContextItem
+	mustUpdate(t, st, func(tx store.Tx) error {
+		if existing, err := tx.Item("ev-" + run.ExecutionID); err == nil {
+			it = existing
+			return nil
+		}
+		it = evidenceItem(tx.NextSeq(), run)
+		return tx.InsertItem(it)
+	})
+	return it
+}

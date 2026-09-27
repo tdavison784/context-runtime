@@ -378,3 +378,21 @@ func TestDUR112OneBudgetPerTransaction(t *testing.T) {
 		}
 	}
 }
+
+// SPEC-1.12 (P3-21): observation evidence is the TOOL occurrence produced by
+// the run's own execution, not any TOOL item in its boundary.
+func TestSPEC112EvidenceBoundToExecution(t *testing.T) {
+	f := newEvalFixture(t)
+	run := f.newRun(t)
+	other := evidenceFor(t, f.st, domain.ObservationRun{ExecutionID: "exec-other", Access: run.Access})
+	for name, ev := range map[string]string{"other execution": other.ID, "no producing call": f.evidence.ID} {
+		runN++
+		if _, err := f.observe(t, f.harness, obsIntent(fmt.Sprintf("obs-%d", runN), run, ev, domain.OutcomePass, hashOf("W1"))); !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Errorf("%s evidence: %v, want ErrInvalidRecord", name, err)
+		}
+	}
+	runN++
+	if _, err := f.observe(t, f.harness, obsIntent(fmt.Sprintf("obs-%d", runN), run, evidenceFor(t, f.st, run).ID, domain.OutcomePass, hashOf("W1"))); err != nil {
+		t.Errorf("the run's own evidence: %v", err)
+	}
+}
