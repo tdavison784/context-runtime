@@ -7,14 +7,12 @@ import (
 	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
-	"sync"
 )
 
 type Service struct {
-	gcQueueCursors sync.Map // session -> store.Cursor; fair bounded scans within this executor
-	store          store.Store
-	policy         domain.Phase3Policy
-	obligations    ReplacementObligations // nil: claim-bearing replacement fails closed
+	store       store.Store
+	policy      domain.Phase3Policy
+	obligations ReplacementObligations // nil: claim-bearing replacement fails closed
 }
 
 // New freezes the execution policy by value; no zero/unlimited defaults exist.
