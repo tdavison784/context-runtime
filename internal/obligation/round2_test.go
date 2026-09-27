@@ -174,3 +174,77 @@ func TestH1PrivateFailDoesNotOutrankTaskPass(t *testing.T) {
 		t.Fatalf("agent-private FAIL outranked the task-wide PASS: %+v", o)
 	}
 }
+
+// H2 regressions: every "is it current / closed / where did it come from"
+// question is one keyed read, so each path below works after more history
+// than the test policy's whole work budget (64 units, page size 2).
+const h2History = 70
+
+// DUR-2.2 = SEC-2.5 = XREV-2.2 (H2): path currency ignores unrelated edits
+// recorded AFTER the path's content, for a CURRENT_PATH assertion and for a
+// file_read observation alike.
+func TestH2PathCurrencyIgnoresLaterUnrelatedEdits(t *testing.T) {
+	f := newEvalFixture(t)
+	ref := f.fileObligation(t, "13")
+	f.matcherGrant(t, "g-file", ref, FileReadV1, f.userP)
+	f.resourceReport(t, "W-a", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	rev := f.r.auth
+	for i := range h2History {
+		f.resourceReport(t, fmt.Sprintf("later%d", i), false, false, []string{"docs/b.md"})
+	}
+	if err := f.assertPath(t, ref, rev, "H1"); err != nil {
+		t.Fatalf("current-path claim after %d unrelated edits: %v", h2History, err)
+	}
+	g := newEvalFixture(t)
+	ref2 := g.fileObligation(t, "13")
+	g.matcherGrant(t, "g-file", ref2, FileReadV1, g.userP)
+	g.resourceReport(t, "W-a", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	for i := range h2History {
+		g.resourceReport(t, fmt.Sprintf("later%d", i), false, false, []string{"docs/b.md"})
+	}
+	runN++
+	run, err := g.registerRun(t, g.harness, runIntent(fmt.Sprintf("run-%d", runN), fmt.Sprintf("exec-%d", runN), fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.report(t, run, domain.OutcomePass, hashOf("H1"), nil)
+	if o := g.status(t, ref2); o.Status != domain.ObligationSatisfied {
+		t.Errorf("file_read after %d unrelated edits: %+v", h2History, o)
+	}
+}
+
+// DUR-2.3 = XREV-2.1 (H2): invalidating a proof finds its installing
+// transition by ID, so a version's accumulated satisfy/invalidate history
+// never wedges resource reports.
+func TestH2InvalidationIgnoresTransitionHistory(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	fp := "W1"
+	for i := range h2History / 2 {
+		f.report(t, f.newRun(t), domain.OutcomePass, hashOf(fp), nil)
+		if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+			t.Fatalf("cycle %d: PASS did not satisfy: %+v", i, o)
+		}
+		fp = fmt.Sprintf("C%d", i)
+		f.r.set(t, f.fixture, hashOf(fp), false)
+		if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved {
+			t.Fatalf("cycle %d: workspace change kept the proof: %+v", i, o)
+		}
+	}
+}
+
+// DUR-2.6 (H2): a run's closing check is one keyed read, so many PARTIAL
+// reports never wedge the run or its final complete outcome.
+func TestH2PartialReportsDoNotWedgeRun(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	run := f.newRun(t)
+	partial := func(in *domain.ObservationIntent) { in.Completeness = domain.ObservationPartial }
+	for range h2History {
+		f.report(t, run, domain.OutcomePass, hashOf("W1"), partial)
+	}
+	f.report(t, run, domain.OutcomePass, hashOf("W1"), nil)
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Errorf("final complete PASS after %d partials: %+v", h2History, o)
+	}
+}

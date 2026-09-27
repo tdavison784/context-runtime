@@ -154,6 +154,9 @@ func TestSQLiteSuite(t *testing.T) {
 		{"H1StalePassAfterRevert", TestH1StalePassAfterRevert, true},
 		{"H1StalePassAfterInapplicableFail", TestH1StalePassAfterInapplicableFail, true},
 		{"H1PrivateFailDoesNotOutrankTaskPass", TestH1PrivateFailDoesNotOutrankTaskPass, true},
+		{"H2PathCurrencyIgnoresLaterUnrelatedEdits", TestH2PathCurrencyIgnoresLaterUnrelatedEdits, true},
+		{"H2InvalidationIgnoresTransitionHistory", TestH2InvalidationIgnoresTransitionHistory, true},
+		{"H2PartialReportsDoNotWedgeRun", TestH2PartialReportsDoNotWedgeRun, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {
