@@ -246,3 +246,60 @@ func testSemanticEarliestExchangeWithItem(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// testSemanticLiveGrantsMatchGrantLiveAt checks the live grant read against
+// store.GrantLiveAt at every sequence, over grants covering each
+// boundary (issued, expiring and revoked at, before and after each
+// other), so a range-split read can never drop or add a live grant
+// (DUR-2.10).
+func testSemanticLiveGrantsMatchGrantLiveAt(t *testing.T, s store.Store) {
+	issuer := NewPrincipal(sessA, domain.AuthoritySystem)
+	item := domain.ItemGrantTarget(sessA, "i1")
+	n := 0
+	update(t, s, sessA, func(tx store.Tx) error {
+		for i := range 6 {
+			for _, expires := range []int{-1, 0, 1, 3} { // -1: never
+				for _, revoke := range []bool{false, true} {
+					n++
+					g := NewGrant(sessA, "g"+strconv.Itoa(n), tx.NextSeq())
+					g.Issuer, g.TargetIDs, g.Targets = issuer, nil, []domain.GrantTarget{item}
+					if i%2 == 1 {
+						g.TargetIDs, g.Targets = []string{"i1"}, nil // legacy key
+					}
+					if expires >= 0 {
+						g.ExpiresAtSeq = g.IssuedSeq + uint64(expires)
+					}
+					noErr(t, tx.InsertGrant(g))
+					if revoke {
+						_, err := tx.RevokeGrant(g.ID, NewLifecycleEvent(sessA, "rv-"+g.ID, tx.NextSeq(), domain.TargetGrant, g.ID))
+						noErr(t, err)
+					}
+				}
+			}
+		}
+		return nil
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		r := readSemantic(t, tx)
+		all, err := r.GrantsFor(domain.ActionResolve, item, 1000)
+		noErr(t, err)
+		for seq := uint64(0); seq <= tx.LastSeq()+1; seq++ {
+			var want []string
+			for _, g := range all {
+				if store.GrantLiveAt(g, seq) {
+					want = append(want, g.ID)
+				}
+			}
+			got, err := r.LiveGrantsFor(domain.ActionResolve, item, seq, 1000)
+			noErr(t, err)
+			var ids []string
+			for _, g := range got {
+				ids = append(ids, g.ID)
+			}
+			if !slicesEqual(ids, want) {
+				t.Fatalf("LiveGrantsFor at seq %d = %v, want %v", seq, ids, want)
+			}
+		}
+		return nil
+	})
+}

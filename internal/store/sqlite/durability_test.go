@@ -298,6 +298,7 @@ var committedMigrations = map[string]string{
 	"0033_resource_update_paths.sql":                 "bd6550d5ef957746a3feffeab0bfe60b86312e5962905ecf1a2ca432458960e3",
 	"0034_reconcile_legacy_creation.sql":             "974c7bd0874406c567d556732a8de88a47d0b42e72b1dfde4a3b711ff20a2596",
 	"0035_item_exchange_index.sql":                   "b1cabd03761102a4527c12a468bc2c4b9626091a4bd14811993904fab7adde16",
+	"0036_grant_target_liveness_ranges.sql":          "53d6eb285426fb498dcff15c54e66187032f428159ef09f98061e1397be3edf3",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {
