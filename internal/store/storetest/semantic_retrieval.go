@@ -203,3 +203,27 @@ func testSemanticRetrieval(t *testing.T, s store.Store) {
 		return semantic(t, tx).InsertCoverage(c, m)
 	})
 }
+
+// testSemanticProjectionItemAccess checks the projection's intersected
+// access in the store (P3-29, SEC-1.12): reads filter on the projection
+// item's access, so the item must carry exactly the record's boundary,
+// which itself lies within the source's. A SESSION-scoped item built from
+// an AGENT-private source never commits.
+func testSemanticProjectionItemAccess(t *testing.T, s store.Store) {
+	var source domain.ContextItem
+	update(t, s, sessA, func(tx store.Tx) error {
+		source = NewItem(sessA, "src", tx.NextSeq(), "private fact")
+		source.Scope, source.Access = domain.ScopeAgent, AgentBoundary(sessA)
+		return tx.InsertItem(source)
+	})
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+		b := newRetrievalBundle(t, source, "1", tx.NextSeq())
+		b.item.Scope, b.item.Access = domain.ScopeSession, domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: sessA}
+		return b.insert(t, tx)
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		_, err := tx.Item("proj-1")
+		wantErr(t, err, domain.ErrNotFound)
+		return nil
+	})
+}
