@@ -35,6 +35,22 @@ func race(fns ...func() error) []error {
 	return errs
 }
 
+// raceRound runs two operations for round i in one of three modes, so every
+// test deterministically exercises both serial orders as well as a true race
+// (TEST-1.4/1.5): the first runs to completion before the second, the second
+// before the first, or both start at once behind race's barrier. Errors are
+// returned in argument order.
+func raceRound(i int, first, second func() error) []error {
+	switch i % 3 {
+	case 0:
+		return []error{first(), second()}
+	case 1:
+		e2 := second()
+		return []error{first(), e2}
+	}
+	return race(first, second)
+}
+
 // TestConcurrency_ReplacementVsTransition: replacing a pin while its v1
 // obligation is being attested either retires an already SATISFIED v1 (the
 // attestation committed first) or rejects the attestation of a retired
@@ -44,13 +60,20 @@ func TestConcurrency_ReplacementVsTransition(t *testing.T) {
 		needsObligations(t, f)
 		sys := principal(domain.AuthoritySystem)
 		attested := 0
-		defer func() { t.Logf("attestation won %d of %d rounds", attested, raceRounds) }()
+		defer func() {
+			t.Logf("attestation won %d of %d rounds", attested, raceRounds)
+			// Both outcomes must occur, or the race exercised one branch only
+			// (TEST-1.4).
+			if !t.Failed() && (attested == 0 || attested == raceRounds) {
+				t.Errorf("attestation won %d of %d rounds: one branch never exercised", attested, raceRounds)
+			}
+		}()
 		for i := range raceRounds {
 			key := fmt.Sprintf("dep%d", i)
 			p1 := mustDirective(t, f.mustIngest(sys, sysEvent("v1-"+key, "## Pinned\n- ["+key+"] {obligation=tests_pass} Use version one.\n")), key)
 			v1 := f.currentObligation(p1.ID)
 			var p2 domain.IngestReceipt
-			errs := race(
+			errs := raceRound(i,
 				func() error {
 					var err error
 					p2, err = f.ingest(sys, sysEvent("v2-"+key, "## Pinned\n- ["+key+"] {obligation=tests_pass} Use version two.\n"))
@@ -107,7 +130,13 @@ func TestConcurrency_CompletionVsCallReservation(t *testing.T) {
 		svc := f.lifecycleService()
 		ledger := invocation.New(f.s)
 		completed := 0
-		defer func() { t.Logf("completion won %d of %d rounds", completed, raceRounds) }()
+		defer func() {
+			t.Logf("completion won %d of %d rounds", completed, raceRounds)
+			// Both outcomes must occur (TEST-1.5).
+			if !t.Failed() && (completed == 0 || completed == raceRounds) {
+				t.Errorf("completion won %d of %d rounds: one branch never exercised", completed, raceRounds)
+			}
+		}()
 		for i := range raceRounds {
 			task := fmt.Sprintf("T%d", i)
 			user := principal(domain.AuthorityUser)
@@ -118,7 +147,7 @@ func TestConcurrency_CompletionVsCallReservation(t *testing.T) {
 			sys, agent := principal(domain.AuthoritySystem), agentPrincipal()
 			sys.TaskID, agent.TaskID = task, task
 			seq := f.lastSeq()
-			errs := race(
+			errs := raceRound(i,
 				func() error {
 					_, err := svc.CompleteTaskStandalone(ctx, sys, domain.CompleteTaskIntent{RequestID: "done-" + task, TaskID: task})
 					return err
