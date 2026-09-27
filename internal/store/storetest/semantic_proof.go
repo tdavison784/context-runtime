@@ -79,6 +79,13 @@ func MatcherTransition(o domain.ObligationVersion, id string, seq uint64, proof 
 // "o1" v1 with its declaration, and matcher grant "g-m" on o1 v1.
 func proofWorld(t *testing.T, s store.Store) domain.ObligationVersion {
 	t.Helper()
+	return proofWorldIn(t, s, domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sessA, TaskID: "task"})
+}
+
+// proofWorldIn is proofWorld with run1, its evidence and o1 in boundary
+// access (a TASK boundary of task "task").
+func proofWorldIn(t *testing.T, s store.Store, access domain.AccessBoundary) domain.ObligationVersion {
+	t.Helper()
 	var o domain.ObligationVersion
 	update(t, s, sessA, func(tx store.Tx) error {
 		sem := semantic(t, tx)
@@ -86,14 +93,17 @@ func proofWorld(t *testing.T, s store.Store) domain.ObligationVersion {
 		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq())))
 		noErr(t, sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 1, tx.NextSeq())))
 		run := NewObservationRun(t, sessA, "run1", "repo", "wb", tx.NextSeq())
+		run.Access = access
 		noErr(t, sem.InsertObservationRun(run))
 		ev := ProducedEvidence(sessA, "ev1", tx.NextSeq(), run.ExecutionID)
+		ev.Access = access
 		noErr(t, tx.InsertItem(ev))
 		noErr(t, sem.InsertObservation(NewObservation(run, "obs1", "ev1", tx.NextSeq(), fpA)))
 		cov, members := NewCoverage(t, sessA, "evcov", tx.NextSeq(), domain.CoverageEvidenceSupport, ContentRef(ev))
 		noErr(t, sem.InsertCoverage(cov, members))
 		noErr(t, tx.InsertItem(SemanticDirective(sessA, "src", "dep", tx.NextSeq(), "All tests must pass")))
 		o = BoundObligation(t, sessA, "o1", 1, tx.NextSeq(), "src")
+		o.Access = access
 		noErr(t, tx.InsertObligationVersion(o))
 		noErr(t, sem.InsertObligationDeclaration(DeclarationOf(o, tx.NextSeq())))
 		g := NewGrant(sessA, "g-m", tx.NextSeq())
