@@ -145,7 +145,7 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 		c = change{unknown: true, allPaths: true}
 	default:
 		u.Freshness, u.WorkspaceFingerprint, u.AllPaths, u.ChangedPaths = domain.ResourceKnown, in.WorkspaceFingerprint, in.AllPaths, in.Clone().ChangedPaths
-		c = change{allPaths: in.AllPaths, paths: map[string]bool{}, fingerprint: in.WorkspaceFingerprint, contents: pathContents(in)}
+		c = change{allPaths: in.AllPaths, paths: map[string]bool{}, fingerprint: in.WorkspaceFingerprint, priorPrint: state.WorkspaceFingerprint, contents: pathContents(in)}
 		for _, p := range in.ChangedPaths {
 			c.paths[p] = true
 		}

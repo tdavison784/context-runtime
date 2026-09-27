@@ -3,6 +3,7 @@ package obligation
 import (
 	"errors"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -21,6 +22,7 @@ type change struct {
 	allPaths    bool              // any path may have changed
 	paths       map[string]bool   // canonical resource-relative changed paths
 	fingerprint string            // resulting KNOWN workspace fingerprint
+	priorPrint  string            // KNOWN fingerprint before an ordinary update
 	contents    map[string]string // authoritative resulting content by path
 }
 
@@ -86,23 +88,7 @@ type invalidation struct {
 // cost a report nothing. Nothing about affected targets is returned to the
 // reporter.
 func (s *Service) invalidateResource(tx store.Tx, sem store.SemanticTx, work *budget, reporter domain.Principal, seq uint64, resourceID string, c change, inv invalidation) error {
-	var affected []domain.ApplicabilityProof
-	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
-		pg, err := sem.CurrentProofsByDependency(resourceID, "", p)
-		if err != nil {
-			return 0, store.Cursor{}, false, err
-		}
-		for _, pr := range pg.Records {
-			hit, err := s.proofAffected(sem, work, pr.ID, resourceID, c)
-			if err != nil {
-				return 0, store.Cursor{}, false, err
-			}
-			if hit {
-				affected = append(affected, pr)
-			}
-		}
-		return len(pg.Records), pg.Next, pg.More, nil
-	})
+	affected, err := s.affectedProofs(sem, work, resourceID, c)
 	if err != nil {
 		return err
 	}
@@ -112,6 +98,67 @@ func (s *Service) invalidateResource(tx store.Tx, sem store.SemanticTx, work *bu
 		}
 	}
 	return nil
+}
+
+// affectedProofs reads the live proofs the update can affect (DUR-3.1 (A)):
+// for a KNOWN, non-ALL update, the proofs with a CURRENT_PATH dependency at
+// or below each changed path, plus the WORKSPACE-dependent proofs only when
+// the fingerprint changed; for an ALL, UNKNOWN or resync update, every live
+// proof on the resource, which the per-resource dependency cap keeps within
+// the work bound. FIXED_CONTENT dependencies are never affected.
+func (s *Service) affectedProofs(sem store.SemanticReader, work *budget, resourceID string, c change) ([]domain.ApplicabilityProof, error) {
+	seen := map[string]bool{}
+	var out []domain.ApplicabilityProof
+	collect := func(read func(store.Page) (store.ResultPage[domain.ApplicabilityProof], error)) error {
+		return s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
+			pg, err := read(p)
+			if err != nil {
+				return 0, store.Cursor{}, false, err
+			}
+			for _, pr := range pg.Records {
+				if seen[pr.ID] {
+					continue
+				}
+				seen[pr.ID] = true
+				hit, err := s.proofAffected(sem, work, pr.ID, resourceID, c)
+				if err != nil {
+					return 0, store.Cursor{}, false, err
+				}
+				if hit {
+					out = append(out, pr)
+				}
+			}
+			return len(pg.Records), pg.Next, pg.More, nil
+		})
+	}
+	if c.unknown || c.allPaths {
+		err := collect(func(p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+			return sem.CurrentProofsByDependency(resourceID, "", p)
+		})
+		return out, err
+	}
+	paths := make([]string, 0, len(c.paths))
+	for p := range c.paths {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, changed := range paths {
+		err := collect(func(p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+			return sem.LiveProofsByPath(resourceID, changed, p)
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if c.fingerprint != c.priorPrint {
+		err := collect(func(p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+			return sem.LiveWorkspaceProofs(resourceID, p)
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (s *Service) proofAffected(r store.SemanticReader, work *budget, proofID, resourceID string, c change) (bool, error) {
