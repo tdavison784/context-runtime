@@ -61,6 +61,9 @@ func readGet(tx store.ReadTx, p domain.Principal, itemID string) (domain.GetResu
 		if current {
 			currentness = domain.ItemCurrent
 		}
+		if currentness == domain.ItemCurrent && it.Namespace == domain.NamespaceObservation && !observationCurrent(tx, it) {
+			currentness = domain.ItemHistorical
+		}
 	}
 	return domain.GetResult{Item: it, SnapshotSeq: tx.LastSeq(), Observed: domain.ObservedItemState{
 		Source:      domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash},
@@ -72,6 +75,28 @@ func readGet(tx store.ReadTx, p domain.Principal, itemID string) (domain.GetResu
 		Authority:   it.Authority,
 		Expiry:      itemExpiry(tx, it, p),
 	}}, nil
+}
+
+// observationCurrent reports whether an OBSERVATION task_state item still
+// describes the current authoritative resource state of its subject
+// (P3-22, SPEC-4.10): the supersession pointer cannot say, because it moves
+// only when a later run files a newer state, so the live value is derived
+// at read from the subject state's observation (DUR-3.1 (B), ruling L1),
+// with one keyed SubjectState read. It fails closed: no semantic backend,
+// no filed subject state, a failing derivation, or an unreadable resource
+// all report not-current. The caller answers with a constant HISTORICAL
+// label, so this is no oracle and adds no resource detail to the response.
+func observationCurrent(tx store.ReadTx, it domain.ContextItem) bool {
+	r, err := store.ReadSemantic(tx)
+	if err != nil {
+		return false
+	}
+	st, err := r.SubjectState(it.DirectiveID, it.TaskID, it.Access)
+	if err != nil {
+		return false
+	}
+	a, err := store.SubjectApplicability(r, st)
+	return err == nil && a == domain.ApplicabilityCurrent
 }
 
 // itemExpiry is descriptive metadata for Get, never an admission decision.
