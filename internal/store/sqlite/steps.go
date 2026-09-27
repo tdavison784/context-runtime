@@ -22,6 +22,7 @@ var migrationSteps = map[int]migrationStep{
 	11: {id: "0011/item-sources/reference-locator-v1", run: backfillItemSourcesV1},
 	26: {id: "0026/obligations/reconcile-matcher-satisfaction-v1", run: reconcileMatcherSatisfactionV1},
 	34: {id: "0034/declarations/reconcile-legacy-creation-v1", run: reconcileLegacyCreationV1},
+	45: {id: "0045/proofs/reconcile-live-proof-paths-v1", run: reconcileLiveProofPathsV1},
 }
 
 // migrationChecksum is the stored checksum of migration number: the SHA-256

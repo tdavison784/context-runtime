@@ -1,6 +1,7 @@
 package storetest
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -166,4 +167,116 @@ func testSemanticGCProgress(t *testing.T, s store.Store) {
 	if _, err := put(progress(1, domain.GCCursor{Seq: 3, ID: "i1"}, 2), 2); !errorsIs(err, domain.ErrInvalidTransition) {
 		t.Errorf("progress of a finished request: error = %v, want ErrInvalidTransition", err)
 	}
+}
+
+// testSemanticGCQueueCursor checks the session's durable GC queue cursor
+// (DUR-3.2): an exact-key read, a compare-and-swap put on Revision that
+// writes nothing on conflict, cursor validation, and a cursor-only
+// transaction that commits without a sequenced record.
+func testSemanticGCQueueCursor(t *testing.T, s store.Store) {
+	read := func() (domain.GCQueueCursor, error) {
+		var c domain.GCQueueCursor
+		var err error
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			c, err = readSemantic(t, tx).GCQueueCursor()
+			return nil
+		})
+		return c, err
+	}
+	put := func(c domain.GCQueueCursor, expected uint64) (domain.GCQueueCursor, error) {
+		var out domain.GCQueueCursor
+		err := s.Update(ctx, sessA, func(tx store.Tx) error {
+			var err error
+			out, err = semantic(t, tx).PutGCQueueCursor(c, expected)
+			return err
+		})
+		return out, err
+	}
+	if _, err := read(); !errorsIs(err, domain.ErrNotFound) {
+		t.Errorf("before the first put: error = %v, want ErrNotFound", err)
+	}
+	got, err := put(domain.GCQueueCursor{SessionID: sessA}, 0)
+	noErr(t, err)
+	if got.Revision != 1 {
+		t.Errorf("created cursor revision = %d, want 1", got.Revision)
+	}
+	advanced := domain.GCQueueCursor{SessionID: sessA, Cursor: domain.GCCursor{Seq: 9, ID: "gcq_a"}}
+	if _, err := put(advanced, 0); !errorsIs(err, domain.ErrVersionConflict) {
+		t.Errorf("stale revision: error = %v, want ErrVersionConflict", err)
+	}
+	got, err = put(advanced, 1)
+	noErr(t, err)
+	if stored, err := read(); err != nil || stored != got || stored.Revision != 2 || stored.Cursor != advanced.Cursor {
+		t.Errorf("GCQueueCursor = %+v (%v), want %+v", stored, err, got)
+	}
+	if _, err := put(domain.GCQueueCursor{SessionID: sessA, Cursor: domain.GCCursor{Seq: 3}}, 2); !errorsIs(err, domain.ErrInvalidRecord) {
+		t.Errorf("invalid cursor: error = %v, want ErrInvalidRecord", err)
+	}
+	if _, err := put(domain.GCQueueCursor{SessionID: sessB}, 2); err == nil {
+		t.Error("another session's cursor was written")
+	}
+}
+
+// testSemanticPendingGCByTrigger checks the per-trigger pending read
+// (DUR-3.2): only pending requests of the enabled triggers, merged in
+// (Seq, ID) order and paged, so requests of disabled triggers and
+// finished ones never fill a page; the trigger set must be canonical.
+func testSemanticPendingGCByTrigger(t *testing.T, s store.Store) {
+	reqs := map[string]domain.GCTrigger{"g1": domain.GCSupersession, "g2": domain.GCTaskCompletion, "g3": domain.GCSupersession, "g5": domain.GCTTL}
+	update(t, s, sessA, func(tx store.Tx) error {
+		putTask(t, tx)
+		for i := range 20 { // a long prefix of requests whose trigger is disabled
+			r := NewGCRequest(sessA, "skip"+strconv.Itoa(i), tx.NextSeq())
+			r.RequestID, r.Trigger = "collect-skip"+strconv.Itoa(i), domain.GCPolicy
+			noErr(t, semantic(t, tx).InsertGCRequest(r))
+		}
+		for _, id := range []string{"g1", "g2", "g3", "g4", "g5"} {
+			r := NewGCRequest(sessA, id, tx.NextSeq())
+			if trig, ok := reqs[id]; ok {
+				r.Trigger = trig
+			}
+			noErr(t, semantic(t, tx).InsertGCRequest(r))
+		}
+		// g3 is finished: FAILED leaves every pending index.
+		return semantic(t, tx).InsertGCResult(domain.GCResult{SemanticMeta: Meta(sessA, "gr-g3", tx.NextSeq()), GCRequestID: "g3",
+			Outcome: domain.GCFailed, Reason: domain.GCFailureInvalidRequest})
+	})
+	ids := func(triggers ...domain.GCTrigger) []string {
+		var out []string
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			p := store.Page{Limit: 1}
+			for {
+				pg, err := readSemantic(t, tx).PendingGCRequestsByTrigger(triggers, p)
+				noErr(t, err)
+				for _, r := range pg.Records {
+					out = append(out, r.ID)
+				}
+				if !pg.More {
+					return nil
+				}
+				p.After = pg.Next
+			}
+		})
+		return out
+	}
+	for _, c := range []struct {
+		triggers []domain.GCTrigger
+		want     []string
+	}{
+		{[]domain.GCTrigger{domain.GCSupersession}, []string{"g1"}},
+		{[]domain.GCTrigger{domain.GCSupersession, domain.GCTaskCompletion}, []string{"g1", "g2", "g4"}},
+		{[]domain.GCTrigger{domain.GCSupersession, domain.GCTaskCompletion, domain.GCTTL}, []string{"g1", "g2", "g4", "g5"}},
+		{[]domain.GCTrigger{domain.GCManual}, nil},
+	} {
+		if got := ids(c.triggers...); !slicesEqual(got, c.want) {
+			t.Errorf("PendingGCRequestsByTrigger(%v) = %v, want %v", c.triggers, got, c.want)
+		}
+	}
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		for _, bad := range [][]domain.GCTrigger{nil, {domain.GCTaskCompletion, domain.GCSupersession}, {"UNKNOWN"}} {
+			_, err := readSemantic(t, tx).PendingGCRequestsByTrigger(bad, store.Page{Limit: 1})
+			wantErr(t, err, domain.ErrInvalidRecord)
+		}
+		return nil
+	})
 }

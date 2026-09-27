@@ -46,9 +46,14 @@ func TestUnfinishedTaskObligations(t *testing.T) {
 		t.Errorf("all waived = %v %v", u, err)
 	}
 	// An exhausted work bound is an error, never "finished".
-	tight := testPolicy()
-	tight.MaxTransactionWork = 1
-	small, _ := New(tight, DefaultRegistry())
+	// The budget is shrunk after New: a valid policy needs room for its
+	// live-proof dependents (MaxLiveProofDependents), a work bound of 1
+	// does not.
+	small, err := New(testPolicy(), DefaultRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	small.policy.MaxTransactionWork = 1
 	if _, err := f.unfinished(t, small); !errors.Is(err, domain.ErrResourceLimit) {
 		t.Errorf("bounded completion check: %v", err)
 	}

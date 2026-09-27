@@ -145,6 +145,8 @@ var suite = []testCase{
 	{"SemanticGCOutcomes", testSemanticGCOutcomes},
 	{"SemanticGCBatchReceipts", testSemanticGCBatchReceipts},
 	{"SemanticGCProgress", testSemanticGCProgress},
+	{"SemanticGCQueueCursor", testSemanticGCQueueCursor},
+	{"SemanticPendingGCByTrigger", testSemanticPendingGCByTrigger},
 	{"SemanticGCCandidates", testSemanticGCCandidates},
 	{"SemanticOpenGoalsByTaskOwner", testSemanticOpenGoalsByTaskOwner},
 	{"SemanticLedgerSeqIsolation", testSemanticLedgerSeqIsolation},
@@ -152,6 +154,8 @@ var suite = []testCase{
 	{"SemanticStaleProof", testSemanticStaleProof},
 	{"SemanticStaleProofWithoutState", testSemanticStaleProofWithoutState},
 	{"SemanticStaleProofPrivateFail", testSemanticStaleProofPrivateFail},
+	{"SemanticStaleProofPublishablePartition", testSemanticStaleProofPublishablePartition},
+	{"SemanticLiveProofsByPath", testSemanticLiveProofsByPath},
 	{"RawTransitionCannotSatisfy", testRawTransitionCannotSatisfy},
 
 	// Ingestion records.

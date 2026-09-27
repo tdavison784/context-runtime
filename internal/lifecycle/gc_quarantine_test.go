@@ -106,9 +106,10 @@ func TestFailingGCRequestsAreQuarantined(t *testing.T) {
 		eachStore(t, func(t *testing.T, db store.Store) {
 			base, _ := New(db, testPolicy())
 			id := completeLarge(t, db, base, 1)
-			pol := testPolicy()
-			pol.MaxTransactionWork = 4
-			s, _ := New(db, pol)
+			// Shrunk after New: a work bound of 4 has no room for a valid
+			// policy's live-proof dependents (MaxLiveProofDependents).
+			s, _ := New(db, testPolicy())
+			s.policy.MaxTransactionWork = 4
 			runGC(t, db, s, id, 30)
 			r, _ := gcResult(t, db, id)
 			readSemantic(t, db, func(sem store.SemanticReader) error {

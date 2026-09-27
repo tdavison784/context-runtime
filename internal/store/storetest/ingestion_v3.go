@@ -14,7 +14,7 @@ func SemanticPolicy() domain.Phase3Policy {
 		CheckpointRetention: domain.RetentionHigh, Version: domain.Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs-state/1",
 		Eligibility: "eligibility/1", Locator: "resource-locator/1", Coverage: "coverage/1", Dedup: "declaration/1", MaxOperations: 64, MaxMetadataBytes: 65536,
 		MaxTargets: 64, MaxEvidence: 64, MaxCoverageMembers: 1024, MaxTransactionWork: 4096, MaxToolResultBytes: 65536,
-		MaxCheckpointSemanticBytes: domain.DefaultMaxCheckpointSemanticBytes, DefaultLeaseCalls: 2, MaxLeaseCalls: 8, GCTriggers: domain.DefaultGCTriggers()}
+		MaxCheckpointSemanticBytes: domain.DefaultMaxCheckpointSemanticBytes, DefaultLeaseCalls: 2, MaxLeaseCalls: 8, MaxLiveProofDependents: 256, GCTriggers: domain.DefaultGCTriggers()}
 }
 
 // testIngestionV3RoundTrip stores a v3 envelope and v2 receipt carrying the

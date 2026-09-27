@@ -1010,3 +1010,127 @@ func TestUpgradeGCResultOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeLiveProofPaths checks migration 0045's step on a database
+// migrated through 0044 (DUR-3.1): a live proof stored before it is filed
+// under every ancestor of its CURRENT_PATH dependency and in the workspace
+// bucket, its two live dependency rows are counted, and its FIXED_CONTENT dependency leaves the live
+// index; a proof no version rests on is not live.
+func TestUpgradeLiveProofPaths(t *testing.T) {
+	l := openLegacy(t, 44)
+	o := storetest.BoundObligation(t, "s", "o1", 1, 3, "src")
+	o.Status, o.CurrentProofID, o.Revision = domain.ObligationSatisfied, "proof-1", 2
+	l.insert("obligation", o, nil)
+	fp := domain.HashBytes([]byte("w"))
+	dep := func(id, proof string, kind domain.ProofDependencyKind, p string) domain.ProofDependency {
+		d := domain.ProofDependency{SemanticMeta: storetest.Meta("s", id, 4), ProofID: proof, ResourceID: "repo", Kind: kind, ResourceRevision: 1, Fingerprint: fp, Access: o.Access}
+		if p != "" {
+			d.Locator = &domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: p}
+		}
+		return d
+	}
+	for _, p := range []struct{ id, deps string }{{"proof-1", "d1,d2,d3"}, {"proof-dead", "d4"}} {
+		l.insert("proof", domain.ApplicabilityProof{SemanticMeta: storetest.Meta("s", p.id, 4), ResourceID: "repo", Fingerprint: fp, ResourceRevision: 1,
+			Target: storetest.Ref(o), TransitionID: "tr", RuleVersion: "rule/1", AssertionID: "a", DependencyIDs: strings.Split(p.deps, ","), Access: o.Access}, nil)
+	}
+	for _, d := range []domain.ProofDependency{
+		dep("d1", "proof-1", domain.DependencyCurrentPath, "src/sub/a.go"),
+		dep("d2", "proof-1", domain.DependencyWorkspace, ""),
+		dep("d3", "proof-1", domain.DependencyFixedContent, "docs/fixed.md"),
+		dep("d4", "proof-dead", domain.DependencyCurrentPath, "src/sub/a.go"),
+	} {
+		l.insert("proof_dependency", d, nil)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := func(pg store.ResultPage[domain.ApplicabilityProof], err error) string {
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, p := range pg.Records {
+				out = append(out, p.ID)
+			}
+			return strings.Join(out, ",")
+		}
+		for _, p := range []string{"src", "src/sub", "src/sub/a.go"} {
+			if got := ids(r.LiveProofsByPath("repo", p, store.Page{Limit: 5})); got != "proof-1" {
+				t.Errorf("LiveProofsByPath(%s) after 0045 = %q, want proof-1", p, got)
+			}
+		}
+		if got := ids(r.LiveProofsByPath("repo", "docs", store.Page{Limit: 5})); got != "" {
+			t.Errorf("FIXED_CONTENT dependency is live after 0045: %q", got)
+		}
+		if got := ids(r.LiveWorkspaceProofs("repo", store.Page{Limit: 5})); got != "proof-1" {
+			t.Errorf("LiveWorkspaceProofs after 0045 = %q, want proof-1", got)
+		}
+		if n, err := r.LiveProofDependents("repo"); err != nil || n != 2 {
+			t.Errorf("LiveProofDependents after 0045 = %d (%v), want 2 (path and workspace rows)", n, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUpgradePolicyMaxLiveProofDependents checks migration 0046 on a
+// database migrated through 0045 (W4b, DUR-3.1): an envelope and receipt
+// recorded under a Phase 3 policy read back with the largest
+// MaxLiveProofDependents their own work budget allows, capped at 256, so
+// the recorded policy still validates and replays verbatim.
+func TestUpgradePolicyMaxLiveProofDependents(t *testing.T) {
+	l := openLegacy(t, 45)
+	env, r := storetest.NewIngestion("s", "evt", domain.CallerOccurrenceID("s", "evt"), 1)
+	small, large := storetest.SemanticPolicy(), storetest.SemanticPolicy()
+	small.MaxTransactionWork, large.MaxTransactionWork = 100, 1<<20
+	env.SemanticPolicy, r.Versions.Semantic = &small, &large
+	l.insert("envelope", env, nil)
+	l.insert("receipt", receiptRow{SessionID: "s", OccurrenceID: r.OccurrenceID, Versions: r.Versions}, nil)
+	s := l.upgrade()
+	var n int
+	if err := s.db.QueryRow("SELECT f_versions_semantic_max_live_proof_dependents FROM rec_receipt WHERE session_id='s' AND id=?", r.OccurrenceID).Scan(&n); err != nil || n != 256 {
+		t.Errorf("receipt policy after 0046: max live proof dependents = %d (%v), want 256", n, err)
+	}
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		e, err := tx.Envelope(env.OccurrenceID)
+		if err != nil || e.SemanticPolicy == nil || e.SemanticPolicy.MaxLiveProofDependents != 10 || e.SemanticPolicy.Validate() != nil {
+			t.Errorf("envelope policy after 0046 = %+v (%v), want MaxLiveProofDependents 10", e.SemanticPolicy, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUpgradePendingGCByTrigger checks migration 0047 on a database
+// migrated through 0046 (DUR-3.2): pending requests stored before it are
+// indexed by their trigger.
+func TestUpgradePendingGCByTrigger(t *testing.T) {
+	l := openLegacy(t, 46)
+	for i, trig := range []domain.GCTrigger{domain.GCSupersession, domain.GCPolicy} {
+		r := storetest.NewGCRequest("s", fmt.Sprintf("g%d", i), uint64(i+1))
+		r.RequestID, r.Trigger = fmt.Sprintf("collect-g%d", i), trig
+		l.insert("gc_request", r, nil)
+		if _, err := l.db.Exec("INSERT INTO lookup_pending_gc(session_id,seq,request_id) VALUES(?,?,?)", "s", r.Seq, r.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pg, err := r.PendingGCRequestsByTrigger([]domain.GCTrigger{domain.GCSupersession}, store.Page{Limit: 5})
+		if err != nil || len(pg.Records) != 1 || pg.Records[0].ID != "g0" {
+			t.Errorf("PendingGCRequestsByTrigger after 0047 = %+v (%v), want g0", pg.Records, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

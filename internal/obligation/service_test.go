@@ -18,7 +18,7 @@ func testPolicy() domain.Phase3Policy {
 		Coverage: "coverage/1", Dedup: "declaration/1",
 		MaxOperations: 64, MaxMetadataBytes: 1 << 16, MaxTargets: 8, MaxEvidence: 8, MaxCoverageMembers: 64,
 		MaxTransactionWork: 64, MaxToolResultBytes: 1 << 16, MaxCheckpointSemanticBytes: domain.DefaultMaxCheckpointSemanticBytes,
-		DefaultLeaseCalls: 2, MaxLeaseCalls: 8, GCTriggers: domain.DefaultGCTriggers(),
+		DefaultLeaseCalls: 2, MaxLeaseCalls: 8, MaxLiveProofDependents: 4, GCTriggers: domain.DefaultGCTriggers(),
 	}
 }
 
