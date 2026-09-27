@@ -213,11 +213,21 @@ both forms share.
   (`internal/lifecycle/replace.go`) also enqueue through `gcqueue.Enqueue`
   now, closing the round-1/round-2 gap where a keyed replacement or a
   session-scoped directive replacement produced no `GCRequest`, or failed
-  outright, despite SUPERSESSION being enabled by default. An enabled
-  trigger whose executor
-  cannot run it (a stale `PolicyVersion` on the request, or a missing
-  authorized collector) fails that attempt closed rather than silently
-  succeeding; it stays pending for a later, correctly-configured attempt.
+  outright, despite SUPERSESSION being enabled by default. Producers and
+  the executor must share a Phase 3 policy version: since SPEC-2.11, a
+  request carries its producer's recorded policy version, so a version
+  mismatch affects every attempt from the first pass, not an occasional
+  one. **A stale `PolicyVersion`, a disabled trigger, and a missing
+  authorized collector are all J5 "configuration errors": the attempt
+  fails closed and the request stays pending, uncharged, never
+  quarantined** (`classifyGCFailure`, `internal/lifecycle/gc_failure.go`,
+  maps `ErrUnsupportedSchema` to `gcNotCharged`; `domain.GCFailurePolicyMismatch`
+  remains a defined reason code but is not produced by this path). This
+  is J5's rule exactly ("a misconfigured collector … returns an error to
+  the caller and leaves the request pending — never quarantined"), which
+  is stricter than, and supersedes, SPEC-3.4's originally suggested
+  "quarantines at once as `POLICY_MISMATCH`" text — that text described
+  round-2 code J1–J7's redesign has since replaced.
   **GC collection resumes in bounded batches (round 3 rulings J1–J7;
   XREV-3.1–3.3, SEC-3.1/3.2/3.9, SPEC-3.2/3.3/3.6).** The first
   batch pins the eligibility ceiling `SnapshotSeq`; all batches traverse
@@ -263,6 +273,16 @@ both forms share.
   `TestJ5ConfigurationErrorsLeaveRequestsPending`,
   `TestJ6QueuePrefixCannotHideRunnableTail`, and
   `TestJ7ManualSessionCollectionResumesAndReplays` run on both stores.
+  **DUR round 3 strengthens three of these rulings; not yet landed in
+  this reconciliation, assigned W3 (DUR-3.2/3.3/3.4).** J6's queue
+  continuation must be durable (a persisted cursor), never reset by a new
+  service instance or a restart — the code above still keeps
+  `gcQueueCursors` as an in-process `sync.Map` on `*Service`. J5's
+  configuration-error path must never quarantine even for a collector-side
+  fault, and a `FAILED` request must be explicitly re-armable through a new
+  request identity. J4's attempt counter must reset whenever a batch makes
+  any progress, not only on full success. This ADR will need a further
+  correction once W3's fix lands.
   **Grant issuance shares its live-count cap fairly and reserves room for
   SYSTEM (SEC-2.7).** `liveGrantRoom` (`internal/lifecycle/grants.go`)
   limits any one issuer to at most a quarter of the policy's live-grant
