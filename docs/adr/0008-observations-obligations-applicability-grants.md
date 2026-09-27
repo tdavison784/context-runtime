@@ -1,15 +1,15 @@
 # 8. Observation identities, obligation matcher/claim versions, applicability fingerprints, mutation grants, and invalidation rules
 
 Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through PR #6 review
-round 2, head `914afef`. `go test -race -count=1 ./...` passes with no exceptions at
-every reconciled head so far; every decision below cites real, `grep`-verified code
-and tests, not a proposed contract. **P3-42's required-test mapping is still
-incomplete** (see "Outstanding required tests" below — SPEC-1.23/SPEC-2.14) **and
-G1's applicability rule is only partially landed as of this pass** (§6/§12
-below): the matcher-level ordinal/boundary rejection rule (H1, SEC-2.9) is
-fixed and tested, but the store-side `SubjectHighWater` read it depends on
-(H2, assigned W2) is still a fail-closed stub. This ADR remains Proposed for
-both reasons, not merely pending a formality)
+round 2 with W1/W2/W4's round-2 fixes merged (heads `f6ae9b0`, `6fc89a3`, and
+W4's tip). `go test -race -count=1 ./...` passes except one known-pending
+integration gap (`internal/lifecycle`'s `TestReplaceTasklessDirectiveProducesNoGC`,
+owned by W3/W7, not yet merged into this reconciliation); every decision
+below cites real, `grep`-verified code and tests, not a proposed contract.
+**P3-42's required-test mapping is still incomplete** (see "Outstanding
+required tests" below — SPEC-1.23/SPEC-2.14): this ADR remains Proposed for
+that reason, not merely pending a formality. G1's applicability rule (§6/§12)
+is now fully landed, matcher and store sides both.)
 Date: 2026-09-26
 
 ## Context
@@ -225,21 +225,27 @@ Ratified refinements beyond the frozen text:
   `TestH1PrivateFailDoesNotOutrankTaskPass`,
   `TestPrivateFailNeverRejectsTaskProof_SEC29`.
 - **Satisfaction is additionally gated on a per-subject high-water mark
-  (H1's watermark half; SEC-2.1/SPEC-2.1/DUR-2.1).** The newest *complete*
-  PASS or FAIL run for the exact subject partition wins, whatever the
-  current subject state's own applicability — this is what closes the
-  round-1 residual where a workspace revert (W1→W2→W1) made an older run's
-  PASS satisfy despite a newer FAIL, because the watermark previously
-  counted only `Applicability == CURRENT` subject states and a revert moves
-  the old state to STALE. **Status: partially landed as of this pass.** The
-  matcher-level ordinal/boundary rule above (`evaluateOne`) is landed and
-  tested. The store-side `SubjectHighWater` read this rule depends on
-  (assigned W2, part of H2's write-time-pointer work) exists only as an
-  interface method with fail-closed stubs and its own regression test,
-  `internal/store/storetest`'s `TestConformance/SemanticSubjectHighWater`
-  (commit `5bb12db`); the store's actual per-subject-partition
-  implementation has not landed in the commits available to this pass.
-  This ADR will need a further correction once it does.
+  (H1's watermark half; SEC-2.1/SPEC-2.1/DUR-2.1). Fully landed as of this
+  pass (commits `7ab3bfe`, `a444105`, W2; `8d14af9`, W4b).** The newest
+  *complete* PASS or FAIL run for the exact subject partition wins, whatever
+  the current subject state's own applicability — this closes the round-1
+  residual where a workspace revert (W1→W2→W1) made an older run's PASS
+  satisfy despite a newer FAIL, because the watermark previously counted
+  only `Applicability == CURRENT` subject states and a revert moves the old
+  state to STALE. `store.ResourceReader.SubjectHighWater(subjectKey, taskID,
+  access)` (`internal/store/semantic_resource.go`) is one keyed read per
+  partition, maintained at write time by `InsertObservation` in both
+  backends (SQLite: migration `0037_subject_high_water.sql`, a primary-key
+  table; memory: an in-memory map keyed the same way) — `subjectWatermark`
+  (`internal/obligation/evaluate.go`) takes the max across the run's own
+  partition and every partition whose evidence could back the obligation.
+  **The same mark independently re-gates at commit time**, not only at
+  evaluation: both stores' `checkProofNotStale`/equivalent guard (the
+  commit-time half of INV-16, `store.ValidateSatisfactionBacking`'s sibling
+  check) rejects a commit whose proof's run ordinal is older than the
+  subject's current high-water mark, closing the same window a
+  read-then-write race could otherwise open between evaluation and commit.
+  Tests: `internal/store/storetest`'s `TestConformance/SemanticSubjectHighWater`.
 - **What rejection touches (§W4-19, corrected — SPEC-1.10/SPEC-2.5).**
   W4's original implementation list narrowed this to "a resource-bound
   assertion proof is never rejected by a FAIL," which silently departed from
@@ -344,6 +350,19 @@ adopted — legacy References identity is unchanged) and separated resource
 neither universal read access nor resource-reporting capability by itself).
 Both rulings are implemented as originally recorded; no change at
 reconciliation.
+
+**Resolution reads only each binding's current version, and only while that
+version is in the context (PR #6 round 2, H2, commit `eb0ae67`, W1).**
+`resolveWorkspace` originally paged `WorkspaceBindingsByContext` — every
+version of every binding in a context — and kept the highest version seen
+in memory; enough rebinding history for one context could exceed the work
+bound and permanently fail a Pinned directive's creation. It now pages
+W1's write-time `CurrentWorkspaceBindingsByContext` (migration 0038's
+one-row-per-binding pointer index), so version history never counts against
+the bound. This is a behavior change beyond a performance fix: **a binding
+counts in a context only while its latest version is still recorded
+there** — a rebind that moves a binding to a different context retires it
+from the old one, rather than leaving a stale version visible forever.
 
 ### 11. Typed observations preserve evidence and reporter provenance (§P3-21, C-6, C-7, §W4-22..23)
 
