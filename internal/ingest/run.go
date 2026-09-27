@@ -235,6 +235,9 @@ func (r *run) newItem(it domain.ContextItem) (domain.ContextItem, error) {
 		return domain.ContextItem{}, errLimit("MaxEventItems")
 	}
 	it = r.fill(it)
+	if err := r.registerOwner(it); err != nil {
+		return domain.ContextItem{}, err
+	}
 	it.ID = domain.DerivedItemID(r.p.SessionID, r.itemKey(), len(r.items))
 	it.Seq = r.tx.NextSeq()
 	validate := it.Validate

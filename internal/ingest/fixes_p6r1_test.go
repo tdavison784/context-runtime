@@ -196,7 +196,16 @@ func TestOwnerRegistrationOnFirstTrustedAssociation_SPEC17(t *testing.T) {
 			t.Fatal("a TOOL item registered its agent owner")
 		}
 
-		r := f.mustIngest(user, userEvent("own-1", "## Pinned\n- [w] {scope=WORKFLOW} Workflow rule.\n- [a] {scope=AGENT} Agent rule.\n", true))
+		// WORKFLOW scope needs a SYSTEM/HARNESS directive source; AGENT
+		// scope a USER one is enough.
+		sys := principal(domain.AuthoritySystem)
+		e := domain.Event{EventID: "own-1", Kind: domain.EventSystem, Spans: []domain.Span{
+			textSpan(domain.AuthoritySystem, true, "## Pinned\n- [w] {scope=WORKFLOW} Workflow rule.\n"),
+			textSpan(domain.AuthoritySystem, true, "## Pinned\n- [a] {scope=AGENT} Agent rule.\n")}}
+		e.Spans[0].Access = domain.AccessBoundary{Scope: domain.ScopeWorkflow, SessionID: sess, WorkflowID: "wf"}
+		e.Spans[1].Access = domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: sess, AgentID: "A"}
+		seqBefore := f.lastSeq()
+		r := f.mustIngest(sys, e)
 		for _, tc := range []struct {
 			kind domain.OwnerKind
 			id   string
@@ -205,7 +214,7 @@ func TestOwnerRegistrationOnFirstTrustedAssociation_SPEC17(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s owner not registered", tc.kind)
 			}
-			if o.Actor.Authority != domain.AuthorityHarness || o.Actor.SessionID != sess || o.SourceID != r.OccurrenceID || o.WorkflowID != "wf" || o.Seq == 0 || o.Seq > r.Items[0].Seq {
+			if o.Actor.Authority != domain.AuthorityHarness || o.Actor.SessionID != sess || o.SourceID != r.OccurrenceID || o.WorkflowID != "wf" || o.Seq <= seqBefore || o.Seq > r.Items[len(r.Items)-1].Seq {
 				t.Fatalf("%s registration = %+v", tc.kind, o)
 			}
 		}
@@ -234,7 +243,9 @@ func TestOwnerRegistrationOnFirstTrustedAssociation_SPEC17(t *testing.T) {
 		}
 		// A later association neither re-registers nor aborts.
 		before, _ := f.ownerRegistration(domain.OwnerWorkflow, "wf")
-		f.mustIngest(user, userEvent("own-2", "## Pinned\n- [w2] {scope=WORKFLOW} Another workflow rule.\n", true))
+		e2 := domain.Event{EventID: "own-2", Kind: domain.EventSystem, Spans: []domain.Span{e.Spans[0]}}
+		e2.Spans[0].Parts = []domain.InputPart{{Type: domain.PartText, MediaType: "text/plain", Text: "## Pinned\n- [w2] {scope=WORKFLOW} Another rule.\n"}}
+		f.mustIngest(sys, e2)
 		if after, _ := f.ownerRegistration(domain.OwnerWorkflow, "wf"); !reflect.DeepEqual(after, before) {
 			t.Fatalf("registration changed: %+v -> %+v", before, after)
 		}
