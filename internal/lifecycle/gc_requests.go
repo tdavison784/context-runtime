@@ -423,7 +423,9 @@ func (s *Service) collectPendingOne(ctx context.Context, session string, p domai
 
 // settleGCFailure records a failed attempt in its own transaction (H3). A
 // permanent failure quarantines at once with code; an infrastructure
-// failure (attempt) records operational statistics and remains pending.
+// failure (attempt) records operational statistics and remains pending
+// until maxGCAttempts consecutive failed batches — the counter resets on
+// progress (DUR-3.4) — quarantine it FAILED/ATTEMPTS_EXHAUSTED (DUR-4.5).
 // A request finished meanwhile is left alone.
 func (s *Service) settleGCFailure(ctx context.Context, session, id string, code domain.GCFailureCode, attempt bool) error {
 	return s.store.Update(ctx, session, func(tx store.Tx) error {
@@ -445,6 +447,11 @@ func (s *Service) settleGCFailure(ctx context.Context, session, id string, code 
 			next.SessionID, next.GCRequestID = session, id
 			next.Attempts++
 			next.Revision++
+			if next.Attempts >= maxGCAttempts {
+				result := domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID(session, id), SessionID: session, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+					GCRequestID: id, Outcome: domain.GCFailed, Reason: domain.GCFailureAttemptsExhausted}
+				return sem.InsertGCResult(result)
+			}
 			_, err = sem.PutGCProgress(next, p.Revision)
 			return err
 		}
