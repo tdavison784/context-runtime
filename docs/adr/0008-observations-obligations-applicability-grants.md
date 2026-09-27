@@ -1,12 +1,13 @@
 # 8. Observation identities, obligation matcher/claim versions, applicability fingerprints, mutation grants, and invalidation rules
 
-Status: Proposed (2026-09-26, drafted for Phase 3; reconciled against the integrated
-Phase 3 code at `phase-3-semantic-state` head `fc87199` on 2026-09-26. Gate evidence
-is fully green (`go test -race -count=1 ./...` passes with no exceptions, confirmed
-at PR #6 review round 1 head `c22a53c`; `TestReplaceDirectiveDeclaresRealW4Obligation`,
-pending in W7's original report, now passes); this ADR stays Proposed until the
-commander formally accepts it, though every decision below now cites real,
-`grep`-verified code and tests, not a proposed contract)
+Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through PR #6 review
+round 2, head `914afef`. `go test -race -count=1 ./...` passes with no exceptions at
+every reconciled head so far; every decision below cites real, `grep`-verified code
+and tests, not a proposed contract. **P3-42's required-test mapping is still
+incomplete** (see "Outstanding required tests" below — SPEC-1.23/SPEC-2.14) **and
+G1's applicability rule is still under active fix as of this pass** (SPEC-2.1/DUR-2.1,
+§12 below): this ADR remains Proposed for both reasons, not merely pending a
+formality)
 Date: 2026-09-26
 
 ## Context
@@ -190,10 +191,18 @@ Ratified refinements beyond the frozen text:
   task-wide matcher proof even when the failing run's own evidence is
   narrower — rejection only ever moves a version towards UNRESOLVED, and its
   details are redacted.
-- **What rejection touches (§W4-19):** rejection affects only a matcher
-  proof from a lower-ordinal run of the *same subject*; a resource-bound
-  assertion proof is never rejected by a FAIL, and an ATTESTATION is never
-  touched by resource invalidation at all.
+- **What rejection touches (§W4-19, corrected — SPEC-1.10/SPEC-2.5).**
+  W4's original implementation list narrowed this to "a resource-bound
+  assertion proof is never rejected by a FAIL," which silently departed from
+  the frozen P3-16 text with no commander ruling; PR #6 round 1 (SPEC-1.10)
+  withdrew that narrowing as a code fix, and this ADR's text is corrected to
+  match. A newer complete applicable FAIL rejects the subject's **current
+  matcher or resource-bound satisfaction alike** — both are proof, and
+  `evaluateOne`'s `VerdictFail` branch runs the same restricted
+  `invalidateProof` path regardless of which kind the current proof is
+  (`internal/obligation/evaluate.go`). An ATTESTATION carries no proof and
+  is never touched by resource invalidation at all — that half of the
+  original text was always correct and is unchanged.
 - **Refresh (§W4-20):** the release (UNRESOLVED) step writes at the
   evaluation's own sequence; the positive (SATISFIED) step is authorized in
   advance at its own later sequence, before either write commits. Without a
