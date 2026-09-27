@@ -43,7 +43,3 @@ func (s *Service) writeCompletion(tx store.Tx, sem store.SemanticTx, p domain.Pr
 	out.GCRequestID, err = s.enqueueGC(tx, sem, p, domain.GCTaskCompletion, domain.CollectTask, task.TaskID, task.TaskID)
 	return out, err
 }
-
-func gcRequestID(session, request string) string {
-	return "gcq_" + domain.NewCanonicalEncoder("context-runtime/gc-request/v1").String(session).String(request).Hash()
-}

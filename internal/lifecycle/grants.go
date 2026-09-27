@@ -74,12 +74,15 @@ func (s *Service) executeRecord(tx store.Tx, p domain.Principal, method, request
 	if err = s.finish(tx, sem, p, domain.MutationGrantFamily, method, requestID, args, out.Result); err != nil {
 		return out, err
 	}
-	out.MutationReceiptID, err = domain.MutationReceiptID(p, domain.MutationGrantFamily, requestID)
+	out.MutationReceiptID, err = domain.MutationReceiptID(tx, p, domain.MutationGrantFamily, requestID)
 	return out, err
 }
 
 func (s *Service) standaloneRecord(ctx context.Context, p domain.Principal, method, requestID string, intent any, run func(store.Tx, uint64) (MutationOutcome, error)) (domain.RecordResult, error) {
 	var out MutationOutcome
+	if err := domain.ValidateCallerRequestID(requestID); err != nil {
+		return domain.RecordResult{}, err // callers never name runtime namespaces (H5, SEC-2.2)
+	}
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
 		_, _, prior, err := s.begin(tx, p, domain.MutationGrantFamily, method, requestID, intent)
 		if err != nil {

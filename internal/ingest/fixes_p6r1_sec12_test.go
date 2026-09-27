@@ -25,7 +25,9 @@ func TestDerivedRequestIDsArePrincipalBound_SEC12(t *testing.T) {
 		gb := mustDirective(t, rb, "gb")
 		derived := func(p domain.Principal, eventID string) string {
 			t.Helper()
-			id, err := domain.OperationRequestID(p, domain.CallerOccurrenceID(sess, eventID), 0, 1)
+			// The attacker's best prediction: its own principal as both the
+			// ingesting principal and owner, at the next event sequence.
+			id, err := domain.OperationRequestID(p, p, domain.CallerOccurrenceID(sess, eventID), f.lastSeq()+1, 0, 1)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -27,6 +27,9 @@ type ReceiptReader interface {
 	GCResult(requestID string) (domain.GCResult, error)
 	CollectReceipt(id string) (domain.CollectReceipt, error)
 	PendingGCRequests(page Page) (ResultPage[domain.GCRequest], error)
+	// GCProgress is the exact-key read of one GC request's batch progress
+	// (H3); domain.ErrNotFound before its first batch claim.
+	GCProgress(gcRequestID string) (domain.GCProgress, error)
 	// Access filtering precedes pagination; no whole-session scan. Eligibility,
 	// protection and exact Archive authority remain service decisions.
 	GCCandidates(GCCandidateFilter) (ResultPage[domain.ContextItem], error)
@@ -36,5 +39,12 @@ type ReceiptWriter interface {
 	InsertToolExecutionReceipt(domain.ToolExecutionReceipt) error
 	InsertGCRequest(domain.GCRequest) error
 	InsertGCResult(domain.GCResult) error
+	// PutGCProgress CAS-writes a GC request's progress (H3): expectedRevision
+	// is the stored Revision (0 to create), the stored record's Revision
+	// becomes expectedRevision+1 and is returned; a mismatch fails with
+	// domain.ErrVersionConflict and writes nothing. The request must exist
+	// and have no GCResult. Progress is operational metadata only; it never
+	// substitutes for a batch CollectReceipt or the request's GCResult.
+	PutGCProgress(p domain.GCProgress, expectedRevision uint64) (domain.GCProgress, error)
 	InsertCollectReceipt(domain.CollectReceipt) error
 }

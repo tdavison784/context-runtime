@@ -99,7 +99,7 @@ func TestCommandsV2_ExecuteInSourceOrder(t *testing.T) {
 		if goal.Version != 2 || *goal.GoalStatus != domain.GoalResolved {
 			t.Errorf("receipt goal snapshot version %d status %s", goal.Version, *goal.GoalStatus)
 		}
-		if want, _ := domain.OperationRequestID(calls[0].actor, r.OccurrenceID, 0, 1); calls[0].intent.RequestID != want {
+		if want, _ := domain.OperationRequestID(sys, calls[0].actor, r.OccurrenceID, r.Seq, 0, 1); calls[0].intent.RequestID != want {
 			t.Errorf("request ID %q, want %q", calls[0].intent.RequestID, want)
 		}
 		if len(r.Lifecycle) != 2 {

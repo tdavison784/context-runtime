@@ -69,7 +69,7 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 	if err != nil {
 		return "", err
 	}
-	receiptID, err := domain.MutationReceiptID(actor, domain.MutationMembership, intent.RequestID)
+	receiptID, err := domain.MutationReceiptID(tx, actor, domain.MutationMembership, intent.RequestID)
 	if err != nil {
 		return "", err
 	}
