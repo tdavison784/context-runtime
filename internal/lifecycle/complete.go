@@ -80,12 +80,15 @@ func (s *Service) CompleteTask(tx store.Tx, p domain.Principal, i domain.Complet
 	if err = s.finish(tx, sem, p, domain.MutationLifecycle, string(domain.ActionCompleteTask), i.RequestID, args, out.Result); err != nil {
 		return out, err
 	}
-	out.MutationReceiptID, err = domain.MutationReceiptID(p, domain.MutationLifecycle, i.RequestID)
+	out.MutationReceiptID, err = domain.MutationReceiptID(tx, p, domain.MutationLifecycle, i.RequestID)
 	return out, err
 }
 
 func (s *Service) CompleteTaskStandalone(ctx context.Context, p domain.Principal, i domain.CompleteTaskIntent) (domain.CompletionReceipt, error) {
 	var out MutationOutcome
+	if err := domain.ValidateCallerRequestID(i.RequestID); err != nil {
+		return domain.CompletionReceipt{}, err // callers never name runtime namespaces (H5, SEC-2.2)
+	}
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
 		_, _, prior, err := s.begin(tx, p, domain.MutationLifecycle, string(domain.ActionCompleteTask), i.RequestID, i)
 		if err != nil {

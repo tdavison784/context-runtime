@@ -36,7 +36,7 @@ func prepareMembershipReceipt(tx store.Tx, actor domain.Principal, requestID, me
 	if err != nil {
 		return nil, receipt, false, err
 	}
-	id, err := domain.MutationReceiptID(actor, domain.MutationMembership, requestID)
+	id, err := domain.MutationReceiptID(tx, actor, domain.MutationMembership, requestID)
 	if err != nil {
 		return nil, receipt, false, err
 	}

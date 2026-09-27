@@ -32,65 +32,109 @@ func TestRuntimeRequestNamespaceIsReserved(t *testing.T) {
 	}
 }
 
-// G3 / SEC-1.2: a derived request ID is bound to the principal that owns its
-// receipt. Another principal presenting it is refused before any receipt
-// lookup, identically whether or not the owner's request exists, so it can
-// neither probe hidden commands nor squat the owner's receipt.
-func TestRuntimeRequestIDIsPrincipalBound(t *testing.T) {
-	a := Principal{SessionID: "s", WorkflowID: "w", TaskID: "t", Authority: AuthorityUser}
+// allocated is a fake transaction: the sequences it allocated.
+type allocated map[uint64]bool
+
+func (a allocated) Allocated(seq uint64) bool { return a[seq] }
+
+// G3 / SEC-1.2 / H5 / SEC-2.2: a runtime request ID binds the authenticated
+// ingesting principal, the receipt owner, the occurrence and the event's
+// own sequence. MutationReceiptID accepts it only for its owner and only in
+// the transaction that allocated that sequence, before any receipt lookup:
+// another principal, a caller predicting a future event, or anyone replaying
+// a past one is refused identically, so there is neither oracle nor squat.
+func TestRuntimeRequestIDIsOwnerAndTransactionBound(t *testing.T) {
+	h := Principal{SessionID: "s", WorkflowID: "w", TaskID: "t", Authority: AuthorityHarness}
+	a := h
+	a.Authority = AuthorityUser // the lowered source actor
 	b := a
 	b.AgentID, b.Authority = "agent", AuthorityAgent
 	occurrence := CallerOccurrenceID("s", "event")
-	id, err := OperationRequestID(a, occurrence, 3, 1)
+	id, err := OperationRequestID(h, a, occurrence, 7, 3, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !ReservedIDPrefix(id) || ValidateCallerRequestID(id) == nil {
 		t.Fatalf("derived ID %q is outside the reserved runtime namespace", id)
 	}
-	owned, err := MutationReceiptID(a, MutationLifecycle, id)
+	tx := allocated{7: true}
+	owned, err := MutationReceiptID(tx, a, MutationLifecycle, id)
 	if err != nil {
-		t.Fatalf("owner's derived request refused: %v", err)
+		t.Fatalf("owner's derived request refused in its own transaction: %v", err)
 	}
-	if _, err := MutationReceiptID(b, MutationLifecycle, id); !errors.Is(err, ErrInvalidRecord) {
-		t.Fatalf("foreign principal accepted another principal's derived request: %v", err)
-	}
-	if other, _ := OperationRequestID(b, occurrence, 3, 1); other == id {
-		t.Fatal("two principals derive the same request ID")
-	}
-	for _, change := range []func(*Principal){
-		func(p *Principal) { p.WorkflowID = "other" },
-		func(p *Principal) { p.TaskID = "other" },
-		func(p *Principal) { p.Authority = AuthoritySystem },
+	for name, probe := range map[string]struct {
+		tx    SeqAllocator
+		owner Principal
+	}{
+		"foreign principal":          {tx, b},
+		"other transaction":          {allocated{8: true}, a},
+		"no transaction":             {nil, a},
+		"lowered actor, other tx":    {allocated{}, a},
+		"authenticated as the owner": {tx, h},
 	} {
-		q := a
-		change(&q)
-		if _, err := MutationReceiptID(q, MutationLifecycle, id); err == nil {
-			t.Fatalf("principal %+v accepted a request derived for %+v", q, a)
+		if _, err := MutationReceiptID(probe.tx, probe.owner, MutationLifecycle, id); !errors.Is(err, ErrInvalidRecord) {
+			t.Errorf("%s: runtime request accepted: %v", name, err)
 		}
 	}
-	for _, forged := range []string{"req_" + strings.Repeat("0", 32), id[:len(id)-1] + "0", strings.Replace(id, ".", "", 1), id + ".x", "req_x.y"} {
-		if _, err := MutationReceiptID(a, MutationLifecycle, forged); err == nil {
+	for name, other := range map[string]func() (string, error){
+		"other authenticated principal": func() (string, error) {
+			g := h
+			g.AgentID = "relay-2"
+			return OperationRequestID(g, a, occurrence, 7, 3, 1)
+		},
+		"other owner":      func() (string, error) { return OperationRequestID(h, b, occurrence, 7, 3, 1) },
+		"other sequence":   func() (string, error) { return OperationRequestID(h, a, occurrence, 8, 3, 1) },
+		"other occurrence": func() (string, error) { return OperationRequestID(h, a, CallerOccurrenceID("s", "e2"), 7, 3, 1) },
+		"other operation":  func() (string, error) { return OperationRequestID(h, a, occurrence, 7, 4, 1) },
+		"other command":    func() (string, error) { return OperationRequestID(h, a, occurrence, 7, 3, 2) },
+	} {
+		if got, err := other(); err != nil || got == id {
+			t.Errorf("%s: derivation omits it (%v)", name, err)
+		}
+	}
+	for _, forged := range []string{"req_" + strings.Repeat("0", 32), "req_7_" + strings.Repeat("0", 32) + ".x", id[:len(id)-1] + "0", strings.Replace(id, "req_7_", "req_8_", 1), "req_07_" + id[len("req_7_"):], "req_x.y"} {
+		if _, err := MutationReceiptID(allocated{7: true, 8: true}, a, MutationLifecycle, forged); err == nil {
 			t.Errorf("forged runtime request %q accepted", forged)
 		}
 	}
-	// Receipt identity values are unchanged by the binding: (session, family, request).
-	c := a
-	c.TaskID = "other"
-	x, _ := MutationReceiptID(a, MutationLifecycle, "caller-request")
-	y, _ := MutationReceiptID(c, MutationLifecycle, "caller-request")
-	if x != y || owned == x {
+	if _, err := OperationRequestID(h, a, occurrence, 0, 3, 1); err == nil {
+		t.Error("runtime request derived without an event sequence")
+	}
+	// Receipt identity values stay (session, family, request).
+	key, _ := MutationReceiptKey("s", MutationLifecycle, id)
+	x, _ := MutationReceiptID(nil, a, MutationLifecycle, "caller-request")
+	y, _ := MutationReceiptKey("s", MutationLifecycle, "caller-request")
+	if owned != key || x != y {
 		t.Fatal("receipt identity must remain (session, family, request)")
 	}
-	for _, change := range []func(*uint64, *uint64, *string){
-		func(op, _ *uint64, _ *string) { *op = 4 },
-		func(_, cmd *uint64, _ *string) { *cmd = 2 },
-		func(_, _ *uint64, occ *string) { *occ = CallerOccurrenceID("s", "other") },
-	} {
-		op, cmd, occ := uint64(3), uint64(1), occurrence
-		change(&op, &cmd, &occ)
-		if other, _ := OperationRequestID(a, occ, op, cmd); other == id {
-			t.Fatal("request ID omits its occurrence or ordinals")
+	if RuntimeRequestOwnedBy(a, id) != nil || RuntimeRequestOwnedBy(b, id) == nil || RuntimeRequestOwnedBy(b, "caller-request") != nil {
+		t.Fatal("store ownership check disagrees with the derivation")
+	}
+}
+
+// H5 / SEC-2.6: GC trigger request IDs bind the authenticated origin and,
+// with GC request record IDs, live in reserved namespaces.
+func TestGCRuntimeIDsAreReservedAndOriginBound(t *testing.T) {
+	p := Principal{SessionID: "s", WorkflowID: "w", TaskID: "t", Authority: AuthorityUser}
+	q := p
+	q.TaskID = "other"
+	id, err := GCTriggerRequestID(p, GCTaskCompletion, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other, _ := GCTriggerRequestID(q, GCTaskCompletion, "t"); other == id {
+		t.Fatal("GC trigger request omits its authenticated origin")
+	}
+	if other, _ := GCTriggerRequestID(p, GCSupersession, "t"); other == id {
+		t.Fatal("GC trigger request omits its trigger")
+	}
+	record, err := GCRequestRecordID("s", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reserved := range []string{id, record, "gc_x", "gcq_x", id + "/batch/1"} {
+		if !ReservedIDPrefix(reserved) || ValidateCallerRequestID(reserved) == nil {
+			t.Errorf("%q is callable by a caller", reserved)
 		}
 	}
 }

@@ -8,10 +8,11 @@ import (
 )
 
 // predictRuntimeRequestID is an attacker's best prediction of the runtime
-// request ID of the first command of event eventID relayed for owner.
-func predictRuntimeRequestID(t *testing.T, owner domain.Principal, eventID string) string {
+// request ID of the first command of event eventID relayed for owner: the
+// owner as its own ingesting principal, at the next event sequence.
+func predictRuntimeRequestID(t *testing.T, f *fixture, owner domain.Principal, eventID string) string {
 	t.Helper()
-	id, err := domain.OperationRequestID(owner, domain.CallerOccurrenceID(sess, eventID), 0, 1)
+	id, err := domain.OperationRequestID(owner, owner, domain.CallerOccurrenceID(sess, eventID), f.lastSeq()+1, 0, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestLoweredActorCannotSquatRelayedEvent_SEC22(t *testing.T) {
 			return domain.Event{EventID: id, Kind: domain.EventUser, Spans: []domain.Span{textSpan(domain.AuthorityUser, true, text)}}
 		}
 		own := mustDirective(t, f.mustIngest(u, userEvent("u-own", "## Goal [mine]\nMine.\n", true)), "mine")
-		_, err := svc.ResolveStandalone(ctx, u, domain.ResolveIntent{RequestID: predictRuntimeRequestID(t, u, "relay-1"), ItemID: own.ID, ExpectedVersion: own.Version})
+		_, err := svc.ResolveStandalone(ctx, u, domain.ResolveIntent{RequestID: predictRuntimeRequestID(t, f, u, "relay-1"), ItemID: own.ID, ExpectedVersion: own.Version})
 		if !errors.Is(err, domain.ErrInvalidRecord) {
 			t.Fatalf("USER named a runtime request ID on the standalone path: err = %v", err)
 		}
@@ -50,7 +51,7 @@ func TestCallerCannotNameOwnRuntimeRequestID_SEC22(t *testing.T) {
 		svc := f.lifecycleService()
 		a := principal(domain.AuthorityUser)
 		h := mustDirective(t, f.mustIngest(a, userEvent("own", "## Goal [h]\nMine.\n", true)), "h")
-		_, err := svc.ResolveStandalone(ctx, a, domain.ResolveIntent{RequestID: predictRuntimeRequestID(t, a, "later"), ItemID: h.ID, ExpectedVersion: h.Version})
+		_, err := svc.ResolveStandalone(ctx, a, domain.ResolveIntent{RequestID: predictRuntimeRequestID(t, f, a, "later"), ItemID: h.ID, ExpectedVersion: h.Version})
 		if !errors.Is(err, domain.ErrInvalidRecord) {
 			t.Fatalf("caller named its own runtime request ID: err = %v", err)
 		}

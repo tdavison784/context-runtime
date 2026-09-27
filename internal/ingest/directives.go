@@ -153,7 +153,7 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		r.repls = append(r.repls, domain.IngestLink{ItemID: it.ID, TargetID: prev})
 		// The supersession is a durable GC trigger identified by the new
 		// version, as in lifecycle.ReplaceDirective (P3-39, SPEC-1.6).
-		if err := r.enqueueGC(c.actor, domain.GCSupersession, it.TaskID, it.ID); err != nil {
+		if err := r.enqueueGC(r.p, domain.GCSupersession, it.TaskID, it.ID); err != nil {
 			return err
 		}
 	}

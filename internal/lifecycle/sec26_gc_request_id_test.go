@@ -51,7 +51,10 @@ func TestGCRequestIDsCannotBeNamedByCallers_SEC26(t *testing.T) {
 		}
 		sec26SeedTask(t, st, "victim", 1)
 		sec26SeedTask(t, st, "attacker", 0)
-		predicted := "gc_" + domain.NewCanonicalEncoder("context-runtime/gc-trigger/v1").String("s").String(string(domain.GCTaskCompletion)).String("victim").Hash()
+		predicted, err := domain.GCTriggerRequestID(sec26Principal("victim", domain.AuthorityUser), domain.GCTaskCompletion, "victim")
+		if err != nil {
+			t.Fatal(err)
+		}
 		attacker := sec26Principal("attacker", domain.AuthorityHarness)
 		for _, id := range []string{predicted, "gc_x", "gcq_x"} {
 			err := st.Update(ctx, "s", func(tx store.Tx) error {

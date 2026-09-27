@@ -59,7 +59,13 @@ func (s *Service) newRequest(family domain.MutationFamily, id, method string, in
 // replay returns the committed result of a known request before any current
 // state is consulted. A different principal, method, or argument set under
 // the same identity is ErrEventIDConflict; replay never recomputes an effect.
-func replay(r store.SemanticReader, actor domain.Principal, req request) (domain.MutationResult, bool, error) {
+func replay(tx domain.SeqAllocator, r store.SemanticReader, actor domain.Principal, req request) (domain.MutationResult, bool, error) {
+	// The request identity is checked before any lookup, so a runtime
+	// request ID that is not this caller's, in this transaction, is refused
+	// identically whether or not its receipt exists (H5, SEC-2.2).
+	if _, err := domain.MutationReceiptID(tx, actor, req.family, req.id); err != nil {
+		return domain.MutationResult{}, false, err
+	}
 	rec, err := r.MutationReceipt(req.family, req.id)
 	if errors.Is(err, domain.ErrNotFound) {
 		if req.overLimit {
@@ -85,8 +91,8 @@ func replay(r store.SemanticReader, actor domain.Principal, req request) (domain
 }
 
 // recordReceipt stores the immutable receipt of a committed mutation.
-func (s *Service) recordReceipt(sem store.SemanticTx, actor domain.Principal, req request, seq uint64, result domain.MutationResult) error {
-	id, err := domain.MutationReceiptID(actor, req.family, req.id)
+func (s *Service) recordReceipt(tx domain.SeqAllocator, sem store.SemanticTx, actor domain.Principal, req request, seq uint64, result domain.MutationResult) error {
+	id, err := domain.MutationReceiptID(tx, actor, req.family, req.id)
 	if err != nil {
 		return err
 	}

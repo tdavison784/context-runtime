@@ -441,6 +441,8 @@ Phase 3 domain contracts (W1):
 - `context-runtime/operation-request-id/v1`
 - `context-runtime/operation-request-id/v2`
 - `context-runtime/operation-request-binding/v1`
+- `context-runtime/operation-request-id/v3`
+- `context-runtime/operation-request-binding/v2`
 - `context-runtime/proof-id/v1`
 - `context-runtime/resource-locator/v1`
 - `context-runtime/semantic-arguments/v1`
@@ -463,6 +465,7 @@ Lifecycle, grant and GC audit/receipt identities (W3):
 - `context-runtime/gc-request/v1`
 - `context-runtime/gc-result/v1`
 - `context-runtime/gc-trigger/v1`
+- `context-runtime/gc-trigger/v2`
 - `context-runtime/grant-revocation-audit/v1`
 - `context-runtime/lifecycle-audit/v1`
 - `context-runtime/lifecycle-change/v1`
@@ -512,19 +515,35 @@ This domain is separate from W4's per-family request-hash domains
 `context-runtime/w4/<family>/v1`. Family names contain a dot, so no family
 domain can equal it.
 
-### Runtime operation request IDs (G3, SEC-1.2)
+### Runtime operation request IDs (G3, SEC-1.2; H5, SEC-2.2)
 
-`domain.OperationRequestID(p, occurrence, operation, command)` derives
-`req_<inner>.<tag>`. `inner` hashes the owning principal, the occurrence
-and the ordinals under `operation-request-id/v2`. `tag` binds `inner` to
-that principal under `operation-request-binding/v1`. `req_` is a reserved
-prefix, so no caller EventID or standalone RequestID
-(`ValidateCallerRequestID`) can name it. `MutationReceiptID(p, family,
-requestID)` refuses a `req_` ID not derived for `p` before any receipt
-lookup. A foreign principal therefore cannot probe for a hidden executed
-command or occupy another principal's receipt. No secret is involved,
-and receipt ID values stay a hash of (session, family, requestID).
-`operation-request-id/v1` remains registered and is never reused.
+`domain.OperationRequestID(authenticated, owner, occurrence, eventSeq,
+operation, command)` derives `req_<eventSeq>_<inner>.<tag>`. `inner`
+(`operation-request-id/v3`) hashes the authenticated ingesting principal,
+the receipt owner (the lowered source actor or the dispatcher), the
+occurrence, the event's own sequence and the ordinals. `tag`
+(`operation-request-binding/v2`) binds `eventSeq` and `inner` to the owner.
+
+`MutationReceiptID(tx, owner, family, requestID)` runs before any receipt
+lookup. It accepts a `req_` ID only if it was derived for `owner` and its
+`eventSeq` was allocated in `tx`. No secret is needed. Another principal,
+a caller predicting a future event, and anyone replaying a past event
+cannot name a runtime request, even a principal whose fields equal the
+lowered actor's. They are refused identically whether or not the owner's
+receipt exists, so there is neither an oracle nor a squat.
+
+`req_`, `gc_` and `gcq_` are reserved prefixes: no caller EventID can
+name them. Standalone requests (`*Standalone`, manual `Collect`) must pass
+`ValidateCallerRequestID`. Stores derive keys with
+`MutationReceiptKey(session, family, requestID)` and check ownership with
+`RuntimeRequestOwnedBy`. Receipt ID values stay a hash of (session, family,
+requestID). `operation-request-id/v1..v2` and `operation-request-binding/v1`
+remain registered and are never reused.
+
+GC runtime IDs (SEC-2.6): `GCTriggerRequestID(origin, trigger, triggerID)`
+(`gc-trigger/v2`) binds the authenticated origin that raised the trigger.
+`GCRequestRecordID(session, requestID)` (`gc-request/v1`, `gcq_`) names
+the queued request. `gc-trigger/v1` remains registered.
 
 ### Tool-outcome EventID format (W7)
 

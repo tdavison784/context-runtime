@@ -245,7 +245,7 @@ func (r *run) registerOutput(m OutcomeMembership) error {
 		}
 		// Membership receipts are keyed past the event's operation and
 		// command request IDs.
-		req, err := domain.OperationRequestID(m.Dispatcher, r.occurrence, uint64(len(r.e.Spans)+len(r.e.Operations)+i), 1<<32)
+		req, err := domain.OperationRequestID(r.p, m.Dispatcher, r.occurrence, r.seq, uint64(len(r.e.Spans)+len(r.e.Operations)+i), 1<<32)
 		if err != nil {
 			return err
 		}
@@ -257,7 +257,7 @@ func (r *run) registerOutput(m OutcomeMembership) error {
 		if _, err := svc.RegisterExchangeMember(r.tx, m.Dispatcher, in, r.tx.NextSeq()); err != nil {
 			return err
 		}
-		id, err := domain.MutationReceiptID(m.Dispatcher, domain.MutationMembership, req)
+		id, err := domain.MutationReceiptID(r.tx, m.Dispatcher, domain.MutationMembership, req)
 		if err != nil {
 			return err
 		}
@@ -319,7 +319,7 @@ func (r *run) registerToolResult(m OutcomeMembership) error {
 	if members.More {
 		return store.ErrLimitExceeded
 	}
-	req, err := domain.OperationRequestID(m.Dispatcher, r.occurrence, 1, 1<<32)
+	req, err := domain.OperationRequestID(r.p, m.Dispatcher, r.occurrence, r.seq, 1, 1<<32)
 	if err != nil {
 		return err
 	}
@@ -329,7 +329,7 @@ func (r *run) registerToolResult(m OutcomeMembership) error {
 	if _, err := svc.RegisterExchangeMember(r.tx, m.Dispatcher, in, r.tx.NextSeq()); err != nil {
 		return err
 	}
-	id, err := domain.MutationReceiptID(m.Dispatcher, domain.MutationMembership, req)
+	id, err := domain.MutationReceiptID(r.tx, m.Dispatcher, domain.MutationMembership, req)
 	if err != nil {
 		return err
 	}
