@@ -9,14 +9,13 @@ package obligation
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
-	"github.com/tdavison784/context-runtime/internal/store/sqlite"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 )
 
 var errInjected = errors.New("teststore: injected write failure")
@@ -25,14 +24,11 @@ var errInjected = errors.New("teststore: injected write failure")
 // and the SQLite suite swaps in W2's SQLite backend.
 var backendFactory = func(t *testing.T) store.Store { return memory.New() }
 
+// sqliteBackend opens a private copy of W2's migrated template, so each store
+// skips replaying every migration (the dominant cost under -race).
 func sqliteBackend(t *testing.T) store.Store {
 	t.Helper()
-	st, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "w4.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	return st
+	return sqlitetest.Open(t)
 }
 
 type testStore struct {
