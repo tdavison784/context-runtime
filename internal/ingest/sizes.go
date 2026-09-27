@@ -116,10 +116,16 @@ func admitKnownRetry(tx store.ReadTx, p domain.Principal, e domain.Event, limitE
 	rc, err := tx.Receipt(occ)
 	switch {
 	case isNotFound(err):
+		if domain.ReservedIDPrefix(e.EventID) {
+			return domain.ErrInvalidRecord
+		}
 		return limitErr
 	case err != nil:
 		return err
 	case rc.Principal != p:
+		if domain.ReservedIDPrefix(e.EventID) {
+			return domain.ErrInvalidRecord
+		}
 		return domain.ErrEventIDConflict
 	}
 	env, err := tx.Envelope(occ)
