@@ -145,6 +145,8 @@ var suite = []testCase{
 	{"SemanticLedgerSeqIsolation", testSemanticLedgerSeqIsolation},
 	{"SemanticSatisfactionBacking", testSemanticSatisfactionBacking},
 	{"SemanticStaleProof", testSemanticStaleProof},
+	{"SemanticStaleProofWithoutState", testSemanticStaleProofWithoutState},
+	{"SemanticStaleProofPrivateFail", testSemanticStaleProofPrivateFail},
 
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},
