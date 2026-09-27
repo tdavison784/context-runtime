@@ -86,6 +86,9 @@ func readGet(tx store.ReadTx, p domain.Principal, itemID string) (domain.GetResu
 // no filed subject state, a failing derivation, or an unreadable resource
 // all report not-current. The caller answers with a constant HISTORICAL
 // label, so this is no oracle and adds no resource detail to the response.
+// The derivation takes no viewer: its callers have already authorized the
+// item for p (readGet's access check), matching the viewer-free store-level
+// rule (L1, GLM-1).
 func observationCurrent(tx store.ReadTx, it domain.ContextItem) bool {
 	r, err := store.ReadSemantic(tx)
 	if err != nil {
