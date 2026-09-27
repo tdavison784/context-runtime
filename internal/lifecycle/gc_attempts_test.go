@@ -60,8 +60,11 @@ func TestAttemptsResetWhenABatchProgresses(t *testing.T) {
 				return
 			}
 			armed = pass%2 == 0 // every other pass fails transiently
-			_, _ = s.CollectPending(ctx, "s", pick, 1)
-			if pass%2 == 1 {
+			n, _ := s.CollectPending(ctx, "s", pick, 1)
+			if _, finished := gcResult(t, db, id); finished {
+				continue // the final batch records the result, not progress
+			}
+			if pass%2 == 1 && n == 1 { // a non-final batch ran and committed
 				var progress domain.GCProgress
 				readSemantic(t, db, func(sem store.SemanticReader) error {
 					var err error

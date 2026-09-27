@@ -134,7 +134,9 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 		// More candidates remain: advance the durable cursor (CAS); the next
 		// pass runs batch n+1 from it.
 		next := domain.GCProgress{SessionID: p.SessionID, GCRequestID: link.requestID, Cursor: plan.next,
-			Batches: link.progress.Batches + 1, Attempts: link.progress.Attempts, SnapshotSeq: receipt.SnapshotSeq, BatchSize: plan.batchSize, ItemAttempts: plan.itemAttempts, ItemAttemptID: plan.itemAttemptID, Revision: link.progress.Revision + 1}
+			// A progressing batch resets the request's attempt counter: it
+			// counts consecutive failures without progress (J4, DUR-3.4).
+			Batches: link.progress.Batches + 1, Attempts: 0, SnapshotSeq: receipt.SnapshotSeq, BatchSize: plan.batchSize, ItemAttempts: plan.itemAttempts, ItemAttemptID: plan.itemAttemptID, Revision: link.progress.Revision + 1}
 		if _, err = sem.PutGCProgress(next, link.progress.Revision); err != nil {
 			return out, err
 		}
