@@ -37,6 +37,12 @@ type ResourceReader interface {
 	// ErrNotFound while the run is open: one keyed lookup, independent of
 	// the run's partial reports (H2, DUR-2.6).
 	ClosingObservation(runID string) (domain.ObservationRecord, error)
+	// SubjectHighWater is the highest run ordinal with a complete PASS or
+	// FAIL (TerminalComplete) among runs of exactly (subjectKey, taskID,
+	// access), ErrNotFound when none. It is raised at write time by every
+	// such observation, whatever its fingerprint or applicability, and read
+	// with one keyed lookup (H1, H2).
+	SubjectHighWater(subjectKey, taskID string, access domain.AccessBoundary) (uint64, error)
 	SubjectState(subjectKey, taskID string, access domain.AccessBoundary) (domain.SubjectState, error)
 	// Only CURRENT states, in first-filing order: STALE/UNKNOWN history is
 	// not a live dependent and never counts toward a page (G2, SEC-1.8).

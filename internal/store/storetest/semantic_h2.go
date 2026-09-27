@@ -246,3 +246,134 @@ func testSemanticEarliestExchangeWithItem(t *testing.T, s store.Store) {
 		return nil
 	})
 }
+
+// testSemanticLiveGrantsMatchGrantLiveAt checks the live grant read against
+// store.GrantLiveAt at every sequence, over grants covering each
+// boundary (issued, expiring and revoked at, before and after each
+// other), so a range-split read can never drop or add a live grant
+// (DUR-2.10).
+func testSemanticLiveGrantsMatchGrantLiveAt(t *testing.T, s store.Store) {
+	issuer := NewPrincipal(sessA, domain.AuthoritySystem)
+	item := domain.ItemGrantTarget(sessA, "i1")
+	n := 0
+	update(t, s, sessA, func(tx store.Tx) error {
+		for i := range 6 {
+			for _, expires := range []int{-1, 0, 1, 3} { // -1: never
+				for _, revoke := range []bool{false, true} {
+					n++
+					g := NewGrant(sessA, "g"+strconv.Itoa(n), tx.NextSeq())
+					g.Issuer, g.TargetIDs, g.Targets = issuer, nil, []domain.GrantTarget{item}
+					if i%2 == 1 {
+						g.TargetIDs, g.Targets = []string{"i1"}, nil // legacy key
+					}
+					if expires >= 0 {
+						g.ExpiresAtSeq = g.IssuedSeq + uint64(expires)
+					}
+					noErr(t, tx.InsertGrant(g))
+					if revoke {
+						_, err := tx.RevokeGrant(g.ID, NewLifecycleEvent(sessA, "rv-"+g.ID, tx.NextSeq(), domain.TargetGrant, g.ID))
+						noErr(t, err)
+					}
+				}
+			}
+		}
+		return nil
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		r := readSemantic(t, tx)
+		all, err := r.GrantsFor(domain.ActionResolve, item, 1000)
+		noErr(t, err)
+		for seq := uint64(0); seq <= tx.LastSeq()+1; seq++ {
+			var want []string
+			for _, g := range all {
+				if store.GrantLiveAt(g, seq) {
+					want = append(want, g.ID)
+				}
+			}
+			got, err := r.LiveGrantsFor(domain.ActionResolve, item, seq, 1000)
+			noErr(t, err)
+			var ids []string
+			for _, g := range got {
+				ids = append(ids, g.ID)
+			}
+			if !slicesEqual(ids, want) {
+				t.Fatalf("LiveGrantsFor at seq %d = %v, want %v", seq, ids, want)
+			}
+		}
+		return nil
+	})
+}
+
+// testSemanticSubjectHighWater checks the subject high-water mark (H1,
+// SEC-2.1/SPEC-2.1/DUR-2.1): the highest run ordinal with a complete PASS
+// or FAIL in one exact (subject, task, access) partition, raised by every
+// such observation whatever its fingerprint or applicability, never
+// lowered by a late older one, untouched by partial, ERROR and other
+// partitions' results, and one keyed lookup.
+func testSemanticSubjectHighWater(t *testing.T, s store.Store) {
+	private := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sessA, TaskID: "task", AgentID: "b"}
+	runs := map[string]domain.ObservationRun{}
+	update(t, s, sessA, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		putTask(t, tx)
+		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq())))
+		noErr(t, sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 1, tx.NextSeq())))
+		for _, id := range []string{"r0", "r1", "r2", "r3", "r4", "rb"} {
+			r := NewObservationRun(t, sessA, id, "repo", "wb", tx.NextSeq())
+			if id == "rb" {
+				r.Access = private
+			}
+			runs[id] = r
+			noErr(t, sem.InsertObservationRun(r))
+		}
+		return nil
+	})
+	observe := func(run, id string, outcome domain.ObservationOutcome, c domain.ObservationCompleteness, fp string) {
+		update(t, s, sessA, func(tx store.Tx) error {
+			r := runs[run]
+			ev := ToolEvidence(sessA, "ev-"+id, tx.NextSeq())
+			ev.Access = r.Access
+			if r.Access.AgentID != "" {
+				ev.AgentID = r.Access.AgentID
+			}
+			noErr(t, tx.InsertItem(ev))
+			o := NewObservation(r, id, "ev-"+id, tx.NextSeq(), fp)
+			o.Outcome, o.Completeness = outcome, c
+			switch {
+			case outcome == domain.OutcomeFail:
+				o.Passed, o.Failed = 2, 1
+			case c == domain.ObservationPartial || outcome != domain.OutcomePass:
+				o.Passed, o.Skipped = 1, 2
+			}
+			return semantic(t, tx).InsertObservation(o)
+		})
+	}
+	mark := func(access domain.AccessBoundary) (uint64, error) {
+		var hw uint64
+		var err error
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			hw, err = readSemantic(t, tx).SubjectHighWater(runs["r1"].SubjectKey, "task", access)
+			return nil
+		})
+		return hw, err
+	}
+	task := runs["r1"].Access
+	if _, err := mark(task); !errorsIs(err, domain.ErrNotFound) {
+		t.Errorf("no results: error = %v, want ErrNotFound", err)
+	}
+	observe("r1", "o1", domain.OutcomePass, domain.ObservationComplete, fpA)
+	observe("r2", "o2", domain.OutcomeFail, domain.ObservationPartial, fpA)  // partial: no mark
+	observe("r3", "o3", domain.OutcomeError, domain.ObservationComplete, "") // ERROR: no mark
+	if hw, err := mark(task); err != nil || hw != runs["r1"].Ordinal {
+		t.Errorf("after PASS r1, partial r2, ERROR r3: mark = %d (%v), want %d", hw, err, runs["r1"].Ordinal)
+	}
+	observe("r4", "o4", domain.OutcomeFail, domain.ObservationComplete, fpB) // another fingerprint still counts
+	observe("r0", "o0", domain.OutcomePass, domain.ObservationComplete, fpA) // a late older run never lowers it
+	observe("rb", "ob", domain.OutcomePass, domain.ObservationComplete, fpA) // another partition
+	if hw, err := mark(task); err != nil || hw != runs["r4"].Ordinal {
+		t.Errorf("task partition mark = %d (%v), want r4's %d", hw, err, runs["r4"].Ordinal)
+	}
+	if hw, err := mark(private); err != nil || hw != runs["rb"].Ordinal {
+		t.Errorf("private partition mark = %d (%v), want rb's %d", hw, err, runs["rb"].Ordinal)
+	}
+}

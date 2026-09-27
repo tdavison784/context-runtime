@@ -1,10 +1,12 @@
 package sqlite
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -148,6 +150,19 @@ func typedGrantKey(authorizationKey string) string {
 }
 func legacyGrantKey(itemID string) string { return "legacy-item:" + hex.EncodeToString([]byte(itemID)) }
 
+// liveGrantRanges are the disjoint range reads behind LiveGrantsFor over
+// migration 0036's index (H2, DUR-2.10), each after (session, action, key,
+// key) and taking seq once per remaining placeholder, then its limit.
+// Together they are exactly store.GrantLiveAt: issued by seq and either
+// unrevoked and never expiring, unrevoked and expiring at or after seq, or
+// revoked after seq and not expired before it. Revoked-before and
+// expired-before rows are outside every range.
+var liveGrantRanges = []string{
+	"SELECT grant_id, issued_seq FROM lookup_grant_target WHERE session_id=? AND action=? AND target_key IN (?,?) AND revoked_seq=0 AND expires_at_seq=0 AND issued_seq<=? LIMIT ?",
+	"SELECT grant_id, issued_seq FROM lookup_grant_target WHERE session_id=? AND action=? AND target_key IN (?,?) AND revoked_seq=0 AND expires_at_seq>=? AND issued_seq<=? LIMIT ?",
+	"SELECT grant_id, issued_seq FROM lookup_grant_target WHERE session_id=? AND action=? AND target_key IN (?,?) AND revoked_seq>? AND issued_seq<=? AND (expires_at_seq=0 OR expires_at_seq>=?) LIMIT ?",
+}
+
 // grantKeys are g's distinct lookup_grant_target keys.
 func grantKeys(g domain.MutationGrant) []string {
 	var keys []string
@@ -196,18 +211,68 @@ func (s semRead) GrantsFor(action domain.Action, target domain.GrantTarget, limi
 // DUR-1.4). The predicate is store.GrantLiveAt over migration 0031's
 // columns.
 func (s semRead) LiveGrantsFor(action domain.Action, target domain.GrantTarget, seq uint64, limit int) ([]domain.MutationGrant, error) {
-	return s.grantsFor(action, target, limit, " AND issued_seq<=? AND (revoked_seq=0 OR revoked_seq>?) AND (expires_at_seq=0 OR expires_at_seq>=?)", []any{seq, seq, seq})
+	t := s.t
+	keys, err := s.grantKeysFor(action, target, limit)
+	if err != nil {
+		return nil, err
+	}
+	type ref struct {
+		id     string
+		issued uint64
+	}
+	var refs []ref
+	for _, q := range liveGrantRanges {
+		args := []any{t.session, string(action), keys[0], keys[1]}
+		for range strings.Count(q, "?") - 5 {
+			args = append(args, seq)
+		}
+		rows, err := t.query(q, append(args, limit+1)...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var r ref
+			if err := rows.Scan(&r.id, &r.issued); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			refs = append(refs, r)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return nil, err
+		}
+		if len(refs) > limit {
+			return nil, store.ErrLimitExceeded
+		}
+	}
+	slices.SortFunc(refs, func(a, b ref) int {
+		if c := cmp.Compare(a.issued, b.issued); c != 0 {
+			return c
+		}
+		return strings.Compare(a.id, b.id)
+	})
+	var out []domain.MutationGrant
+	for _, r := range refs {
+		g, err := t.Grant(r.id)
+		if err != nil {
+			return nil, fmt.Errorf("%w: grant index names missing grant %s", domain.ErrIntegrity, r.id)
+		}
+		out = append(out, g)
+	}
+	return out, nil
 }
 
-func (s semRead) grantsFor(action domain.Action, target domain.GrantTarget, limit int, live string, liveArgs []any) ([]domain.MutationGrant, error) {
-	t := s.t
+// grantKeysFor validates a grant lookup and returns its two index keys: the
+// typed key, and the legacy item key for an item action (else the typed
+// key again).
+func (s semRead) grantKeysFor(action domain.Action, target domain.GrantTarget, limit int) ([]any, error) {
 	if limit <= 0 {
 		return nil, invalid("grant lookup limit must be positive")
 	}
 	if err := target.Validate(); err != nil {
 		return nil, invalid("grant lookup: %v", err)
 	}
-	if target.SessionID != t.session {
+	if target.SessionID != s.t.session {
 		return nil, invalid("grant lookup: target belongs to another session")
 	}
 	keys := []any{typedGrantKey(target.AuthorizationKey)}
@@ -215,6 +280,15 @@ func (s semRead) grantsFor(action domain.Action, target domain.GrantTarget, limi
 		keys = append(keys, legacyGrantKey(target.ItemID))
 	} else {
 		keys = append(keys, keys[0])
+	}
+	return keys, nil
+}
+
+func (s semRead) grantsFor(action domain.Action, target domain.GrantTarget, limit int, live string, liveArgs []any) ([]domain.MutationGrant, error) {
+	t := s.t
+	keys, err := s.grantKeysFor(action, target, limit)
+	if err != nil {
+		return nil, err
 	}
 	args := append([]any{t.session, string(action), keys[0], keys[1]}, liveArgs...)
 	rows, err := t.query("SELECT DISTINCT grant_id, issued_seq FROM lookup_grant_target WHERE session_id=? AND action=? AND target_key IN (?,?)"+live+" ORDER BY issued_seq, grant_id LIMIT ?",

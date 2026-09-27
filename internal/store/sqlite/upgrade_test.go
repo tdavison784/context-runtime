@@ -920,3 +920,39 @@ func TestUpgradeItemExchangeIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeSubjectHighWater checks migration 0037 on a database migrated
+// through 0036 (H1): complete PASS/FAIL observations stored before it
+// raise their partition's mark under the key live writes use; partial
+// ones do not.
+func TestUpgradeSubjectHighWater(t *testing.T) {
+	l := openLegacy(t, 36)
+	var runs []domain.ObservationRun
+	for i, id := range []string{"r1", "r2", "r3"} {
+		r := storetest.NewObservationRun(t, "s", id, "repo", "wb", uint64(10+i))
+		runs = append(runs, r)
+		l.insert("observation_run", r, nil)
+	}
+	fp := domain.HashBytes([]byte("w"))
+	complete := storetest.NewObservation(runs[1], "o2", "ev", 20, fp)
+	complete.Outcome, complete.Passed, complete.Failed = domain.OutcomeFail, 2, 1
+	l.insert("observation", storetest.NewObservation(runs[0], "o1", "ev", 21, fp), nil)
+	l.insert("observation", complete, nil)
+	partial := storetest.NewObservation(runs[2], "o3", "ev", 22, fp)
+	partial.Completeness, partial.Passed, partial.Skipped = domain.ObservationPartial, 1, 2
+	l.insert("observation", partial, nil)
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hw, err := r.SubjectHighWater(runs[0].SubjectKey, runs[0].TaskID, runs[0].Access)
+		if err != nil || hw != runs[1].Ordinal {
+			t.Errorf("SubjectHighWater after 0037 = %d (%v), want %d", hw, err, runs[1].Ordinal)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

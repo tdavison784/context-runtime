@@ -54,7 +54,8 @@ type resState struct {
 	runsBySubj   map[string][]seqRef
 	observations map[string]domain.ObservationRecord
 	obsByRun     map[string][]seqRef
-	runClosing   map[string]string // run -> closing observation (H2)
+	runClosing   map[string]string     // run -> closing observation (H2)
+	highWater    map[subjectKey]uint64 // partition -> highest complete PASS/FAIL run ordinal (H1)
 	subjects     map[subjectKey]domain.SubjectState
 	subjByRes    map[string][]seqRef
 	subjIDs      map[string]subjectKey
@@ -66,7 +67,7 @@ func newResState() resState {
 		updByRes: map[string][]seqRef{}, updByPath: map[resPath][]seqRef{}, updRequests: map[resRequest]string{}, states: map[string]domain.ResourceState{},
 		paths: map[string]domain.ResourcePathState{}, wbindings: map[wbKey]domain.WorkspaceBinding{}, wbLatest: map[string]uint64{},
 		wbByContext: map[wsContext][]seqRef{}, runs: map[string]domain.ObservationRun{}, runsBySubj: map[string][]seqRef{},
-		observations: map[string]domain.ObservationRecord{}, obsByRun: map[string][]seqRef{}, runClosing: map[string]string{}, subjects: map[subjectKey]domain.SubjectState{},
+		observations: map[string]domain.ObservationRecord{}, obsByRun: map[string][]seqRef{}, runClosing: map[string]string{}, highWater: map[subjectKey]uint64{}, subjects: map[subjectKey]domain.SubjectState{},
 		subjByRes: map[string][]seqRef{}, subjIDs: map[string]subjectKey{},
 	}
 }
@@ -88,6 +89,7 @@ type resView struct {
 	observations table[string, domain.ObservationRecord]
 	obsByRun     orderedIndex[string]
 	runClosing   table[string, string]
+	highWater    table[subjectKey, uint64]
 	subjects     table[subjectKey, domain.SubjectState]
 	subjByRes    orderedIndex[string]
 	subjIDs      table[string, subjectKey]
@@ -104,6 +106,7 @@ func newResView(st *resState, w bool) resView {
 		runs: newTable(st.runs, w, domain.ObservationRun.Clone), runsBySubj: newOrderedIndex(st.runsBySubj, w),
 		observations: newTable(st.observations, w, domain.ObservationRecord.Clone), obsByRun: newOrderedIndex(st.obsByRun, w),
 		runClosing: newTable(st.runClosing, w, same[string]),
+		highWater:  newTable(st.highWater, w, same[uint64]),
 		subjects:   newTable(st.subjects, w, domain.SubjectState.Clone), subjByRes: newOrderedIndex(st.subjByRes, w),
 		subjIDs: newTable(st.subjIDs, w, same[subjectKey]),
 	}
@@ -131,6 +134,7 @@ func (v *resView) commit() {
 	v.observations.commit()
 	v.obsByRun.commit()
 	v.runClosing.commit()
+	v.highWater.commit()
 	v.subjects.commit()
 	v.subjByRes.commit()
 	v.subjIDs.commit()
@@ -462,6 +466,11 @@ func (t *semTx) InsertObservation(o domain.ObservationRecord) error {
 	if store.ClosesRun(o) {
 		t.r.sem.res.runClosing.put(o.RunID, o.ID)
 	}
+	if key := (subjectKey{run.SubjectKey, run.TaskID, run.Access}); o.TerminalComplete() {
+		if hw, _ := t.r.sem.res.highWater.peek(key); run.Ordinal > hw {
+			t.r.sem.res.highWater.put(key, run.Ordinal)
+		}
+	}
 	t.r.sem.res.observations.put(o.ID, o)
 	t.r.sem.res.obsByRun.add(o.RunID, seqRef{o.Seq, o.ID})
 	t.t.sequencedWrite(o.Seq)
@@ -637,4 +646,17 @@ func (r semRead) ClosingObservation(runID string) (domain.ObservationRecord, err
 		return domain.ObservationRecord{}, domain.ErrIntegrity
 	}
 	return o, nil
+}
+
+// SubjectHighWater implements store.ResourceReader: one keyed read of the
+// mark InsertObservation raises.
+func (r semRead) SubjectHighWater(subject, taskID string, access domain.AccessBoundary) (uint64, error) {
+	if err := r.r.check(); err != nil {
+		return 0, err
+	}
+	hw, ok := r.r.sem.res.highWater.get(subjectKey{subject, taskID, access})
+	if !ok {
+		return 0, notFound("subject high-water mark", subject)
+	}
+	return hw, nil
 }

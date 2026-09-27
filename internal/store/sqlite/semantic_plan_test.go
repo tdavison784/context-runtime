@@ -189,7 +189,7 @@ func TestLiveReadsUseLiveIndexes(t *testing.T) {
 			_, err := r.SubjectStatesByResource("repo", store.Page{Limit: 5})
 			return err
 		}},
-		{"lookup_grant_target_live", func(r store.SemanticReader) error {
+		{"lookup_grant_target_liveness", func(r store.SemanticReader) error {
 			_, err := r.LiveGrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i"), 9, 5)
 			return err
 		}},
@@ -277,7 +277,7 @@ func assertUsesIndex(t *testing.T, s *Store, index, q string, args ...any) {
 		}
 		plan = append(plan, detail)
 	}
-	if !strings.Contains(strings.Join(plan, "\n"), "USING INDEX "+index+" ") {
+	if !strings.Contains(strings.Join(plan, "\n"), "INDEX "+index) {
 		t.Errorf("%q does not search %s\nplan: %v", q, index, plan)
 	}
 }
@@ -300,5 +300,23 @@ func assertNoSort(t *testing.T, s *Store, q string, args ...any) {
 		if strings.Contains(detail, "TEMP B-TREE") {
 			t.Errorf("query sorts every matching row: %q\nstep: %s", q, detail)
 		}
+	}
+}
+
+// TestLiveGrantRangesSkipDeadRows checks DUR-2.10 (H2): each range read
+// behind LiveGrantsFor searches 0036's liveness index on its full key and
+// never sorts, so revoked and expired rows are not visited.
+func TestLiveGrantRangesSkipDeadRows(t *testing.T) {
+	s, _ := openTemp(t)
+	for _, q := range liveGrantRanges {
+		args := make([]any, strings.Count(q, "?"))
+		for i := range args {
+			args[i] = 1
+		}
+		assertIndexed(t, s, []string{"session_id", "action", "target_key"}, q, args...)
+		assertNoSort(t, s, q, args...)
+		// The search itself bounds revoked_seq (=0 or >seq), so revoked
+		// history is never visited.
+		assertUsesIndex(t, s, "lookup_grant_target_liveness (session_id=? AND action=? AND target_key=? AND revoked_seq", q, args...)
 	}
 }
