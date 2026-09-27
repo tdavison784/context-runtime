@@ -41,6 +41,9 @@ func (s *Service) BindWorkspaceTx(tx store.Tx, actor domain.Principal, in domain
 	if err := checkWorkspaceContext(tx, actor, in.Context); err != nil {
 		return domain.MutationResult{}, err
 	}
+	if err := checkPreviousBinding(sem, actor, in); err != nil {
+		return domain.MutationResult{}, err
+	}
 	w := &writes{tx: tx}
 	w.start()
 	b := domain.WorkspaceBinding{
@@ -66,6 +69,32 @@ func (s *Service) BindWorkspaceTx(tx store.Tx, actor domain.Principal, in domain
 		return domain.MutationResult{}, w.fail(err)
 	}
 	return result, nil
+}
+
+// checkPreviousBinding lets a new version of a binding ID follow only a
+// previous version the actor may read, reported at an authority the actor
+// meets (SEC-3.10, P3-20, FR-AUTH-002): a lower authority never overrides a
+// higher-authority binding, in its context or by moving it to another. A
+// hidden previous version answers as absent (no existence oracle); a
+// missing one is left to the store's dense-version check.
+func checkPreviousBinding(r store.SemanticReader, actor domain.Principal, in domain.WorkspaceBindingIntent) error {
+	if in.Version <= 1 {
+		return nil
+	}
+	prev, err := r.WorkspaceBinding(domain.WorkspaceBindingRef{ID: in.BindingID, Version: in.Version - 1})
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !prev.Access.Permits(actor) {
+		return domain.ErrNotFound
+	}
+	if !actor.Authority.AtLeast(prev.Reporter.Authority) {
+		return domain.ErrInvalidAuthorityPromotion
+	}
+	return nil
 }
 
 // trustedControl reports whether p may perform control-plane operations
