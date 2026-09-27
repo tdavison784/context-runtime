@@ -1,13 +1,11 @@
 # 8. Observation identities, obligation matcher/claim versions, applicability fingerprints, mutation grants, and invalidation rules
 
 Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through PR #6 review
-round 2 with W1/W2/W4's round-2 fixes merged (heads `f6ae9b0`, `6fc89a3`, and
-W4's tip). `go test -race -count=1 ./...` passes except one known-pending
-integration gap (`internal/lifecycle`'s `TestReplaceTasklessDirectiveProducesNoGC`,
-owned by W3/W7, not yet merged into this reconciliation); every decision
-below cites real, `grep`-verified code and tests, not a proposed contract.
-**P3-42's required-test mapping is still incomplete** (see "Outstanding
-required tests" below — SPEC-1.23/SPEC-2.14): this ADR remains Proposed for
+round 2 with W1/W2/W3/W4/W7's round-2 fixes fully merged (`phase-3-semantic-state`
+head `75f5c45`, all integrated). `go test -race -count=1 ./...` passes with
+no exceptions; every decision below cites real, `grep`-verified code and
+tests, not a proposed contract. **P3-42's required-test mapping is still
+incomplete** (see "Outstanding required tests" below — SPEC-1.23/SPEC-2.14): this ADR remains Proposed for
 that reason, not merely pending a formality. G1's applicability rule (§6/§12)
 is now fully landed, matcher and store sides both.)
 Date: 2026-09-26

@@ -134,6 +134,35 @@ IDs follow the same rule from `domain` directly:
 as reserved prefixes callers may never supply, checked by
 `ValidateCallerRequestID` before every standalone lifecycle mutation
 (item, grant, `CompleteTask`, `ReplaceDirective`) and manual `Collect`.
+
+**Reserved-namespace rejection runs after the exact-replay lookup, not
+before (PR #6 round 2, DUR-2.8/SEC-2.8).** Checking a reserved prefix
+(`req_`/`outcome-`/`gc_`/`gcq_`) before looking up an existing receipt
+would refuse to replay a Phase 2 event whose caller `EventID` happens to
+collide with a namespace this ADR reserved only at Phase 3.
+`lookupReceipt` (`internal/ingest/ingest.go`) now runs first; a match
+replays regardless of namespace, and the reserved-namespace check applies
+only once no receipt is found, i.e. only to a genuinely new request. This
+is the same ownership-before-existence discipline §11's
+`AuthorizeMutation`/`AuthorizeSupersession` already use for access
+disclosure, now applied to receipt disclosure: `internal/lifecycle`'s
+`begin` (`internal/lifecycle/receipt.go`) applies the identical rule —
+exact-replay lookup first, then `domain.RuntimeRequestOwnedBy` before a
+foreign receipt's existence can affect the outcome (SEC-2.8, no existence
+oracle). Tests: `internal/ingest`'s frozen-fixture round-trip in
+`testdata/phase2/reserved.db`/`reserved.golden.json`; `internal/lifecycle`'s
+`TestLifecycleDerivedRequestIDIsNoExistenceOracle` and
+`TestLegacyRuntimeRequestIDReplaysForItsOwnerOnly`.
+
+**Owner registration is exercised end to end through ingest, including
+restart (PR #6 round 2, SPEC-2.12, closing the SPEC-1.7 test gap).**
+`internal/ingest`'s `TestIngestRegisteredOwnersOutliveTaskAndRestart_SPEC212`
+registers a WORKFLOW/AGENT owner through a real ingested event (not a
+seeded fixture), completes its task, restarts the store, and confirms the
+owner's broad-scope goal/pin survives and Collect does not archive it —
+closing the gap where the existing pure/seeded tests could pass even with
+the ingest-side producer removed.
+
 **An empty, non-nil `Operations` is rejected at validation, never
 silently treated as "no operations" (G4 = SEC-1.11 = SPEC-1.2).**
 `Event.ValidateV3` (`internal/domain/ingest_v3.go`) requires `Operations`
