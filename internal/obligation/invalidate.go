@@ -3,6 +3,7 @@ package obligation
 import (
 	"path"
 	"slices"
+	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -21,6 +22,22 @@ type change struct {
 	paths       map[string]bool   // canonical resource-relative changed paths
 	fingerprint string            // resulting KNOWN workspace fingerprint
 	contents    map[string]string // authoritative resulting content by path
+}
+
+// touches reports whether a changed path equals p or is a directory
+// containing it (SPEC-1.18): intersection is conservative.
+func (c change) touches(p string) bool {
+	for q := range c.paths {
+		if under(p, q) {
+			return true
+		}
+	}
+	return false
+}
+
+// under reports whether p is q or lies inside directory q.
+func under(p, q string) bool {
+	return p == q || strings.HasPrefix(p, q+"/")
 }
 
 // sameContent reports whether the update states that p still holds hash.
@@ -43,7 +60,7 @@ func (c change) affects(d domain.ProofDependency) bool {
 		if c.sameContent(p, d.Fingerprint) {
 			return false // authoritative content is unchanged
 		}
-		return c.unknown || c.allPaths || c.paths[p]
+		return c.unknown || c.allPaths || c.touches(p)
 	case domain.DependencyFixedContent:
 		return false // a fixed snapshot does not depend on the path's current content
 	}
@@ -154,7 +171,7 @@ func markSubject(sem store.SemanticTx, seq uint64, st domain.SubjectState, c cha
 		}
 		if f := run.Subject.Target.File; f == nil {
 			next = domain.ApplicabilityStale
-		} else if p := path.Join(f.Locator.BaseDir, f.Locator.Path); !c.sameContent(p, obs.ObservedContentHash) && (c.allPaths || c.paths[p]) {
+		} else if p := path.Join(f.Locator.BaseDir, f.Locator.Path); !c.sameContent(p, obs.ObservedContentHash) && (c.allPaths || c.touches(p)) {
 			next = domain.ApplicabilityStale
 		}
 	}

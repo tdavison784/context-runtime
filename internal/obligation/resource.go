@@ -275,9 +275,10 @@ func (s *Service) currentPathState(r store.SemanticReader, work *budget, loc dom
 	return ps, true, nil
 }
 
+// containsPath reports whether any changed path equals p or contains it.
 func containsPath(paths []string, p string) bool {
 	for _, q := range paths {
-		if q == p {
+		if under(p, q) {
 			return true
 		}
 	}
