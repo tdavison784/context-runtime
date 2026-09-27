@@ -12,7 +12,7 @@ func testPolicy() domain.Phase3Policy {
 	return domain.Phase3Policy{Version: domain.Phase3PolicyVersion, Claim: "claim/v1", Matcher: "matcher/v1", ObservationState: "obs-state/1",
 		Eligibility: policy.EligibilityVersion, Locator: domain.ResourceLocatorEncodingV1, Coverage: "coverage/v1", Dedup: domain.DeclarationEncodingV1,
 		MaxPageSize: 64, MaxReceiptBytes: 65536, MaxGCDecisions: 128, MaxOperations: 128, MaxMetadataBytes: 4096, MaxTargets: 128, MaxEvidence: 128,
-		MaxCoverageMembers: 128, MaxTransactionWork: 512, MaxToolResultBytes: 65536, MaxCheckpointSemanticBytes: 16384, DefaultLeaseCalls: 2, MaxLeaseCalls: 8,
+		MaxCoverageMembers: 128, MaxTransactionWork: 512, MaxToolResultBytes: 65536, MaxCheckpointSemanticBytes: 16384, DefaultLeaseCalls: 2, MaxLeaseCalls: 8, MaxLiveProofDependents: 1,
 		CheckpointGeneration: domain.GenerationWorking, CheckpointRetention: domain.RetentionNormal, GCTriggers: domain.DefaultGCTriggers()}
 }
 

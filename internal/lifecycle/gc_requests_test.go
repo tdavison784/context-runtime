@@ -85,9 +85,10 @@ func TestCompletionGCRequestExecutesOnceAfterProducerCommit(t *testing.T) {
 		t.Fatalf("retry: %+v %v", again, err)
 	}
 	// A later, tightened policy still replays the committed collection.
-	tight := testPolicy()
-	tight.MaxTransactionWork = 1
-	s2, _ := New(mem, tight)
+	// Shrunk after New: a work bound of 1 has no room for a valid policy's
+	// live-proof dependents (MaxLiveProofDependents).
+	s2, _ := New(mem, testPolicy())
+	s2.policy.MaxTransactionWork = 1
 	if replay, err := executeGC(f, mem, s2, collector, id); err != nil || replay.Result.Collect.ID != r.ID {
 		t.Fatalf("replay under new policy: %+v %v", replay, err)
 	}

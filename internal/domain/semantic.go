@@ -138,6 +138,11 @@ func (p Phase3Policy) Validate() error {
 	if p.DefaultLeaseCalls == 0 || p.MaxLeaseCalls < p.DefaultLeaseCalls {
 		return invalid("semantic policy: invalid lease allowance")
 	}
+	// Invalidating every live dependency row of one resource costs at most 5
+	// units per row and must fit half the transaction work budget.
+	if p.MaxLiveProofDependents < 1 || 5*p.MaxLiveProofDependents > p.MaxTransactionWork/2 {
+		return invalid("semantic policy: live proof dependents must be positive and fit half the work budget")
+	}
 	if len(p.GCTriggers) == 0 {
 		return invalid("semantic policy: explicit enabled GC trigger set required")
 	}

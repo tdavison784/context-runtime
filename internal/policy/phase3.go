@@ -29,7 +29,7 @@ func DefaultPhase3Policy() domain.Phase3Policy {
 		MaxCoverageMembers: 1024, MaxTransactionWork: 4096, MaxToolResultBytes: 1 << 16,
 		MaxCheckpointSemanticBytes: domain.DefaultMaxCheckpointSemanticBytes,
 		CheckpointGeneration:       domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh,
-		DefaultLeaseCalls: 2, MaxLeaseCalls: 8,
+		DefaultLeaseCalls: 2, MaxLeaseCalls: 8, MaxLiveProofDependents: 256,
 		// Only triggers with a producer on every path (SPEC-1.6, FR-GC-004):
 		// ingest and ReplaceDirective produce SUPERSESSION, ingest produces
 		// TTL per turn advance, and completion TASK_COMPLETION. POLICY has no
