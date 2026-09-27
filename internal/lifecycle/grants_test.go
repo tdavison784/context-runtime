@@ -283,40 +283,76 @@ func TestDeadGrantHistoryNeverBlocksIssuance(t *testing.T) {
 	})
 }
 
-// SEC-2.7 (H2): one issuer cannot fill the live-grant cap, and issuers below
-// SYSTEM cannot take the slots reserved for SYSTEM.
-func TestLiveGrantCapIsSharedFairly(t *testing.T) {
+// SEC-3.8 / DUR-3.6 (SEC-2.7 residual): grant room is tiered by authority
+// class, not by principal tuple, so no number of USER principals (one user
+// acting through several agents or tasks) can deny HARNESS or SYSTEM.
+// USER issuers together hold at most half the live slots, USER and HARNESS
+// together three quarters, SYSTEM all of them.
+func TestGrantRoomIsTieredByAuthority(t *testing.T) {
 	ctx := context.Background()
 	eachStore(t, func(t *testing.T, db store.Store) {
 		pol := testPolicy()
-		pol.MaxTargets = 4 // one live grant per issuer, one slot reserved for SYSTEM
+		pol.MaxTargets = 8
 		s, _ := New(db, pol)
 		seedItem(t, db, storetest.NewItem("s", "shared", 0, "shared USER fact"))
-		user := func(n int) domain.Principal {
-			p := storetest.NewPrincipal("s", domain.AuthorityUser)
-			p.AgentID = fmt.Sprintf("user-%d", n)
+		as := func(a domain.Authority, n int) domain.Principal {
+			p := storetest.NewPrincipal("s", a)
+			p.AgentID = fmt.Sprintf("%s-%d", a, n)
 			return p
 		}
 		issue := func(issuer domain.Principal, id string) error {
-			_, err := s.IssueGrantStandalone(ctx, issuer, archiveGrant("r-"+id, id, "shared", issuer))
+			grantee := storetest.NewPrincipal("s", domain.AuthorityUser)
+			_, err := s.IssueGrantStandalone(ctx, issuer, archiveGrant("r-"+id, id, "shared", grantee))
 			return err
 		}
-		if err := issue(user(0), "u0-a"); err != nil {
-			t.Fatal(err)
-		}
-		if err := issue(user(0), "u0-b"); !errors.Is(err, domain.ErrResourceLimit) {
-			t.Fatalf("one USER exceeded its share: %v", err)
-		}
-		for n := 1; n <= 2; n++ {
-			if err := issue(user(n), fmt.Sprintf("u%d", n)); err != nil {
-				t.Fatalf("user %d: %v", n, err)
+		for n := range 4 {
+			if err := issue(as(domain.AuthorityUser, n), fmt.Sprintf("u%d", n)); err != nil {
+				t.Fatalf("USER %d within the USER tier: %v", n, err)
 			}
 		}
-		if err := issue(user(3), "u3"); !errors.Is(err, domain.ErrResourceLimit) {
-			t.Fatalf("lower authority took the SYSTEM reserve: %v", err)
+		if err := issue(as(domain.AuthorityUser, 9), "u9"); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("USER tier exceeded: %v", err)
 		}
-		if err := issue(storetest.NewPrincipal("s", domain.AuthoritySystem), "sys"); err != nil {
-			t.Fatalf("SYSTEM denied by lower-authority grants: %v", err)
+		for n := range 2 {
+			if err := issue(as(domain.AuthorityHarness, n), fmt.Sprintf("h%d", n)); err != nil {
+				t.Fatalf("HARNESS denied by USER grants: %v", err)
+			}
+		}
+		if err := issue(as(domain.AuthorityHarness, 9), "h9"); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("non-SYSTEM tiers took the SYSTEM reserve: %v", err)
+		}
+		for n := range 2 {
+			if err := issue(as(domain.AuthoritySystem, n), fmt.Sprintf("s%d", n)); err != nil {
+				t.Fatalf("SYSTEM reserve: %v", err)
+			}
+		}
+		if err := issue(as(domain.AuthoritySystem, 9), "s9"); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("live grants beyond the read limit: %v", err)
 		}
 	})
+}
+
+// DUR-3.6: with fewer than four slots there are no reserves, so a valid
+// small MaxTargets never makes non-SYSTEM issuance impossible.
+func TestSmallGrantRoomHasNoReserves(t *testing.T) {
+	ctx := context.Background()
+	for _, max := range []int{1, 3} {
+		t.Run(fmt.Sprintf("MaxTargets=%d", max), func(t *testing.T) {
+			eachStore(t, func(t *testing.T, db store.Store) {
+				pol := testPolicy()
+				pol.MaxTargets = max
+				s, _ := New(db, pol)
+				seedItem(t, db, storetest.NewItem("s", "shared", 0, "shared USER fact"))
+				user := storetest.NewPrincipal("s", domain.AuthorityUser)
+				for n := range max {
+					if _, err := s.IssueGrantStandalone(ctx, user, archiveGrant(fmt.Sprintf("r%d", n), fmt.Sprintf("g%d", n), "shared", user)); err != nil {
+						t.Fatalf("USER grant %d of %d: %v", n+1, max, err)
+					}
+				}
+				if _, err := s.IssueGrantStandalone(ctx, user, archiveGrant("over", "over", "shared", user)); !errors.Is(err, domain.ErrResourceLimit) {
+					t.Fatalf("beyond MaxTargets: %v", err)
+				}
+			})
+		})
+	}
 }
