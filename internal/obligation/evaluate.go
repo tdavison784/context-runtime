@@ -2,6 +2,7 @@ package obligation
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -213,7 +214,9 @@ func (s *Service) satisfy(tx store.Tx, sem store.SemanticTx, actor domain.Princi
 	}
 	t := domain.ObligationTransition{
 		Cause: cause, AssertionMode: domain.AssertionResourceBound, RequestID: obs.ID, ReasonCode: reason,
-		ID:        recordID("otr_", "matcher", target.AuthorizationKey, obs.ID),
+		// The evaluated revision is part of the identity (SPEC-1.9): the same
+		// observation may satisfy again after revalidation or a revert.
+		ID:        recordID("otr_", "matcher", target.AuthorizationKey, obs.ID, strconv.FormatUint(o.Revision, 10)),
 		SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version, Seq: seq,
 		From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation,
 		Actor: actor, GrantID: grantID, Matcher: o.Matcher, EvidenceIDs: []string{ev.ID},
@@ -253,7 +256,7 @@ func (s *Service) satisfy(tx store.Tx, sem store.SemanticTx, actor domain.Princi
 	if old != nil {
 		release := domain.ObligationTransition{
 			Cause: domain.CauseProofRefresh, PriorProofID: old.ID, RequestID: obs.ID, ReasonCode: domain.ReasonProofRefreshed,
-			ID:        recordID("otr_", "proof-refresh-release", target.AuthorizationKey, obs.ID),
+			ID:        recordID("otr_", "proof-refresh-release", target.AuthorizationKey, obs.ID, strconv.FormatUint(o.Revision, 10)),
 			SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version, Seq: releaseSeq,
 			From: domain.ObligationSatisfied, To: domain.ObligationUnresolved, Action: domain.ActionAssertObligation,
 			Actor: actor, GrantID: grantID, Matcher: o.Matcher,
