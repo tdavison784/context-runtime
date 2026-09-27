@@ -147,8 +147,8 @@ func (s semRead) CoverageMembers(coverageID string, p store.Page) (store.ResultP
 	if err != nil {
 		return out, err
 	}
-	rows, err := s.t.query(sc.selectSQL+" WHERE session_id=? AND id=? AND (f_member_semantic_meta_seq>? OR (f_member_semantic_meta_seq=? AND f_member_semantic_meta_id>?)) ORDER BY subkey LIMIT ?",
-		s.t.session, coverageID, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	rows, err := s.t.query(sc.selectSQL+" WHERE session_id=? AND id=? AND (f_member_semantic_meta_seq, f_member_semantic_meta_id) > (?, ?) ORDER BY subkey LIMIT ?",
+		s.t.session, coverageID, p.After.Seq, p.After.ID, p.Limit+1)
 	if err != nil {
 		return out, err
 	}
@@ -174,8 +174,8 @@ func (s semRead) CoveragesBySource(itemID string, purpose domain.CoveragePurpose
 	if p.Limit <= 0 {
 		return out, invalid("page limit must be positive")
 	}
-	rows, err := s.t.query("SELECT seq, coverage_id FROM lookup_coverage_source WHERE session_id=? AND item_id=? AND purpose=? AND (seq>? OR (seq=? AND coverage_id>?)) ORDER BY seq, coverage_id LIMIT ?",
-		s.t.session, itemID, string(purpose), p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	rows, err := s.t.query("SELECT seq, coverage_id FROM lookup_coverage_source WHERE session_id=? AND item_id=? AND purpose=? AND (seq, coverage_id) > (?, ?) ORDER BY seq, coverage_id LIMIT ?",
+		s.t.session, itemID, string(purpose), p.After.Seq, p.After.ID, p.Limit+1)
 	if err != nil {
 		return out, err
 	}

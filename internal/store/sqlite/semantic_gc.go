@@ -146,8 +146,8 @@ func (s semRead) PendingGCRequests(p store.Page) (store.ResultPage[domain.GCRequ
 	if p.Limit <= 0 {
 		return out, invalid("page limit must be positive")
 	}
-	rows, err := t.query("SELECT request_id FROM lookup_pending_gc WHERE session_id=? AND (seq>? OR (seq=? AND request_id>?)) ORDER BY seq, request_id LIMIT ?",
-		t.session, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	rows, err := t.query("SELECT request_id FROM lookup_pending_gc WHERE session_id=? AND (seq, request_id) > (?, ?) ORDER BY seq, request_id LIMIT ?",
+		t.session, p.After.Seq, p.After.ID, p.Limit+1)
 	if err != nil {
 		return out, err
 	}
