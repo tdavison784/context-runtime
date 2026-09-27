@@ -197,8 +197,10 @@ func TestConcurrency_InvalidationVsObservation(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
 		w := newT07(t, f, true, 1)
 		fp := fingerprint("W1")
-		satisfied := 0
-		defer func() { t.Logf("observation left the proof current in %d of %d rounds", satisfied, raceRounds) }()
+		satisfied, stored := 0, 0
+		defer func() {
+			t.Logf("observation left the proof current in %d of %d rounds; stored SATISFIED checked in %d", satisfied, raceRounds, stored)
+		}()
 		for i := range raceRounds {
 			runID, exec, err := w.register(t07Target(nil))
 			if err != nil {
@@ -237,8 +239,20 @@ func TestConcurrency_InvalidationVsObservation(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if o.CurrentProofID != "" && eff != domain.ObligationSatisfied && !pending {
-					t.Fatalf("round %d: stored SATISFIED is effectively %s without pending settlement", i, eff)
+				if o.Status == domain.ObligationSatisfied {
+					stored++
+					if eff != domain.ObligationSatisfied && !pending {
+						t.Fatalf("round %d: stored SATISFIED is effectively %s without pending settlement", i, eff)
+					}
+					// A stored-SATISFIED RESOURCE_BOUND version rests on a
+					// current proof; its mode is its satisfying transition's.
+					mode, err := satisfiedMode(sem, w.ref)
+					if err != nil {
+						return err
+					}
+					if mode == domain.AssertionResourceBound && o.CurrentProofID == "" {
+						t.Fatalf("round %d: stored SATISFIED RESOURCE_BOUND version has no current proof: %+v", i, o)
+					}
 				}
 				if eff != domain.ObligationSatisfied {
 					return nil
@@ -309,4 +323,26 @@ func TestConcurrency_Collect(t *testing.T) {
 			t.Fatalf("no superseded Working item was collected; the race exercised nothing")
 		}
 	})
+}
+
+// satisfiedMode is the assertion mode of ref's latest transition to
+// SATISFIED, or "" if it has none.
+func satisfiedMode(sem store.SemanticReader, ref domain.ObligationRef) (domain.AssertionMode, error) {
+	var mode domain.AssertionMode
+	page := store.Page{Limit: 64}
+	for {
+		res, err := sem.TransitionsByVersion(ref, page)
+		if err != nil {
+			return "", err
+		}
+		for _, tr := range res.Records {
+			if tr.To == domain.ObligationSatisfied {
+				mode = tr.AssertionMode
+			}
+		}
+		if !res.More {
+			return mode, nil
+		}
+		page.After = res.Next
+	}
 }
