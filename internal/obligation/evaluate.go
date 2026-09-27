@@ -47,6 +47,16 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	if !ok {
 		return nil, nil // an unavailable historical version is never replaced
 	}
+	// A pending version is settled first, so what follows starts from its
+	// effective state (K1 A3).
+	o, _, err := s.settle(tx, sem, work, o)
+	if err != nil {
+		return nil, err
+	}
+	status, _, err := EffectiveStatus(sem, o)
+	if err != nil {
+		return nil, err
+	}
 	cur, curOrdinal, err := s.currentMatcherProof(sem, o)
 	if err != nil {
 		return nil, err
@@ -82,7 +92,7 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	// proof or has its ID recorded where the proof's readers see it
 	// (SEC-2.9). Attestations carry no proof and are untouched.
 	if obs.Family == m.Family() && obs.SubjectKey == o.TargetSubjectKey && obs.TerminalComplete() && obs.Outcome == domain.OutcomeFail {
-		if o.Status == domain.ObligationSatisfied && cur != nil && run.Ordinal > curOrdinal && failCovers(cur.Access, obs, run) {
+		if cur != nil && run.Ordinal > curOrdinal && failCovers(cur.Access, obs, run) {
 			inv := invalidation{cause: domain.CauseProofRejected, causeRecord: obs.ID, requestID: obs.ID, reason: domain.ReasonProofRejected, rule: ProofRejectionRule}
 			seq := tx.NextSeq()
 			if err := s.invalidateProof(tx, sem, work, actor, seq, *cur, inv); err != nil {
@@ -94,9 +104,9 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	}
 	if v := m.Evaluate(in); v.Kind == VerdictPass {
 		switch {
-		case o.Status == domain.ObligationUnresolved:
+		case status == domain.ObligationUnresolved:
 			return s.satisfy(tx, sem, work, actor, o, obs, v, nil)
-		case o.Status == domain.ObligationSatisfied && cur != nil && cur.ObservationID != obs.ID && run.Ordinal > curOrdinal:
+		case cur != nil && cur.ObservationID != obs.ID && run.Ordinal > curOrdinal:
 			return s.satisfy(tx, sem, work, actor, o, obs, v, cur)
 		}
 	}
@@ -163,7 +173,9 @@ func uniq(a, b string) []string {
 // an attestation) and its ordinal: the run ordinal of the observation behind
 // a matcher proof, or the sequence of a resource-bound assertion's proof.
 func (s *Service) currentMatcherProof(r store.SemanticReader, o domain.ObligationVersion) (*domain.ApplicabilityProof, uint64, error) {
-	if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
+	// A current proof is recorded only while SATISFIED; callers settle a
+	// pending version first, so a remaining proof is valid (K1 A2/A3).
+	if o.CurrentProofID == "" {
 		return nil, 0, nil
 	}
 	p, err := r.ApplicabilityProof(o.CurrentProofID)
