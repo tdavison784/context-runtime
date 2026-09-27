@@ -104,7 +104,8 @@ func consumeMembershipRound(tx store.Tx, service *MembershipService, actor domai
 		}
 	}
 	if len(sources) == 0 {
-		sources = []domain.ItemContentRef{storetest.ContentRef(r.toolResult)}
+		// The consuming inference received the whole round (SEC-1.10).
+		sources = []domain.ItemContentRef{storetest.ContentRef(r.output), storetest.ContentRef(r.toolResult)}
 	}
 	coverage, err := service.RecordAdmissionCoverage(tx, actor, r.x.Principal, "input-"+callID, sources)
 	if err != nil {
