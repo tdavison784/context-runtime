@@ -144,7 +144,7 @@ func (r *run) directiveItem(c unitCtx, item directive.Item) error {
 		r.dups = append(r.dups, domain.IngestLink{ItemID: it.ID, TargetID: canonical.ID})
 		return nil
 	}
-	prev, err := graph.ReplaceDirective(r.tx, c.actor, it.TaskID, it.DirectiveID, it.ID, r.graphEventID())
+	prev, err := graph.ReplaceDirective(r.tx, c.actor, it.TaskID, it.DirectiveID, it.ID, r.graphEventID(), r.graphOptions()...)
 	if err != nil {
 		return err
 	}

@@ -30,6 +30,7 @@ type ReplacementObligations interface {
 }
 
 var _ ReplacementObligations = (*obligation.Service)(nil)
+var _ graph.PendingSettler = (*obligation.Service)(nil)
 
 // WithReplacementObligations returns a copy of s that declares Pinned and
 // claim-bearing replacements through o, e.g. a W4 service with an embedder's
@@ -120,7 +121,14 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 	if err != nil {
 		return out, err
 	}
-	previous, err := graph.ReplaceDirective(tx, p, fresh.TaskID, fresh.DirectiveID, fresh.ID, fresh.EventID)
+	// The injected obligation service settles pending invalidations before
+	// graph retires the prior's obligations (ruling M2); without one graph
+	// fails closed on a pending settlement.
+	var opts []graph.Option
+	if settler, ok := s.obligations.(graph.PendingSettler); ok {
+		opts = append(opts, graph.WithPendingSettler(settler))
+	}
+	previous, err := graph.ReplaceDirective(tx, p, fresh.TaskID, fresh.DirectiveID, fresh.ID, fresh.EventID, opts...)
 	if err != nil {
 		return out, err
 	}
