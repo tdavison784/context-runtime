@@ -13,7 +13,10 @@ func (t *semTx) InsertMutationReceipt(r domain.MutationReceipt) error {
 	if err := t.t.companion("mutation receipt", r.SemanticMeta, r.Validate); err != nil {
 		return err
 	}
-	id, err := domain.MutationReceiptID(r.Principal, r.Family, r.RequestID)
+	if err := domain.RuntimeRequestOwnedBy(r.Principal, r.RequestID); err != nil {
+		return err
+	}
+	id, err := domain.MutationReceiptKey(r.SessionID, r.Family, r.RequestID)
 	if err != nil {
 		return err
 	}

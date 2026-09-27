@@ -1,6 +1,9 @@
 package domain
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 func (m SemanticMeta) SemanticSeq() uint64 { return m.Seq }
 func (m SemanticMeta) Clone() SemanticMeta { return m }
@@ -28,25 +31,51 @@ func (f MutationFamily) HashDomain() string {
 	return ""
 }
 
-// MutationReceiptID is the receipt identity of (session, family, requestID).
-// It takes the authenticated principal that owns the receipt: a request ID
-// in the runtime req_ namespace is accepted only if it was derived for that
-// exact principal, and is rejected before any receipt lookup otherwise. A
-// foreign principal presenting another's derived ID therefore learns
-// nothing and can never occupy it (G3, SEC-1.2). Receipt ID values are
-// unchanged by the principal binding.
-func MutationReceiptID(p Principal, family MutationFamily, requestID string) (string, error) {
-	if err := validateIngestPrincipal(p); err != nil {
-		return "", err
-	}
-	if !family.Valid() || !semanticID(requestID) {
+// SeqAllocator reports whether seq was allocated in the current
+// transaction; store.Tx satisfies it.
+type SeqAllocator interface{ Allocated(seq uint64) bool }
+
+// MutationReceiptKey is the pure receipt identity of (session, family,
+// requestID), for stores deriving the key of a record they hold. Services
+// derive it through MutationReceiptID, which also proves a runtime request
+// is theirs to use.
+func MutationReceiptKey(session string, family MutationFamily, requestID string) (string, error) {
+	if !semanticID(session) || !family.Valid() || !semanticID(requestID) {
 		return "", invalid("receipt identity: exact session/family/request required")
 	}
-	if strings.HasPrefix(requestID, operationRequestPrefix) && !runtimeRequestIDFor(p, requestID) {
-		return "", invalid("receipt identity: runtime request ID not derived for this principal")
-	}
-	return "mut_" + shortHash(NewCanonicalEncoder("context-runtime/mutation-receipt-id/v1").String(p.SessionID).String(string(family)).String(requestID)), nil
+	return "mut_" + shortHash(NewCanonicalEncoder("context-runtime/mutation-receipt-id/v1").String(session).String(string(family)).String(requestID)), nil
 }
+
+// MutationReceiptID is the receipt identity of (session, family, requestID)
+// for owner, the authenticated principal whose receipt it is. It is checked
+// before any receipt lookup. A request ID in the runtime req_ namespace is
+// accepted only if it was derived for owner at an event sequence allocated
+// in this very transaction (H5, SEC-2.2): no caller can name another
+// principal's, a future, or a past runtime request, so there is neither an
+// oracle nor a squat. Receipt ID values are unchanged.
+func MutationReceiptID(tx SeqAllocator, owner Principal, family MutationFamily, requestID string) (string, error) {
+	if err := validateIngestPrincipal(owner); err != nil {
+		return "", err
+	}
+	if err := RuntimeRequestOwnedBy(owner, requestID); err != nil {
+		return "", err
+	}
+	if seq, ok := runtimeRequestSeq(requestID); ok && (tx == nil || !tx.Allocated(seq)) {
+		return "", invalid("receipt identity: runtime request ID is not this transaction's")
+	}
+	return MutationReceiptKey(owner.SessionID, family, requestID)
+}
+
+// RuntimeRequestOwnedBy fails when requestID is in the runtime req_
+// namespace but was not derived for owner; any other ID passes. Stores use
+// it as a commit-time check on the receipts they hold.
+func RuntimeRequestOwnedBy(owner Principal, requestID string) error {
+	if strings.HasPrefix(requestID, operationRequestPrefix) && !runtimeRequestIDFor(owner, requestID) {
+		return invalid("receipt identity: runtime request ID not derived for this principal")
+	}
+	return nil
+}
+
 func ApplicabilityProofID(target ObligationRef, transitionID string) (string, error) {
 	if err := target.Validate(); err != nil {
 		return "", err
@@ -60,38 +89,70 @@ func ApplicabilityProofID(target ObligationRef, transitionID string) (string, er
 const operationRequestPrefix = "req_"
 
 // OperationRequestID derives the runtime request ID of one operation or
-// command of an event occurrence, owned by principal p (the principal whose
-// mutation receipt it names). The ID is req_<inner>.<tag>: inner binds the
-// principal, occurrence and ordinals; tag binds inner to the principal, so
-// MutationReceiptID can verify ownership without a secret (G3, SEC-1.2).
-func OperationRequestID(p Principal, occurrence string, operation, command uint64) (string, error) {
-	if err := validateIngestPrincipal(p); err != nil {
+// command of an event occurrence (H5, SEC-2.2). authenticated is the
+// principal that ingested the event; owner is the principal whose mutation
+// receipt the request names (the lowered source actor or the dispatcher);
+// eventSeq is the event's own sequence, allocated in the ingesting
+// transaction. The ID is req_<eventSeq>_<inner>.<tag>: inner binds both
+// principals, the occurrence, the event sequence and the ordinals, and tag
+// binds eventSeq and inner to owner, so MutationReceiptID can verify both
+// ownership and that the request belongs to the current transaction.
+func OperationRequestID(authenticated, owner Principal, occurrence string, eventSeq, operation, command uint64) (string, error) {
+	if err := validateIngestPrincipal(authenticated); err != nil {
 		return "", err
 	}
-	if !ValidOccurrenceID(occurrence) {
-		return "", invalid("operation request: occurrence required")
+	if err := validateIngestPrincipal(owner); err != nil {
+		return "", err
 	}
-	e := NewCanonicalEncoder("context-runtime/operation-request-id/v2")
-	encodePrincipal(e, p)
-	inner := shortHash(e.String(occurrence).Uint(operation).Uint(command))
-	return operationRequestPrefix + inner + "." + operationRequestTag(p, inner), nil
+	if !ValidOccurrenceID(occurrence) || eventSeq == 0 || authenticated.SessionID != owner.SessionID {
+		return "", invalid("operation request: occurrence, event sequence and one session required")
+	}
+	e := NewCanonicalEncoder("context-runtime/operation-request-id/v3")
+	encodePrincipal(e, authenticated)
+	encodePrincipal(e, owner)
+	inner := shortHash(e.String(occurrence).Uint(eventSeq).Uint(operation).Uint(command))
+	return operationRequestPrefix + strconv.FormatUint(eventSeq, 10) + "_" + inner + "." + operationRequestTag(owner, eventSeq, inner), nil
 }
 
-func operationRequestTag(p Principal, inner string) string {
-	e := NewCanonicalEncoder("context-runtime/operation-request-binding/v1")
-	encodePrincipal(e, p)
-	return shortHash(e.String(inner))
+func operationRequestTag(owner Principal, eventSeq uint64, inner string) string {
+	e := NewCanonicalEncoder("context-runtime/operation-request-binding/v2")
+	encodePrincipal(e, owner)
+	return shortHash(e.Uint(eventSeq).String(inner))
+}
+
+// runtimeRequestParts splits req_<seq>_<inner>.<tag>.
+func runtimeRequestParts(id string) (seq uint64, inner, tag string, ok bool) {
+	body, ok := strings.CutPrefix(id, operationRequestPrefix)
+	if !ok {
+		return 0, "", "", false
+	}
+	num, rest, ok := strings.Cut(body, "_")
+	if !ok {
+		return 0, "", "", false
+	}
+	seq, err := strconv.ParseUint(num, 10, 64)
+	if err != nil || seq == 0 || strconv.FormatUint(seq, 10) != num {
+		return 0, "", "", false
+	}
+	inner, tag, ok = strings.Cut(rest, ".")
+	if !ok || len(inner) != 32 || !isLowerHex(inner) {
+		return 0, "", "", false
+	}
+	return seq, inner, tag, true
+}
+
+// runtimeRequestSeq is the event sequence a well-formed runtime request ID
+// is bound to.
+func runtimeRequestSeq(id string) (uint64, bool) {
+	seq, _, _, ok := runtimeRequestParts(id)
+	return seq, ok
 }
 
 // runtimeRequestIDFor reports whether id is a runtime request ID derived
-// for exactly p.
-func runtimeRequestIDFor(p Principal, id string) bool {
-	body, ok := strings.CutPrefix(id, operationRequestPrefix)
-	if !ok {
-		return false
-	}
-	inner, tag, ok := strings.Cut(body, ".")
-	return ok && len(inner) == 32 && isLowerHex(inner) && tag == operationRequestTag(p, inner)
+// for exactly owner.
+func runtimeRequestIDFor(owner Principal, id string) bool {
+	seq, inner, tag, ok := runtimeRequestParts(id)
+	return ok && tag == operationRequestTag(owner, seq, inner)
 }
 
 // These records contain value fields only. Explicit Clone methods give stores

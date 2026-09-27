@@ -102,7 +102,7 @@ func TestOps_OrderSequenceAndAliases(t *testing.T) {
 			t.Errorf("sequences: transcript %d, ops %d %d, allocated %v", r.Items[0].Seq, calls[0].seq, calls[1].seq, allocated)
 		}
 		for i, c := range calls {
-			want, _ := domain.OperationRequestID(c.actor, r.OccurrenceID, uint64(i+1), 0)
+			want, _ := domain.OperationRequestID(sys, c.actor, r.OccurrenceID, r.Seq, uint64(i+1), 0)
 			got := c.op.Grant
 			var id string
 			if got != nil {

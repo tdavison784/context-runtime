@@ -49,7 +49,7 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 	r, err := sem.MutationReceipt(family, requestID)
 	if err == nil {
 		if r.Principal != p {
-			if _, idErr := domain.MutationReceiptID(p, family, requestID); idErr != nil {
+			if idErr := domain.RuntimeRequestOwnedBy(p, requestID); idErr != nil {
 				return nil, nil, nil, idErr
 			}
 		}
@@ -62,7 +62,7 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 	if !errors.Is(err, domain.ErrNotFound) {
 		return nil, nil, nil, err
 	}
-	if _, err := domain.MutationReceiptID(p, family, requestID); err != nil {
+	if _, err := domain.MutationReceiptID(tx, p, family, requestID); err != nil {
 		return nil, nil, nil, err
 	}
 	args, err := domain.CanonicalSemanticArguments(intent, s.policy.MaxMetadataBytes)
@@ -70,7 +70,7 @@ func (s *Service) begin(tx store.Tx, p domain.Principal, family domain.MutationF
 }
 
 func (s *Service) finish(tx store.Tx, sem store.SemanticTx, p domain.Principal, family domain.MutationFamily, method, requestID string, args []byte, result domain.MutationResult) error {
-	id, err := domain.MutationReceiptID(p, family, requestID)
+	id, err := domain.MutationReceiptID(tx, p, family, requestID)
 	if err != nil {
 		return err
 	}

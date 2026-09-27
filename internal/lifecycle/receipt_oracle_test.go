@@ -19,27 +19,44 @@ func TestLifecycleDerivedRequestIDIsNoExistenceOracle(t *testing.T) {
 		seedItem(t, db, storetest.NewItem("s", "fact", 0, "fact"))
 		s, _ := New(db, testPolicy())
 		owner := storetest.NewPrincipal("s", domain.AuthorityUser)
-		registered, err := domain.OperationRequestID(owner, domain.CallerOccurrenceID("s", "event-1"), 1, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		absent, _ := domain.OperationRequestID(owner, domain.CallerOccurrenceID("s", "event-1"), 2, 0)
-		first, err := s.ArchiveStandalone(ctx, owner, domain.ArchiveIntent{RequestID: registered, ItemID: "fact", ExpectedVersion: 1})
-		if err != nil {
+		occ := domain.CallerOccurrenceID("s", "event-1")
+		intent := domain.ArchiveIntent{ItemID: "fact", ExpectedVersion: 1}
+		// The owner's request IDs derive from its ingesting transaction's
+		// event sequence (H5).
+		var registered, absent string
+		var first LifecycleOutcome
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			eventSeq := tx.NextSeq()
+			var err error
+			if registered, err = domain.OperationRequestID(owner, owner, occ, eventSeq, 1, 0); err != nil {
+				return err
+			}
+			absent, _ = domain.OperationRequestID(owner, owner, occ, eventSeq, 2, 0)
+			i := intent
+			i.RequestID = registered
+			first, err = s.Archive(tx, owner, i, tx.NextSeq())
+			return err
+		}); err != nil {
 			t.Fatal(err)
 		}
 		foreign := owner
 		foreign.AgentID = "intruder"
 		probe := func(requestID string) error {
-			_, err := s.ArchiveStandalone(ctx, foreign, domain.ArchiveIntent{RequestID: requestID, ItemID: "fact", ExpectedVersion: 1})
+			i := intent
+			i.RequestID = requestID
+			_, err := s.ArchiveStandalone(ctx, foreign, i)
 			return err
 		}
 		existing, missing := probe(registered), probe(absent)
 		if existing == nil || missing == nil || existing.Error() != missing.Error() || errors.Is(existing, domain.ErrEventIDConflict) {
 			t.Fatalf("existence oracle: existing=%v missing=%v", existing, missing)
 		}
-		again, err := s.ArchiveStandalone(ctx, owner, domain.ArchiveIntent{RequestID: registered, ItemID: "fact", ExpectedVersion: 1})
-		if err != nil || again.AuditID != first.AuditID {
+		// A later transaction: the owner replays because the exact lookup
+		// precedes the current-transaction check (DUR-2.8).
+		i := intent
+		i.RequestID = registered
+		again, err := s.ArchiveStandalone(ctx, owner, i)
+		if err != nil || again.AuditID != first.Result.AuditID {
 			t.Fatalf("owner replay: %+v %v", again, err)
 		}
 	})

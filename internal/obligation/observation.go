@@ -32,7 +32,7 @@ func (s *Service) RegisterRunTx(tx store.Tx, actor domain.Principal, in domain.R
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	if res, ok, err := replay(sem, actor, req); ok || err != nil {
+	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
 	run, err := s.registerRun(tx, sem, actor, in, seq)
@@ -40,7 +40,7 @@ func (s *Service) RegisterRunTx(tx store.Tx, actor domain.Principal, in domain.R
 		return domain.MutationResult{}, err
 	}
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: resultObservationRun, IDs: []string{run.ID}}}
-	if err := s.recordReceipt(sem, actor, req, seq, result); err != nil {
+	if err := s.recordReceipt(tx, sem, actor, req, seq, result); err != nil {
 		tx.Poison(err)
 		return domain.MutationResult{}, err
 	}
@@ -121,7 +121,7 @@ func (s *Service) ReportObservationTx(tx store.Tx, actor domain.Principal, in do
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	if res, ok, err := replay(sem, actor, req); ok || err != nil {
+	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
 	obs, err := s.reportObservation(tx, sem, actor, in, seq)
@@ -129,7 +129,7 @@ func (s *Service) ReportObservationTx(tx store.Tx, actor domain.Principal, in do
 		return domain.MutationResult{}, err
 	}
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: resultObservation, IDs: []string{obs.ID}}}
-	if err := s.recordReceipt(sem, actor, req, seq, result); err != nil {
+	if err := s.recordReceipt(tx, sem, actor, req, seq, result); err != nil {
 		tx.Poison(err)
 		return domain.MutationResult{}, err
 	}

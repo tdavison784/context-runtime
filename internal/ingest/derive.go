@@ -291,7 +291,7 @@ func (r *run) workingSection(c unitCtx, si int) error {
 		// A snapshot that retires members is one durable SUPERSESSION
 		// trigger, identified by its first new member, however many it
 		// retires (P3-39, SPEC-1.6).
-		return r.enqueueGC(c.actor, domain.GCSupersession, r.p.TaskID, ids[0])
+		return r.enqueueGC(r.p, domain.GCSupersession, r.p.TaskID, ids[0])
 	}
 	return nil
 }
@@ -433,7 +433,7 @@ func (r *run) executeCommand(rec *domain.LifecycleCommandRecord, outcome domain.
 	if r.g.Lifecycle == nil {
 		return domain.ErrUnsupportedSchema
 	}
-	req, err := domain.OperationRequestID(rec.Actor, r.occurrence, r.unitOp, uint64(rec.Ordinal)+1)
+	req, err := domain.OperationRequestID(r.p, rec.Actor, r.occurrence, r.seq, r.unitOp, uint64(rec.Ordinal)+1)
 	if err != nil {
 		return err
 	}
