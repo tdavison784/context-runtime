@@ -54,14 +54,35 @@ func TestUnfinishedTaskObligations(t *testing.T) {
 	}
 }
 
+// satisfies collects every page of the SATISFIES view (DUR-3.8).
 func (f *evalFixture) satisfies(t *testing.T, viewer domain.Principal, current bool) (SatisfiesView, error) {
-	var v SatisfiesView
-	var err error
-	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
-		v, err = f.s.Satisfies(tx, viewer, f.sysTests, current)
-		return nil
-	})
-	return v, err
+	return f.satisfiesOf(t, viewer, f.sysTests, current)
+}
+
+func (f *evalFixture) satisfiesOf(t *testing.T, viewer domain.Principal, ref domain.ObligationRef, current bool) (SatisfiesView, error) {
+	t.Helper()
+	var all SatisfiesView
+	var after store.Cursor
+	for pages := 0; ; pages++ {
+		if pages > 1000 {
+			t.Fatal("SATISFIES view never ends")
+		}
+		var v SatisfiesView
+		var err error
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			v, err = f.s.Satisfies(tx, viewer, ref, current, after)
+			return nil
+		})
+		if err != nil {
+			return all, err
+		}
+		all.Relations = append(all.Relations, v.Relations...)
+		all.Truncated = all.Truncated || v.Truncated
+		if !v.More {
+			return all, nil
+		}
+		after = v.Next
+	}
 }
 
 func TestSatisfiesView(t *testing.T) {

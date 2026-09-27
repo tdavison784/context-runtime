@@ -161,3 +161,26 @@ func TestDUR31SubjectApplicabilityIsDerived(t *testing.T) {
 	want("freshness lost", file, domain.ApplicabilityUnknown)
 	want("freshness lost", tests, domain.ApplicabilityUnknown)
 }
+
+// DUR-3.8 (H2): the history SATISFIES view is returned in cursor pages of
+// bounded work, never failed because a version's history outgrew one
+// transaction's budget.
+func TestDUR38HistorySatisfiesPages(t *testing.T) {
+	f := newEvalFixture(t)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	fp := "W1"
+	for i := range h2History / 2 {
+		f.report(t, f.newRun(t), domain.OutcomePass, hashOf(fp), nil)
+		fp = fmt.Sprintf("C%d", i)
+		f.r.set(t, f.fixture, hashOf(fp), false)
+	}
+	v, err := f.satisfies(t, f.harness, false)
+	if err != nil || len(v.Relations) != h2History/2 {
+		t.Fatalf("history SATISFIES = %d relations, %v; want %d", len(v.Relations), err, h2History/2)
+	}
+	for _, rel := range v.Relations {
+		if rel.Current {
+			t.Errorf("invalidated proof presented as current: %+v", rel)
+		}
+	}
+}

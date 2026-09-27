@@ -46,11 +46,15 @@ func (s *Service) UnfinishedTaskObligations(tx store.ReadTx, taskID string) (boo
 type SatisfiesView struct {
 	Relations []domain.SatisfiesRelation
 	Truncated bool
+	// Next continues the history view when More is set.
+	Next store.Cursor
+	More bool
 }
 
 // Satisfies returns the SATISFIES view of target for viewer. A version the
-// viewer cannot access is ErrNotFound.
-func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target domain.ObligationRef, currentOnly bool) (SatisfiesView, error) {
+// viewer cannot access is ErrNotFound. The history view continues after the
+// cursor after.
+func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target domain.ObligationRef, currentOnly bool, after store.Cursor) (SatisfiesView, error) {
 	if err := viewer.Validate(); err != nil {
 		return SatisfiesView{}, err
 	}
