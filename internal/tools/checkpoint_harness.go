@@ -66,6 +66,10 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return "", err
 	}
+	receiptID, err := domain.MutationReceiptID(tx, actor, domain.MutationMembership, intent.RequestID)
+	if err != nil {
+		return "", err
+	}
 	if seq == 0 {
 		seq = tx.NextSeq() // allocated only after the replay check (FR-ING-006)
 	}
@@ -74,10 +78,6 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 		return "", err
 	}
 	hash, err := domain.MutationRequestHash(actor, domain.MutationMembership, methodHarnessCheckpoint, args)
-	if err != nil {
-		return "", err
-	}
-	receiptID, err := domain.MutationReceiptID(tx, actor, domain.MutationMembership, intent.RequestID)
 	if err != nil {
 		return "", err
 	}

@@ -120,6 +120,10 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 }
 
 func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event, o *outcome) (domain.IngestReceipt, error) {
+	if o == nil && isOutcomeEventID(e.EventID) {
+		return domain.IngestReceipt{}, domain.ErrInvalidRecord
+	}
+
 	// Admission (SEC-2.1), from lengths alone and outside any write
 	// transaction: the hard ceiling first, then the configured limits. An
 	// over-limit event is admitted only as the retry of a known EventID
@@ -191,6 +195,11 @@ func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 }
 
 func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string, o *outcome) (domain.IngestReceipt, error) {
+	// Outcome IDs never belonged to plain events, including Phase 2.
+	if o == nil && isOutcomeEventID(e.EventID) {
+		return domain.IngestReceipt{}, domain.ErrInvalidRecord
+	}
+
 	var b *domain.OutcomeBinding
 	var m *OutcomeMembership
 	if o != nil {
@@ -305,6 +314,9 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.
 		// Principal before detail: another principal's EventID is a bare
 		// conflict before anything of the request is canonicalized.
 		if r.Principal != p {
+			if domain.ReservedIDPrefix(e.EventID) {
+				return domain.IngestReceipt{}, true, domain.ErrInvalidRecord
+			}
 			return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
 		}
 		// The EventID is the lookup key, never payload, so the retry is
@@ -323,6 +335,9 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.
 		return domain.IngestReceipt{}, true, err
 	}
 	if _, err := tx.Event(e.EventID); err == nil {
+		if domain.ReservedIDPrefix(e.EventID) {
+			return domain.IngestReceipt{}, true, domain.ErrInvalidRecord
+		}
 		return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
 	} else if !isNotFound(err) {
 		return domain.IngestReceipt{}, true, err

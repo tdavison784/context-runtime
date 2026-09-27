@@ -12,19 +12,21 @@ import (
 
 // ErrGCTriggerDisabled rejects collection for a trigger outside the policy's
 // explicit enabled set. The durable request, if any, stays pending.
+var ErrGCConfiguration = errors.New("lifecycle: invalid collector configuration")
+
 var ErrGCTriggerDisabled = fmt.Errorf("lifecycle: GC trigger disabled by policy: %w", domain.ErrInvalidTransition)
 
 // EnqueueGC persists a durable GC request in the producer's transaction
 // (P3-39) under this executor's policy; it is a thin wrapper over
 // gcqueue.Enqueue, which producers below lifecycle call directly with their
-// event's recorded policy (SPEC-2.11). A session-scoped (task-less) trigger
-// produces nothing: Phase 3 has no session-scoped GC (H4).
+// event's recorded policy (SPEC-2.11). A session-scoped (task-less) automatic
+// trigger produces nothing (H4); manual session Collect can resume (J7).
 func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain.GCTrigger, scope domain.CollectScope, taskID, triggerID string) (string, error) {
 	switch scope {
 	case domain.CollectTask:
 		return gcqueue.Enqueue(tx, s.policy, origin, trigger, taskID, triggerID)
 	case domain.CollectSession:
-		return "", nil // no session-scoped GC in Phase 3 (H4)
+		return "", nil // automatic task-less producers are disabled (H4)
 	}
 	tx.Poison(domain.ErrInvalidRecord)
 	return "", domain.ErrInvalidRecord
@@ -35,8 +37,8 @@ func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain
 // request identity.
 var ErrGCRequestFailed = fmt.Errorf("lifecycle: GC request quarantined: %w", domain.ErrInvalidTransition)
 
-// maxGCAttempts bounds transient failures of one GC request before it is
-// quarantined as ATTEMPTS_EXHAUSTED (H3).
+// maxGCAttempts bounds transient reads of one candidate before an explicit
+// SKIP_ATTEMPTS_EXHAUSTED decision (J4).
 const maxGCAttempts = 3
 
 // maxGCPagesPerCall bounds the pending-queue pages one CollectPending call
@@ -61,7 +63,7 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 		}
 	}()
 	if err = collector.Validate(); err != nil {
-		return out, err
+		return out, errors.Join(ErrGCConfiguration, err)
 	}
 	sem, err := store.Semantic(tx)
 	if err != nil {
@@ -104,8 +106,24 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 	if err != nil {
 		return out, err
 	}
+	if progress.Batches > 0 {
+		firstID, e := req.BatchRequestID(1)
+		if domain.ValidateCallerRequestID(req.RequestID) == nil {
+			firstID = req.RequestID
+		}
+		if e != nil {
+			return out, e
+		}
+		first, e := sem.CollectReceipt(collectReceiptID(req.SessionID, firstID))
+		if e != nil {
+			return out, e
+		}
+		if first.Principal != collector {
+			return out, ErrGCConfiguration
+		}
+	}
 	i := req.CollectIntent
-	if i.RequestID, err = domain.GCBatchRequestID(req.RequestID, progress.Batches+1); err != nil {
+	if i.RequestID, err = req.BatchRequestID(progress.Batches + 1); err != nil {
 		return out, err
 	}
 	return s.collect(tx, collector, i, &gcBatch{requestID: req.ID, progress: progress}, seq)
@@ -118,18 +136,37 @@ func gcProgress(sem store.SemanticReader, id string) (domain.GCProgress, error) 
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.GCProgress{}, nil
 	}
-	return p, err
+	if err != nil {
+		return p, err
+	}
+	// Pre-J2 progress recovers the ceiling from its first committed receipt.
+	if p.Batches > 0 && p.SnapshotSeq == 0 {
+		req, err := sem.GCRequest(id)
+		if err != nil {
+			return p, err
+		}
+		firstID, err := domain.GCBatchRequestID(req.RequestID, 1)
+		if err != nil {
+			return p, err
+		}
+		first, err := sem.CollectReceipt(collectReceiptID(req.SessionID, firstID))
+		if err != nil {
+			return p, err
+		}
+		p.SnapshotSeq = first.SnapshotSeq
+	}
+	return p, nil
 }
 
 // CollectPending executes up to max request batches, each in its own
 // transaction, paging through the queue (G2, H3). collectorFor supplies the
 // authenticated collector for a request, or false to leave it pending;
 // disabled triggers and requests already collected by another worker stay
-// uncounted. A failing batch never blocks later requests: a deterministic
-// failure is quarantined FAILED at once, a transient one counts an attempt
-// (FAILED/ATTEMPTS_EXHAUSTED at maxGCAttempts), and one not attributable to
-// the request is only reported. Each call makes at most max attempts, scans
-// at most maxGCPagesPerCall pages, and stops when ctx is done.
+// uncounted. Only request-level permanent failures quarantine. Configuration
+// errors are reported without charging; infrastructure failures record an
+// attempt and remain pending. Item retries and skips belong to the batch.
+// Each call makes at most max attempts, scans at most maxGCPagesPerCall
+// pages, and stops when ctx is done.
 func (s *Service) CollectPending(ctx context.Context, session string, collectorFor func(domain.GCRequest) (domain.Principal, bool), max int) (int, error) {
 	if collectorFor == nil || max <= 0 {
 		return 0, domain.ErrInvalidRecord
@@ -137,6 +174,10 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 	done, attempts := 0, 0
 	var failures []error
 	var after store.Cursor
+	if saved, ok := s.gcQueueCursors.Load(session); ok {
+		after = saved.(store.Cursor)
+	}
+	defer func() { s.gcQueueCursors.Store(session, after) }()
 	for pages := 0; attempts < max && pages < maxGCPagesPerCall; pages++ {
 		if err := ctx.Err(); err != nil {
 			return done, errors.Join(append(failures, err)...)
@@ -153,15 +194,19 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 			return done, errors.Join(append(failures, err)...)
 		}
 		for _, r := range page.Records {
-			after = store.Cursor{Seq: r.Seq, ID: r.ID}
 			if attempts == max {
-				break
+				return done, errors.Join(failures...)
 			}
+			after = store.Cursor{Seq: r.Seq, ID: r.ID}
 			if err := ctx.Err(); err != nil {
 				return done, errors.Join(append(failures, err)...)
 			}
 			p, ok := collectorFor(r)
-			if !ok || !s.policy.GCTriggerEnabled(r.Trigger) {
+			if !ok {
+				continue
+			}
+			if !s.policy.GCTriggerEnabled(r.Trigger) {
+				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, ErrGCTriggerDisabled))
 				continue
 			}
 			attempts++
@@ -187,6 +232,7 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 			}
 		}
 		if !page.More {
+			after = store.Cursor{} // wrap; previously skipped requests get another opportunity
 			break
 		}
 		if len(page.Records) == 0 {
@@ -221,9 +267,9 @@ func (s *Service) collectPendingOne(ctx context.Context, session string, p domai
 }
 
 // settleGCFailure records a failed attempt in its own transaction (H3). A
-// permanent failure quarantines at once with code; a transient one (attempt)
-// counts toward maxGCAttempts and quarantines as code on the last. A request
-// finished meanwhile is left alone.
+// permanent failure quarantines at once with code; an infrastructure
+// failure (attempt) records operational statistics and remains pending.
+// A request finished meanwhile is left alone.
 func (s *Service) settleGCFailure(ctx context.Context, session, id string, code domain.GCFailureCode, attempt bool) error {
 	return s.store.Update(ctx, session, func(tx store.Tx) error {
 		sem, err := store.Semantic(tx)
@@ -240,11 +286,12 @@ func (s *Service) settleGCFailure(ctx context.Context, session, id string, code 
 			if err != nil {
 				return err
 			}
-			if p.Attempts+1 < maxGCAttempts {
-				next := domain.GCProgress{SessionID: session, GCRequestID: id, Cursor: p.Cursor, Batches: p.Batches, Attempts: p.Attempts + 1, Revision: p.Revision + 1}
-				_, err := sem.PutGCProgress(next, p.Revision)
-				return err
-			}
+			next := p
+			next.SessionID, next.GCRequestID = session, id
+			next.Attempts++
+			next.Revision++
+			_, err = sem.PutGCProgress(next, p.Revision)
+			return err
 		}
 		result := domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID(session, id), SessionID: session, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
 			GCRequestID: id, Outcome: domain.GCFailed, Reason: code}

@@ -17,7 +17,8 @@ import (
 //   - A trigger the policy disables persists nothing and returns "", nil.
 //     Task completion always persists (P3-39).
 //   - A task-less trigger persists nothing (H4): Phase 3 has no session
-//     scoped GC, so every request is TASK scoped.
+//     automatic GC, so producer requests are TASK scoped. Manual session
+//     collection is batched by lifecycle.
 //   - The request identity derives from the authenticated origin and the
 //     trigger identity (H5), so a repeated trigger returns the existing
 //     request and no caller can name it; the same identity with different

@@ -31,6 +31,9 @@ func drain[T any](b *workBudget, maxRecords int, read func(store.Page) (store.Re
 		if err := b.spend(1); err != nil {
 			return nil, err
 		}
+		if b.remaining == 0 {
+			return nil, errBudget
+		}
 		limit := min(b.pageSize, maxRecords-len(out), b.remaining)
 		if limit <= 0 {
 			return nil, domain.ErrResourceLimit

@@ -218,24 +218,51 @@ both forms share.
   cannot run it (a stale `PolicyVersion` on the request, or a missing
   authorized collector) fails that attempt closed rather than silently
   succeeding; it stays pending for a later, correctly-configured attempt.
-  **GC requests quarantine on permanent failure and collect large
-  candidate sets in durable batches (H3/SEC-2.4/SPEC-2.4/DUR-2.7, commit
-  `e68ce80`).** `classifyGCFailure` (`internal/lifecycle/gc_failure.go`)
-  sorts an attempt's error into not-charged (cancelled, contended, trigger
-  disabled — stays pending), transient (counts toward a bounded attempt
-  limit, then quarantines `ATTEMPTS_EXHAUSTED`), or permanent
-  (`ErrUnsupportedSchema`/`ErrIntegrity`/`ErrInvalidRecord`/`ErrNotFound` —
-  quarantines at once with a closed `GCFailureCode`). `ExecuteGCRequest`
-  runs the next batch from the request's `GCProgress` cursor
-  (`GCBatchRequestID(n)`), advancing it by CAS, so one oversized request
-  can never wedge the whole queue or exceed the per-call work bound.
-  Quarantined and completed requests leave `PendingGCRequests`, so one
-  permanently failing request no longer blocks every later one. Tests:
-  `TestClassifyGCFailure`, `TestFailingGCRequestsAreQuarantined`,
-  `TestLargeGCRequestCollectsAcrossBatches`,
-  `TestCollectionPlansInBoundedBatches`,
-  `TestOverflowingCandidateIsIneligibleNotAWedge`,
-  `TestBatchFitsTheReceiptLimit`.
+  **GC collection resumes in bounded batches (round 3 rulings J1–J7;
+  XREV-3.1–3.3, SEC-3.1/3.2/3.9, SPEC-3.2/3.3/3.6).** The first
+  batch pins the eligibility ceiling `SnapshotSeq`; all batches traverse
+  that ceiling in `(item.Seq, item.ID)` order. `GCProgress` CAS persists
+  the last fully decided candidate, completed batch count, adaptive
+  item-count limit, and attempts for the next candidate. Later insertions
+  cannot extend the request. Continuations require the first batch's
+  collector principal, preserving its access boundary.
+  Shared transaction-budget exhaustion commits only the completed prefix
+  and halves the item-count limit (floor one). Receipt sizing includes
+  the complete enclosing mutation receipt, archive results, request link,
+  arguments and metadata before applying effects; a smaller prefix is
+  chosen until it fits. A single-item overflow is an explicit
+  `SKIP_RESOURCE_LIMIT` decision. Permanent item errors record
+  `SKIP_INVALID_ITEM` or `SKIP_INTEGRITY`; transient item reads retry at
+  most three times and then record `SKIP_ATTEMPTS_EXHAUSTED`. These skips
+  preserve the item and let later candidates proceed. A result becomes
+  `COLLECTED` only when the bounded candidate traversal is exhausted.
+  Only request-level `INVALID_REQUEST` and `INTEGRITY` failures quarantine.
+  Collector policy/trigger mismatch or missing capability returns an error
+  and leaves the request pending without charging attempts. Infrastructure
+  failures also leave it pending; historical terminal reason codes remain
+  readable. Terminal results remove requests from the pending index in the
+  same transaction. Each service keeps a concurrency-safe, per-session
+  scan continuation across calls and wraps at the end, so a disabled or
+  declined prefix cannot permanently hide runnable requests within that
+  service's lifetime; a new service begins at the queue head.
+  Direct `Collect`, including SESSION scope, uses the same durable path.
+  Its receipt exposes `GCRequestID`; callers use `ExecuteGCRequest` or
+  `CollectPending` to continue. Retrying the original manual intent replays
+  its first receipt without rescanning. Later batch identities derive from
+  the authenticated origin in the reserved runtime namespace. H4 still
+  disables automatic task-less producers; manual session collection works.
+  SQLite migrations 0041–0044 add `SnapshotSeq`, `BatchSize`,
+  `ItemAttempts`, and `ItemAttemptID` to GC progress. Existing progress without a snapshot
+  recovers its ceiling from its first committed collect receipt. No
+  candidate-history or pending-index schema change is needed.
+  Regression tests: `TestJ1BudgetBoundaryCollectsEveryCandidate`,
+  `TestJ2SnapshotAndCursorStayFrozen`,
+  `TestJ3CompleteReceiptFitsAndBatchAdapts`,
+  `TestJ4DeadLeaseHistoryDoesNotFailRequest`,
+  `TestJ4LongCancelledMembershipHistorySkipsOnlyOneItem`,
+  `TestJ5ConfigurationErrorsLeaveRequestsPending`,
+  `TestJ6QueuePrefixCannotHideRunnableTail`, and
+  `TestJ7ManualSessionCollectionResumesAndReplays` run on both stores.
   **Grant issuance shares its live-count cap fairly and reserves room for
   SYSTEM (SEC-2.7).** `liveGrantRoom` (`internal/lifecycle/grants.go`)
   limits any one issuer to at most a quarter of the policy's live-grant

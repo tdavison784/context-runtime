@@ -19,7 +19,7 @@ func TestClassifyGCFailure(t *testing.T) {
 		kind gcFailureKind
 		code domain.GCFailureCode
 	}{
-		"policy mismatch":   {domain.ErrUnsupportedSchema, gcPermanent, domain.GCFailurePolicyMismatch},
+		"policy mismatch":   {domain.ErrUnsupportedSchema, gcNotCharged, ""},
 		"invalid request":   {fmt.Errorf("wrapped: %w", domain.ErrInvalidRecord), gcPermanent, domain.GCFailureInvalidRequest},
 		"missing task":      {domain.ErrNotFound, gcPermanent, domain.GCFailureInvalidRequest},
 		"integrity":         {domain.ErrIntegrity, gcPermanent, domain.GCFailureIntegrity},

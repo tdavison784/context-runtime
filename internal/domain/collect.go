@@ -82,9 +82,13 @@ func (r ItemRevisionRef) Validate() error {
 type GCDecisionCode string
 
 const (
-	GCArchive    GCDecisionCode = "ARCHIVE"
-	GCProtected  GCDecisionCode = "PROTECTED"
-	GCIneligible GCDecisionCode = "INELIGIBLE"
+	GCArchive               GCDecisionCode = "ARCHIVE"
+	GCProtected             GCDecisionCode = "PROTECTED"
+	GCIneligible            GCDecisionCode = "INELIGIBLE"
+	GCSkipResourceLimit     GCDecisionCode = "SKIP_RESOURCE_LIMIT"
+	GCSkipInvalidItem       GCDecisionCode = "SKIP_INVALID_ITEM"
+	GCSkipIntegrity         GCDecisionCode = "SKIP_INTEGRITY"
+	GCSkipAttemptsExhausted GCDecisionCode = "SKIP_ATTEMPTS_EXHAUSTED"
 )
 
 type GCDecision struct {
@@ -133,7 +137,7 @@ func (r CollectReceipt) Validate() error {
 				return invalid("collect receipt: archived results disagree")
 			}
 			archived++
-		case GCProtected, GCIneligible:
+		case GCProtected, GCIneligible, GCSkipResourceLimit, GCSkipInvalidItem, GCSkipIntegrity, GCSkipAttemptsExhausted:
 		default:
 			return invalid("collect receipt: unknown decision")
 		}
@@ -216,6 +220,10 @@ type GCCursor struct {
 // completed batches and attempts. It is CAS-written on Revision and is never
 // a substitute for a batch's CollectReceipt or the request's GCResult.
 type GCProgress struct {
+	ItemAttemptID               string // identity whose transient reads are counted
+	ItemAttempts                uint64 // transient attempts for the next candidate after Cursor
+	BatchSize                   int    // adaptive item-count ceiling; zero uses policy default
+	SnapshotSeq                 uint64 // fixed eligibility ceiling, ordered by (item Seq, ID)
 	SessionID, GCRequestID      string
 	Cursor                      GCCursor
 	Batches, Attempts, Revision uint64
@@ -227,6 +235,12 @@ func (p GCProgress) Validate() error {
 	if !semanticID(p.SessionID) || !semanticID(p.GCRequestID) || p.Revision == 0 {
 		return invalid("GC progress: session, request and revision required")
 	}
+	if p.ItemAttemptID != "" && !semanticID(p.ItemAttemptID) {
+		return invalid("GC progress: invalid attempted item")
+	}
+	if p.BatchSize < 0 {
+		return invalid("GC progress: negative batch size")
+	}
 	if p.Cursor.Seq == 0 && p.Cursor.ID != "" || p.Cursor.Seq != 0 && !semanticID(p.Cursor.ID) {
 		return invalid("GC progress: invalid cursor")
 	}
@@ -234,6 +248,21 @@ func (p GCProgress) Validate() error {
 		return invalid("GC progress: a cursor advances only with a completed batch")
 	}
 	return nil
+}
+
+// BatchRequestID keeps continuations of caller-named manual requests in the
+// reserved runtime namespace. The first manual batch retains the caller ID
+// for exact replay; subsequent batches use this authenticated derivation.
+func (r GCRequest) BatchRequestID(batch uint64) (string, error) {
+	root := r.RequestID
+	if ValidateCallerRequestID(root) == nil {
+		var err error
+		root, err = GCTriggerRequestID(r.Origin, r.Trigger, root)
+		if err != nil {
+			return "", err
+		}
+	}
+	return GCBatchRequestID(root, batch)
 }
 
 // GCBatchRequestID is the CollectReceipt request ID of batch n (from 1) of a

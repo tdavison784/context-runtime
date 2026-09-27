@@ -54,7 +54,16 @@ func planOnce(t *testing.T, db store.Store, s *Service, after domain.GCCursor) b
 			return err
 		}
 		plan, err = s.planBatch(tx, sem, storetest.NewPrincipal("s", domain.AuthoritySystem),
-			domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual}, tx.NextSeq(), after)
+			domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual}, tx.NextSeq(), domain.GCProgress{Cursor: after})
+		if err != nil {
+			return err
+		}
+		i := domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual}
+		args, err := domain.CanonicalSemanticArguments(i, s.policy.MaxMetadataBytes)
+		if err != nil {
+			return err
+		}
+		plan, err = s.fitCollectionPlan(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), i, args, "", plan)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -102,31 +111,12 @@ func TestCollectionPlansInBoundedBatches(t *testing.T) {
 	})
 }
 
-// H3: one candidate whose own bounded read overflows is recorded
-// INELIGIBLE (never archived) instead of wedging every later batch.
-func TestOverflowingCandidateIsIneligibleNotAWedge(t *testing.T) {
-	eachStore(t, func(t *testing.T, db store.Store) {
-		pol := testPolicy()
-		pol.MaxTargets = 3
-		s, _ := New(db, pol)
-		seedEphemeral(t, db, 2, 4)
-		plan := planOnce(t, db, s, domain.GCCursor{})
-		got := map[string]domain.GCDecisionCode{}
-		for _, d := range plan.receipt.Decisions {
-			got[d.Target.ItemID] = d.Code
-		}
-		if plan.more || got["heavy"] != domain.GCIneligible || got["eph-000"] != domain.GCArchive || got["eph-001"] != domain.GCArchive {
-			t.Fatalf("plan: more=%v %v", plan.more, got)
-		}
-	})
-}
-
 // H3: a batch whose frozen receipt would exceed MaxReceiptBytes is cut to
 // a prefix that fits, continuing from its last candidate.
 func TestBatchFitsTheReceiptLimit(t *testing.T) {
 	eachStore(t, func(t *testing.T, db store.Store) {
 		pol := testPolicy()
-		pol.MaxReceiptBytes = 2048
+		pol.MaxReceiptBytes = 4096
 		s, _ := New(db, pol)
 		seedEphemeral(t, db, 60, 0)
 		plan := planOnce(t, db, s, domain.GCCursor{})

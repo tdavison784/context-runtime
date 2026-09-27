@@ -102,54 +102,22 @@ func TestFailingGCRequestsAreQuarantined(t *testing.T) {
 	harness := storetest.NewPrincipal("s", domain.AuthorityHarness)
 	pick := func(domain.GCRequest) (domain.Principal, bool) { return harness, true }
 
-	t.Run("permanent", func(t *testing.T) {
-		eachStore(t, func(t *testing.T, db store.Store) {
-			s, _ := New(db, testPolicy())
-			seedCompletion(t, db, nil, "", false)
-			if err := db.Update(ctx, "s", func(tx store.Tx) error {
-				sem, err := store.Semantic(tx)
-				if err != nil {
-					return err
-				}
-				return sem.InsertGCRequest(domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: "gcq_old", SessionID: "s", SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
-					CollectIntent: domain.CollectIntent{RequestID: "gc_old", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCSupersession},
-					Origin:        storetest.NewPrincipal("s", domain.AuthoritySystem), PolicyVersion: "phase3-policy/v0"})
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := s.CollectPending(ctx, "s", pick, 4); err != nil {
-				t.Fatalf("quarantine pass: %v", err)
-			}
-			res, found := gcResult(t, db, "gcq_old")
-			if !found || res.Outcome != domain.GCFailed || res.Reason != domain.GCFailurePolicyMismatch || res.CollectReceiptID != "" {
-				t.Fatalf("quarantine record: %+v found=%v", res, found)
-			}
-			before := lastSeq(t, db)
-			if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || err != nil || lastSeq(t, db) != before || len(pendingGC(t, db)) != 0 {
-				t.Fatalf("quarantined request retried: n=%d err=%v", n, err)
-			}
-		})
-	})
-	t.Run("transient exhausted", func(t *testing.T) {
+	t.Run("single item budget skip", func(t *testing.T) {
 		eachStore(t, func(t *testing.T, db store.Store) {
 			base, _ := New(db, testPolicy())
 			id := completeLarge(t, db, base, 1)
 			pol := testPolicy()
-			pol.MaxTransactionWork = 4 // no candidate fits a batch
+			pol.MaxTransactionWork = 4
 			s, _ := New(db, pol)
-			for pass := 1; pass <= maxGCAttempts; pass++ {
-				n, err := s.CollectPending(ctx, "s", pick, 1)
-				if n != 0 {
-					t.Fatalf("pass %d executed", pass)
+			runGC(t, db, s, id, 30)
+			r, _ := gcResult(t, db, id)
+			readSemantic(t, db, func(sem store.SemanticReader) error {
+				c, err := sem.CollectReceipt(r.CollectReceiptID)
+				if len(c.Decisions) != 1 || c.Decisions[0].Code != domain.GCSkipResourceLimit {
+					t.Errorf("skip receipt: %+v", c)
 				}
-				res, found := gcResult(t, db, id)
-				if pass < maxGCAttempts && (found || err == nil) {
-					t.Fatalf("pass %d: quarantined early or silent: %+v %v", pass, res, err)
-				}
-				if pass == maxGCAttempts && (!found || res.Outcome != domain.GCFailed || res.Reason != domain.GCFailureAttemptsExhausted) {
-					t.Fatalf("attempts exhausted: %+v found=%v err=%v", res, found, err)
-				}
-			}
+				return err
+			})
 		})
 	})
 	t.Run("cancelled", func(t *testing.T) {

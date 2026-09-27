@@ -87,6 +87,9 @@ func (s *Service) CompleteTask(tx store.Tx, p domain.Principal, i domain.Complet
 func (s *Service) CompleteTaskStandalone(ctx context.Context, p domain.Principal, i domain.CompleteTaskIntent) (domain.CompletionReceipt, error) {
 	var out MutationOutcome
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
+		if err := domain.ValidateCallerReplayID(i.RequestID); err != nil {
+			return err
+		}
 		_, _, prior, err := s.begin(tx, p, domain.MutationLifecycle, string(domain.ActionCompleteTask), i.RequestID, i)
 		if err != nil {
 			return err

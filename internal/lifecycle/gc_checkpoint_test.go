@@ -46,7 +46,7 @@ func TestGCProtectsOnlyTheNewestRelevantCheckpoint(t *testing.T) {
 		"invisible counts as newest": {err: domain.ErrNotFound, want: domain.GCProtected},
 		// H3: an overflowing lookup keeps the checkpoint (never archived)
 		// without aborting the rest of the collection.
-		"bounded lookup is ineligible": {err: domain.ErrResourceLimit, want: domain.GCIneligible},
+		"bounded lookup is skipped": {err: domain.ErrResourceLimit, want: domain.GCSkipResourceLimit},
 	} {
 		t.Run(name, func(t *testing.T) {
 			mem := memory.New()
@@ -57,7 +57,9 @@ func TestGCProtectsOnlyTheNewestRelevantCheckpoint(t *testing.T) {
 				viewer = v
 				return domain.Checkpoint{ItemID: id}, tc.newest, tc.err
 			}
-			s, _ := New(mem, testPolicy())
+			pol := testPolicy()
+			pol.MaxGCDecisions = 1
+			s, _ := New(mem, pol)
 			out, err := collect(newFacets(), mem, s, harness, domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual})
 			if tc.fails != nil {
 				if !errors.Is(err, tc.fails) {
@@ -75,13 +77,15 @@ func TestGCProtectsOnlyTheNewestRelevantCheckpoint(t *testing.T) {
 	}
 }
 
-func TestGCCheckpointWithoutCompanionAbortsOnRealGraph(t *testing.T) {
+func TestGCCheckpointWithoutCompanionRecordsItemSkip(t *testing.T) {
 	mem := memory.New()
 	t.Cleanup(func() { mem.Close() })
 	seedCheckpointItem(t, mem)
-	s, _ := New(mem, testPolicy())
-	_, err := collect(newFacets(), mem, s, storetest.NewPrincipal("s", domain.AuthorityHarness), domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual})
-	if !errors.Is(err, domain.ErrIntegrity) {
+	pol := testPolicy()
+	pol.MaxGCDecisions = 1
+	s, _ := New(mem, pol)
+	out, err := collect(newFacets(), mem, s, storetest.NewPrincipal("s", domain.AuthorityHarness), domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual})
+	if err != nil || len(out.Result.Collect.Decisions) != 1 || out.Result.Collect.Decisions[0].Code != domain.GCSkipIntegrity {
 		t.Fatalf("checkpoint item without its record: %v", err)
 	}
 }

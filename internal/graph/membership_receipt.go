@@ -40,11 +40,11 @@ func prepareMembershipReceipt(tx store.Tx, actor domain.Principal, requestID, me
 	if !errors.Is(err, domain.ErrNotFound) {
 		return nil, receipt, false, err
 	}
-	args, err := domain.CanonicalSemanticArguments(intent, policy.MaxMetadataBytes)
+	id, err := domain.MutationReceiptID(tx, actor, domain.MutationMembership, requestID)
 	if err != nil {
 		return nil, receipt, false, err
 	}
-	id, err := domain.MutationReceiptID(tx, actor, domain.MutationMembership, requestID)
+	args, err := domain.CanonicalSemanticArguments(intent, policy.MaxMetadataBytes)
 	if err != nil {
 		return nil, receipt, false, err
 	}

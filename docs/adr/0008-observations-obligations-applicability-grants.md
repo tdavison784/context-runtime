@@ -578,8 +578,7 @@ no single §-decision above covers them. Each cites its real code and test.
   W7's final report's open item ("W1 may register it formally") is resolved.
   See ADR 4's "Canonical domain registry (Phase 3)" section, which this ADR
   does not duplicate.
-- **A task-less trigger produces no GC request; Phase 3 has no
-  session-scoped GC (PR #6 round 2 systemic ruling H4; SPEC-2.2/DUR-2.5).**
+- **A task-less automatic trigger produces no GC request (PR #6 round 2 systemic ruling H4; SPEC-2.2/DUR-2.5).**
   A directive's explicit replacement (ADR 19's Q1/C-1 amendment) may itself
   be session-scoped (`TaskID == ""`); before this ruling, its SUPERSESSION
   side effect tried to build a `CollectTask` request with an empty
@@ -591,9 +590,12 @@ no single §-decision above covers them. Each cites its real code and test.
   `internal/obligation` — everything below `internal/lifecycle` that
   produces a trigger) persists nothing at all for a task-less trigger and
   returns success; it never falls back to a session-scoped `CollectScope`,
-  because Phase 3 defines none. The replacement (or keyed write, or
+  because H4 disables automatic session-scoped collection. The replacement (or keyed write, or
   observation supersession) that raised the trigger always succeeds on its
   own merits — GC producing nothing is never a reason a mutation fails.
+  Manual SESSION collection uses durable resumable batches under round-3
+  ruling J7 (SEC-3.9); see ADR 16. This does not enable automatic task-less
+  producers.
   `domain.GCTaskCompletion` is exempt from this restriction the same way it
   is exempt from the enabled-set check (ADR 16's amendment): it always
   names a real task by construction. **SPEC-2.11 (same commit):** `Enqueue`

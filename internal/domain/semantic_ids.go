@@ -66,6 +66,17 @@ func MutationReceiptID(tx SeqAllocator, owner Principal, family MutationFamily, 
 	return MutationReceiptKey(owner.SessionID, family, requestID)
 }
 
+// ValidateCallerReplayID rejects current runtime operation IDs at standalone
+// entry points, before receipt lookup. Their authenticated origin may differ
+// from the lowered actor stored on a receipt (SEC-3.6). Only pre-derivation
+// legacy IDs can qualify for replay-before-namespace compatibility.
+func ValidateCallerReplayID(requestID string) error {
+	if _, ok := runtimeRequestSeq(requestID); ok {
+		return ValidateCallerRequestID(requestID)
+	}
+	return nil
+}
+
 // RuntimeRequestOwnedBy fails when requestID is in the runtime req_
 // namespace but was not derived for owner; any other ID passes. Stores use
 // it as a commit-time check on the receipts they hold.

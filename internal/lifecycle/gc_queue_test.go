@@ -48,7 +48,7 @@ func TestGCQueueNeverBlocksBehindSkippedOrFailingRequests(t *testing.T) {
 			for pass := range 2 {
 				n, err := s.CollectPending(ctx, "s", pick, 1)
 				want := 1 - pass
-				if n != want || err != nil {
+				if n != want || !errors.Is(err, ErrGCTriggerDisabled) {
 					t.Fatalf("pass %d: n=%d err=%v, want %d", pass, n, err, want)
 				}
 			}
@@ -83,14 +83,14 @@ func TestGCQueueNeverBlocksBehindSkippedOrFailingRequests(t *testing.T) {
 				if pass > 0 {
 					want = 0
 				}
-				if n != want || err != nil {
+				if n != want || !errors.Is(err, domain.ErrUnsupportedSchema) {
 					t.Fatalf("pass %d: n=%d err=%v, want %d", pass, n, err, want)
 				}
 			}
-			if res, found := gcResult(t, db, "gcq_old"); !found || res.Outcome != domain.GCFailed || res.Reason != domain.GCFailurePolicyMismatch {
-				t.Fatalf("failing head not quarantined: %+v", res)
+			if res, found := gcResult(t, db, "gcq_old"); found {
+				t.Fatalf("misconfigured head quarantined: %+v", res)
 			}
-			if pending := pendingGC(t, db); len(pending) != 0 {
+			if pending := pendingGC(t, db); len(pending) != 1 {
 				t.Fatalf("pending: %+v", pending)
 			}
 		})
