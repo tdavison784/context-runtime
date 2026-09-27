@@ -730,3 +730,8 @@ func (t *semTx) SetObligationMaterialization(target domain.ObligationRef, disabl
 	t.t.markSequenced()
 	return next.Clone(), nil
 }
+
+// ObligationTransition implements store.ProofReader.
+func (r semRead) ObligationTransition(id string) (domain.ObligationTransition, error) {
+	return domain.ObligationTransition{}, domain.ErrUnsupportedSchema
+}

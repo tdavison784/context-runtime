@@ -605,3 +605,8 @@ func (t *transaction) checkProofNotStale(ref domain.ObligationRef, proofID strin
 	}
 	return nil
 }
+
+// ObligationTransition implements store.ProofReader.
+func (s semRead) ObligationTransition(id string) (domain.ObligationTransition, error) {
+	return domain.ObligationTransition{}, domain.ErrUnsupportedSchema
+}
