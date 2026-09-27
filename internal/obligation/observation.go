@@ -1,6 +1,7 @@
 package obligation
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -35,6 +36,7 @@ func (s *Service) RegisterRunTx(tx store.Tx, actor domain.Principal, in domain.R
 	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	run, err := s.registerRun(tx, sem, actor, in, seq)
 	if err != nil {
 		return domain.MutationResult{}, err
@@ -124,6 +126,7 @@ func (s *Service) ReportObservationTx(tx store.Tx, actor domain.Principal, in do
 	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	obs, err := s.reportObservation(tx, sem, actor, in, seq)
 	if err != nil {
 		return domain.MutationResult{}, err
@@ -229,25 +232,15 @@ func evidenceInRun(ev domain.ContextItem, run domain.ObservationRun) bool {
 	return owners == run.Access
 }
 
-// closing reports whether an observation ends its run.
-func closing(o domain.ObservationRecord) bool {
-	return o.TerminalComplete() || o.Outcome == domain.OutcomeError || o.Outcome == domain.OutcomeTimeout || o.Outcome == domain.OutcomeCancelled
-}
-
-// runClosed reports whether the run already has a closing observation.
+// runClosed reports whether the run already has a closing observation: one
+// keyed read, however many PARTIAL reports the run has (H2, DUR-2.6).
 func (s *Service) runClosed(r store.SemanticReader, work *budget, runID string) (bool, error) {
-	closed := false
-	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
-		pg, err := r.ObservationsByRun(runID, p)
-		if err != nil {
-			return 0, store.Cursor{}, false, err
-		}
-		for _, o := range pg.Records {
-			if closing(o) {
-				closed = true
-			}
-		}
-		return len(pg.Records), pg.Next, pg.More, nil
-	})
-	return closed, err
+	if err := work.spend(1); err != nil {
+		return false, err
+	}
+	_, err := r.ClosingObservation(runID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }

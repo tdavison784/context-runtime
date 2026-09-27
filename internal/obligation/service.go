@@ -115,8 +115,10 @@ func (s *Service) recordReceipt(tx domain.SeqAllocator, sem store.SemanticTx, ac
 }
 
 // begin opens a transaction-scoped mutation: it validates the actor, binds the
-// semantic facet, and checks the allocated sequence. Replay is the caller's
-// next step, before any state is read.
+// semantic facet, and checks the sequence, which is either allocated in this
+// transaction or 0 (deferred). Replay is the caller's next step, before any
+// state is read; allocate then resolves a deferred sequence, so an exact
+// replay consumes none (DUR-2.14, DUR-1.3).
 func begin(tx store.Tx, actor domain.Principal, seq uint64) (store.SemanticTx, error) {
 	if err := actor.Validate(); err != nil {
 		return nil, err
@@ -128,10 +130,28 @@ func begin(tx store.Tx, actor domain.Principal, seq uint64) (store.SemanticTx, e
 	if err != nil {
 		return nil, err
 	}
-	if seq == 0 || !tx.Allocated(seq) {
+	if seq != 0 && !tx.Allocated(seq) {
 		return nil, domain.ErrInvalidRecord
 	}
 	return sem, nil
+}
+
+// beginAt is begin for declarations that ride another write's transaction
+// (a pinned source's creation or replacement): the sequence must be that
+// write's, never deferred.
+func beginAt(tx store.Tx, actor domain.Principal, seq uint64) (store.SemanticTx, error) {
+	if seq == 0 {
+		return nil, domain.ErrInvalidRecord
+	}
+	return begin(tx, actor, seq)
+}
+
+// allocate returns seq, or a newly allocated sequence when it was deferred.
+func allocate(tx store.Tx, seq uint64) uint64 {
+	if seq == 0 {
+		return tx.NextSeq()
+	}
+	return seq
 }
 
 // writes poisons the transaction on the first error after a constituent write

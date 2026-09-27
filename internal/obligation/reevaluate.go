@@ -30,6 +30,7 @@ func (s *Service) ReevaluateTx(tx store.Tx, actor domain.Principal, in domain.Re
 	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	if in.Target.SessionID != actor.SessionID {
 		return domain.MutationResult{}, domain.ErrNotFound
 	}

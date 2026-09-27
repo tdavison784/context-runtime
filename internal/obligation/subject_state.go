@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/gcqueue"
 	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -66,6 +67,14 @@ func (s *Service) deriveState(tx store.Tx, sem store.SemanticTx, work *budget, a
 	}
 	if err := graph.FileObservationState(tx, actor, item.ID, run.SubjectKey, prior.CurrentItemID); err != nil {
 		return w.fail(err)
+	}
+	// A superseded state is a SUPERSESSION trigger, keyed by the new
+	// occurrence, under the policy this report is recorded with (P3-39,
+	// SPEC-2.3, SPEC-2.11); gcqueue writes nothing for a task-less run (H4).
+	if prior.CurrentItemID != "" {
+		if _, err := gcqueue.Enqueue(tx, s.policy, actor, domain.GCSupersession, run.TaskID, item.ID); err != nil {
+			return w.fail(err)
+		}
 	}
 	next := domain.SubjectState{
 		SemanticMeta:    domain.SemanticMeta{ID: recordID("sst_", "subject-state", run.SubjectKey, run.TaskID, boundaryKey(run.Access)), SessionID: obs.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},

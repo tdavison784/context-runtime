@@ -7,6 +7,7 @@ import (
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/graph"
+	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
 	"github.com/tdavison784/context-runtime/internal/store/storetest"
@@ -217,4 +218,42 @@ func TestReplaceDirectiveEnqueuesSupersessionGC(t *testing.T) {
 			t.Fatalf("replay: %v", err)
 		}
 	}
+}
+
+// H4 (SPEC-2.2 / DUR-2.5): replacing a task-less (session-scoped) directive
+// succeeds under the default policy and produces no GC request, since Phase 3
+// has no session-scoped GC.
+func TestReplaceTasklessDirectiveProducesNoGC(t *testing.T) {
+	ctx := context.Background()
+	eachStore(t, func(t *testing.T, db store.Store) {
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			it := storetest.NewDirective("s", "prior", "d", tx.NextSeq(), "session rule")
+			it.Namespace, it.TaskID, it.TurnID, it.CreatedTurn = domain.NamespaceDirective, "", "", 0
+			it.Scope, it.Access = domain.ScopeSession, domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: "s"}
+			it.Authority, it.Section, it.Kind, it.Generation, it.Retention = domain.AuthoritySystem, domain.SectionRemember, domain.KindFact, domain.GenerationDurable, domain.RetentionHigh
+			if err := tx.InsertItem(it); err != nil {
+				return err
+			}
+			if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
+				return err
+			}
+			_, err := graph.DeclareCreation(tx, it, graph.CreationAcceptance{PolicyVersion: "policy/v1"})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		pol := testPolicy()
+		pol.GCTriggers = policy.DefaultPhase3Policy().GCTriggers // SUPERSESSION enabled
+		s, err := New(db, pol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := s.ReplaceDirectiveStandalone(ctx, storetest.NewPrincipal("s", domain.AuthoritySystem), replaceIntent("r", 1, "session rule v2"))
+		if err != nil || out.Result.Records == nil {
+			t.Fatalf("task-less replacement: %+v %v", out, err)
+		}
+		if got := pendingGC(t, db); len(got) != 0 {
+			t.Fatalf("task-less supersession produced GC requests: %+v", got)
+		}
+	})
 }

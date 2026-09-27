@@ -51,9 +51,9 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	if err != nil {
 		return nil, err
 	}
-	// The watermark is the subject's accepted high-water mark, not just the
+	// The watermark is the subject's run-order high-water mark, not just the
 	// current proof's run: an older run is stale whatever the obligation's
-	// status (G1: SEC-1.1/SPEC-1.1/DUR-1.1, P3-16/22).
+	// status or the fingerprint the newer run observed (H1, G1, P3-16/22).
 	watermark, err := s.subjectWatermark(sem, work, run, o)
 	if err != nil {
 		return nil, err
@@ -74,20 +74,15 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
 	}
-	v := m.Evaluate(in)
-	switch v.Kind {
-	case VerdictPass:
-		switch {
-		case o.Status == domain.ObligationUnresolved:
-			return s.satisfy(tx, sem, actor, o, obs, v, nil)
-		case o.Status == domain.ObligationSatisfied && cur != nil && cur.ObservationID != obs.ID && run.Ordinal > curOrdinal:
-			return s.satisfy(tx, sem, actor, o, obs, v, cur)
-		}
-	case VerdictFail:
-		// A newer complete applicable FAIL rejects this subject's current
-		// matcher or resource-bound satisfaction through the restricted path
-		// (P3-16, SPEC-1.10). Attestations carry no proof and are untouched.
-		if o.Status == domain.ObligationSatisfied && cur != nil && run.Ordinal > curOrdinal {
+	// A newer complete FAIL of this subject and family rejects the current
+	// matcher or resource-bound satisfaction through the restricted path
+	// (P3-16, SPEC-1.10) whatever fingerprint or content it observed:
+	// ordering is by run ordinal only (H1). It must cover the proof's
+	// boundary, so a FAIL private to another agent never rejects a wider
+	// proof or has its ID recorded where the proof's readers see it
+	// (SEC-2.9). Attestations carry no proof and are untouched.
+	if obs.Family == m.Family() && obs.SubjectKey == o.TargetSubjectKey && obs.TerminalComplete() && obs.Outcome == domain.OutcomeFail {
+		if o.Status == domain.ObligationSatisfied && cur != nil && run.Ordinal > curOrdinal && failCovers(cur.Access, obs, run) {
 			inv := invalidation{cause: domain.CauseProofRejected, causeRecord: obs.ID, requestID: obs.ID, reason: domain.ReasonProofRejected, rule: ProofRejectionRule}
 			seq := tx.NextSeq()
 			if err := s.invalidateProof(tx, sem, work, actor, seq, *cur, inv); err != nil {
@@ -95,30 +90,46 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 			}
 			return []string{recordID("otr_", string(inv.cause), cur.Target.Target().AuthorizationKey, obs.ID)}, nil
 		}
+		return nil, nil
+	}
+	if v := m.Evaluate(in); v.Kind == VerdictPass {
+		switch {
+		case o.Status == domain.ObligationUnresolved:
+			return s.satisfy(tx, sem, actor, o, obs, v, nil)
+		case o.Status == domain.ObligationSatisfied && cur != nil && cur.ObservationID != obs.ID && run.Ordinal > curOrdinal:
+			return s.satisfy(tx, sem, actor, o, obs, v, cur)
+		}
 	}
 	return nil, nil
 }
 
-// subjectWatermark is the highest accepted ordinal among subject states that
-// still describe the current resource state (Applicability CURRENT) in the
-// run's own partition and in every partition whose evidence could back the
-// obligation. Each is one indexed lookup, independent of run history.
+// failCovers reports whether a FAIL observation's evidence and run
+// boundaries both cover the proof boundary, the same publication rule a PASS
+// must meet to satisfy it (P3-14).
+func failCovers(proof domain.AccessBoundary, obs domain.ObservationRecord, run domain.ObservationRun) bool {
+	return proof.Within(obs.Access) && proof.Within(run.Access)
+}
+
+// subjectWatermark is the subject's run-order high-water mark (H1, SEC-2.1,
+// SPEC-2.1, DUR-2.1): the highest ordinal of any complete PASS/FAIL run in
+// the run's own partition and in every partition whose evidence could back
+// the obligation, whatever fingerprint it observed and whatever its subject
+// state's applicability. The store maintains each mark at write time; each
+// is one keyed read, independent of run history.
 func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run domain.ObservationRun, o domain.ObligationVersion) (uint64, error) {
 	var high uint64
 	for _, p := range candidatePartitions(run, o) {
 		if err := work.spend(1); err != nil {
 			return 0, err
 		}
-		st, err := r.SubjectState(run.SubjectKey, p.TaskID, p)
+		mark, err := r.SubjectHighWater(run.SubjectKey, p.TaskID, p)
 		if errors.Is(err, domain.ErrNotFound) {
 			continue
 		}
 		if err != nil {
 			return 0, err
 		}
-		if st.Applicability == domain.ApplicabilityCurrent && st.AcceptedOrdinal > high {
-			high = st.AcceptedOrdinal
-		}
+		high = max(high, mark)
 	}
 	return high, nil
 }

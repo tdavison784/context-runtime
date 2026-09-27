@@ -37,6 +37,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 	if res, ok, err := replay(tx, sem, actor, req); ok || err != nil {
 		return res, err
 	}
+	seq = allocate(tx, seq)
 	// Current limits bound new work only; an admitted request replays above.
 	if len(in.EvidenceIDs) > s.policy.MaxEvidence || len(in.Resources) > s.policy.MaxTargets {
 		return domain.MutationResult{}, domain.ErrResourceLimit

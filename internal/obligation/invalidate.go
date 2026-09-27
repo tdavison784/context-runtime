@@ -1,6 +1,7 @@
 package obligation
 
 import (
+	"errors"
 	"path"
 	"strings"
 
@@ -239,27 +240,21 @@ func (s *Service) invalidateProof(tx store.Tx, sem store.SemanticTx, work *budge
 }
 
 // originOf returns the historical authorization of the transition that
-// installed a proof, paging the version's transitions under the work budget.
+// installed a proof: one keyed read, whatever the version's accumulated
+// history (H2, DUR-2.3, XREV-2.1).
 func (s *Service) originOf(r store.SemanticReader, work *budget, o domain.ObligationVersion, transitionID string) (domain.OriginAuthorizationRef, error) {
 	ref := domain.ObligationRef{SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version}
-	var found *domain.ObligationTransition
-	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
-		pg, err := r.TransitionsByVersion(ref, p)
-		if err != nil {
-			return 0, store.Cursor{}, false, err
-		}
-		for i := range pg.Records {
-			if pg.Records[i].ID == transitionID {
-				t := pg.Records[i]
-				found = &t
-			}
-		}
-		return len(pg.Records), pg.Next, pg.More && found == nil, nil
-	})
+	if err := work.spend(1); err != nil {
+		return domain.OriginAuthorizationRef{}, err
+	}
+	found, err := r.ObligationTransition(transitionID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.OriginAuthorizationRef{}, domain.ErrIntegrity
+	}
 	if err != nil {
 		return domain.OriginAuthorizationRef{}, err
 	}
-	if found == nil {
+	if found.SessionID != ref.SessionID || found.ObligationID != ref.ObligationID || found.Version != ref.Version {
 		return domain.OriginAuthorizationRef{}, domain.ErrIntegrity
 	}
 	return domain.OriginAuthorizationRef{
