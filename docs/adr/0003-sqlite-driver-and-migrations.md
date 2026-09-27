@@ -3,6 +3,75 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
+## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
+
+Phase 3 (worker W2, `internal/store`) adds eleven forward migrations, 0018
+through 0028, after this ADR's Phase 2 migrations (0001 unchanged, per this
+ADR's own rule). The full record/column/index manifest is
+`docs/phase3-schema-manifest.md` (P3-41); this section records the
+migration list itself and its upgrade-parity tests, matching how this ADR
+already tracks 0001-0017 above.
+
+- `0018_phase3_row_fields.sql` — Phase 3 fields on existing record tables
+  (P3-3/5/6/12/13/35/40/41): item `Namespace`, decoded grant `Targets`, and
+  the flattened lifecycle-command-result/obligation-binding columns. Every
+  new column reads NULL on a pre-Phase-3 row, decoded as that field's zero
+  value, which the domain treats as the frozen legacy form (namespace ""
+  is the pre-Phase-3 directive/agent-key fallback; nil `Targets` leaves the
+  legacy `TargetIDs` path in force).
+- `0019_command_execution_result.sql` — stores a lifecycle command's
+  execution result whole (P3-35), correcting 0018's per-field flattening,
+  which collided `Result.Before.Version` with `BeforeVersion` on one column
+  name.
+- `0020_phase3_membership.sql` — coverage, logical membership, checkpoint,
+  owner, and request-receipt companions (P3-2/6/7/24/27/32): one typed
+  `rec_*` table per companion, keyed `(session, ID)` like every earlier
+  record.
+- `0021_phase3_declarations.sql` — creation/snapshot declarations, semantic
+  change records, and the indexed grant/audit reads (P3-3/4/5/36/39/41). A
+  creation declaration is keyed by its item, one per item; absence is
+  unknown identity, never backfilled (P3-41).
+- `0022_phase3_resources.sql` — resource registration/reporting, per-path
+  content, workspace bindings, pre-execution runs, typed observations, and
+  subject state (P3-19..22/41). Nothing is backfilled: no migration guesses
+  a repository, baseline fingerprint, reporter, binding, or run order.
+- `0023_phase3_proofs.sql` — obligation declarations, applicability proofs
+  and their dependencies, assertions, and transition details, with the
+  indexed reads completion/invalidation need (P3-9/12..18/23/41). No legacy
+  obligation gains a declaration, proof, assertion mode, or dependency.
+- `0024_phase3_retrieval.sql` — retrieval leases, results, projections, and
+  events (P3-28..30/41). No legacy content gains a lease or admission, and
+  no item's residency changes.
+- `0025_phase3_gc.sql` — GC requests, collect receipts/results, and the
+  indexed reads collection/completion need (P3-9/38/39/41). No request,
+  receipt, or result is invented for earlier data.
+- `0026_reconcile_legacy_matcher_satisfaction.sql` — the checksum-pinned Go
+  step (`steps_0026.go`, `reconcileMatcherSatisfactionV1`) that returns each
+  Phase 2 obligation version SATISFIED by a matcher transition, with no
+  applicability proof a Phase 3 binary can establish, to UNRESOLVED exactly
+  once, through an audited SYSTEM `UPGRADE_RECONCILIATION` transition that
+  preserves original history (P3-41, ADR 8's residual-risk-adjacent
+  legacy-treatment rule). Tests:
+  `TestUpgradeReconcilesLegacyMatcherSatisfaction`,
+  `TestInterruptedReconciliationRollsBack`.
+- `0027_current_version_observation_namespace.sql` — admits every domain
+  namespace, including OBSERVATION, in the current-version key's CHECK
+  constraint (P3-3/22); SQLite cannot alter a CHECK, so the table is rebuilt
+  with the same columns/key and every existing pointer copied unchanged.
+- `0028_phase3_policy_gc_triggers.sql` — the explicit enabled GC-trigger set
+  of the recorded Phase 3 policy (P3-38/39, ADR 16's amendment): a row
+  without a recorded Phase 3 policy (every Phase 2 envelope/receipt) is
+  unaffected, and no trigger set is backfilled onto it.
+
+**Tests that lock this list (all in `internal/store/sqlite`, extending this
+ADR's existing migration-checksum/upgrade discipline):**
+`TestMigrationChecksumCoversStep`, `TestCommittedMigrationsUnchanged`,
+`TestMigratedSchemaMatchesTypes`, `TestMigrationChecksumMismatch`,
+`TestInterruptedMigrationReplays`, `TestUpgradePhase3RowFields`,
+`TestUpgradeGrantTargetIndex`. `internal/obligation`'s own SQLite suite
+(50/50 subtests, 8/8 failure-injection scenarios, ADR 8) runs against these
+migrations through W2's `sqlitetest` template.
+
 ## Context
 
 FR-PER-001 requires in-memory and SQLite stores implementing the same
