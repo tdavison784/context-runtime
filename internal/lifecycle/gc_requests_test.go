@@ -231,3 +231,40 @@ func TestGCTriggerSetIsEnforced(t *testing.T) {
 		t.Fatalf("disabled manual collection: %v", err)
 	}
 }
+
+// facetless is a store double whose transactions expose only the Phase 2
+// interfaces: no semantic facet exists for GC, receipts or the goal index.
+type facetless struct{ store.Store }
+type legacyRead struct{ store.ReadTx }
+
+func (f facetless) Update(ctx context.Context, session string, fn func(store.Tx) error) error {
+	return f.Store.Update(ctx, session, func(tx store.Tx) error { return fn(legacyOnly{tx}) })
+}
+func (f facetless) View(ctx context.Context, session string, fn func(store.ReadTx) error) error {
+	return f.Store.View(ctx, session, func(tx store.ReadTx) error { return fn(legacyRead{tx}) })
+}
+
+func TestGCAndCompletionFailClosedWithoutSemanticFacet(t *testing.T) {
+	ctx := context.Background()
+	mem := memory.New()
+	t.Cleanup(func() { mem.Close() })
+	seedCompletion(t, mem, nil, "", false)
+	s, _ := New(facetless{mem}, testPolicy())
+	pick := func(domain.GCRequest) (domain.Principal, bool) {
+		return storetest.NewPrincipal("s", domain.AuthorityHarness), true
+	}
+	if n, err := s.CollectPending(ctx, "s", pick, 4); n != 0 || !errors.Is(err, domain.ErrUnsupportedSchema) {
+		t.Fatalf("pending without facet: %d %v", n, err)
+	}
+	if _, err := s.CompleteTaskStandalone(ctx, storetest.NewPrincipal("s", domain.AuthorityUser), domain.CompleteTaskIntent{RequestID: "r", TaskID: "task"}); !errors.Is(err, domain.ErrUnsupportedSchema) {
+		t.Fatalf("completion without facet: %v", err)
+	}
+	if err := mem.View(ctx, "s", func(tx store.ReadTx) error {
+		if task, _ := tx.Task("task"); task.Status != domain.TaskActive {
+			t.Fatal("completion committed without receipt storage")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
