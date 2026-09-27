@@ -1173,36 +1173,37 @@ Answers to `p2-ingest`'s implementation questions, appended to
   reconcile, ADR 3's amendment) is neither a duplicate nor an authorized
   replacement, so the line is dropped exactly as an unsupported lifecycle
   word would be, never silently accepted or promoted to a hard event abort.
-**The unknown-identity limitation is not unique to plain directive lines; it
-follows every caller of `SameDirective`/`knownDeclaration`, with a different
-failure shape per caller (SPEC-2.9, PR #6 round 2, residual of SPEC-1.3).**
-An attribute-only change to an unknown-identity directive (e.g. adding
-`{obligation=…}` to otherwise identical text) still produces
+**The unknown-identity limitation is directive-line-specific by design; two
+other `SameDirective` callers now dedup successfully instead of failing
+(SPEC-2.9/SPEC-2.10, PR #6 round 2, residual of SPEC-1.3; commit `2ca005c`,
+W1).** An attribute-only change to an unknown-identity directive (e.g.
+adding `{obligation=…}` to otherwise identical text) still produces
 `unknown_identity` and never lands as a replacement, because
 `graph.knownDeclaration` fails closed whenever the prior declaration is
-unknown, regardless of what changed — and the explicit
-`lifecycle.ReplaceDirective` refuses the same source for the same reason, so
-there is currently no authorized way to recommission such a directive short
-of changing its text. The same `knownDeclaration` call is reached by two
-other callers, each with its own, worse failure shape, both still open:
-**Working snapshots (SPEC-2.9's first bullet)** — `isDuplicateSnapshot`
-(`internal/graph/snapshot.go:336-345`) requires every member of an
-identical-looking Working snapshot to pass `SameDirective` against its
-prior row; an unknown-identity member fails the whole snapshot with
-`ErrUnknownDeclaration`, aborting the *entire ingest event*, not dropping
-one line — worse than a directive line's clean per-line diagnostic, for a
-case that is otherwise an ordinary duplicate. **Tool-written agent keys
-(SPEC-2.10)** — `internal/tools/keyed.go:94` also calls `SameDirective`
-before recording a keyed write as a duplicate; an unknown-identity current
-key returns a tool-level error instead of deduplicating, contradicting G5's
-"so identical restatement dedups" ruling. None of these three callers
-currently achieves G5's intended outcome for an unknown-identity target
-except the directive-line case, and only by degrading to a diagnostic
-rather than a successful dedup. SPEC-2.9's suggested fix — a pre-check in
-`workingSection` emitting the same per-line diagnostic instead of aborting
-— and SPEC-2.10's — reconciling agent keys the way 0034 reconciles
-directives, or documenting the exception — are both open, assigned to
-future work, not this pass.
+unknown, regardless of what changed, and directive lines can carry
+attributes, an obligation declaration, or cited support their row alone
+does not show — so an unknown declaration can never be safely assumed
+identical for them. **Working-snapshot members and tool-written agent
+keys are different: their creation identity is fully shown by the row
+itself (`attributeFreeIdentity`, `internal/graph/duplicate.go`) — a
+Working snapshot member (`Section == SectionWorking`) or a tool-written
+agent key (`AuthorityAgent`, `Section == SectionNone`) never carries an
+accepted attribute, obligation declaration, or cited support beyond what
+the row already records.** For these two classes only, `SameDirective`
+now treats an unknown pre-upgrade identity as a match when the fresh
+declaration adds nothing beyond the row (`plainDeclaration`) — linking
+`DUPLICATE_OF`, never replacing, re-filing, or rebinding it, closing both
+SPEC-2.9's Working-snapshot-abort failure and SPEC-2.10's
+agent-key-returns-an-error failure with the same successful dedup G5
+always intended. A *distinct* version (genuinely new support, attributes,
+or content) still replaces normally, going through the ordinary
+authorized path. The explicit `graph.ReplaceDirective` still refuses an
+identical restatement of unknown identity outright, for any class — this
+dedup path is detection only, never an authorized replacement, matching
+Q1's default. Tests: `internal/graph`'s
+`TestIdenticalSnapshotOverUnknownIdentityIsDuplicate`,
+`TestIdenticalAgentKeyOverUnknownIdentityIsDuplicate`; `internal/ingest`'s
+`TestUpgradeAgentOwnOldKey_G5`.
 
 
 
