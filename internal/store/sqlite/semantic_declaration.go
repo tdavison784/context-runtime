@@ -327,7 +327,8 @@ func (s semRead) SemanticChanges(viewer domain.Principal, target domain.GrantTar
 	})
 }
 
-// LifecycleEvent implements store.DeclarationReader.
+// LifecycleEvent implements store.DeclarationReader: one primary-key read.
 func (s semRead) LifecycleEvent(id string) (domain.LifecycleEvent, error) {
-	return domain.LifecycleEvent{}, domain.ErrUnsupportedSchema
+	var e domain.LifecycleEvent
+	return e, s.t.get("lifecycle", id, 0, &e)
 }

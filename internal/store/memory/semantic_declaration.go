@@ -148,7 +148,14 @@ func (t *semTx) SetCurrentVersion(itemID, expectedPriorItemID string) error {
 	return nil
 }
 
-// LifecycleEvent implements store.DeclarationReader.
+// LifecycleEvent implements store.DeclarationReader: one keyed lookup.
 func (r semRead) LifecycleEvent(id string) (domain.LifecycleEvent, error) {
-	return domain.LifecycleEvent{}, domain.ErrUnsupportedSchema
+	if err := r.r.check(); err != nil {
+		return domain.LifecycleEvent{}, err
+	}
+	e, ok := r.r.lifecycle.get(id)
+	if !ok {
+		return e, notFound("lifecycle event", id)
+	}
+	return e, nil
 }
