@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -25,5 +26,12 @@ func New(s store.Store, p domain.Phase3Policy) (*Service, error) {
 	if p.Version != domain.Phase3PolicyVersion || p.Eligibility != policy.EligibilityVersion {
 		return nil, domain.ErrUnsupportedSchema
 	}
-	return &Service{store: s, policy: p}, nil
+	svc := &Service{store: s, policy: p}
+	// A policy naming W4's claim/matcher/state rules gets W4's real
+	// replacement declaration with its default registry; otherwise pinned
+	// replacements fail closed until WithReplacementObligations attaches one.
+	if w4, err := obligation.New(p, obligation.DefaultRegistry()); err == nil {
+		svc.obligations = w4
+	}
+	return svc, nil
 }

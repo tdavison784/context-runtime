@@ -9,6 +9,7 @@ import (
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/graph"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -24,8 +25,11 @@ type ReplacementObligations interface {
 	DeclareForReplacementTx(tx store.Tx, actor domain.Principal, sourceID string, seq uint64) (*domain.ObligationRef, error)
 }
 
-// WithReplacementObligations returns a copy of s that declares claim-bearing
-// replacements through o. The receiver is unchanged.
+var _ ReplacementObligations = (*obligation.Service)(nil)
+
+// WithReplacementObligations returns a copy of s that declares Pinned and
+// claim-bearing replacements through o, e.g. a W4 service with an embedder's
+// matcher registry. The receiver is unchanged.
 func (s *Service) WithReplacementObligations(o ReplacementObligations) *Service {
 	c := *s
 	c.obligations = o
@@ -44,10 +48,11 @@ func (s *Service) WithReplacementObligations(o ReplacementObligations) *Service 
 // prior's declared creation defaults, so Unpin/Resolve/Archive state never
 // carries over and a goal reopens as a new OPEN version. TURN/TTL origin is
 // the owning task's current turn. Identity-changing attributes and legacy
-// sources without a creation declaration fail closed. A claim-bearing source
-// (an accepted obligation= attribute) needs W4's declaration hook, which
-// declares the new UNRESOLVED version after the prior's retirement; without
-// the hook, or if the hook declares nothing, the whole replacement fails.
+// sources without a creation declaration fail closed. A Pinned or
+// claim-bearing source needs W4's declaration hook, which declares the new
+// UNRESOLVED version (explicit or text-matched claim) after the prior's
+// retirement; without the hook, or if an explicit claim declares nothing,
+// the whole replacement fails.
 func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.ReplaceDirectiveIntent, seq uint64) (out MutationOutcome, err error) {
 	defer func() {
 		if err != nil {
@@ -88,8 +93,11 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 		return out, err
 	}
 	was := decl.AcceptedSemantics
+	// W4 declares every Pinned occurrence's claim, explicit or matched from
+	// its text, so no Pinned replacement proceeds without the hook.
 	claim := was.ObligationDeclarationHash != "" || slices.ContainsFunc(was.AcceptedAttributes, func(a string) bool { return strings.HasPrefix(a, "obligation=") })
-	if claim && s.obligations == nil {
+	pinned := old.Section == domain.SectionPinned && was.Generation == domain.GenerationPinned
+	if (claim || pinned) && s.obligations == nil {
 		return out, domain.ErrUnsupportedSchema
 	}
 	attrs := slices.Clone(i.AcceptedAttributes)
@@ -115,12 +123,13 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 	if previous != old.ID {
 		return out, domain.ErrVersionConflict
 	}
-	if claim {
+	if claim || pinned {
 		ref, err := s.obligations.DeclareForReplacementTx(tx, p, fresh.ID, tx.NextSeq())
 		if err != nil {
 			return out, err
 		}
-		if ref == nil {
+		// A plain pin may declare nothing; an explicit claim must bind.
+		if claim && ref == nil {
 			return out, domain.ErrIntegrity
 		}
 	}

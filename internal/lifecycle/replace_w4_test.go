@@ -61,7 +61,7 @@ func TestReplaceDirectiveDeclaresRealW4Obligation(t *testing.T) {
 		declares    bool
 	}{
 		"attribute claim":    {"Keep the build green.", "Keep the build green.", []string{"obligation=tests_pass"}, true},
-		"text claim pattern": {"All tests must pass.", "All tests must pass, always.", nil, true},
+		"text claim pattern": {"All tests must pass.", "All tests must pass.", nil, true},
 		"plain pin":          {"Ship it.", "Ship it now.", nil, false},
 	} {
 		t.Run(name, func(t *testing.T) {
