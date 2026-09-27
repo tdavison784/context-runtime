@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -72,7 +73,8 @@ func TestGCQueueContinuesDurablyPastSkippedPrefix(t *testing.T) {
 			target := enqueueMany(t, db, pol, domain.GCTaskCompletion, prefix, domain.GCSupersession)
 			s, _ := New(db, completionOff)
 			pick := func(domain.GCRequest) (domain.Principal, bool) { return harness, true }
-			if n, err := s.CollectPending(ctx, "s", pick, 1); n != 1 || err != nil {
+			// The disabled backlog is reported (J5), never scanned.
+			if n, err := s.CollectPending(ctx, "s", pick, 1); n != 1 || !errors.Is(err, ErrGCTriggerDisabled) {
 				t.Fatalf("enabled request behind %d disabled ones: n=%d err=%v", prefix, n, err)
 			}
 			if res, found := gcResult(t, db, target); !found || res.Outcome != domain.GCCollected {

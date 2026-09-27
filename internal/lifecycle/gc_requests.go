@@ -217,17 +217,37 @@ func gcProgress(sem store.SemanticReader, id string) (domain.GCProgress, error) 
 // attempt and remain pending. Item retries and skips belong to the batch.
 // Each call makes at most max attempts, scans at most maxGCPagesPerCall
 // pages, and stops when ctx is done.
-func (s *Service) CollectPending(ctx context.Context, session string, collectorFor func(domain.GCRequest) (domain.Principal, bool), max int) (int, error) {
+func (s *Service) CollectPending(ctx context.Context, session string, collectorFor func(domain.GCRequest) (domain.Principal, bool), max int) (n int, err error) {
 	if collectorFor == nil || max <= 0 {
 		return 0, domain.ErrInvalidRecord
 	}
 	done, attempts := 0, 0
 	var failures []error
-	var after store.Cursor
-	if saved, ok := s.gcQueueCursors.Load(session); ok {
-		after = saved.(store.Cursor)
+	// Only enabled triggers are read, through the per-trigger pending index,
+	// so disabled ones never fill a page; the scan resumes from the session's
+	// durable cursor, so no request behind a long skipped prefix starves
+	// across calls or restarts (J6, DUR-3.2).
+	triggers := s.queueTriggers()
+	// A request waiting on a disabled trigger is a configuration fault: it is
+	// reported (J5) but never read into the scan, charged or collected.
+	defer func() {
+		if derr := s.disabledTriggerPending(ctx, session); derr != nil {
+			err = errors.Join(err, derr)
+		}
+	}()
+	if len(triggers) == 0 {
+		return 0, nil
 	}
-	defer func() { s.gcQueueCursors.Store(session, after) }()
+	start, lerr := s.loadQueueCursor(ctx, session)
+	if lerr != nil {
+		return 0, lerr
+	}
+	after := store.Cursor{Seq: start.Cursor.Seq, ID: start.Cursor.ID}
+	defer func() {
+		if serr := s.saveQueueCursor(ctx, session, start, after); serr != nil {
+			err = errors.Join(err, serr)
+		}
+	}()
 	for pages := 0; attempts < max && pages < maxGCPagesPerCall; pages++ {
 		if err := ctx.Err(); err != nil {
 			return done, errors.Join(append(failures, err)...)
@@ -238,7 +258,7 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 			if err != nil {
 				return err
 			}
-			page, err = sem.PendingGCRequests(store.Page{After: after, Limit: s.policy.MaxPageSize})
+			page, err = sem.PendingGCRequestsByTrigger(triggers, store.Page{After: after, Limit: s.policy.MaxPageSize})
 			return err
 		}); err != nil {
 			return done, errors.Join(append(failures, err)...)
@@ -290,6 +310,85 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 		}
 	}
 	return done, errors.Join(failures...)
+}
+
+// queueTriggers are the policy's enabled triggers, in its canonical sorted
+// order; MANUAL is included, since a resumable manual collection persists a
+// durable request (J7).
+func (s *Service) queueTriggers() []domain.GCTrigger {
+	return append([]domain.GCTrigger(nil), s.policy.GCTriggers...)
+}
+
+// disabledTriggerPending reports ErrGCTriggerDisabled when any request waits
+// on a trigger this executor's policy disables, with one single-record page
+// of the per-trigger index: O(1), whatever the backlog (J5, DUR-3.2).
+func (s *Service) disabledTriggerPending(ctx context.Context, session string) error {
+	var disabled []domain.GCTrigger
+	for _, t := range domain.DefaultGCTriggers() {
+		if !s.policy.GCTriggerEnabled(t) {
+			disabled = append(disabled, t)
+		}
+	}
+	if len(disabled) == 0 {
+		return nil
+	}
+	var waiting bool
+	err := s.store.View(ctx, session, func(tx store.ReadTx) error {
+		sem, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		page, err := sem.PendingGCRequestsByTrigger(disabled, store.Page{Limit: 1})
+		waiting = len(page.Records) != 0
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if waiting {
+		return fmt.Errorf("%w: GC requests wait on triggers %v", ErrGCTriggerDisabled, disabled)
+	}
+	return nil
+}
+
+// loadQueueCursor reads the session's durable queue cursor; the zero cursor
+// (Revision 0) before the first scan.
+func (s *Service) loadQueueCursor(ctx context.Context, session string) (domain.GCQueueCursor, error) {
+	var c domain.GCQueueCursor
+	err := s.store.View(ctx, session, func(tx store.ReadTx) error {
+		sem, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		c, err = sem.GCQueueCursor()
+		if errors.Is(err, domain.ErrNotFound) {
+			c, err = domain.GCQueueCursor{}, nil
+		}
+		return err
+	})
+	return c, err
+}
+
+// saveQueueCursor CAS-advances the session's cursor to after, in its own
+// transaction. A worker that moved it first wins; this call's position is
+// dropped rather than regressing theirs.
+func (s *Service) saveQueueCursor(ctx context.Context, session string, start domain.GCQueueCursor, after store.Cursor) error {
+	next := domain.GCQueueCursor{SessionID: session, Cursor: domain.GCCursor{Seq: after.Seq, ID: after.ID}, Revision: start.Revision + 1}
+	if next.Cursor == start.Cursor && start.Revision != 0 {
+		return nil
+	}
+	err := s.store.Update(context.WithoutCancel(ctx), session, func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		_, err = sem.PutGCQueueCursor(next, start.Revision)
+		return err
+	})
+	if errors.Is(err, domain.ErrVersionConflict) {
+		return nil
+	}
+	return err
 }
 
 // collectPendingOne runs one batch in its own transaction. Under the

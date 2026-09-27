@@ -35,8 +35,8 @@ var _ ReplacementObligations = (*obligation.Service)(nil)
 // claim-bearing replacements through o, e.g. a W4 service with an embedder's
 // matcher registry. The receiver is unchanged.
 func (s *Service) WithReplacementObligations(o ReplacementObligations) *Service {
-	// Field by field: the copy starts its own queue-scan fairness state and
-	// never copies the receiver's sync.Map.
+	// Field by field, so a future non-copyable field cannot be copied by
+	// accident.
 	return &Service{store: s.store, policy: s.policy, obligations: o}
 }
 
