@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"errors"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -122,7 +123,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 		// More candidates remain: advance the durable cursor (CAS); the next
 		// pass runs batch n+1 from it.
 		next := domain.GCProgress{SessionID: p.SessionID, GCRequestID: link.requestID, Cursor: plan.next,
-			Batches: link.progress.Batches + 1, Attempts: link.progress.Attempts, SnapshotSeq: receipt.SnapshotSeq, BatchSize: plan.batchSize, Revision: link.progress.Revision + 1}
+			Batches: link.progress.Batches + 1, Attempts: link.progress.Attempts, SnapshotSeq: receipt.SnapshotSeq, BatchSize: plan.batchSize, ItemAttempts: plan.itemAttempts, ItemAttemptID: plan.itemAttemptID, Revision: link.progress.Revision + 1}
 		if _, err = sem.PutGCProgress(next, link.progress.Revision); err != nil {
 			return out, err
 		}
@@ -145,13 +146,15 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 // decisions, the archive effects to apply, a reserved sequence no archive
 // consumed, and the durable cursor after its last candidate.
 type batchPlan struct {
-	batchSize int
-	receipt   domain.CollectReceipt
-	effects   []itemEffect
-	cursors   []domain.GCCursor // position of each decided candidate
-	spare     uint64
-	next      domain.GCCursor
-	more      bool
+	itemAttemptID string
+	itemAttempts  uint64
+	batchSize     int
+	receipt       domain.CollectReceipt
+	effects       []itemEffect
+	cursors       []domain.GCCursor // position of each decided candidate
+	spare         uint64
+	next          domain.GCCursor
+	more          bool
 }
 
 // planBatch freezes the candidates after cursor, in (Seq, ID) order, and
@@ -161,8 +164,8 @@ type batchPlan struct {
 // failing as a whole. The caller's seq authorizes the first archive; a
 // candidate whose authorization fails, or that the batch does not finish,
 // returns its reserved seq for the next one. Candidates the collector may
-// access but not archive, or whose own bounded read overflows, are recorded
-// INELIGIBLE, never forced.
+// access but not archive are INELIGIBLE. An item that exceeds a fresh
+// single-item batch records a closed skip code, never an archive.
 func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Principal, i domain.CollectIntent, seq uint64, progress domain.GCProgress) (batchPlan, error) {
 	after := progress.Cursor
 	snap := seq - 1
@@ -174,7 +177,7 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 		batchSize = s.policy.MaxGCDecisions
 	}
 	batchSize = min(batchSize, s.policy.MaxGCDecisions)
-	plan := batchPlan{batchSize: batchSize, receipt: domain.CollectReceipt{RequestID: i.RequestID, PolicyVersion: s.policy.Version, Principal: p, SnapshotSeq: snap}, spare: seq, next: after}
+	plan := batchPlan{batchSize: batchSize, itemAttempts: progress.ItemAttempts, itemAttemptID: progress.ItemAttemptID, receipt: domain.CollectReceipt{RequestID: i.RequestID, PolicyVersion: s.policy.Version, Principal: p, SnapshotSeq: snap}, spare: seq, next: after}
 	b := workBudget{remaining: s.policy.MaxTransactionWork, pageSize: s.policy.MaxPageSize}
 	seqs := seqPool{spare: seq, next: tx.NextSeq}
 	seen := map[string]bool{}
@@ -184,9 +187,6 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 			plan.batchSize = max(1, plan.batchSize/2)
 		}
 		plan.spare = seqs.spare
-		if len(plan.receipt.Decisions) == 0 && batchSize == 1 {
-			return plan, domain.ErrResourceLimit // one candidate exceeds a whole batch
-		}
 		plan.more = true
 		return plan, nil
 	}
@@ -212,17 +212,35 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 				return plan, domain.ErrIntegrity
 			}
 			seen[it.ID] = true
+			if plan.itemAttemptID != it.ID {
+				plan.itemAttempts = 0
+			}
 			saved, spare := b, seqs.spare
 			code, effect, err := s.decideCandidate(tx, sem, p, i, it, snap, cache, &b, &seqs)
-			if errors.Is(err, errBudget) {
-				// Unfinished candidate: nothing of it is kept; the next batch
-				// starts with it.
-				b, seqs.spare = saved, spare
-				return stop(true)
+
+			switch {
+			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), errors.Is(err, domain.ErrVersionConflict), errors.Is(err, domain.ErrUnsupportedSchema):
+				return plan, err // execution environment, never an item decision
+			case errors.Is(err, domain.ErrResourceLimit), errors.Is(err, store.ErrLimitExceeded):
+				if batchSize > 1 {
+					b, seqs.spare = saved, spare
+					return stop(true)
+				}
+				code, effect = domain.GCSkipResourceLimit, nil
+			case errors.Is(err, domain.ErrIntegrity):
+				code, effect = domain.GCSkipIntegrity, nil
+			case errors.Is(err, domain.ErrInvalidRecord), errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrInvalidTransition):
+				code, effect = domain.GCSkipInvalidItem, nil
+			case err != nil:
+				plan.itemAttemptID = it.ID
+				plan.itemAttempts++
+				if plan.itemAttempts < maxGCAttempts {
+					seqs.spare = spare
+					return stop(false)
+				}
+				code, effect = domain.GCSkipAttemptsExhausted, nil
 			}
-			if err != nil {
-				return plan, err
-			}
+			plan.itemAttempts, plan.itemAttemptID = 0, ""
 			ref := domain.ItemRevisionRef{ItemID: it.ID, Version: it.Version}
 			if effect != nil {
 				plan.effects = append(plan.effects, *effect)
@@ -244,10 +262,9 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 }
 
 // decideCandidate decides one candidate. Cheap facts come first: only a
-// possible archive pays for protection reads, so live items cannot exhaust
-// the work bound (SEC-1.6). A candidate whose own bounded read overflows
-// (not the batch budget) is INELIGIBLE; so is one the collector cannot
-// archive (SEC-1.5, G2).
+// possible archive pays for protection reads (SEC-1.6). Read errors remain
+// distinguishable for the planner to retry or skip at item granularity;
+// missing Archive authority is INELIGIBLE (SEC-1.5, G2).
 func (s *Service) decideCandidate(tx store.Tx, sem store.SemanticReader, p domain.Principal, i domain.CollectIntent, it domain.ContextItem, snap uint64, cache *gcCache, b *workBudget, seqs *seqPool) (domain.GCDecisionCode, *itemEffect, error) {
 	gs, err := s.gcBase(tx, sem, it, snap, cache, b)
 	if err != nil {
@@ -261,7 +278,7 @@ func (s *Service) decideCandidate(tx store.Tx, sem store.SemanticReader, p domai
 	case errors.Is(err, errBudget):
 		return "", nil, err
 	case errors.Is(err, domain.ErrResourceLimit), errors.Is(err, store.ErrLimitExceeded):
-		return domain.GCIneligible, nil, nil
+		return "", nil, err
 	case err != nil:
 		return "", nil, err
 	}
@@ -312,6 +329,12 @@ func (s *Service) fitCollectionPlan(tx store.Tx, p domain.Principal, i domain.Co
 			return plan, nil
 		}
 		if len(plan.receipt.Decisions) <= 1 {
+			if len(plan.effects) > 0 {
+				plan.effects = nil
+				plan.receipt.Decisions[0].Code = domain.GCSkipResourceLimit
+				plan.batchSize = 1
+				continue
+			}
 			return plan, domain.ErrResourceLimit
 		}
 		plan.batchSize = max(1, plan.batchSize/2)
@@ -328,6 +351,7 @@ func (s *Service) fitCollectionPlan(tx store.Tx, p domain.Principal, i domain.Co
 		}
 		plan.receipt.CandidateRefs, plan.receipt.Decisions, plan.effects = plan.receipt.CandidateRefs[:n], plan.receipt.Decisions[:n], effects
 		plan.cursors, plan.next, plan.more = plan.cursors[:n], plan.cursors[n-1], true
+		plan.itemAttempts, plan.itemAttemptID = 0, "" // trimming changed the next candidate
 	}
 }
 

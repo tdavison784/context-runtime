@@ -82,9 +82,13 @@ func (r ItemRevisionRef) Validate() error {
 type GCDecisionCode string
 
 const (
-	GCArchive    GCDecisionCode = "ARCHIVE"
-	GCProtected  GCDecisionCode = "PROTECTED"
-	GCIneligible GCDecisionCode = "INELIGIBLE"
+	GCArchive               GCDecisionCode = "ARCHIVE"
+	GCProtected             GCDecisionCode = "PROTECTED"
+	GCIneligible            GCDecisionCode = "INELIGIBLE"
+	GCSkipResourceLimit     GCDecisionCode = "SKIP_RESOURCE_LIMIT"
+	GCSkipInvalidItem       GCDecisionCode = "SKIP_INVALID_ITEM"
+	GCSkipIntegrity         GCDecisionCode = "SKIP_INTEGRITY"
+	GCSkipAttemptsExhausted GCDecisionCode = "SKIP_ATTEMPTS_EXHAUSTED"
 )
 
 type GCDecision struct {
@@ -133,7 +137,7 @@ func (r CollectReceipt) Validate() error {
 				return invalid("collect receipt: archived results disagree")
 			}
 			archived++
-		case GCProtected, GCIneligible:
+		case GCProtected, GCIneligible, GCSkipResourceLimit, GCSkipInvalidItem, GCSkipIntegrity, GCSkipAttemptsExhausted:
 		default:
 			return invalid("collect receipt: unknown decision")
 		}
@@ -216,6 +220,8 @@ type GCCursor struct {
 // completed batches and attempts. It is CAS-written on Revision and is never
 // a substitute for a batch's CollectReceipt or the request's GCResult.
 type GCProgress struct {
+	ItemAttemptID               string // identity whose transient reads are counted
+	ItemAttempts                uint64 // transient attempts for the next candidate after Cursor
 	BatchSize                   int    // adaptive item-count ceiling; zero uses policy default
 	SnapshotSeq                 uint64 // fixed eligibility ceiling, ordered by (item Seq, ID)
 	SessionID, GCRequestID      string
@@ -228,6 +234,12 @@ func (p GCProgress) Clone() GCProgress { return p }
 func (p GCProgress) Validate() error {
 	if !semanticID(p.SessionID) || !semanticID(p.GCRequestID) || p.Revision == 0 {
 		return invalid("GC progress: session, request and revision required")
+	}
+	if p.ItemAttemptID != "" && !semanticID(p.ItemAttemptID) {
+		return invalid("GC progress: invalid attempted item")
+	}
+	if p.BatchSize < 0 {
+		return invalid("GC progress: negative batch size")
 	}
 	if p.Cursor.Seq == 0 && p.Cursor.ID != "" || p.Cursor.Seq != 0 && !semanticID(p.Cursor.ID) {
 		return invalid("GC progress: invalid cursor")

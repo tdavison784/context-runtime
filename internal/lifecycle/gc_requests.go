@@ -259,14 +259,12 @@ func (s *Service) settleGCFailure(ctx context.Context, session, id string, code 
 			if err != nil {
 				return err
 			}
-			if p.Attempts+1 < maxGCAttempts {
-				next := p
-				next.SessionID, next.GCRequestID = session, id
-				next.Attempts++
-				next.Revision++
-				_, err := sem.PutGCProgress(next, p.Revision)
-				return err
-			}
+			next := p
+			next.SessionID, next.GCRequestID = session, id
+			next.Attempts++
+			next.Revision++
+			_, err = sem.PutGCProgress(next, p.Revision)
+			return err
 		}
 		result := domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID(session, id), SessionID: session, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
 			GCRequestID: id, Outcome: domain.GCFailed, Reason: code}

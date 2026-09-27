@@ -130,26 +130,22 @@ func TestFailingGCRequestsAreQuarantined(t *testing.T) {
 			}
 		})
 	})
-	t.Run("transient exhausted", func(t *testing.T) {
+	t.Run("single item budget skip", func(t *testing.T) {
 		eachStore(t, func(t *testing.T, db store.Store) {
 			base, _ := New(db, testPolicy())
 			id := completeLarge(t, db, base, 1)
 			pol := testPolicy()
-			pol.MaxTransactionWork = 4 // no candidate fits a batch
+			pol.MaxTransactionWork = 4
 			s, _ := New(db, pol)
-			for pass := 1; pass <= maxGCAttempts; pass++ {
-				n, err := s.CollectPending(ctx, "s", pick, 1)
-				if n != 0 {
-					t.Fatalf("pass %d executed", pass)
+			runGC(t, db, s, id, 30)
+			r, _ := gcResult(t, db, id)
+			readSemantic(t, db, func(sem store.SemanticReader) error {
+				c, err := sem.CollectReceipt(r.CollectReceiptID)
+				if len(c.Decisions) != 1 || c.Decisions[0].Code != domain.GCSkipResourceLimit {
+					t.Errorf("skip receipt: %+v", c)
 				}
-				res, found := gcResult(t, db, id)
-				if pass < maxGCAttempts && (found || err == nil) {
-					t.Fatalf("pass %d: quarantined early or silent: %+v %v", pass, res, err)
-				}
-				if pass == maxGCAttempts && (!found || res.Outcome != domain.GCFailed || res.Reason != domain.GCFailureAttemptsExhausted) {
-					t.Fatalf("attempts exhausted: %+v found=%v err=%v", res, found, err)
-				}
-			}
+				return err
+			})
 		})
 	})
 	t.Run("cancelled", func(t *testing.T) {

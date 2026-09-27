@@ -111,25 +111,6 @@ func TestCollectionPlansInBoundedBatches(t *testing.T) {
 	})
 }
 
-// H3: one candidate whose own bounded read overflows is recorded
-// INELIGIBLE (never archived) instead of wedging every later batch.
-func TestOverflowingCandidateIsIneligibleNotAWedge(t *testing.T) {
-	eachStore(t, func(t *testing.T, db store.Store) {
-		pol := testPolicy()
-		pol.MaxTargets = 3
-		s, _ := New(db, pol)
-		seedEphemeral(t, db, 2, 4)
-		plan := planOnce(t, db, s, domain.GCCursor{})
-		got := map[string]domain.GCDecisionCode{}
-		for _, d := range plan.receipt.Decisions {
-			got[d.Target.ItemID] = d.Code
-		}
-		if plan.more || got["heavy"] != domain.GCIneligible || got["eph-000"] != domain.GCArchive || got["eph-001"] != domain.GCArchive {
-			t.Fatalf("plan: more=%v %v", plan.more, got)
-		}
-	})
-}
-
 // H3: a batch whose frozen receipt would exceed MaxReceiptBytes is cut to
 // a prefix that fits, continuing from its last candidate.
 func TestBatchFitsTheReceiptLimit(t *testing.T) {
