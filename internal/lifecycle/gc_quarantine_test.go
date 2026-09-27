@@ -132,10 +132,11 @@ func TestFailingGCRequestsAreQuarantined(t *testing.T) {
 	})
 	t.Run("transient exhausted", func(t *testing.T) {
 		eachStore(t, func(t *testing.T, db store.Store) {
+			base, _ := New(db, testPolicy())
+			id := completeLarge(t, db, base, 1)
 			pol := testPolicy()
 			pol.MaxTransactionWork = 4 // no candidate fits a batch
 			s, _ := New(db, pol)
-			id := completeLarge(t, db, s, 1)
 			for pass := 1; pass <= maxGCAttempts; pass++ {
 				n, err := s.CollectPending(ctx, "s", pick, 1)
 				if n != 0 {

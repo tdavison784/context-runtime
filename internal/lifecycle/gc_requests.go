@@ -30,13 +30,29 @@ func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain
 	return "", domain.ErrInvalidRecord
 }
 
-// ExecuteGCRequest runs one durable request idempotently after its producer
-// committed. seq 0 allocates only after the replay check. The collector is
-// an authenticated SYSTEM/HARNESS principal
-// supplied by the embedding; for task-scoped requests it must belong to that
-// task. A failure rolls back only this attempt: the request stays pending and
-// producer state is untouched. The request→result link commits with the
-// collection, so a committed request never executes twice.
+// ErrGCRequestFailed reports a quarantined GC request: it recorded a FAILED
+// outcome and is never retried automatically (H3); re-arming needs a new
+// request identity.
+var ErrGCRequestFailed = fmt.Errorf("lifecycle: GC request quarantined: %w", domain.ErrInvalidTransition)
+
+// maxGCAttempts bounds transient failures of one GC request before it is
+// quarantined as ATTEMPTS_EXHAUSTED (H3).
+const maxGCAttempts = 3
+
+// maxGCPagesPerCall bounds the pending-queue pages one CollectPending call
+// scans, whatever it skips (DUR-2.7).
+const maxGCPagesPerCall = 64
+
+// ExecuteGCRequest runs the next bounded batch of one durable request after
+// its producer committed (H3). The batch starts at the request's durable
+// cursor, commits its own CollectReceipt (request ID GCBatchRequestID(n))
+// and either advances the cursor (CAS) or, when no candidates remain,
+// records the COLLECTED result. A finished request replays its final batch;
+// a quarantined one reports ErrGCRequestFailed. seq 0 allocates only after
+// the replay check. The collector is an authenticated SYSTEM/HARNESS
+// principal supplied by the embedding; for task-scoped requests it must
+// belong to that task. A failure rolls back only this batch: CollectPending
+// records the attempt or quarantine in its own transaction.
 func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRequestID string, seq uint64) (out MutationOutcome, err error) {
 	defer func() {
 		if err != nil {
@@ -58,10 +74,19 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 	if err != nil {
 		return out, err
 	}
-	// A committed collection replays under its recorded principal and policy
+	// A finished request replays under its recorded principal and policy
 	// before any of today's checks (P3-2).
-	if _, err = sem.GCResult(req.ID); err == nil {
-		return s.collect(tx, collector, req.CollectIntent, req.ID, seq)
+	if res, err := sem.GCResult(req.ID); err == nil {
+		if res.Outcome == domain.GCFailed {
+			return out, ErrGCRequestFailed
+		}
+		final, err := sem.CollectReceipt(res.CollectReceiptID)
+		if err != nil {
+			return out, err
+		}
+		i := req.CollectIntent
+		i.RequestID = final.RequestID
+		return s.collect(tx, collector, i, &gcBatch{requestID: req.ID}, seq)
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return out, err
 	}
@@ -75,23 +100,47 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 	if !s.policy.GCTriggerEnabled(req.Trigger) {
 		return out, ErrGCTriggerDisabled
 	}
-	return s.collect(tx, collector, req.CollectIntent, req.ID, seq)
+	progress, err := gcProgress(sem, req.ID)
+	if err != nil {
+		return out, err
+	}
+	i := req.CollectIntent
+	if i.RequestID, err = domain.GCBatchRequestID(req.RequestID, progress.Batches+1); err != nil {
+		return out, err
+	}
+	return s.collect(tx, collector, i, &gcBatch{requestID: req.ID, progress: progress}, seq)
 }
 
-// CollectPending executes up to max pending requests, each in its own
-// transaction, paging through the whole queue (G2). collectorFor supplies
-// the authenticated collector for a request, or false to leave it pending;
+// gcProgress is the request's stored progress, or the zero progress
+// (Revision 0) before its first batch.
+func gcProgress(sem store.SemanticReader, id string) (domain.GCProgress, error) {
+	p, err := sem.GCProgress(id)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.GCProgress{}, nil
+	}
+	return p, err
+}
+
+// CollectPending executes up to max request batches, each in its own
+// transaction, paging through the queue (G2, H3). collectorFor supplies the
+// authenticated collector for a request, or false to leave it pending;
 // disabled triggers and requests already collected by another worker stay
-// uncounted. A failing request never blocks later ones: its error is joined
-// into the result and the request stays pending for a later attempt.
+// uncounted. A failing batch never blocks later requests: a deterministic
+// failure is quarantined FAILED at once, a transient one counts an attempt
+// (FAILED/ATTEMPTS_EXHAUSTED at maxGCAttempts), and one not attributable to
+// the request is only reported. Each call makes at most max attempts, scans
+// at most maxGCPagesPerCall pages, and stops when ctx is done.
 func (s *Service) CollectPending(ctx context.Context, session string, collectorFor func(domain.GCRequest) (domain.Principal, bool), max int) (int, error) {
 	if collectorFor == nil || max <= 0 {
 		return 0, domain.ErrInvalidRecord
 	}
-	done := 0
+	done, attempts := 0, 0
 	var failures []error
 	var after store.Cursor
-	for done < max {
+	for pages := 0; attempts < max && pages < maxGCPagesPerCall; pages++ {
+		if err := ctx.Err(); err != nil {
+			return done, errors.Join(append(failures, err)...)
+		}
 		var page store.ResultPage[domain.GCRequest]
 		if err := s.store.View(ctx, session, func(tx store.ReadTx) error {
 			sem, err := store.ReadSemantic(tx)
@@ -105,20 +154,36 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 		}
 		for _, r := range page.Records {
 			after = store.Cursor{Seq: r.Seq, ID: r.ID}
-			if done == max {
+			if attempts == max {
 				break
+			}
+			if err := ctx.Err(); err != nil {
+				return done, errors.Join(append(failures, err)...)
 			}
 			p, ok := collectorFor(r)
 			if !ok || !s.policy.GCTriggerEnabled(r.Trigger) {
 				continue
 			}
+			attempts++
 			executed, err := s.collectPendingOne(ctx, session, p, r.ID)
-			if err != nil {
-				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, err))
+			if err == nil {
+				if executed {
+					done++
+				}
 				continue
 			}
-			if executed {
-				done++
+			switch kind, code := classifyGCFailure(err); kind {
+			case gcPermanent:
+				if qerr := s.settleGCFailure(ctx, session, r.ID, code, false); qerr != nil {
+					failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, errors.Join(err, qerr)))
+				}
+			case gcTransient:
+				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, err))
+				if qerr := s.settleGCFailure(ctx, session, r.ID, domain.GCFailureAttemptsExhausted, true); qerr != nil {
+					failures = append(failures, fmt.Errorf("GC request %s attempt: %w", r.ID, qerr))
+				}
+			default:
+				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, err))
 			}
 		}
 		if !page.More {
@@ -131,8 +196,8 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 	return done, errors.Join(failures...)
 }
 
-// collectPendingOne runs one request in its own transaction. Under the
-// session writer, a request another worker already collected is skipped: no
+// collectPendingOne runs one batch in its own transaction. Under the
+// session writer, a request another worker already finished is skipped: no
 // sequence, no count (DUR-1.3).
 func (s *Service) collectPendingOne(ctx context.Context, session string, p domain.Principal, id string) (bool, error) {
 	executed := false
@@ -153,4 +218,36 @@ func (s *Service) collectPendingOne(ctx context.Context, session string, p domai
 		return nil
 	})
 	return executed && err == nil, err
+}
+
+// settleGCFailure records a failed attempt in its own transaction (H3). A
+// permanent failure quarantines at once with code; a transient one (attempt)
+// counts toward maxGCAttempts and quarantines as code on the last. A request
+// finished meanwhile is left alone.
+func (s *Service) settleGCFailure(ctx context.Context, session, id string, code domain.GCFailureCode, attempt bool) error {
+	return s.store.Update(ctx, session, func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		if _, err := sem.GCResult(id); err == nil {
+			return nil
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			return err
+		}
+		if attempt {
+			p, err := gcProgress(sem, id)
+			if err != nil {
+				return err
+			}
+			if p.Attempts+1 < maxGCAttempts {
+				next := domain.GCProgress{SessionID: session, GCRequestID: id, Cursor: p.Cursor, Batches: p.Batches, Attempts: p.Attempts + 1, Revision: p.Revision + 1}
+				_, err := sem.PutGCProgress(next, p.Revision)
+				return err
+			}
+		}
+		result := domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID(session, id), SessionID: session, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+			GCRequestID: id, Outcome: domain.GCFailed, Reason: code}
+		return sem.InsertGCResult(result)
+	})
 }

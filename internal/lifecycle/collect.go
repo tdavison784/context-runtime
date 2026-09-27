@@ -18,10 +18,18 @@ const methodCollect = "collect"
 // archived target needs its own Archive authority: entry authority is no
 // ownership wildcard. Exceeding any work bound fails the whole collection.
 func (s *Service) Collect(tx store.Tx, p domain.Principal, i domain.CollectIntent, seq uint64) (MutationOutcome, error) {
-	return s.collect(tx, p, i, "", seq)
+	return s.collect(tx, p, i, nil, seq)
 }
 
-func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectIntent, gcRequestID string, seq uint64) (out MutationOutcome, err error) {
+// gcBatch links a collection to batch n of a durable GC request (H3): its
+// record ID, and the stored progress (Revision 0 before the first batch)
+// whose cursor the batch starts from.
+type gcBatch struct {
+	requestID string
+	progress  domain.GCProgress
+}
+
+func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectIntent, link *gcBatch, seq uint64) (out MutationOutcome, err error) {
 	defer func() {
 		if err != nil {
 			tx.Poison(err)
@@ -32,6 +40,10 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	if err != nil {
 		return out, err
 	}
+	gcRequestID := ""
+	if link != nil {
+		gcRequestID = link.requestID
+	}
 	if prior != nil {
 		if prior.Result.Collect == nil || prior.Result.Collect.GCRequestID != gcRequestID {
 			return out, domain.ErrIntegrity
@@ -41,7 +53,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	// A new manual collection is a caller request: it can never name the
 	// runtime GC namespaces its queued requests use (H5, SEC-2.6); a
 	// committed receipt replayed above first (DUR-2.8).
-	if gcRequestID == "" {
+	if link == nil {
 		if err = domain.ValidateCallerRequestID(i.RequestID); err != nil {
 			return out, err
 		}
@@ -69,13 +81,17 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 			return out, err
 		}
 	}
-	plan, err := s.planBatch(tx, sem, p, i, seq, domain.GCCursor{})
+	var cursor domain.GCCursor
+	if link != nil {
+		cursor = link.progress.Cursor
+	}
+	plan, err := s.planBatch(tx, sem, p, i, seq, cursor)
 	if err != nil {
 		return out, err
 	}
 	// A direct Collect is single-shot: exceeding one batch fails as a whole
 	// (P3-39). Durable GC requests continue across batches instead (H3).
-	if plan.more {
+	if plan.more && link == nil {
 		return out, domain.ErrResourceLimit
 	}
 	receipt, effects, spare := plan.receipt, plan.effects, plan.spare
@@ -97,10 +113,19 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	if err = sem.InsertCollectReceipt(receipt); err != nil {
 		return out, err
 	}
-	if gcRequestID != "" {
-		link := domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID(p.SessionID, gcRequestID), SessionID: p.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
-			GCRequestID: gcRequestID, CollectReceiptID: receipt.ID, Outcome: domain.GCCollected}
-		if err = sem.InsertGCResult(link); err != nil {
+	switch {
+	case link != nil && plan.more:
+		// More candidates remain: advance the durable cursor (CAS); the next
+		// pass runs batch n+1 from it.
+		next := domain.GCProgress{SessionID: p.SessionID, GCRequestID: link.requestID, Cursor: plan.next,
+			Batches: link.progress.Batches + 1, Attempts: link.progress.Attempts, Revision: link.progress.Revision + 1}
+		if _, err = sem.PutGCProgress(next, link.progress.Revision); err != nil {
+			return out, err
+		}
+	case link != nil:
+		result := domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID(p.SessionID, link.requestID), SessionID: p.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+			GCRequestID: link.requestID, CollectReceiptID: receipt.ID, Outcome: domain.GCCollected}
+		if err = sem.InsertGCResult(result); err != nil {
 			return out, err
 		}
 	}
