@@ -2,6 +2,7 @@ package graph
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -19,6 +20,11 @@ var (
 	// makes a directive item permanently non-current, so attaching one to
 	// an existing item would retire it without an authorized supersession.
 	ErrDuplicateNotAtCreation = errors.New("graph: an item can only be classified a duplicate in the transaction that created it")
+	// ErrUnknownDeclaration reports an identical restatement of a version
+	// whose creation identity is missing or unknown (legacy, pre-upgrade).
+	// It is never a silent non-duplicate: the restatement must not replace
+	// or rebind that version (SPEC-1.3, P3-4, C-1, P3-41).
+	ErrUnknownDeclaration = fmt.Errorf("graph: restatement of a version whose creation identity is unknown: %w", domain.ErrUnsupportedSchema)
 )
 
 // SameDirectiveSemantics compares immutable row identity only. It is a necessary
