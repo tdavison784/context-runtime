@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"errors"
+	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"reflect"
 	"testing"
@@ -142,5 +143,114 @@ func TestOutcomeMembershipIsRequestIdentity_DUR17(t *testing.T) {
 			_, err := f.in.IngestOutcome(ctx, f.s, b, out, &OutcomeMembership{Dispatcher: dispatcherFor(agent)})
 			return err
 		})
+	})
+}
+
+// ownerRegistration reads the (kind, id) owner registration, if any.
+func (f *fixture) ownerRegistration(kind domain.OwnerKind, id string) (domain.OwnerRegistration, bool) {
+	f.t.Helper()
+	var o domain.OwnerRegistration
+	var found bool
+	f.view(func(tx store.ReadTx) error {
+		sem, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		o, err = sem.OwnerRegistration(kind, id)
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil
+		}
+		found = err == nil
+		return err
+	})
+	return o, found
+}
+
+// TestOwnerRegistrationOnFirstTrustedAssociation_SPEC17 is SPEC-1.7
+// (P3-32/C-15): the first item an authenticated principal creates at
+// WORKFLOW or AGENT scope records that owner's immutable registration in
+// the same transaction, before the item, as the trusted ingestion service
+// (HARNESS), with the owner ID taken from the principal and the event's
+// occurrence as its source. The item's scope lifetime is then LIVE rather
+// than UNKNOWN, and stays LIVE after its originating task completes. A
+// later association does not re-register (and does not abort), and a
+// TOOL-authority item never registers an owner.
+func TestOwnerRegistrationOnFirstTrustedAssociation_SPEC17(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		user := principal(domain.AuthorityUser)
+		if _, ok := f.ownerRegistration(domain.OwnerWorkflow, "wf"); ok {
+			t.Fatal("registration before any association")
+		}
+		// A TOOL-authority span at AGENT scope associates no owner. (A tool
+		// result needs an opened turn; the plain question is TASK-scoped.)
+		f.mustIngest(user, userEvent("q", "hi", false))
+		if _, ok := f.ownerRegistration(domain.OwnerAgent, "A"); ok {
+			t.Fatal("a TASK-scoped item registered its agent owner")
+		}
+		tool := agentPrincipal()
+		te := domain.Event{EventID: "tool-1", Kind: domain.EventTool, Spans: []domain.Span{textSpan(domain.AuthorityTool, false, "tool output")}}
+		te.Spans[0].Access = domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: sess, WorkflowID: "wf", TaskID: "T", AgentID: "A"}
+		te.Spans[0].Source = &domain.SourceRef{Kind: domain.SourceTool, Locator: "tool:x", ToolCallID: "x"}
+		f.mustIngest(tool, te)
+		if _, ok := f.ownerRegistration(domain.OwnerAgent, "A"); ok {
+			t.Fatal("a TOOL item registered its agent owner")
+		}
+
+		r := f.mustIngest(user, userEvent("own-1", "## Pinned\n- [w] {scope=WORKFLOW} Workflow rule.\n- [a] {scope=AGENT} Agent rule.\n", true))
+		for _, tc := range []struct {
+			kind domain.OwnerKind
+			id   string
+		}{{domain.OwnerWorkflow, "wf"}, {domain.OwnerAgent, "A"}} {
+			o, ok := f.ownerRegistration(tc.kind, tc.id)
+			if !ok {
+				t.Fatalf("%s owner not registered", tc.kind)
+			}
+			if o.Actor.Authority != domain.AuthorityHarness || o.Actor.SessionID != sess || o.SourceID != r.OccurrenceID || o.WorkflowID != "wf" || o.Seq == 0 || o.Seq > r.Items[0].Seq {
+				t.Fatalf("%s registration = %+v", tc.kind, o)
+			}
+		}
+		var scoped []domain.ContextItem
+		for _, it := range r.Items {
+			if it.Scope == domain.ScopeWorkflow || it.Scope == domain.ScopeAgent {
+				scoped = append(scoped, it)
+			}
+		}
+		if len(scoped) != 2 {
+			t.Fatalf("scoped items = %d", len(scoped))
+		}
+		lifetime := func(it domain.ContextItem) domain.ExpiryState {
+			kind, id := domain.OwnerWorkflow, it.Access.WorkflowID
+			if it.Scope == domain.ScopeAgent {
+				kind, id = domain.OwnerAgent, it.Access.AgentID
+			}
+			o, _ := f.ownerRegistration(kind, id)
+			task := f.task()
+			return policy.ScopeLifetime(it, policy.OwnerSnapshot{Seq: f.lastSeq(), Task: &task, Owner: &o})
+		}
+		for _, it := range scoped {
+			if got := lifetime(it); got != domain.ExpiryLive {
+				t.Fatalf("%s item lifetime = %s, want LIVE", it.Scope, got)
+			}
+		}
+		// A later association neither re-registers nor aborts.
+		before, _ := f.ownerRegistration(domain.OwnerWorkflow, "wf")
+		f.mustIngest(user, userEvent("own-2", "## Pinned\n- [w2] {scope=WORKFLOW} Another workflow rule.\n", true))
+		if after, _ := f.ownerRegistration(domain.OwnerWorkflow, "wf"); !reflect.DeepEqual(after, before) {
+			t.Fatalf("registration changed: %+v -> %+v", before, after)
+		}
+		// The owner outlives its originating task (P3-32).
+		if hasCompletion(f.s) {
+			if _, err := f.lifecycleService().CompleteTaskStandalone(ctx, principal(domain.AuthoritySystem), domain.CompleteTaskIntent{RequestID: "c-own", TaskID: "T"}); err != nil {
+				t.Fatalf("complete: %v", err)
+			}
+			if f.task().Status != domain.TaskCompleted {
+				t.Fatal("task not completed")
+			}
+			for _, it := range scoped {
+				if got := lifetime(it); got != domain.ExpiryLive {
+					t.Fatalf("after completion, %s item lifetime = %s, want LIVE", it.Scope, got)
+				}
+			}
+		}
 	})
 }
