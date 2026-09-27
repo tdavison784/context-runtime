@@ -285,6 +285,18 @@ func (it ContextItem) Validate() error {
 	return nil
 }
 
+// QualifiesAsEvidenceSupport reports whether it may be cited as evidence
+// SUPPORT (keyed writes, completion claims, EVIDENCE_SUPPORT coverage).
+// Non-transcript items may. Among transcripts only a TOOL-authority
+// tool_result is evidence (FR-DOM-006); USER, AGENT, SYSTEM, HARNESS and any
+// other transcript is provenance-only and never supports truth.
+func (it ContextItem) QualifiesAsEvidenceSupport() bool {
+	if it.Role != RoleTranscript {
+		return true
+	}
+	return it.Authority == AuthorityTool && it.Kind == KindToolResult
+}
+
 // validateRole fails closed on a transcript that could pose as a
 // requirement: no directive identity, no directive-category kind, no pinned
 // generation or protected retention, and no source ranges (it is the source).
