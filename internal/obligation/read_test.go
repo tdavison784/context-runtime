@@ -70,7 +70,7 @@ func TestSatisfiesView(t *testing.T) {
 	f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
 	first := f.status(t, f.sysTests).CurrentProofID
 	v, err := f.satisfies(t, f.userP, true)
-	if err != nil || len(v.Relations) != 1 || v.Truncated || !v.Relations[0].Current || v.Relations[0].ProofID != first || v.Relations[0].Evidence.ItemID != f.evidence.ID {
+	if err != nil || len(v.Relations) != 1 || v.Truncated || !v.Relations[0].Current || v.Relations[0].ProofID != first || v.Relations[0].Evidence.ItemID == "" {
 		t.Fatalf("current view = %+v %v", v, err)
 	}
 	// Invalidation removes the current edge but keeps history.

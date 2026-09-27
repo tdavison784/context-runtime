@@ -148,6 +148,7 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 			c.paths[p] = true
 		}
 	}
+	work := s.newBudget() // one budget for the whole report (DUR-1.12)
 	w := &writes{tx: tx}
 	w.start()
 	if err := sem.InsertResourceUpdate(u); err != nil {
@@ -167,12 +168,12 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 		return domain.MutationResult{}, w.fail(err)
 	}
 	if u.Freshness == domain.ResourceKnown {
-		if err := s.recordPathContents(sem, u, in.PathContents); err != nil {
+		if err := s.recordPathContents(sem, work, u, in.PathContents); err != nil {
 			return domain.MutationResult{}, w.fail(err)
 		}
 	}
 	inv := invalidation{cause: domain.CauseResourceInvalidation, causeRecord: u.ID, requestID: in.RequestID, reason: domain.ReasonResourceChanged, rule: ResourceInvalidationRule}
-	if err := s.invalidateResource(tx, sem, actor, seq, in.ResourceID, c, inv); err != nil {
+	if err := s.invalidateResource(tx, sem, work, actor, seq, in.ResourceID, c, inv); err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: "RESOURCE_UPDATE", IDs: []string{u.ID}}}
@@ -199,8 +200,7 @@ func canonicalLocator(l domain.ResourceLocator) (domain.ResourceLocator, error) 
 
 // recordPathContents stores the reported authoritative content of each path
 // at the update's resulting revision (P3-19). Missing entries assert nothing.
-func (s *Service) recordPathContents(sem store.SemanticTx, u domain.ResourceUpdate, contents []domain.ResourcePathContent) error {
-	work := s.newBudget()
+func (s *Service) recordPathContents(sem store.SemanticTx, work *budget, u domain.ResourceUpdate, contents []domain.ResourcePathContent) error {
 	for _, c := range contents {
 		if err := work.spend(1); err != nil {
 			return err
@@ -255,8 +255,16 @@ func (s *Service) currentPathState(r store.SemanticReader, work *budget, loc dom
 		return domain.ResourcePathState{}, false, nil
 	}
 	full := path.Join(loc.BaseDir, loc.Path)
+	// Only updates after the one that recorded this content can supersede
+	// it; start paging there instead of at the start of history (SEC-1.7,
+	// DUR-1.2). A fully bounded read awaits W2's indexed path-change read.
+	recorded, err := r.ResourceUpdate(ps.ResourceUpdateID)
+	if err != nil {
+		return domain.ResourcePathState{}, false, err
+	}
+	after := store.Cursor{Seq: recorded.Seq, ID: recorded.ID}
 	stale := false
-	err = s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
+	err = s.eachPageFrom(work, after, func(p store.Page) (int, store.Cursor, bool, error) {
 		pg, err := r.ResourceUpdates(loc.ResourceID, p)
 		if err != nil {
 			return 0, store.Cursor{}, false, err
@@ -275,9 +283,10 @@ func (s *Service) currentPathState(r store.SemanticReader, work *budget, loc dom
 	return ps, true, nil
 }
 
+// containsPath reports whether any changed path equals p or contains it.
 func containsPath(paths []string, p string) bool {
 	for _, q := range paths {
-		if q == p {
+		if under(p, q) {
 			return true
 		}
 	}

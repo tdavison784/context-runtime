@@ -174,7 +174,11 @@ func TestConcurrentINV16(t *testing.T) {
 					if i%2 == 0 {
 						fp = rs.WorkspaceFingerprint // current when it commits
 					}
-					if _, err = f.s.reportObservation(tx, sem, f.harness, obsIntent(fmt.Sprintf("co-%d", id), run, f.evidence.ID, domain.OutcomePass, fp), tx.NextSeq()); err != nil {
+					ev := evidenceItem(tx.NextSeq(), run)
+					if err := tx.InsertItem(ev); err != nil {
+						return err
+					}
+					if _, err = f.s.reportObservation(tx, sem, f.harness, obsIntent(fmt.Sprintf("co-%d", id), run, ev.ID, domain.OutcomePass, fp), tx.NextSeq()); err != nil {
 						return err
 					}
 					if o, err := sem.ExactObligation(f.sysTests); err == nil && o.Status == domain.ObligationSatisfied {
@@ -321,7 +325,6 @@ func TestTraceT07PublicAPI(t *testing.T) {
 		return tx.InsertGrant(domain.MutationGrant{ID: "g", SessionID: testSession, Action: domain.ActionAssertObligation,
 			Targets: []domain.GrantTarget{ref.Target()}, Issuer: system, Matcher: &m, IssuedSeq: tx.NextSeq()})
 	})
-	ev := seedEvidence(t, st, "ev", taskBoundary())
 	run := func(n, fp string) {
 		res := do(func(tx store.Tx, seq uint64) (domain.MutationResult, error) {
 			return s.RegisterRunTx(tx, harness, runIntent("run-"+n, "exec-"+n, testsTarget(nil)), seq)
@@ -333,6 +336,10 @@ func TestTraceT07PublicAPI(t *testing.T) {
 			return nil
 		})
 		do(func(tx store.Tx, seq uint64) (domain.MutationResult, error) {
+			ev := evidenceItem(tx.NextSeq(), r)
+			if err := tx.InsertItem(ev); err != nil {
+				return domain.MutationResult{}, err
+			}
 			return s.ReportObservationTx(tx, harness, obsIntent("obs-"+n, r, ev.ID, domain.OutcomePass, fp), seq)
 		})
 	}

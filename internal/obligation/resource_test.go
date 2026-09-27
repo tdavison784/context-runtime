@@ -35,12 +35,32 @@ type resourceFixture struct {
 	n        int
 }
 
+// newResourceFixture reports repo2 through a session-level reporter that can
+// read no task obligation. Its user and sysTests obligations are typed
+// tests_pass declarations on repo2, so resource-bound claims on repo2 cover
+// their targets (SPEC-1.11).
 func newResourceFixture(t *testing.T) *resourceFixture {
 	ef := newEvalFixture(t)
-	f := &resourceFixture{fixture: ef.fixture, sysTests: ef.sysTests, reporter: sessionReporter()}
+	f := &resourceFixture{fixture: ef.fixture, reporter: sessionReporter()}
 	seedResource(t, f.st, "repo2", f.reporter)
+	f.user = f.repo2Obligation(t, "pu", f.harness)
+	f.sysTests = f.repo2Obligation(t, "p-sys-tests", f.system)
 	f.resync(t, 1, hashOf("W1"))
 	return f
+}
+
+// repo2Obligation declares a tests_pass obligation on repo2 in slot 10 of
+// the source, as actor.
+func (f *resourceFixture) repo2Obligation(t *testing.T, source string, actor domain.Principal) domain.ObligationRef {
+	t.Helper()
+	target := testsTarget(func(v *domain.TestsTarget) { v.ResourceID = "repo2" })
+	in := domain.DeclareObligationIntent{RequestID: "d-repo2-" + source, SourceItemID: source, DeclarationSlot: "10", Description: "suite on repo2",
+		ExpectedSourceVersion: 1, Target: &target, Matcher: &TestsPassV1}
+	if _, err := f.s.declare(t, f.st, actor, in); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := f.item(t, source).CurrentKey()
+	return domain.ObligationRef{SessionID: testSession, ObligationID: domain.DerivedObligationID(key, 10), Version: 1}
 }
 
 func (f *resourceFixture) send(t *testing.T, in domain.ReportResourceChangeIntent) (domain.MutationResult, error) {
@@ -263,11 +283,8 @@ func TestResourceInvalidationPagingAndLimit(t *testing.T) {
 	f := newResourceFixture(t)
 	refs := []domain.ObligationRef{f.user}
 	for i := range 4 {
-		ref, err := pinAndDeclare(t, f.s, f.st, fmt.Sprintf("pp%d", i), fmt.Sprintf("dir%d", i), domain.AuthorityUser, "All tests must pass.", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		refs = append(refs, *ref)
+		src := seedPinned(t, f.st, fmt.Sprintf("pp%d", i), fmt.Sprintf("dir%d", i), domain.AuthorityUser, "Keep the suite green.")
+		refs = append(refs, f.repo2Obligation(t, src.ID, f.harness))
 	}
 	for _, ref := range refs {
 		f.assertBound(t, ref, f.system)

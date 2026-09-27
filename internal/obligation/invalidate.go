@@ -2,7 +2,7 @@ package obligation
 
 import (
 	"path"
-	"slices"
+	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -21,6 +21,22 @@ type change struct {
 	paths       map[string]bool   // canonical resource-relative changed paths
 	fingerprint string            // resulting KNOWN workspace fingerprint
 	contents    map[string]string // authoritative resulting content by path
+}
+
+// touches reports whether a changed path equals p or is a directory
+// containing it (SPEC-1.18): intersection is conservative.
+func (c change) touches(p string) bool {
+	for q := range c.paths {
+		if under(p, q) {
+			return true
+		}
+	}
+	return false
+}
+
+// under reports whether p is q or lies inside directory q.
+func under(p, q string) bool {
+	return p == q || strings.HasPrefix(p, q+"/")
 }
 
 // sameContent reports whether the update states that p still holds hash.
@@ -43,7 +59,7 @@ func (c change) affects(d domain.ProofDependency) bool {
 		if c.sameContent(p, d.Fingerprint) {
 			return false // authoritative content is unchanged
 		}
-		return c.unknown || c.allPaths || c.paths[p]
+		return c.unknown || c.allPaths || c.touches(p)
 	case domain.DependencyFixedContent:
 		return false // a fixed snapshot does not depend on the path's current content
 	}
@@ -66,8 +82,7 @@ type invalidation struct {
 // fails the whole update. Current subject-state applicability is marked stale
 // or unknown in the same transaction. Nothing about affected targets is
 // returned to the reporter.
-func (s *Service) invalidateResource(tx store.Tx, sem store.SemanticTx, reporter domain.Principal, seq uint64, resourceID string, c change, inv invalidation) error {
-	work := s.newBudget()
+func (s *Service) invalidateResource(tx store.Tx, sem store.SemanticTx, work *budget, reporter domain.Principal, seq uint64, resourceID string, c change, inv invalidation) error {
 	var affected []domain.ApplicabilityProof
 	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
 		pg, err := sem.CurrentProofsByDependency(resourceID, "", p)
@@ -101,7 +116,7 @@ func (s *Service) invalidateResource(tx store.Tx, sem store.SemanticTx, reporter
 		return err
 	}
 	for _, pr := range affected {
-		if err := s.invalidateProof(tx, sem, reporter, seq, pr, inv); err != nil {
+		if err := s.invalidateProof(tx, sem, work, reporter, seq, pr, inv); err != nil {
 			return err
 		}
 	}
@@ -154,7 +169,7 @@ func markSubject(sem store.SemanticTx, seq uint64, st domain.SubjectState, c cha
 		}
 		if f := run.Subject.Target.File; f == nil {
 			next = domain.ApplicabilityStale
-		} else if p := path.Join(f.Locator.BaseDir, f.Locator.Path); !c.sameContent(p, obs.ObservedContentHash) && (c.allPaths || c.paths[p]) {
+		} else if p := path.Join(f.Locator.BaseDir, f.Locator.Path); !c.sameContent(p, obs.ObservedContentHash) && (c.allPaths || c.touches(p)) {
 			next = domain.ApplicabilityStale
 		}
 	}
@@ -172,7 +187,7 @@ func markSubject(sem store.SemanticTx, seq uint64, st domain.SubjectState, c cha
 // It exercises no grant; the original authorization is recorded as history,
 // separately from the actual actor. It cannot waive, block, satisfy, or touch
 // any other target, and a version no longer resting on p is left alone.
-func (s *Service) invalidateProof(tx store.Tx, sem store.SemanticTx, actor domain.Principal, seq uint64, p domain.ApplicabilityProof, inv invalidation) error {
+func (s *Service) invalidateProof(tx store.Tx, sem store.SemanticTx, work *budget, actor domain.Principal, seq uint64, p domain.ApplicabilityProof, inv invalidation) error {
 	o, err := sem.ExactObligation(p.Target)
 	if err != nil {
 		return err
@@ -180,7 +195,7 @@ func (s *Service) invalidateProof(tx store.Tx, sem store.SemanticTx, actor domai
 	if !o.Current || o.Status != domain.ObligationSatisfied || o.CurrentProofID != p.ID {
 		return nil
 	}
-	origin, err := originOf(tx, o, p.TransitionID)
+	origin, err := s.originOf(sem, work, o, p.TransitionID)
 	if err != nil {
 		return err
 	}
@@ -224,20 +239,32 @@ func (s *Service) invalidateProof(tx store.Tx, sem store.SemanticTx, actor domai
 }
 
 // originOf returns the historical authorization of the transition that
-// installed a proof.
-func originOf(tx store.ReadTx, o domain.ObligationVersion, transitionID string) (domain.OriginAuthorizationRef, error) {
-	all, err := tx.ObligationTransitions(o.ObligationID)
+// installed a proof, paging the version's transitions under the work budget.
+func (s *Service) originOf(r store.SemanticReader, work *budget, o domain.ObligationVersion, transitionID string) (domain.OriginAuthorizationRef, error) {
+	ref := domain.ObligationRef{SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version}
+	var found *domain.ObligationTransition
+	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
+		pg, err := r.TransitionsByVersion(ref, p)
+		if err != nil {
+			return 0, store.Cursor{}, false, err
+		}
+		for i := range pg.Records {
+			if pg.Records[i].ID == transitionID {
+				t := pg.Records[i]
+				found = &t
+			}
+		}
+		return len(pg.Records), pg.Next, pg.More && found == nil, nil
+	})
 	if err != nil {
 		return domain.OriginAuthorizationRef{}, err
 	}
-	i := slices.IndexFunc(all, func(t domain.ObligationTransition) bool { return t.ID == transitionID })
-	if i < 0 {
+	if found == nil {
 		return domain.OriginAuthorizationRef{}, domain.ErrIntegrity
 	}
-	t := all[i]
 	return domain.OriginAuthorizationRef{
-		TransitionID: t.ID, GrantID: t.GrantID, Actor: t.Actor,
-		Target: domain.ObligationRef{SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version},
-		Seq:    t.Seq,
+		TransitionID: found.ID, GrantID: found.GrantID, Actor: found.Actor,
+		Target: ref,
+		Seq:    found.Seq,
 	}, nil
 }

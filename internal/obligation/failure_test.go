@@ -65,13 +65,14 @@ func injectionScenarios() []scenario {
 		}
 		return run
 	}
-	observe := func(f *evalFixture, run domain.ObservationRun, fp string) func(tx store.Tx) error {
+	observe := func(t *testing.T, f *evalFixture, run domain.ObservationRun, fp string) func(tx store.Tx) error {
+		ev := evidenceFor(t, f.st, run)
 		return func(tx store.Tx) error {
 			sem, err := begin(tx, f.harness, tx.NextSeq())
 			if err != nil {
 				return err
 			}
-			_, err = f.s.reportObservation(tx, sem, f.harness, obsIntent("obs-inject", run, f.evidence.ID, domain.OutcomePass, fp), tx.LastSeq())
+			_, err = f.s.reportObservation(tx, sem, f.harness, obsIntent("obs-inject", run, ev.ID, domain.OutcomePass, fp), tx.LastSeq())
 			return err
 		}
 	}
@@ -87,21 +88,22 @@ func injectionScenarios() []scenario {
 		{"observation deriving state and satisfying", func(t *testing.T) (fixture, func(tx store.Tx) error) {
 			f := newEvalFixture(t)
 			f.matcherGrant(t, "g-sys", f.sysTests, TestsPassV1, f.system)
-			return f.fixture, observe(f, registered(t, f), hashOf("W1"))
+			return f.fixture, observe(t, f, registered(t, f), hashOf("W1"))
 		}, true},
 		{"proof refresh pair", func(t *testing.T) (fixture, func(tx store.Tx) error) {
 			f := satisfiedEval(t)
-			return f.fixture, observe(f, registered(t, f), hashOf("W1"))
+			return f.fixture, observe(t, f, registered(t, f), hashOf("W1"))
 		}, true},
 		{"proof rejection", func(t *testing.T) (fixture, func(tx store.Tx) error) {
 			f := satisfiedEval(t)
 			run := registered(t, f)
+			ev := evidenceFor(t, f.st, run)
 			return f.fixture, func(tx store.Tx) error {
 				sem, err := begin(tx, f.harness, tx.NextSeq())
 				if err != nil {
 					return err
 				}
-				_, err = f.s.reportObservation(tx, sem, f.harness, obsIntent("obs-fail", run, f.evidence.ID, domain.OutcomeFail, hashOf("W1")), tx.LastSeq())
+				_, err = f.s.reportObservation(tx, sem, f.harness, obsIntent("obs-fail", run, ev.ID, domain.OutcomeFail, hashOf("W1")), tx.LastSeq())
 				return err
 			}
 		}, true},

@@ -2,6 +2,7 @@ package obligation
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -15,8 +16,7 @@ import (
 // naming the exact obligation version and matcher version at the mutation's
 // allocated sequence, and a publishable boundary. Missing authority leaves
 // the observation as evidence for later trusted reevaluation.
-func (s *Service) evaluate(tx store.Tx, sem store.SemanticTx, actor domain.Principal, obs domain.ObservationRecord, run domain.ObservationRun) error {
-	work := s.newBudget()
+func (s *Service) evaluate(tx store.Tx, sem store.SemanticTx, work *budget, actor domain.Principal, obs domain.ObservationRecord, run domain.ObservationRun) error {
 	var candidates []domain.ObligationVersion
 	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
 		pg, err := sem.CurrentBoundObligationsBySubject(run.SubjectKey, p)
@@ -51,7 +51,14 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	if err != nil {
 		return nil, err
 	}
-	in := EvalInput{Target: *o.TargetSpec, SubjectKey: o.TargetSubjectKey, Observation: obs, Ordinal: run.Ordinal, Watermark: curOrdinal}
+	// The watermark is the subject's accepted high-water mark, not just the
+	// current proof's run: an older run is stale whatever the obligation's
+	// status (G1: SEC-1.1/SPEC-1.1/DUR-1.1, P3-16/22).
+	watermark, err := s.subjectWatermark(sem, work, run, o)
+	if err != nil {
+		return nil, err
+	}
+	in := EvalInput{Target: *o.TargetSpec, SubjectKey: o.TargetSubjectKey, Observation: obs, Ordinal: run.Ordinal, Watermark: max(curOrdinal, watermark)}
 	resource := targetResource(*o.TargetSpec)
 	if rs, err := sem.ResourceState(resource); err == nil {
 		in.Resource = &rs
@@ -78,11 +85,12 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 		}
 	case VerdictFail:
 		// A newer complete applicable FAIL rejects this subject's current
-		// matcher proof through the restricted path (P3-16).
-		if o.Status == domain.ObligationSatisfied && cur != nil && cur.Matcher != nil && run.Ordinal > curOrdinal {
+		// matcher or resource-bound satisfaction through the restricted path
+		// (P3-16, SPEC-1.10). Attestations carry no proof and are untouched.
+		if o.Status == domain.ObligationSatisfied && cur != nil && run.Ordinal > curOrdinal {
 			inv := invalidation{cause: domain.CauseProofRejected, causeRecord: obs.ID, requestID: obs.ID, reason: domain.ReasonProofRejected, rule: ProofRejectionRule}
 			seq := tx.NextSeq()
-			if err := s.invalidateProof(tx, sem, actor, seq, *cur, inv); err != nil {
+			if err := s.invalidateProof(tx, sem, work, actor, seq, *cur, inv); err != nil {
 				return nil, err
 			}
 			return []string{recordID("otr_", string(inv.cause), cur.Target.Target().AuthorizationKey, obs.ID)}, nil
@@ -91,9 +99,68 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	return nil, nil
 }
 
+// subjectWatermark is the highest accepted ordinal among subject states that
+// still describe the current resource state (Applicability CURRENT) in the
+// run's own partition and in every partition whose evidence could back the
+// obligation. Each is one indexed lookup, independent of run history.
+func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run domain.ObservationRun, o domain.ObligationVersion) (uint64, error) {
+	var high uint64
+	for _, p := range candidatePartitions(run, o) {
+		if err := work.spend(1); err != nil {
+			return 0, err
+		}
+		st, err := r.SubjectState(run.SubjectKey, p.TaskID, p)
+		if errors.Is(err, domain.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if st.Applicability == domain.ApplicabilityCurrent && st.AcceptedOrdinal > high {
+			high = st.AcceptedOrdinal
+		}
+	}
+	return high, nil
+}
+
+// candidatePartitions lists the run's own partition and the obligation's
+// publishable partitions, deduplicated.
+func candidatePartitions(run domain.ObservationRun, o domain.ObligationVersion) []domain.AccessBoundary {
+	out := []domain.AccessBoundary{run.Access}
+	for _, b := range obligationPartitions(o) {
+		if b != run.Access {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// obligationPartitions lists the TASK partitions of the obligation's task
+// whose owners are a subset of the obligation's: evidence there is
+// publishable at the obligation's boundary (P3-14).
+func obligationPartitions(o domain.ObligationVersion) []domain.AccessBoundary {
+	if o.TaskID == "" {
+		return nil
+	}
+	var out []domain.AccessBoundary
+	for _, wf := range uniq("", o.Access.WorkflowID) {
+		for _, ag := range uniq("", o.Access.AgentID) {
+			out = append(out, domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: o.SessionID, TaskID: o.TaskID, WorkflowID: wf, AgentID: ag})
+		}
+	}
+	return out
+}
+
+func uniq(a, b string) []string {
+	if a == b {
+		return []string{a}
+	}
+	return []string{a, b}
+}
+
 // currentMatcherProof returns the version's current proof (nil for none or
-// an attestation) and the run ordinal of the observation behind it (0 for
-// a resource-bound assertion).
+// an attestation) and its ordinal: the run ordinal of the observation behind
+// a matcher proof, or the sequence of a resource-bound assertion's proof.
 func (s *Service) currentMatcherProof(r store.SemanticReader, o domain.ObligationVersion) (*domain.ApplicabilityProof, uint64, error) {
 	if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
 		return nil, 0, nil
@@ -103,7 +170,10 @@ func (s *Service) currentMatcherProof(r store.SemanticReader, o domain.Obligatio
 		return nil, 0, err
 	}
 	if p.ObservationID == "" {
-		return &p, 0, nil
+		// A resource-bound assertion is ordered by its own sequence, which is
+		// comparable with pre-execution run ordinals (both session sequences):
+		// only runs registered after it are newer.
+		return &p, p.Seq, nil
 	}
 	prev, err := r.Observation(p.ObservationID)
 	if err != nil {
@@ -156,7 +226,9 @@ func (s *Service) satisfy(tx store.Tx, sem store.SemanticTx, actor domain.Princi
 	}
 	t := domain.ObligationTransition{
 		Cause: cause, AssertionMode: domain.AssertionResourceBound, RequestID: obs.ID, ReasonCode: reason,
-		ID:        recordID("otr_", "matcher", target.AuthorizationKey, obs.ID),
+		// The evaluated revision is part of the identity (SPEC-1.9): the same
+		// observation may satisfy again after revalidation or a revert.
+		ID:        recordID("otr_", "matcher", target.AuthorizationKey, obs.ID, strconv.FormatUint(o.Revision, 10)),
 		SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version, Seq: seq,
 		From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation,
 		Actor: actor, GrantID: grantID, Matcher: o.Matcher, EvidenceIDs: []string{ev.ID},
@@ -196,7 +268,7 @@ func (s *Service) satisfy(tx store.Tx, sem store.SemanticTx, actor domain.Princi
 	if old != nil {
 		release := domain.ObligationTransition{
 			Cause: domain.CauseProofRefresh, PriorProofID: old.ID, RequestID: obs.ID, ReasonCode: domain.ReasonProofRefreshed,
-			ID:        recordID("otr_", "proof-refresh-release", target.AuthorizationKey, obs.ID),
+			ID:        recordID("otr_", "proof-refresh-release", target.AuthorizationKey, obs.ID, strconv.FormatUint(o.Revision, 10)),
 			SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version, Seq: releaseSeq,
 			From: domain.ObligationSatisfied, To: domain.ObligationUnresolved, Action: domain.ActionAssertObligation,
 			Actor: actor, GrantID: grantID, Matcher: o.Matcher,

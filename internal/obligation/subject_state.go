@@ -44,8 +44,8 @@ func (s *Service) applicableNow(r store.SemanticReader, work *budget, obs domain
 // exact task partition, superseding the previous state under the trusted
 // runtime actor. Everything else remains evidence only. Nothing in the
 // template comes from tool output or environment values.
-func (s *Service) deriveState(tx store.Tx, sem store.SemanticTx, actor domain.Principal, obs domain.ObservationRecord, run domain.ObservationRun, seq uint64) error {
-	applicable, _, _, err := s.applicableNow(sem, s.newBudget(), obs, run)
+func (s *Service) deriveState(tx store.Tx, sem store.SemanticTx, work *budget, actor domain.Principal, obs domain.ObservationRecord, run domain.ObservationRun, seq uint64) error {
+	applicable, _, _, err := s.applicableNow(sem, work, obs, run)
 	if err != nil || !applicable {
 		return err
 	}

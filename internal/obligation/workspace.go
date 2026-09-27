@@ -124,8 +124,7 @@ func checkWorkspaceContext(tx store.Tx, actor domain.Principal, c domain.Workspa
 // requirement) and its boundary covers the source's. The latest version of
 // each binding ID is considered. More than one applicable binding is
 // ambiguous; candidates that exist but do not apply yield BINDING_AUTHORITY.
-func (s *Service) resolveWorkspace(r store.SemanticReader, source domain.ContextItem) (Workspace, error) {
-	work := s.newBudget()
+func (s *Service) resolveWorkspace(r store.SemanticReader, work *budget, source domain.ContextItem) (Workspace, error) {
 	contexts := [][3]string{{source.ID, "", ""}}
 	if source.TaskID != "" {
 		contexts = append(contexts, [3]string{"", source.TaskID, ""})
@@ -186,7 +185,12 @@ func (b *budget) spend(n int) error {
 // eachPage exhausts a paged read under the policy's page size, charging each
 // page and its records to b.
 func (s *Service) eachPage(b *budget, next func(store.Page) (n int, after store.Cursor, more bool, err error)) error {
-	p := store.Page{Limit: s.policy.MaxPageSize}
+	return s.eachPageFrom(b, store.Cursor{}, next)
+}
+
+// eachPageFrom is eachPage starting strictly after cursor from.
+func (s *Service) eachPageFrom(b *budget, from store.Cursor, next func(store.Page) (n int, after store.Cursor, more bool, err error)) error {
+	p := store.Page{After: from, Limit: s.policy.MaxPageSize}
 	for {
 		n, after, more, err := next(p)
 		if err != nil {

@@ -157,6 +157,17 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 	if err != nil || !evidenceInRun(ev, run) {
 		return domain.ObservationRecord{}, domain.ErrInvalidRecord
 	}
+	// A run has one closing outcome (DUR-1.1): once it has reported a
+	// complete PASS/FAIL or an ERROR/TIMEOUT/CANCELLED, a further
+	// (possibly contradictory) observation is rejected.
+	work := s.newBudget() // one budget for the whole report (DUR-1.12)
+	closed, err := s.runClosed(sem, work, run.ID)
+	if err != nil {
+		return domain.ObservationRecord{}, err
+	}
+	if closed {
+		return domain.ObservationRecord{}, domain.ErrInvalidTransition
+	}
 	m, ok := s.reg.ForClaim(string(run.Subject.Family))
 	if !ok {
 		return domain.ObservationRecord{}, domain.ErrUnsupportedSchema
@@ -186,22 +197,28 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 	if err := sem.InsertObservation(obs); err != nil {
 		return domain.ObservationRecord{}, w.fail(err)
 	}
-	if err := s.deriveState(tx, sem, actor, obs, run, seq); err != nil {
+	if err := s.deriveState(tx, sem, work, actor, obs, run, seq); err != nil {
 		return domain.ObservationRecord{}, w.fail(err)
 	}
-	if err := s.evaluate(tx, sem, actor, obs, run); err != nil {
+	if err := s.evaluate(tx, sem, work, actor, obs, run); err != nil {
 		return domain.ObservationRecord{}, w.fail(err)
 	}
 	return obs, nil
 }
 
 // evidenceInRun reports whether a TOOL occurrence may evidence a run: same
-// session and task, TASK or TURN scope, and exactly the run's ownership.
+// session and task, produced by the run's execution (Source.ToolCallID equals
+// the run's ExecutionID), TASK or TURN scope, and exactly the run's ownership.
 // TURN narrows only the evidence's lifetime, never its ownership, so derived
 // TASK state publishes nothing narrower (commander ruling on T07). Any change
 // of workflow, agent, task, or session ownership is rejected.
 func evidenceInRun(ev domain.ContextItem, run domain.ObservationRun) bool {
 	if ev.Authority != domain.AuthorityTool || ev.SessionID != run.SessionID || ev.TaskID != run.TaskID {
+		return false
+	}
+	// The occurrence must be produced by the run's own execution: its
+	// recorded producing tool call is the run's execution identity (SPEC-1.12).
+	if ev.Source == nil || ev.Source.ToolCallID == "" || ev.Source.ToolCallID != run.ExecutionID {
 		return false
 	}
 	if ev.Access.Scope != domain.ScopeTask && ev.Access.Scope != domain.ScopeTurn {
@@ -210,4 +227,27 @@ func evidenceInRun(ev domain.ContextItem, run domain.ObservationRun) bool {
 	owners := ev.Access
 	owners.Scope = run.Access.Scope
 	return owners == run.Access
+}
+
+// closing reports whether an observation ends its run.
+func closing(o domain.ObservationRecord) bool {
+	return o.TerminalComplete() || o.Outcome == domain.OutcomeError || o.Outcome == domain.OutcomeTimeout || o.Outcome == domain.OutcomeCancelled
+}
+
+// runClosed reports whether the run already has a closing observation.
+func (s *Service) runClosed(r store.SemanticReader, work *budget, runID string) (bool, error) {
+	closed := false
+	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
+		pg, err := r.ObservationsByRun(runID, p)
+		if err != nil {
+			return 0, store.Cursor{}, false, err
+		}
+		for _, o := range pg.Records {
+			if closing(o) {
+				closed = true
+			}
+		}
+		return len(pg.Records), pg.Next, pg.More, nil
+	})
+	return closed, err
 }

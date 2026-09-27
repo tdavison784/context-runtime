@@ -72,7 +72,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 		if o.TargetSpec == nil {
 			return domain.MutationResult{}, domain.ErrUnknownApplicability
 		}
-		if claims, err = s.checkResourceClaims(sem, o, in.Resources); err != nil {
+		if claims, err = s.checkResourceClaims(sem, s.newBudget(), o, in.Resources); err != nil {
 			return domain.MutationResult{}, err
 		}
 	}
@@ -189,7 +189,7 @@ func publishableEvidence(tx store.ReadTx, actor domain.Principal, o domain.Oblig
 // authoritative resource state (P3-15, P3-19). A claim must match the current
 // KNOWN state exactly; anything else is ErrUnknownApplicability. The
 // obligation's boundary must lie within each resource registration's.
-func (s *Service) checkResourceClaims(r store.SemanticReader, o domain.ObligationVersion, claims []domain.ResourceClaim) ([]domain.ResourceClaim, error) {
+func (s *Service) checkResourceClaims(r store.SemanticReader, work *budget, o domain.ObligationVersion, claims []domain.ResourceClaim) ([]domain.ResourceClaim, error) {
 	out := make([]domain.ResourceClaim, 0, len(claims))
 	for _, c := range claims {
 		c = c.Clone()
@@ -218,12 +218,23 @@ func (s *Service) checkResourceClaims(r store.SemanticReader, o domain.Obligatio
 			if err != nil || !knownResource(&st, c.ResourceID) {
 				return nil, domain.ErrUnknownApplicability
 			}
-			ps, err := r.ResourcePathState(*c.Locator)
-			if err != nil || ps.Freshness != domain.ResourceKnown || ps.ContentHash != c.Fingerprint || ps.ResourceRevision != c.ResourceRevision {
+			// The same currentness rule as file_read (XREV-1.1): a cached
+			// path state that a later changed-path, all-path, UNKNOWN, or
+			// resync report superseded is not current content.
+			ps, ok, err := s.currentPathState(r, work, *c.Locator, st)
+			if err != nil {
+				return nil, err
+			}
+			if !ok || ps.ContentHash != c.Fingerprint || ps.ResourceRevision != c.ResourceRevision {
 				return nil, domain.ErrUnknownApplicability
 			}
 		case domain.DependencyFixedContent:
-			if c.Locator == nil || c.Locator.ResourceID != c.ResourceID || c.Locator.Validate() != nil || c.ResourceRevision != 0 {
+			// A fixed-content dependency is only meaningful as the required
+			// snapshot of a FIXED_HASH file target; anywhere else it would be
+			// an attestation under a RESOURCE_BOUND label (SPEC-1.11).
+			f := o.TargetSpec.File
+			if c.Locator == nil || c.Locator.ResourceID != c.ResourceID || c.Locator.Validate() != nil || c.ResourceRevision != 0 ||
+				f == nil || f.Mode != domain.FileFixedHash || !sameFile(*c.Locator, f.Locator) || c.Fingerprint != f.RequiredHash {
 				return nil, domain.ErrUnknownApplicability
 			}
 		default:
@@ -231,7 +242,37 @@ func (s *Service) checkResourceClaims(r store.SemanticReader, o domain.Obligatio
 		}
 		out = append(out, c)
 	}
+	if !coversTarget(*o.TargetSpec, out) {
+		return nil, domain.ErrUnknownApplicability
+	}
 	return out, nil
+}
+
+// coversTarget reports whether validated claims include a dependency on the
+// obligation's own target (SPEC-1.11, P3-15): the target resource's workspace
+// for tests_pass, the current content of the target file for CURRENT_CONTENT,
+// or the required snapshot of the target file for FIXED_HASH.
+func coversTarget(t domain.TargetSpec, claims []domain.ResourceClaim) bool {
+	for _, c := range claims {
+		switch {
+		case t.Tests != nil:
+			if c.Kind == domain.DependencyWorkspace && c.ResourceID == t.Tests.ResourceID {
+				return true
+			}
+		case t.File != nil && c.Locator != nil && sameFile(*c.Locator, t.File.Locator):
+			switch t.File.Mode {
+			case domain.FileCurrentContent:
+				if c.Kind == domain.DependencyCurrentPath {
+					return true
+				}
+			case domain.FileFixedHash:
+				if c.Fingerprint == t.File.RequiredHash && (c.Kind == domain.DependencyFixedContent || c.Kind == domain.DependencyCurrentPath) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // assertionProof builds the resource-bound proof of an authorized assertion
