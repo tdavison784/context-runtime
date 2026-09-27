@@ -180,25 +180,3 @@ func (s *Service) VisibleObligations(tx store.ReadTx, viewer domain.Principal, t
 	}
 	return out, nil
 }
-
-// SubjectApplicability is a subject state's applicability to the current
-// authoritative resource state, derived exactly at read (DUR-3.1 (B),
-// amending P3-22/23): the state's recorded Applicability is only its value
-// at filing, and a state is never presented as current once its path or
-// fingerprint changes. Planning and eligibility inputs use this value.
-func (s *Service) SubjectApplicability(tx store.ReadTx, st domain.SubjectState) (domain.ApplicabilityState, error) {
-	r, err := store.ReadSemantic(tx)
-	if err != nil {
-		return "", err
-	}
-	obs, err := r.Observation(st.ObservationID)
-	if err != nil {
-		return "", err
-	}
-	run, err := r.ObservationRun(obs.RunID)
-	if err != nil {
-		return "", err
-	}
-	a, err := s.applicability(r, s.newBudget(), obs, run)
-	return a, err
-}
