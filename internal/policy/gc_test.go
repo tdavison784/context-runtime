@@ -96,11 +96,18 @@ func TestCollectDecisionMatrix(t *testing.T) {
 			s.LiveLease = true
 			return s
 		}, domain.GCProtected, GCReasonLiveLease},
-		"active checkpoint kept": {gcItem(func(it *domain.ContextItem) { it.Role = domain.RoleCheckpoint }), func(it domain.ContextItem) GCSnapshot {
-			return gcSnap(it, gcTask(domain.TaskActive, 2), domain.ItemHistorical)
+		"newest active checkpoint kept": {gcItem(func(it *domain.ContextItem) { it.Role = domain.RoleCheckpoint }), func(it domain.ContextItem) GCSnapshot {
+			s := gcSnap(it, gcTask(domain.TaskActive, 2), domain.ItemHistorical)
+			s.NewestCheckpoint = true
+			return s
 		}, domain.GCProtected, GCReasonActiveCheckpoint},
-		"completed checkpoint collectible": {gcItem(func(it *domain.ContextItem) { it.Role = domain.RoleCheckpoint }), func(it domain.ContextItem) GCSnapshot {
-			return gcSnap(it, gcTask(domain.TaskCompleted, 2), domain.ItemHistorical)
+		"older active checkpoint collectible": {gcItem(func(it *domain.ContextItem) { it.Role = domain.RoleCheckpoint }), func(it domain.ContextItem) GCSnapshot {
+			return gcSnap(it, gcTask(domain.TaskActive, 2), domain.ItemHistorical)
+		}, domain.GCArchive, GCReasonStale},
+		"newest completed checkpoint collectible": {gcItem(func(it *domain.ContextItem) { it.Role = domain.RoleCheckpoint }), func(it domain.ContextItem) GCSnapshot {
+			s := gcSnap(it, gcTask(domain.TaskCompleted, 2), domain.ItemHistorical)
+			s.NewestCheckpoint = true
+			return s
 		}, domain.GCArchive, GCReasonStale},
 		"archived": {gcItem(func(it *domain.ContextItem) { it.Residency = domain.ResidencyArchived }), func(it domain.ContextItem) GCSnapshot {
 			return gcSnap(it, gcTask(domain.TaskActive, 2), domain.ItemHistorical)

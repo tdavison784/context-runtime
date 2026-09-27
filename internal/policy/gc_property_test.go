@@ -52,6 +52,7 @@ func TestCollectDecisionSafetyProperties(t *testing.T) {
 		}
 		s := gcSnap(it, task, currents[pick(len(currents))])
 		s.OpenExchange, s.LiveLease, s.OpenObligationSource = pick(6) == 0, pick(6) == 0, pick(6) == 0
+		s.NewestCheckpoint = pick(2) == 0
 		code, reason, err := CollectDecision(it, s)
 		if err != nil {
 			t.Fatalf("case %d: %v", n, err)
@@ -71,6 +72,8 @@ func TestCollectDecisionSafetyProperties(t *testing.T) {
 			t.Fatalf("case %d: archived protected content (%s)", n, reason)
 		case task != nil && task.Status == domain.TaskActive && it.TurnID == task.TurnID:
 			t.Fatalf("case %d: archived active-turn content", n)
+		case it.Role == domain.RoleCheckpoint && s.NewestCheckpoint && (task == nil || task.Status == domain.TaskActive):
+			t.Fatalf("case %d: archived the newest checkpoint of a live conversation", n)
 		case life == domain.ExpiryUnknown && current(s.Currentness):
 			t.Fatalf("case %d: archived a current item of unknown lifetime", n)
 		case life == domain.ExpiryLive && (s.OpenObligationSource || current(s.Currentness) && requirement(it)):
