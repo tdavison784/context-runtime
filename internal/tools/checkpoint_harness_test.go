@@ -63,11 +63,19 @@ func TestHarnessCheckpointKeepsHarnessAuthorityAndReplays(t *testing.T) {
 func TestHarnessCheckpointDerivedRequestIDIsNoExistenceOracle(t *testing.T) {
 	st, s, i2, manifest := checkpointConversation(t, true)
 	owner := dispatcher(i2)
-	occurrence := domain.CallerOccurrenceID("s", "event-1")
-	registered, _ := domain.OperationRequestID(owner, occurrence, 1, 0)
-	absent, _ := domain.OperationRequestID(owner, occurrence, 2, 0)
+	// H5: a runtime request ID binds the event sequence allocated in the
+	// transaction that first uses it.
+	var registered, absent string
 	update(t, st, func(tx store.Tx) error {
-		_, err := s.ApplyHarnessCheckpoint(tx, owner, HarnessCheckpointRequest{i2.Principal, i2.ExchangeID, summary(registered, manifest, "owner")}, 0)
+		seq, occurrence := tx.NextSeq(), domain.CallerOccurrenceID("s", "event-1")
+		var err error
+		if registered, err = domain.OperationRequestID(owner, owner, occurrence, seq, 1, 0); err != nil {
+			return err
+		}
+		if absent, err = domain.OperationRequestID(owner, owner, occurrence, seq, 2, 0); err != nil {
+			return err
+		}
+		_, err = s.ApplyHarnessCheckpoint(tx, owner, HarnessCheckpointRequest{i2.Principal, i2.ExchangeID, summary(registered, manifest, "owner")}, 0)
 		return err
 	})
 	b := seedAgentInvocation(t, st, "b")

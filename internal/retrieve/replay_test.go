@@ -83,7 +83,7 @@ func TestRetrievalReceiptReplayPrecedesCurrentState(t *testing.T) {
 // oracle; ownership is checked before the receipt can affect the outcome.
 func TestForeignDerivedRequestIDIsNoReceiptOracle(t *testing.T) {
 	owner := storetest.NewPrincipal("s", domain.AuthorityHarness)
-	request, err := domain.OperationRequestID(owner, domain.CallerOccurrenceID("s", "event-1"), 1, 0)
+	request, err := domain.OperationRequestID(owner, owner, domain.CallerOccurrenceID("s", "event-1"), 1, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
