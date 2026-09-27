@@ -40,7 +40,7 @@ Codex) has scrutinized it, noting which findings changed the decision.
 | 5 | Semantic scoring weights, SemanticBytes encoding, fixed-point scale, relevance threshold, resident-byte limits, soft-pressure fraction, retrieval-call windows, stub budget, checkpoint size limit, decision-trace retention | Phase 4 | pending — gates Phase 4 |
 | 6 | Access-boundary and context-eligibility matrix, historical leases, expiry, epoch validation | Phase 1 | [Accepted](0006-access-and-eligibility.md) |
 | 7 | Lexical index and normalization rules | Phase 4 | pending — gates Phase 4 |
-| 8 | Observation identities, obligation matcher/claim versions, evidence applicability fingerprints, mutation grants, invalidation rules | Phase 3 | [Proposed](0008-observations-obligations-applicability-grants.md) — gates Phase 3; reconciled through PR #6 round 3. Status is Proposed because P3-42's required-test mapping is still incomplete (SPEC-1.23/2.14/3.9), not merely pending a formality |
+| 8 | Observation identities, obligation matcher/claim versions, evidence applicability fingerprints, mutation grants, invalidation rules | Phase 3 | [Proposed](0008-observations-obligations-applicability-grants.md) — gates Phase 3; reconciled through PR #6 round 4. Status is Proposed because P3-42's required-test mapping is still incomplete (SPEC-1.23/2.14/3.9/4.9), not merely pending a formality, and because the commander's FROZEN K1 ruling (K1e) has not yet landed as code |
 | 9 | Provider transport libraries, retry policy, OpenAI API surface, verified reasoning replay rules | Phase 5 | pending — gates Phase 5 |
 | 10 | Benchmark fixture/oracle, comparative statistics and run counts, baseline profiles, shared resource limits/projections, reproducible hardware/data profile | Phase 5 (initial fixture/profile); finalized Phase 8 | pending — gates Phase 5 |
 | 11 | Render templates and delimiters per provider | Phase 5 | pending — gates Phase 5 |
@@ -166,9 +166,10 @@ reports (`final-p3-w4.md`, `final-p3-w5.md`, `final-p3-w7.md`) and the
 later commander rulings recorded there. New at this pass:
 
 - [0003](0003-sqlite-driver-and-migrations.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
-  Phase 3's twenty-seven forward migrations, 0018 through 0044 (PR #6
-  round 3, SPEC-3.8: corrected from a stale "eleven ... 0018 through
-  0028").
+  Phase 3's thirty forward migrations, 0018 through 0047 (PR #6 round 4,
+  SPEC-4.4/DUR-4.10: corrected from a stale "twenty-seven ... 0018
+  through 0044," itself PR #6 round 3's correction of a stale
+  "eleven ... 0018 through 0028").
 - [0017](0017-call-ledger.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
   `domain.OutcomeBinding`, exchange membership joined to a completed
   outcome through its trusted dispatcher, and confirmation that
@@ -195,3 +196,33 @@ contract v2 landed (`scratchpad/codex-contract-v2-review.md`), which found
 several of the first pass's fixes PARTIAL and one (ADR 6's temporal-
 eligibility deferral) DEFERRED-WRONG. Findings that changed a decision are
 noted in that ADR's Review section, labeled by pass.
+
+## SDD conflicts found and applied (v0.11)
+
+PR #6 round 4's security/spec review (SEC-4.1/SPEC-4.1, High) found that
+ADR 8's DUR-3.1 (C) live-proof-dependents cap does not bound what an
+ALL/UNKNOWN/resync resource report actually costs, so it fails to prevent
+the wedge it exists to prevent and P3-19/P3-23 fail open. The commander's
+FROZEN K1 ruling (`.worktrees/_commander/K1-final.md`, adopting
+`proposal-K1.md` K1a/K1d/K1e as amended by `K1-spec.md` A1-A7) replaces the
+cap with a derive-at-read validity design and retires it outright (A6).
+Applied to SDD.md as v0.11, independent of K1's own implementation landing
+— the same freeze-time-amendment precedent v0.9/v0.10 already set:
+
+- [0008](0008-observations-obligations-applicability-grants.md#sdd-amendment-k1e-applied-in-v011-ahead-of-k1s-own-implementation):
+  FR-OBL-005 (a resource-bound obligation's SATISFIED status is its
+  *effective* status, derived at read from proof validity against
+  authoritative resource state, never the stored status flag; a resource
+  change that invalidates a stored-SATISFIED proof is recorded atomically
+  by the next transition that observes it and independently by a bounded
+  asynchronous audit worker, with correctness never depending on the
+  worker having run) and INV-16 (reworded to "effective SATISFIED status
+  ... backed by an assertion or proof that is valid at read").
+
+ADR 8 itself remains Status: Proposed for this and other reasons (P3-42's
+still-incomplete required-test mapping, SPEC-1.23/2.14/3.9/4.9); K1's own
+Decision-section text (the exact monotone validity rule, the one-helper
+enforcement test, the inline-settle/async-audit-worker mechanism, and the
+commit guard) is recorded in ADR 8 as decided but not yet built, and will
+be rewritten to cite real code once W4b (lead, with W2c/W3c/W7b/W1) lands
+it.
