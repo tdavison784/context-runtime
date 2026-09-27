@@ -479,6 +479,26 @@ produces, so its release step carries the evaluating actor's own
 section's restricted invalidation path, even though both share the
 SATISFIED→UNRESOLVED direction.
 
+**Subject-state applicability moves from recorded to derived at read time
+(PR #6 round 3 commander ruling, DUR-3.1; High; amends P3-22/P3-23's
+"recorded ... marked in the same transaction" text; assigned W4b, not yet
+landed).** A file subject state's `Applicability` (§12) is currently
+written once, at state-derivation time (`ApplicabilityCurrent`,
+`internal/obligation/subject_state.go`) — matching P3-22/P3-23's original
+"marked in the same transaction" design. DUR-3.1 replaces this: file
+applicability is instead **derived at read time** from the authoritative
+resource state, never stored as a static flag that a later resource
+change would otherwise have to walk out and update by hand. Proof
+invalidation stays atomic (§13's transaction, unchanged), but is now
+bounded by a **per-resource live-dependents cap** validated against
+`s.policy.MaxTransactionWork`, failing closed with `ErrResourceLimit`
+rather than an unbounded scan. A non-`ALL` KNOWN resource report reads
+only its *actually affected* dependents through an ancestor-key index
+(the same directory-intersects-files rule §13 already requires, now as an
+index rather than a linear scan). This changes §12's "recorded" framing
+for the file-content case specifically; the OBSERVATION-derived
+`task_state` item itself (§11/§12, TOOL authority, C-6) is unaffected.
+
 **A changed directory intersects files under it (PR #6 round 1, SPEC-1.18).**
 `change.affects` (`internal/obligation/invalidate.go:39,50`) originally
 compared a reported path to a dependency's path by exact string equality
