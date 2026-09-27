@@ -24,7 +24,7 @@ func (s *Service) Rehydrate(ctx context.Context, actor domain.Principal, intent 
 	if err := execution.Validate(); err != nil {
 		return domain.RetrievalResult{}, ErrRetrievalUnavailable
 	}
-	start := time.Now()
+	start := retrievalClock()
 	var out domain.RetrievalResult
 	err := s.store.Update(ctx, actor.SessionID, func(tx store.Tx) error {
 		var err error
@@ -36,7 +36,7 @@ func (s *Service) Rehydrate(ctx context.Context, actor domain.Principal, intent 
 			return domain.RetrievalResult{}, err
 		}
 		_, fixed := FixedRetrievalError(err)
-		latency := uint64(time.Since(start).Nanoseconds())
+		latency := elapsedNanos(start)
 		if auditErr := s.store.Update(ctx, actor.SessionID, func(tx store.Tx) error {
 			return AppendDenial(tx, actor, intent, err, latency, execution)
 		}); auditErr != nil {
@@ -47,9 +47,23 @@ func (s *Service) Rehydrate(ctx context.Context, actor domain.Principal, intent 
 	return out.Clone(), nil
 }
 
+// retrievalClock times retrieval for audit only; latency is never a policy
+// or eligibility input (P3-30/31). Tests replace it.
+var retrievalClock = time.Now
+
+func elapsedNanos(start time.Time) uint64 {
+	d := retrievalClock().Sub(start)
+	if d < 0 {
+		return 0
+	}
+	return uint64(d.Nanoseconds())
+}
+
 // Apply lets a tool handler include retrieval and its tool execution receipt
 // in one Store.Update. Every failure after allocation poisons that transaction.
+// The success event records the latency from entry to record construction.
 func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, execution domain.Phase3Policy, allowStub bool) (out domain.RetrievalResult, err error) {
+	start := retrievalClock()
 	if err = actor.Validate(); err != nil {
 		return out, err
 	}
@@ -85,6 +99,7 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 		return out, err
 	}
 	var inherited *domain.ProjectionRecord
+	var inheritedMembers []domain.CoverageMember
 	if got.Item.Role == domain.RoleProjection {
 		old, err := sem.ProjectionByItem(got.Item.ID)
 		if errors.Is(err, domain.ErrNotFound) {
@@ -97,6 +112,9 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 			return out, err
 		}
 		inherited = &old
+		if inheritedMembers, err = coverageMembers(sem, old.DependencyCoverageID, execution.MaxPageSize, execution.MaxCoverageMembers); err != nil {
+			return out, err
+		}
 	}
 	source := got.Observed.Source
 	lease, found, err := findActiveLease(sem, actor, source, task, conv, tx.LastSeq(), execution.MaxPageSize, execution.MaxTransactionWork)
@@ -126,10 +144,11 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	seqs.Event = tx.NextSeq()
 	seqs.Receipt = tx.NextSeq()
 	input := recordInput{Source: got.Item, Observed: got.Observed, Task: task, Conversation: conv, Actor: actor,
-		Intent: intent, Policy: execution, Arguments: args, Allowance: allowance, AllowStub: allowStub, Inherited: inherited, Seqs: seqs}
+		Intent: intent, Policy: execution, Arguments: args, Allowance: allowance, AllowStub: allowStub, Inherited: inherited, InheritedMembers: inheritedMembers, Seqs: seqs}
 	if found {
 		input.Existing = &lease
 	}
+	input.LatencyNanos = elapsedNanos(start)
 	records, err := buildRetrievalRecords(input)
 	if err != nil {
 		return out, err
@@ -157,5 +176,42 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	if err = sem.InsertMutationReceipt(records.Receipt); err != nil {
 		return out, err
 	}
+	// Never commit a projection its own dispatch checker would reject; the
+	// caller receives a fixed error instead (SEC-1.14).
+	if err = CheckStoredProjectionDependencies(tx, sem, records.Projection, actor, task, conv, execution.MaxPageSize, execution.MaxTransactionWork); err != nil {
+		return out, err
+	}
 	return records.Result.Clone(), nil
+}
+
+// coverageMembers reads one coverage's complete member list within limit;
+// a list that does not fit is a resource-limit rejection, never truncated.
+func coverageMembers(r store.SemanticReader, id string, pageSize, limit int) ([]domain.CoverageMember, error) {
+	if pageSize <= 0 || limit <= 0 {
+		return nil, domain.ErrResourceLimit
+	}
+	var out []domain.CoverageMember
+	after := store.Cursor{}
+	for {
+		n := min(pageSize, limit-len(out))
+		if n <= 0 {
+			return nil, domain.ErrResourceLimit
+		}
+		page, err := r.CoverageMembers(id, store.Page{After: after, Limit: n})
+		if err != nil {
+			return nil, err
+		}
+		if len(page.Records) > n || page.More && len(page.Records) == 0 {
+			return nil, domain.ErrIntegrity
+		}
+		out = append(out, page.Records...)
+		if !page.More {
+			return out, nil
+		}
+		last := page.Records[len(page.Records)-1]
+		if page.Next != (store.Cursor{Seq: last.Seq, ID: last.ID}) || page.Next.Seq < after.Seq || page.Next.Seq == after.Seq && page.Next.ID <= after.ID {
+			return nil, domain.ErrIntegrity
+		}
+		after = page.Next
+	}
 }

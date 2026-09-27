@@ -33,8 +33,12 @@ Scope: P3-28..30 under C-16/C-21. Code lives in `internal/retrieve`.
   written in one transaction. Any failure after the first write poisons the
   transaction. Access is the source ∩ conversation boundary. Oversized
   content needs a registered stub policy (`allowStub`); otherwise it gets a
-  fixed size error. Projections of projections carry the original nested
-  lease.
+  fixed size error. A projection of a projection copies the inherited
+  coverage's complete, bounded dependency closure (SEC-1.14). `Apply` then
+  runs the stored dispatch checker on the new projection before returning,
+  so a chain the bounds cannot hold fails with a fixed error instead of
+  committing. The success event records audit-only `LatencyNanos`
+  (SPEC-1.20).
 - **Replay** — the receipt must match the principal, method and canonical
   arguments. The linked result must match the session and exact origin, and
   its success event must pass `ValidateOriginEvent`. Otherwise replay fails
@@ -70,6 +74,9 @@ Scope: P3-28..30 under C-16/C-21. Code lives in `internal/retrieve`.
   - Completed-inference consumption is covered in `internal/policy`
     `TestLeaseLive*`.
 - **P3-30:**
+  - `TestReprojectionChainStaysDispatchable` (SEC-1.14)
+  - `TestReprojectionBeyondBoundsIsRejectedNotCommitted` (SEC-1.14)
+  - `TestApplyRecordsSuccessLatency` (SPEC-1.20)
   - `TestProjectionRendersHistoricalDataAtToolAuthority`
   - `TestOversizedProjectionNeedsExplicitRegisteredPolicy`
   - `TestBuildRetrievalRecords*`

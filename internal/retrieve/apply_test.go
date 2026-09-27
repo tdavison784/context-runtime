@@ -3,6 +3,7 @@ package retrieve
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -34,6 +35,11 @@ func (t *applyTx) Conversation(string) (domain.Conversation, error) { return t.c
 func (t *applyTx) Item(id string) (domain.ContextItem, error) {
 	if item, ok := t.extra[id]; ok {
 		return item.Clone(), nil
+	}
+	for _, item := range t.items {
+		if item.ID == id {
+			return item.Clone(), nil
+		}
 	}
 	if id != t.source.ID {
 		return domain.ContextItem{}, domain.ErrNotFound
@@ -94,6 +100,11 @@ func (s *applySemantic) ProjectionByItem(id string) (domain.ProjectionRecord, er
 	if p, ok := s.oldProjections[id]; ok {
 		return p, nil
 	}
+	for _, p := range s.projections {
+		if p.ItemID == id {
+			return p, nil
+		}
+	}
 	return domain.ProjectionRecord{}, domain.ErrNotFound
 }
 func (s *applySemantic) Coverage(id string) (domain.CoverageRecord, error) {
@@ -112,8 +123,12 @@ func (s *applySemantic) InsertRetrievalLease(v domain.RetrievalLease) error {
 	s.leases = append(s.leases, v)
 	return nil
 }
-func (s *applySemantic) InsertCoverage(v domain.CoverageRecord, _ []domain.CoverageMember) error {
+func (s *applySemantic) InsertCoverage(v domain.CoverageRecord, members []domain.CoverageMember) error {
 	s.coverages = append(s.coverages, v)
+	if s.oldCoverages == nil {
+		s.oldCoverages, s.oldMembers = map[string]domain.CoverageRecord{}, map[string][]domain.CoverageMember{}
+	}
+	s.oldCoverages[v.ID], s.oldMembers[v.ID] = v, members
 	return nil
 }
 func (s *applySemantic) InsertProjection(v domain.ProjectionRecord) error {
@@ -230,5 +245,29 @@ func TestApplyProjectionSourceCarriesOldLeaseAndRejectsExpiry(t *testing.T) {
 	_, err = Apply(tx, p, i, leasePolicy(), false)
 	if !errors.Is(err, domain.ErrLeaseExpired) || tx.seq != seq || len(sem.leases) != 2 {
 		t.Fatalf("expired original lease renewed: %v", err)
+	}
+}
+
+// SPEC-1.20: a successful retrieval event records audit-only latency.
+func TestApplyRecordsSuccessLatency(t *testing.T) {
+	start := time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC)
+	calls := 0
+	restore := retrievalClock
+	retrievalClock = func() time.Time {
+		calls++
+		return start.Add(time.Duration(calls-1) * 7 * time.Millisecond)
+	}
+	defer func() { retrievalClock = restore }()
+	p := storetest.NewPrincipal("s", domain.AuthorityHarness)
+	sem := &applySemantic{results: map[string]domain.RetrievalResult{}, receipts: map[string]domain.MutationReceipt{}}
+	tx := &applyTx{sem: sem, source: storetest.NewItem("s", "source", 1, "historical content"), seq: 1,
+		task: domain.TaskState{SessionID: "s", TaskID: p.TaskID, WorkflowID: p.WorkflowID, Status: domain.TaskActive, Turn: 1, TurnID: "turn", Version: 1},
+		conv: domain.Conversation{SessionID: "s", ConversationID: domain.ConversationIDFor(p.TaskID, p.AgentID), TaskID: p.TaskID, AgentID: p.AgentID, Version: 1, Revision: 1}}
+	i := AdmissionIntent{Rehydrate: domain.RehydrateIntent{RequestID: "request", ItemID: "source"}, Origin: domain.RetrievalOrigin{Holder: p, ConversationID: tx.conv.ConversationID, TurnID: "turn"}, Method: "rehydrate"}
+	if _, err := Apply(tx, p, i, leasePolicy(), false); err != nil {
+		t.Fatal(err)
+	}
+	if len(sem.events) != 1 || sem.events[0].ErrorCode != "" || sem.events[0].LatencyNanos != uint64(7*time.Millisecond) {
+		t.Fatalf("success event latency = %+v", sem.events)
 	}
 }
