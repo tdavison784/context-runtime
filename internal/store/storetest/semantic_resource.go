@@ -342,10 +342,10 @@ func testSemanticObservations(t *testing.T, s store.Store) {
 		run2 = NewObservationRun(t, sessA, "run2", "repo", "wb", tx.NextSeq())
 		noErr(t, sem.InsertObservationRun(run1))
 		noErr(t, sem.InsertObservationRun(run2))
-		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev1", tx.NextSeq())))
+		noErr(t, tx.InsertItem(ProducedEvidence(sessA, "ev1", tx.NextSeq(), run1.ExecutionID)))
 		o1 = NewObservation(run1, "obs1", "ev1", tx.NextSeq(), fpA)
 		noErr(t, sem.InsertObservation(o1))
-		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev2", tx.NextSeq())))
+		noErr(t, tx.InsertItem(ProducedEvidence(sessA, "ev2", tx.NextSeq(), run2.ExecutionID)))
 		return sem.InsertObservation(NewObservation(run2, "obs2", "ev2", tx.NextSeq(), fpB))
 	})
 	for _, tc := range []struct {
@@ -481,7 +481,7 @@ func testSemanticRunOrdinalUnique(t *testing.T, s store.Store) {
 func testSemanticRunClosesOnce(t *testing.T, s store.Store) {
 	var run domain.ObservationRun
 	obs := func(tx store.Tx, id string, outcome domain.ObservationOutcome, c domain.ObservationCompleteness) domain.ObservationRecord {
-		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-"+id, tx.NextSeq())))
+		noErr(t, tx.InsertItem(ProducedEvidence(sessA, "ev-"+id, tx.NextSeq(), run.ExecutionID)))
 		o := NewObservation(run, id, "ev-"+id, tx.NextSeq(), fpA)
 		o.Outcome, o.Completeness = outcome, c
 		switch {
@@ -543,7 +543,7 @@ func testSemanticLiveSubjectStates(t *testing.T, s store.Store) {
 			ObservationID: obs, Access: r.Access, AcceptedOrdinal: r.Ordinal, Revision: 1, Applicability: a}
 	}
 	observe := func(tx store.Tx, r domain.ObservationRun, obs string) {
-		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-"+obs, tx.NextSeq())))
+		noErr(t, tx.InsertItem(ProducedEvidence(sessA, "ev-"+obs, tx.NextSeq(), r.ExecutionID)))
 		noErr(t, semantic(t, tx).InsertObservation(NewObservation(r, obs, "ev-"+obs, tx.NextSeq(), fpA)))
 	}
 	var ra domain.ObservationRun

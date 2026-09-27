@@ -25,7 +25,7 @@ func testSemanticLedgerSeqIsolation(t *testing.T, s store.Store) {
 		noErr(t, sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 1, tx.NextSeq())))
 		run1 = NewObservationRun(t, sessA, "run1", "repo", "wb", tx.NextSeq())
 		noErr(t, sem.InsertObservationRun(run1))
-		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev1", tx.NextSeq())))
+		noErr(t, tx.InsertItem(ProducedEvidence(sessA, "ev1", tx.NextSeq(), run1.ExecutionID)))
 		noErr(t, sem.InsertObservation(NewObservation(run1, "obs1", "ev1", tx.NextSeq(), fpA)))
 		noErr(t, tx.InsertItem(SemanticDirective(sessA, "src", "dep", tx.NextSeq(), "All tests must pass")))
 		o = BoundObligation(t, sessA, "o1", 1, tx.NextSeq(), "src")

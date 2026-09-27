@@ -123,3 +123,10 @@ func uniqueOf(a, b string) []string {
 	}
 	return []string{a, b}
 }
+
+// ProducedBy reports whether item ev was produced by tool call execution:
+// its recorded source names that call (P3-21). Content without a producing
+// call never evidences a run.
+func ProducedBy(ev domain.ContextItem, execution string) bool {
+	return ev.Source != nil && ev.Source.ToolCallID != "" && ev.Source.ToolCallID == execution
+}

@@ -319,6 +319,10 @@ func (s semTx) InsertObservation(o domain.ObservationRecord) error {
 	if err != nil || ev.Authority != domain.AuthorityTool || ev.Access != o.Access {
 		return invalid("observation %s: evidence is not a stored TOOL item in its boundary", o.ID)
 	}
+	// The evidence is produced by the run's own execution (P3-21, SPEC-2.8).
+	if !store.ProducedBy(ev, run.ExecutionID) {
+		return invalid("observation %s: evidence is not produced by run %s's execution", o.ID, run.ID)
+	}
 	// A run closes once (DUR-1.1, G1); migration 0030's partial unique
 	// index backs this check.
 	var closed domain.ObservationRecord

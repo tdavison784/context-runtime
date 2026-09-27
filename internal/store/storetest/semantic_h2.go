@@ -113,7 +113,7 @@ func errorsIs(err, target error) bool { return errors.Is(err, target) }
 func testSemanticClosingObservation(t *testing.T, s store.Store) {
 	var run domain.ObservationRun
 	partial := func(tx store.Tx, id string) domain.ObservationRecord {
-		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-"+id, tx.NextSeq())))
+		noErr(t, tx.InsertItem(ProducedEvidence(sessA, "ev-"+id, tx.NextSeq(), run.ExecutionID)))
 		o := NewObservation(run, id, "ev-"+id, tx.NextSeq(), fpA)
 		o.Completeness, o.Passed, o.Skipped = domain.ObservationPartial, 1, 2
 		return o
@@ -145,7 +145,7 @@ func testSemanticClosingObservation(t *testing.T, s store.Store) {
 	}
 	var final domain.ObservationRecord
 	update(t, s, sessA, func(tx store.Tx) error {
-		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-final", tx.NextSeq())))
+		noErr(t, tx.InsertItem(ProducedEvidence(sessA, "ev-final", tx.NextSeq(), run.ExecutionID)))
 		final = NewObservation(run, "final", "ev-final", tx.NextSeq(), fpA)
 		return semantic(t, tx).InsertObservation(final)
 	})
@@ -331,7 +331,7 @@ func testSemanticSubjectHighWater(t *testing.T, s store.Store) {
 	observe := func(run, id string, outcome domain.ObservationOutcome, c domain.ObservationCompleteness, fp string) {
 		update(t, s, sessA, func(tx store.Tx) error {
 			r := runs[run]
-			ev := ToolEvidence(sessA, "ev-"+id, tx.NextSeq())
+			ev := ProducedEvidence(sessA, "ev-"+id, tx.NextSeq(), r.ExecutionID)
 			ev.Access = r.Access
 			if r.Access.AgentID != "" {
 				ev.AgentID = r.Access.AgentID

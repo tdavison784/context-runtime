@@ -468,6 +468,10 @@ func (t *semTx) InsertObservation(o domain.ObservationRecord) error {
 	if !ok || ev.Authority != domain.AuthorityTool || ev.Access != o.Access {
 		return invalid("observation %s: evidence is not a stored TOOL item in its boundary", o.ID)
 	}
+	// The evidence is produced by the run's own execution (P3-21, SPEC-2.8).
+	if !store.ProducedBy(ev, run.ExecutionID) {
+		return invalid("observation %s: evidence is not produced by run %s's execution", o.ID, run.ID)
+	}
 	// A run closes once (DUR-1.1, G1).
 	if prior, ok := t.r.sem.res.runClosing.peek(o.RunID); ok {
 		return fmt.Errorf("observation %s: run %s already closed with %s: %w", o.ID, o.RunID, prior, domain.ErrInvalidTransition)
