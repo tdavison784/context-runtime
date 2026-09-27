@@ -35,9 +35,9 @@ var _ ReplacementObligations = (*obligation.Service)(nil)
 // claim-bearing replacements through o, e.g. a W4 service with an embedder's
 // matcher registry. The receiver is unchanged.
 func (s *Service) WithReplacementObligations(o ReplacementObligations) *Service {
-	c := *s
-	c.obligations = o
-	return &c
+	// Built field by field: Service holds a sync.Map (GC queue scan hints)
+	// that must not be copied; the copy starts with its own fair-scan state.
+	return &Service{store: s.store, policy: s.policy, obligations: o}
 }
 
 // ReplaceDirective executes the explicit typed replacement (C-1): CAS on the
