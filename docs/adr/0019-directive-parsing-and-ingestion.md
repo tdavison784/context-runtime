@@ -118,7 +118,19 @@ still an open question as of PR #6 round 2 (SEC-2.2/SEC-2.6, H5, assigned
 W1):** `internal/ingest/ops.go`'s `typedOperation` currently passes the
 operation's lowered *source actor*, not the authenticated caller principal
 H5 requires; this ADR's text will need a further correction once that
-lands. Lifecycle-command v2 executes Resolve/Unpin
+lands. **An empty, non-nil `Operations` is rejected at validation, never
+silently treated as "no operations" (G4 = SEC-1.11 = SPEC-1.2).**
+`Event.ValidateV3` (`internal/domain/ingest_v3.go`) requires `Operations`
+to be either `nil` (every span ingests in the frozen per-span order) or a
+non-empty stream covering every span — before this fix, an event with
+spans and an explicitly empty `Operations` slice (e.g. JSON
+`"operations": []`) took the v3 path and stored its spans without ingesting
+any of them, silently losing content under an `EventID` a caller could
+never successfully retry (`Operations: nil` on retry produced
+`ErrEventIDConflict` instead of re-ingesting). Tests:
+`TestV3RejectsEmptyNonNilOperationStream`,
+`TestEmptyOperationStreamRejected_G4`. Lifecycle-command v2 executes
+Resolve/Unpin
 in source order at each command's exact, allocated authorization sequence
 (never a predicted one), with C-2's narrowed `DetailAccess` redaction
 applied to the execution outcome itself, not just target resolution. A
@@ -1137,7 +1149,46 @@ Answers to `p2-ingest`'s implementation questions, appended to
   record itself — a target in the wrong state for its action is, from the
   caller's perspective, not currently a valid target for that action, the
   same outcome class as `TargetNotFound`, distinguished only by the
-  `Reason` token, never by a different `Code`.
+  `Reason` token, never by a different `Code`. **Added at Phase 3 (SPEC-1.3,
+  PR #6 round 1; SPEC-2.13, this pair was missing from the pinned list):**
+  `ReasonUnknownIdentity` ("unknown_identity") pairs with
+  `ErrUnsupportedDirective` — an identical restatement of a version whose
+  creation identity is unknown (a pre-upgrade item migration 0034 could not
+  reconcile, ADR 3's amendment) is neither a duplicate nor an authorized
+  replacement, so the line is dropped exactly as an unsupported lifecycle
+  word would be, never silently accepted or promoted to a hard event abort.
+**The unknown-identity limitation is not unique to plain directive lines; it
+follows every caller of `SameDirective`/`knownDeclaration`, with a different
+failure shape per caller (SPEC-2.9, PR #6 round 2, residual of SPEC-1.3).**
+An attribute-only change to an unknown-identity directive (e.g. adding
+`{obligation=…}` to otherwise identical text) still produces
+`unknown_identity` and never lands as a replacement, because
+`graph.knownDeclaration` fails closed whenever the prior declaration is
+unknown, regardless of what changed — and the explicit
+`lifecycle.ReplaceDirective` refuses the same source for the same reason, so
+there is currently no authorized way to recommission such a directive short
+of changing its text. The same `knownDeclaration` call is reached by two
+other callers, each with its own, worse failure shape, both still open:
+**Working snapshots (SPEC-2.9's first bullet)** — `isDuplicateSnapshot`
+(`internal/graph/snapshot.go:336-345`) requires every member of an
+identical-looking Working snapshot to pass `SameDirective` against its
+prior row; an unknown-identity member fails the whole snapshot with
+`ErrUnknownDeclaration`, aborting the *entire ingest event*, not dropping
+one line — worse than a directive line's clean per-line diagnostic, for a
+case that is otherwise an ordinary duplicate. **Tool-written agent keys
+(SPEC-2.10)** — `internal/tools/keyed.go:94` also calls `SameDirective`
+before recording a keyed write as a duplicate; an unknown-identity current
+key returns a tool-level error instead of deduplicating, contradicting G5's
+"so identical restatement dedups" ruling. None of these three callers
+currently achieves G5's intended outcome for an unknown-identity target
+except the directive-line case, and only by degrading to a diagnostic
+rather than a successful dedup. SPEC-2.9's suggested fix — a pre-check in
+`workingSection` emitting the same per-line diagnostic instead of aborting
+— and SPEC-2.10's — reconciling agent keys the way 0034 reconciles
+directives, or documenting the exception — are both open, assigned to
+future work, not this pass.
+
+
 
 ### 24. Round 6 ruling (ingest-suite findings): R20
 
