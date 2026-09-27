@@ -219,7 +219,7 @@ Requirements: FR-TOOL-004, FR-PLN-004, FR-DOM-007, FR-RND-001, FR-ASM-011.
 2. A calls context_checkpoint with summary K1. Assemble (preview) then proposes REBASE under ALLOW_RESET because of soft pressure.
 3. Prepare and record the rebased inference.
 
-Expected state: K1 is an AGENT-authority summary whose coverage range spans X1–X12; F1 and F2 are current, DERIVED_FROM X3 and X9.
+Expected state: K1 is an AGENT-authority CHECKPOINT item whose source coverage is the admitted generation input of the issuing inference and whose separately recorded closed-exchange coverage is exactly X1–X12; F1 and F2 are current, DERIVED_FROM X3 and X9.
 
 Expected request: S policy, U goals/pins, then F1 and F2 as assistant content, then K1 as assistant content, then only uncovered exchanges and the pending input. X1–X12 are excluded with the covered reason code and remain retrievable; old reasoning is absent and a deliberate reset is recorded. A K1 larger than the policy limit is rejected at the tool call, and the rebase then renders without it, reporting the missing checkpoint.
 
