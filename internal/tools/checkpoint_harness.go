@@ -44,6 +44,14 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 	}
 	request := HarnessCheckpointRequest{Recipient: recipient, IssuingExchangeID: issuingExchangeID, Intent: intent}
 	if prior, err := sem.MutationReceipt(domain.MutationMembership, intent.RequestID); err == nil {
+		if prior.Principal != actor {
+			// Ownership of the request ID is checked before another
+			// principal's receipt can change the outcome (SEC-2.8).
+			if _, idErr := domain.MutationReceiptID(actor, domain.MutationMembership, intent.RequestID); idErr != nil {
+				return "", idErr
+			}
+			return "", domain.ErrEventIDConflict
+		}
 		args, err := domain.CanonicalSemanticArguments(request, graph.ReplayArgumentLimit(s.policy, prior.CanonicalArguments))
 		if err != nil {
 			return "", domain.ErrEventIDConflict
