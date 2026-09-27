@@ -80,9 +80,11 @@ type invalidation struct {
 // resource-bound proof on the resource, across the session and regardless of
 // the reporter's own access (P3-23). It reads the complete affected set
 // first, under the transaction's work bound, then writes; exceeding the bound
-// fails the whole update. Current subject-state applicability is marked stale
-// or unknown in the same transaction. Nothing about affected targets is
-// returned to the reporter.
+// fails the whole update. Subject states are never read or marked here:
+// their applicability is derived at read from authoritative resource state
+// (SubjectApplicability, DUR-3.1 (B)), so live states on untouched paths
+// cost a report nothing. Nothing about affected targets is returned to the
+// reporter.
 func (s *Service) invalidateResource(tx store.Tx, sem store.SemanticTx, work *budget, reporter domain.Principal, seq uint64, resourceID string, c change, inv invalidation) error {
 	var affected []domain.ApplicabilityProof
 	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
@@ -104,25 +106,8 @@ func (s *Service) invalidateResource(tx store.Tx, sem store.SemanticTx, work *bu
 	if err != nil {
 		return err
 	}
-	var subjects []domain.SubjectState
-	err = s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
-		pg, err := sem.SubjectStatesByResource(resourceID, p)
-		if err != nil {
-			return 0, store.Cursor{}, false, err
-		}
-		subjects = append(subjects, pg.Records...)
-		return len(pg.Records), pg.Next, pg.More, nil
-	})
-	if err != nil {
-		return err
-	}
 	for _, pr := range affected {
 		if err := s.invalidateProof(tx, sem, work, reporter, seq, pr, inv); err != nil {
-			return err
-		}
-	}
-	for _, st := range subjects {
-		if err := markSubject(sem, seq, st, c, inv.causeRecord); err != nil {
 			return err
 		}
 	}
@@ -144,43 +129,6 @@ func (s *Service) proofAffected(r store.SemanticReader, work *budget, proofID, r
 		return len(pg.Records), pg.Next, pg.More, nil
 	})
 	return hit, err
-}
-
-// markSubject moves a CURRENT subject state whose recorded observation no
-// longer describes the resource to STALE (or UNKNOWN when freshness is lost),
-// so planning never presents it as current truth.
-func markSubject(sem store.SemanticTx, seq uint64, st domain.SubjectState, c change, cause string) error {
-	if st.Applicability != domain.ApplicabilityCurrent {
-		return nil
-	}
-	obs, err := sem.Observation(st.ObservationID)
-	if err != nil {
-		return err
-	}
-	next := domain.ApplicabilityCurrent
-	switch {
-	case c.unknown:
-		next = domain.ApplicabilityUnknown
-	case obs.Family == domain.ObservationTests && obs.ObservedWorkspaceFingerprint != c.fingerprint:
-		next = domain.ApplicabilityStale
-	case obs.Family == domain.ObservationFileRead:
-		run, err := sem.ObservationRun(obs.RunID)
-		if err != nil {
-			return err
-		}
-		if f := run.Subject.Target.File; f == nil {
-			next = domain.ApplicabilityStale
-		} else if p := path.Join(f.Locator.BaseDir, f.Locator.Path); !c.sameContent(p, obs.ObservedContentHash) && (c.allPaths || c.touches(p)) {
-			next = domain.ApplicabilityStale
-		}
-	}
-	if next == domain.ApplicabilityCurrent {
-		return nil
-	}
-	expected := st.Revision
-	st.Applicability, st.Seq, st.Revision = next, seq, expected+1
-	_, err = sem.PutSubjectState(st, expected, cause)
-	return err
 }
 
 // invalidateProof is the restricted consequence path (C-10): it can only move
