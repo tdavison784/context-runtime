@@ -311,9 +311,12 @@ func (s gcMissingCapabilityStore) Update(ctx context.Context, session string, f 
 	return s.Store.Update(ctx, session, func(tx store.Tx) error { return f(legacyOnly{tx}) })
 }
 
-// J5 / SPEC-3.2: collector configuration never charges or quarantines a request.
+// J5 / SPEC-3.2: collector configuration never charges or quarantines a
+// request. (The policy-version case now follows ruling M1, DUR-4.9:
+// TestPolicyMismatchSettlesAndRearms_DUR49 settles the request
+// FAILED/POLICY_MISMATCH instead of leaving it stranded.)
 func TestJ5ConfigurationErrorsLeaveRequestsPending(t *testing.T) {
-	for _, kind := range []string{"policy", "trigger", "capability"} {
+	for _, kind := range []string{"trigger", "capability"} {
 		t.Run(kind, func(t *testing.T) {
 			eachStore(t, func(t *testing.T, db store.Store) {
 				pol := testPolicy()
@@ -322,8 +325,6 @@ func TestJ5ConfigurationErrorsLeaveRequestsPending(t *testing.T) {
 				id := enqueueScratch(t, db, base)
 				var runtimeStore store.Store = db
 				switch kind {
-				case "policy":
-					pol.Version = "phase3-policy/v0"
 				case "trigger":
 					pol.GCTriggers = []domain.GCTrigger{domain.GCManual}
 				case "capability":

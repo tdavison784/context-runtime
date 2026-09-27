@@ -462,6 +462,8 @@ Lifecycle, grant and GC audit/receipt identities (W3):
 
 - `context-runtime/collect-audit/v1`
 - `context-runtime/collect-receipt/v1`
+- `context-runtime/gc-manual/v1`
+- `context-runtime/gc-rearm/v1`
 - `context-runtime/gc-request/v1`
 - `context-runtime/gc-result/v1`
 - `context-runtime/gc-trigger/v1`
@@ -552,7 +554,13 @@ remain registered and are never reused.
 GC runtime IDs (SEC-2.6): `GCTriggerRequestID(origin, trigger, triggerID)`
 (`gc-trigger/v2`) binds the authenticated origin that raised the trigger.
 `GCRequestRecordID(session, requestID)` (`gc-request/v1`, `gcq_`) names
-the queued request. `gc-trigger/v1` remains registered.
+the queued request. Explicit collections derive separately: a manual
+`Collect` records under `GCManualRequestID(origin, requestID)`
+(`gc-manual/v1`, SEC-4.8), so it can neither precompute a runtime trigger
+record nor alias its batch receipts, and a re-arm records under
+`GCRearmRequestID(failedID)` (`gc-rearm/v1`, SEC-4.4), derived from the
+failed request alone so any authorized actor re-arms idempotently.
+`gc-trigger/v1` remains registered.
 
 ### Tool-outcome EventID format (W7)
 

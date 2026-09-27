@@ -28,6 +28,8 @@ var registeredCanonicalDomains = []string{
 	"context-runtime/creation-declaration/v1",
 	"context-runtime/current-key/v2",
 	"context-runtime/event-occurrence/v1",
+	"context-runtime/gc-manual/v1",
+	"context-runtime/gc-rearm/v1",
 	"context-runtime/gc-request/v1",
 	"context-runtime/gc-result/v1",
 	"context-runtime/gc-trigger/v1",

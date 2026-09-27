@@ -82,9 +82,12 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 			return out, err
 		}
 	}
-	// Every new caller collection has the same durable continuation as a trigger.
+	// Every new caller collection derives its durable request in the manual
+	// encoder domain (SEC-4.8): the collector and the caller-named request
+	// alone, so a manual Collect can neither precompute a runtime trigger
+	// record nor be wedged by one.
 	if link == nil {
-		runtimeID, e := domain.GCTriggerRequestID(p, i.Trigger, i.RequestID)
+		runtimeID, e := domain.GCManualRequestID(p, i.RequestID)
 		if e != nil {
 			return out, e
 		}
@@ -207,6 +210,10 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 	for {
 		room := batchSize - len(plan.receipt.Decisions)
 		if room <= 0 {
+			// A full batch had work budget to spare, so the next one may
+			// double back toward the policy ceiling (SEC-4.7, DUR-4.4):
+			// one heavy item's halving never pins the request for good.
+			plan.batchSize = min(2*plan.batchSize, s.policy.MaxGCDecisions)
 			return stop(false)
 		}
 		if err := b.spend(1); err != nil {
@@ -234,11 +241,21 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 			switch {
 			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), errors.Is(err, domain.ErrVersionConflict), errors.Is(err, domain.ErrUnsupportedSchema):
 				return plan, err // execution environment, never an item decision
-			case errors.Is(err, domain.ErrResourceLimit), errors.Is(err, store.ErrLimitExceeded):
-				if batchSize > 1 {
-					b, seqs.spare = saved, spare
+			case errors.Is(err, errBudget):
+				// The shared work budget ran out mid-item (J3). With a
+				// decision already frozen the batch halves and retries the
+				// item in a smaller one; an item that exhausts a fresh
+				// budget alone skips immediately — no batch size ever fits
+				// it, and halving only burns empty batches (DUR-4.4).
+				b, seqs.spare = saved, spare
+				if batchSize > 1 && len(plan.receipt.Decisions) > 0 {
 					return stop(true)
 				}
+				code, effect = domain.GCSkipResourceLimit, nil
+			case errors.Is(err, domain.ErrResourceLimit), errors.Is(err, store.ErrLimitExceeded):
+				// The item's own deterministic read bound: a smaller batch
+				// cannot help, so it skips at any batch size (DUR-4.4).
+				b, seqs.spare = saved, spare
 				code, effect = domain.GCSkipResourceLimit, nil
 			case errors.Is(err, domain.ErrIntegrity):
 				code, effect = domain.GCSkipIntegrity, nil

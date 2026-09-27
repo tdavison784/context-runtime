@@ -49,3 +49,24 @@ func TestDrainExhaustsPagesOrFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// SEC-4.11 / SEC-3.2: drain reports budget exhaustion as errBudget — an
+// ErrResourceLimit — never the generic read-bound error, so planBatch can
+// tell the shared work budget from an item's own bound (J3 halving versus an
+// immediate skip, DUR-4.4). Dropping drain's remaining==0 check degrades this
+// to domain.ErrResourceLimit and no other test notices; this one does. An
+// exact-fit budget still completes its page (J1).
+func TestDrainReportsBudgetExhaustionAsErrBudget_SEC411(t *testing.T) {
+	read := func(store.Page) (store.ResultPage[domain.ContextItem], error) {
+		return store.ResultPage[domain.ContextItem]{Records: []domain.ContextItem{{}}}, nil
+	}
+	b := workBudget{remaining: 2, pageSize: 4}
+	if out, err := drain(&b, 8, read); err != nil || len(out) != 1 {
+		t.Fatalf("exact-fit budget: %d %v", len(out), err)
+	}
+	b = workBudget{remaining: 1, pageSize: 4}
+	_, err := drain(&b, 8, read)
+	if !errors.Is(err, errBudget) || !errors.Is(err, domain.ErrResourceLimit) {
+		t.Fatalf("drain with a spent budget: %v", err)
+	}
+}

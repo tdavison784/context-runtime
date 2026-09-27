@@ -11,10 +11,19 @@ import (
 )
 
 // ErrGCTriggerDisabled rejects collection for a trigger outside the policy's
-// explicit enabled set. The durable request, if any, stays pending.
+// explicit enabled set; test it with errors.Is (DUR-4.9). The durable
+// request, if any, stays pending: this is a configuration fault, never a
+// charge on the request (J5).
 var ErrGCConfiguration = errors.New("lifecycle: invalid collector configuration")
 
 var ErrGCTriggerDisabled = fmt.Errorf("lifecycle: GC trigger disabled by policy: %w", domain.ErrInvalidTransition)
+
+// ErrGCPolicyVersion reports a pending GC request recorded under another
+// policy version (DUR-4.9, ruling M1); test it with errors.Is. CollectPending
+// settles such a request FAILED/POLICY_MISMATCH — uncharged, nothing
+// archived — so it stops stranding and the normal re-arm path applies under
+// the current policy.
+var ErrGCPolicyVersion = fmt.Errorf("lifecycle: GC request recorded under another policy version: %w", domain.ErrUnsupportedSchema)
 
 // EnqueueGC persists a durable GC request in the producer's transaction
 // (P3-39) under this executor's policy; it is a thin wrapper over
@@ -53,7 +62,10 @@ const maxGCPagesPerCall = 64
 // a quarantined one reports ErrGCRequestFailed. seq 0 allocates only after
 // the replay check. The collector is an authenticated SYSTEM/HARNESS
 // principal supplied by the embedding; for task-scoped requests it must
-// belong to that task. A failure rolls back only this batch: CollectPending
+// belong to that task. Continuation binds to that authority class plus
+// task, never to the principal that ran an earlier batch: any authorized
+// collector may continue a pending request (SEC-4.5). A failure rolls back
+// only this batch: CollectPending
 // records the attempt or quarantine in its own transaction.
 func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRequestID string, seq uint64) (out MutationOutcome, err error) {
 	defer func() {
@@ -114,22 +126,6 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 	if err != nil {
 		return out, err
 	}
-	if progress.Batches > 0 {
-		firstID, e := req.BatchRequestID(1)
-		if domain.ValidateCallerRequestID(req.RequestID) == nil {
-			firstID = req.RequestID
-		}
-		if e != nil {
-			return out, e
-		}
-		first, e := sem.CollectReceipt(collectReceiptID(req.SessionID, firstID))
-		if e != nil {
-			return out, e
-		}
-		if first.Principal != collector {
-			return out, ErrGCConfiguration
-		}
-	}
 	i := req.CollectIntent
 	if i.RequestID, err = req.BatchRequestID(progress.Batches + 1); err != nil {
 		return out, err
@@ -138,10 +134,16 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 }
 
 // RearmGCRequest re-enqueues a FAILED request under a new, deterministic
-// request identity (DUR-3.3): same scope, task and trigger, triggered by the
-// failed request itself, so repeating the re-arm returns the same request.
-// The failed record stays immutable. Only SYSTEM/HARNESS may re-arm; the
-// actor is recorded as the new request's origin, never its collector.
+// request identity (DUR-3.3): same scope, task and trigger, keyed on the
+// failed request alone, so repeating the re-arm — by any authorized actor —
+// returns the same request. The failed record stays immutable. Only
+// SYSTEM/HARNESS may re-arm, and a task-scoped request re-arms only from
+// its own task (SYSTEM exempt); that binding is checked before any outcome
+// check and is indistinguishable from an absent request, so a foreign
+// principal learns nothing about whether a predictable gcq_ ID exists
+// (SEC-4.4). MANUAL and session-scope requests re-arm (DUR-4.8); a trigger
+// this executor's policy disables reports ErrGCTriggerDisabled. The actor
+// is recorded as the new request's origin, never its collector.
 func (s *Service) RearmGCRequest(tx store.Tx, actor domain.Principal, failedID string) (id string, err error) {
 	defer func() {
 		if err != nil {
@@ -169,6 +171,12 @@ func (s *Service) RearmGCRequest(tx store.Tx, actor domain.Principal, failedID s
 	if err != nil {
 		return "", err
 	}
+	// Task scope binds the re-arm to the request's task before any outcome
+	// check: a foreign principal sees ErrNotFound for pending, failed and
+	// absent requests alike (SEC-4.4: no existence oracle).
+	if req.Scope == domain.CollectTask && actor.Authority != domain.AuthoritySystem && actor.TaskID != req.TaskID {
+		return "", domain.ErrNotFound
+	}
 	res, err := sem.GCResult(req.ID)
 	if errors.Is(err, domain.ErrNotFound) || err == nil && res.Outcome != domain.GCFailed {
 		return "", domain.ErrInvalidTransition // only a FAILED request re-arms
@@ -176,7 +184,14 @@ func (s *Service) RearmGCRequest(tx store.Tx, actor domain.Principal, failedID s
 	if err != nil {
 		return "", err
 	}
-	return gcqueue.Enqueue(tx, s.policy, actor, req.Trigger, req.TaskID, "rearm/"+req.ID)
+	id, err = gcqueue.EnqueueRearm(tx, s.policy, actor, req)
+	if err != nil {
+		return "", err
+	}
+	if id == "" {
+		return "", ErrGCTriggerDisabled // the trigger is disabled under this policy
+	}
+	return id, nil
 }
 
 // gcProgress is the request's stored progress, or the zero progress
@@ -277,6 +292,18 @@ func (s *Service) CollectPending(ctx context.Context, session string, collectorF
 			}
 			if !s.policy.GCTriggerEnabled(r.Trigger) {
 				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, ErrGCTriggerDisabled))
+				continue
+			}
+			// A request recorded under another policy version cannot run
+			// under this one (DUR-4.9, ruling M1): settle it
+			// FAILED/POLICY_MISMATCH — uncharged, nothing archived — so it
+			// stops stranding and the normal re-arm path applies under the
+			// current policy.
+			if r.PolicyVersion != s.policy.Version {
+				failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, ErrGCPolicyVersion))
+				if qerr := s.settleGCFailure(ctx, session, r.ID, domain.GCFailurePolicyMismatch, false); qerr != nil {
+					failures = append(failures, fmt.Errorf("GC request %s: %w", r.ID, qerr))
+				}
 				continue
 			}
 			attempts++
@@ -417,7 +444,9 @@ func (s *Service) collectPendingOne(ctx context.Context, session string, p domai
 
 // settleGCFailure records a failed attempt in its own transaction (H3). A
 // permanent failure quarantines at once with code; an infrastructure
-// failure (attempt) records operational statistics and remains pending.
+// failure (attempt) records operational statistics and remains pending
+// until maxGCAttempts consecutive failed batches — the counter resets on
+// progress (DUR-3.4) — quarantine it FAILED/ATTEMPTS_EXHAUSTED (DUR-4.5).
 // A request finished meanwhile is left alone.
 func (s *Service) settleGCFailure(ctx context.Context, session, id string, code domain.GCFailureCode, attempt bool) error {
 	return s.store.Update(ctx, session, func(tx store.Tx) error {
@@ -439,6 +468,11 @@ func (s *Service) settleGCFailure(ctx context.Context, session, id string, code 
 			next.SessionID, next.GCRequestID = session, id
 			next.Attempts++
 			next.Revision++
+			if next.Attempts >= maxGCAttempts {
+				result := domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID(session, id), SessionID: session, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+					GCRequestID: id, Outcome: domain.GCFailed, Reason: domain.GCFailureAttemptsExhausted}
+				return sem.InsertGCResult(result)
+			}
 			_, err = sem.PutGCProgress(next, p.Revision)
 			return err
 		}

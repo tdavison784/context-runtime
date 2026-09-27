@@ -121,6 +121,37 @@ func TestFailingGCRequestsAreQuarantined(t *testing.T) {
 			})
 		})
 	})
+	t.Run("transient attempts exhaust", func(t *testing.T) {
+		eachStore(t, func(t *testing.T, db store.Store) {
+			base, _ := New(db, testPolicy())
+			id := completeLarge(t, db, base, 1)
+			calls := 0
+			s, _ := New(gcBatchFaultStore{Store: db, calls: &calls}, testPolicy())
+			for pass := 0; pass < 6; pass++ {
+				if _, found := gcResult(t, db, id); found {
+					break
+				}
+				if _, err := s.CollectPending(ctx, "s", pick, 1); err != nil && pass >= maxGCAttempts {
+					t.Fatalf("pass %d: %v", pass, err)
+				}
+			}
+			r, found := gcResult(t, db, id)
+			if !found || r.Outcome != domain.GCFailed || r.Reason != domain.GCFailureAttemptsExhausted {
+				t.Fatalf("transient failures never quarantined: %+v found=%v", r, found)
+			}
+			if calls != maxGCAttempts {
+				t.Fatalf("quarantined after %d batch commits, want %d", calls, maxGCAttempts)
+			}
+			// A quarantined request is quiet: another pass neither charges
+			// nor retries it.
+			if n, err := s.CollectPending(ctx, "s", pick, 1); n != 0 || err != nil {
+				t.Fatalf("quarantined request retried: n=%d err=%v", n, err)
+			}
+			if calls != maxGCAttempts {
+				t.Fatalf("quarantined request retried: %d batch commits", calls)
+			}
+		})
+	})
 	t.Run("cancelled", func(t *testing.T) {
 		eachStore(t, func(t *testing.T, db store.Store) {
 			s, _ := New(db, testPolicy())
@@ -135,4 +166,39 @@ func TestFailingGCRequestsAreQuarantined(t *testing.T) {
 			}
 		})
 	})
+}
+
+// gcBatchFaultStore fails every batch's receipt commit with a transient
+// error (DUR-4.5): the batch transaction fails after planning, while the
+// settle path — which writes progress or the result, never a receipt — is
+// not faulted.
+type gcBatchFaultStore struct {
+	store.Store
+	calls *int
+}
+
+func (f gcBatchFaultStore) Update(ctx context.Context, session string, fn func(store.Tx) error) error {
+	return f.Store.Update(ctx, session, func(tx store.Tx) error {
+		return fn(gcBatchFaultTx{Tx: tx, calls: f.calls})
+	})
+}
+
+type gcBatchFaultTx struct {
+	store.Tx
+	calls *int
+}
+
+func (tx gcBatchFaultTx) SemanticTransaction() (store.SemanticTx, error) {
+	sem, err := store.Semantic(tx.Tx)
+	return gcBatchFaultSem{SemanticTx: sem, calls: tx.calls}, err
+}
+
+type gcBatchFaultSem struct {
+	store.SemanticTx
+	calls *int
+}
+
+func (s gcBatchFaultSem) InsertCollectReceipt(r domain.CollectReceipt) error {
+	*s.calls++
+	return fmt.Errorf("temporary receipt commit failure")
 }

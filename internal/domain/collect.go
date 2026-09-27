@@ -288,12 +288,14 @@ func (p GCProgress) Validate() error {
 
 // BatchRequestID keeps continuations of caller-named manual requests in the
 // reserved runtime namespace. The first manual batch retains the caller ID
-// for exact replay; subsequent batches use this authenticated derivation.
+// for exact replay; subsequent batches use this authenticated derivation in
+// the manual encoder domain, so they never alias a runtime request's batch
+// receipts (SEC-4.8).
 func (r GCRequest) BatchRequestID(batch uint64) (string, error) {
 	root := r.RequestID
 	if ValidateCallerRequestID(root) == nil {
 		var err error
-		root, err = GCTriggerRequestID(r.Origin, r.Trigger, root)
+		root, err = GCManualRequestID(r.Origin, root)
 		if err != nil {
 			return "", err
 		}
@@ -332,6 +334,38 @@ func GCTriggerRequestID(origin Principal, trigger GCTrigger, triggerID string) (
 	e := NewCanonicalEncoder("context-runtime/gc-trigger/v2")
 	encodePrincipal(e, origin)
 	return gcTriggerRequestPrefix + e.String(string(trigger)).String(triggerID).Hash(), nil
+}
+
+// GCRearmRequestID is the collection request ID for re-arming a FAILED GC
+// request (DUR-3.3, SEC-4.4, DUR-4.8): it derives from the failed request
+// alone, in its own encoder domain, so it is idempotent whatever authorized
+// actor re-arms, and no runtime trigger, manual collection or caller-named
+// request can alias or squat it. Like every runtime collection ID it lives
+// in the reserved "gc_" namespace.
+func GCRearmRequestID(failedID string) (string, error) {
+	if !semanticID(failedID) {
+		return "", invalid("GC re-arm request: failed request identity required")
+	}
+	return gcTriggerRequestPrefix + NewCanonicalEncoder("context-runtime/gc-rearm/v1").String(failedID).Hash(), nil
+}
+
+// GCManualRequestID is the durable continuation identity of an explicit
+// (manual) collection (J7): the collector and the caller-named request ID
+// under the manual encoder domain, which no runtime trigger or re-arm
+// derivation shares (SEC-4.8: a manual Collect must not be able to
+// precompute a runtime gcq_ record, and no runtime producer can wedge a
+// manual one). The result lives in the reserved "gc_" namespace, so no
+// caller can name it either.
+func GCManualRequestID(origin Principal, requestID string) (string, error) {
+	if err := validateIngestPrincipal(origin); err != nil {
+		return "", err
+	}
+	if !semanticID(requestID) {
+		return "", invalid("GC manual request: caller request required")
+	}
+	e := NewCanonicalEncoder("context-runtime/gc-manual/v1")
+	encodePrincipal(e, origin)
+	return gcTriggerRequestPrefix + e.String(requestID).Hash(), nil
 }
 
 // GCRequestRecordID is the record ID of the GC request whose collection
