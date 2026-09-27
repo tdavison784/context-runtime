@@ -349,6 +349,12 @@ These are decisions the commander approved during Phase 3 implementation,
 beyond P3-1..42 and C-1..C-21, that this ADR is the natural home for because
 no single §-decision above covers them. Each cites its real code and test.
 
+- **Runtime discipline — change causes (§W4-24).** `obligation.appendTransition`
+  (`internal/obligation/change.go`) requires every `SemanticChange` cause to
+  cite a stored record: the transition itself for a caller-requested
+  transition, the evaluated observation for a matcher or refresh step, and
+  the resource update or rejecting observation for a runtime consequence
+  (§13). `TestSemanticChangeRecords` (`internal/obligation/change_test.go`).
 - **Runtime discipline — record IDs (§W4-28).** `obligation.RecordIDEncoding
   = "context-runtime/w4/record-id/v1"` (`internal/obligation/ids.go`) derives
   every W4 audit/transition/dependency/observation/run/update record ID as a
