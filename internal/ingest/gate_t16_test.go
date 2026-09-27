@@ -157,7 +157,16 @@ func (c *t16) invocation(b domain.OutcomeBinding) domain.ToolInvocation {
 	return domain.ToolInvocation{SessionID: sess, Principal: c.agent, ConversationID: b.ConversationID, ExchangeID: b.ExchangeID, CallID: b.CallID, ToolCallID: "tool", TurnID: b.TurnID}
 }
 
-// toolResult is the TOOL result transcript registered for b's tool call.
+// external answers b's tool call with an external tool's result, ingested
+// as a TOOL tool_result and registered as its TOOL_RESULT member.
+func (c *t16) external(b domain.OutcomeBinding, text string) {
+	c.f.t.Helper()
+	if _, err := c.f.in.IngestOutcome(ctx, c.f.s, b, toolResultEvent(b, "tool", text), &OutcomeMembership{Dispatcher: c.dispatcher}); err != nil {
+		c.f.t.Fatalf("tool result: %v", err)
+	}
+}
+
+// toolResult is the result transcript registered for b's tool call.
 func (c *t16) toolResult(b domain.OutcomeBinding) string {
 	c.f.t.Helper()
 	_, ms := c.f.members(b.ExchangeID)
@@ -193,17 +202,17 @@ func TestGateT16_CheckpointThroughPipeline(t *testing.T) {
 		needsObligations(t, f)
 		c := newT16(t, f)
 		x1, _ := c.round(1)
-		c.keyed(x1, false, "progress", "Step 1 done.")
+		c.external(x1, "db: postgres 16 detected")
 		x2, _ := c.round(2)
 		f1 := c.keyed(x2, true, "db", "The service uses postgres.", c.toolResult(x1))
 		x3, _ := c.round(3)
-		c.keyed(x3, false, "progress", "Step 3 done.")
+		c.external(x3, "GET /v2/status 200")
 		x4, _ := c.round(4)
 		f2 := c.keyed(x4, true, "api", "The API is versioned.", c.toolResult(x3))
 		x5, manifest := c.round(5)
 
-		// F1 and F2 are current AGENT facts supported by the TOOL results
-		// they cite (TOOL-result evidence support, ruling).
+		// F1 and F2 are current AGENT facts supported by the external
+		// TOOL results they cite (TOOL-result evidence support, ruling).
 		for fact, src := range map[string]string{f1.Keyed.ItemID: c.toolResult(x1), f2.Keyed.ItemID: c.toolResult(x3)} {
 			if !f.isCurrent(fact) {
 				t.Fatalf("fact %s not current", fact)

@@ -172,16 +172,16 @@ func notFoundOrFixed(err error) error {
 	return err
 }
 
-// TestGateT17_ToolResultAsEvidence (P3-25, ruling): a TOOL result
-// transcript qualifies as evidence support; a conversation transcript (the
-// user's) does not, and citing it fails INVALID_ARGUMENT with nothing
-// written.
+// TestGateT17_ToolResultAsEvidence (P3-25, ruling): an external TOOL
+// result qualifies as evidence support; the user's transcript and a
+// semantic tool's acknowledgment do not, and citing them fails
+// INVALID_ARGUMENT with nothing written.
 func TestGateT17_ToolResultAsEvidence(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
 		needsObligations(t, f)
 		c := newT16(t, f)
 		x1, _ := c.round(1)
-		c.keyed(x1, false, "progress", "Checked the API.")
+		c.external(x1, "GET /v3/health 200")
 		x2, _ := c.round(2)
 		userTranscript := f.items()[0].ID
 		before := f.lastSeq()
@@ -200,6 +200,18 @@ func TestGateT17_ToolResultAsEvidence(t *testing.T) {
 		fact := c.keyed(x3, true, "api-note", "The API uses v3.", c.toolResult(x1))
 		if fact.Keyed == nil || !f.isCurrent(fact.Keyed.ItemID) {
 			t.Fatalf("TOOL-result-supported fact = %+v", fact.Keyed)
+		}
+		// A semantic tool's acknowledgment is conversation, never evidence
+		// (W5, FR-DOM-006).
+		x4, _ := c.round(4)
+		ack := c.toolResult(x3)
+		before = f.lastSeq()
+		_, err = tools.Execute(ctx, f.s, sess, func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
+			return c.svc.Remember(tx, c.dispatcher, tools.Request[domain.KeyedWriteIntent]{Invocation: c.invocation(x4), Intent: domain.KeyedWriteIntent{
+				RequestID: "req-ack", Key: "echo", Kind: domain.KindFact, Parts: textParts("I stored a note."), EvidenceIDs: []string{ack}}}, seq)
+		})
+		if !errors.As(err, &te) || te.Code() != domain.ToolErrorInvalidArgument || f.lastSeq() != before {
+			t.Fatalf("acknowledgment as evidence: %v", err)
 		}
 	})
 }
