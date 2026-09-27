@@ -72,9 +72,6 @@ func TestReservedNamespaceReceiptsReplay_DUR28(t *testing.T) {
 		t.Fatalf("retries allocated sequences: %d -> %d", seq, f.lastSeq())
 	}
 	for _, id := range []string{"outcome-new", "req_new", "gc_new"} {
-		if id == "gc_new" && !domain.ReservedIDPrefix(id) {
-			continue // gc_ is reserved by W1's SEC-2.6 change
-		}
 		f.requireAtomic(domain.ErrInvalidRecord, func() error {
 			_, err := f.ingest(user, userEvent(id, "new", false))
 			return err
