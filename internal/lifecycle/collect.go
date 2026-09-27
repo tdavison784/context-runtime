@@ -153,7 +153,10 @@ func (s *Service) planCollection(tx store.Tx, sem store.SemanticReader, p domain
 			target := domain.ItemGrantTarget(p.SessionID, it.ID)
 			auth, err := graph.AuthorizeAtSequence(tx, p, domain.ActionArchive, []domain.GrantTarget{target}, nil, at, s.policy.MaxTargets)
 			switch {
-			case errors.Is(err, domain.ErrInvalidAuthorityPromotion):
+			case errors.Is(err, domain.ErrInvalidAuthorityPromotion), errors.Is(err, store.ErrLimitExceeded):
+				// Unauthorized, or authority not establishable within the
+				// bounded grant read: never archived, and one target's grant
+				// history cannot abort the collection (SEC-1.5, G2).
 				code, spare = domain.GCIneligible, at
 			case err != nil:
 				return r, nil, 0, err
