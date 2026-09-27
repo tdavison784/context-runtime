@@ -27,13 +27,14 @@ applies — grouped by subsystem, for Phase 2's five worker branches
 Sources: `phase2-brief.md` (D1-D20), `phase2-decision-review.md`
 (amendments and M1-M8), `phase2-amendments.md` (R1-R8, binding).
 
-## Amended in Phase 3 (ADR 8, 2026-09-26; proposed pending Phase 3 gate)
+## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
 
 Phase 3's binding decision record (`.worktrees/_commander/phase3-decisions.md`,
-P3-4, with commander ruling C-1 FROZEN 2026-09-26) restates and extends this
-ADR's §7 (D10's deduplication/replacement rule): the accepted Q1 ruling that
-predates the Phase 3 decision record, plus a new explicit replacement
-operation Q1 did not itself provide.
+P3-4, P3-34, P3-35, P3-36, P3-40, with commander ruling C-1 FROZEN
+2026-09-26, reconciled against W7's landed `internal/ingest`) restates and
+extends this ADR's §7 (D10's deduplication/replacement rule) and adds the
+typed-operation/lifecycle-v2/v3-identity decisions this ADR's ingestion
+pipeline already owned, now that Phase 3 implements them.
 
 **Q1, restated (already accepted before this Phase 3 record, unchanged
 here):** "Reopening requires a changed version (different content or
@@ -85,6 +86,57 @@ the explicit typed intent preserves Q1's default while giving an authorized
 principal a deliberate, audited way to do exactly that when it is actually
 needed. **Commander ruling (FROZEN 2026-09-26): ADOPT the recommendation and
 amend Q1 to add this explicit escape hatch, without weakening Q1's default.**
+Real code confirms this exactly: `domain.ActionReplaceDirective`
+(`internal/domain/authz.go`), `domain.ReplaceDirectiveIntent`
+(`internal/domain/lifecycle_intent.go`), and
+`lifecycle.Service.ReplaceDirective`/`internal/graph.ReplaceDirective`
+(`internal/lifecycle/replace.go`, W3) implement it; obligation retirement
+runs through ADR 8 §2's `obligation.DeclareForReplacementTx`. Tests:
+`internal/lifecycle`: `TestReplaceDirectiveReopensWithIdenticalContentAndRetiresObligations`,
+`TestReplaceDirectiveNeedsAuthorityOrExactGrant`,
+`TestReplaceDirectiveFailsClosedOnUnknownIdentity`; `internal/ingest`:
+`TestGateT02_ReplacementRetiresOldRequirement`,
+`TestP336_ChangedRestatementReplaces`,
+`TestP336_ResolvedRestatementStaysResolved`,
+`TestP336_UnpinnedRestatementStaysUnpinned`; `internal/graph`:
+`TestReplaceDirective_T02`.
+
+**Typed operations, v3 identity, and lifecycle-command v2 execution (P3-34,
+P3-35, P3-40) — implemented in `internal/ingest`, this ADR's own package.**
+`Event.Operations` is an ordered, typed operation stream (span, alias,
+control, and mutation-intent operations) hashed under
+`ingest-payload/v3` (ADR 4), replacing the frozen v2 encoder for new events
+only — v2 stays frozen and still validated for legacy replay. A submitted
+operation's `RequestID` must be empty; `ingest.OperationRequestID(session,
+occurrence, opIndex, ordinal)` derives it only after acceptance, so no
+caller can forge or predict one. Lifecycle-command v2 executes Resolve/Unpin
+in source order at each command's exact, allocated authorization sequence
+(never a predicted one), with C-2's narrowed `DetailAccess` redaction
+applied to the execution outcome itself, not just target resolution. A
+malformed operation, an alias to a nonexistent prior result, or an
+unauthorized source actor aborts the whole event atomically. Tests:
+`TestV3_SpanOperationsFollowStreamOrder`, `TestV3_RetryUsesRecordedSchema`,
+`TestV3_RetryUsesRecordedPolicy`, `TestV3_DirectiveNamespaceExplicit`,
+`TestOps_OrderSequenceAndAliases`, `TestOps_AliasBindsSpanItem`,
+`TestOps_AliasRejections`, `TestOps_SourceSpanActor`,
+`TestOps_ControlEventOpensNothing`, `TestOps_MissingHandlerFailsClosed`,
+`TestOps_CallerRequestIDRejected`, `TestCommandsV2_ExecuteInSourceOrder`,
+`TestCommandsV2_DetailRedaction`, `TestCommandsV2_AbortsAtomically`,
+`TestLifecycle_ExecutesInOrder_P335`, `TestConcurrency_IdenticalV3Retries`.
+Frozen-fixture/upgrade coverage: `TestPhase2FixtureReplay` (a Phase 2 SQLite
+database, frozen at `b5f6b1f`, replays every original receipt unchanged
+under the new v3 code with no new sequence and no lifecycle command
+executing).
+
+**Semantic-change audit data (P3-36) — implemented across `internal/ingest`,
+`internal/lifecycle`, and ADR 8's `internal/obligation`, stored and checked
+by the stores.** `domain.SemanticChange` records old/new revision/status/
+currentness for every lifecycle/replacement/proof-invalidation/observation-
+state change, with an immutable, stored cause. Tests: `TestP336_ChangedRestatementReplaces`,
+`TestP336_ReplacementHistoryReconstructible`, `TestP336_ResolvedRestatementStaysResolved`,
+`TestP336_UnpinnedRestatementStaysUnpinned` (`internal/ingest`);
+`internal/obligation`'s `TestSemanticChangeRecords` (ADR 8's "Implementation
+decisions beyond the frozen text," change causes).
 
 ### SDD amendment (applied in v0.10)
 
