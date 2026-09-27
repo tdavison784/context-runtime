@@ -40,7 +40,7 @@ Codex) has scrutinized it, noting which findings changed the decision.
 | 5 | Semantic scoring weights, SemanticBytes encoding, fixed-point scale, relevance threshold, resident-byte limits, soft-pressure fraction, retrieval-call windows, stub budget, checkpoint size limit, decision-trace retention | Phase 4 | pending — gates Phase 4 |
 | 6 | Access-boundary and context-eligibility matrix, historical leases, expiry, epoch validation | Phase 1 | [Accepted](0006-access-and-eligibility.md) |
 | 7 | Lexical index and normalization rules | Phase 4 | pending — gates Phase 4 |
-| 8 | Observation identities, obligation matcher/claim versions, evidence applicability fingerprints, mutation grants, invalidation rules | Phase 3 | [Proposed](0008-observations-obligations-applicability-grants.md) — gates Phase 3; gate evidence green at integration head `fc87199` (one unrelated W3 fixture pending), Status kept Proposed pending commander acceptance |
+| 8 | Observation identities, obligation matcher/claim versions, evidence applicability fingerprints, mutation grants, invalidation rules | Phase 3 | [Proposed](0008-observations-obligations-applicability-grants.md) — gates Phase 3; reconciled through PR #6 round 3. Status is Proposed because P3-42's required-test mapping is still incomplete (SPEC-1.23/2.14/3.9), not merely pending a formality |
 | 9 | Provider transport libraries, retry policy, OpenAI API surface, verified reasoning replay rules | Phase 5 | pending — gates Phase 5 |
 | 10 | Benchmark fixture/oracle, comparative statistics and run counts, baseline profiles, shared resource limits/projections, reproducible hardware/data profile | Phase 5 (initial fixture/profile); finalized Phase 8 | pending — gates Phase 5 |
 | 11 | Render templates and delimiters per provider | Phase 5 | pending — gates Phase 5 |
@@ -166,7 +166,9 @@ reports (`final-p3-w4.md`, `final-p3-w5.md`, `final-p3-w7.md`) and the
 later commander rulings recorded there. New at this pass:
 
 - [0003](0003-sqlite-driver-and-migrations.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
-  Phase 3's eleven forward migrations, 0018 through 0028.
+  Phase 3's twenty-seven forward migrations, 0018 through 0044 (PR #6
+  round 3, SPEC-3.8: corrected from a stale "eleven ... 0018 through
+  0028").
 - [0017](0017-call-ledger.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
   `domain.OutcomeBinding`, exchange membership joined to a completed
   outcome through its trusted dispatcher, and confirmation that
