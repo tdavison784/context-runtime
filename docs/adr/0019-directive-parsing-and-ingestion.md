@@ -145,8 +145,8 @@ decisions beyond the frozen text," change causes).
   or rebind an obligation. TURN/TTL eligibility origin remains part of
   semantic identity." Retain Q1's changed-content/attributes requirement as
   the default; `ActionReplaceDirective` (above) is the one authorized
-  exception, itself recorded at FR-AUTH-001/FR-DIR-002 rather than as a
-  weakening of this sentence.
+  exception, itself recorded at FR-DIR-005/FR-ING-005 (this same amendment)
+  rather than as a weakening of this sentence.
 
 Applied to SDD.md as v0.10 (this ADR does not itself edit SDD.md).
 
