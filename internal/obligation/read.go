@@ -46,11 +46,16 @@ func (s *Service) UnfinishedTaskObligations(tx store.ReadTx, taskID string) (boo
 type SatisfiesView struct {
 	Relations []domain.SatisfiesRelation
 	Truncated bool
+	// Next continues the history view when More is set.
+	Next store.Cursor
+	More bool
 }
 
 // Satisfies returns the SATISFIES view of target for viewer. A version the
-// viewer cannot access is ErrNotFound.
-func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target domain.ObligationRef, currentOnly bool) (SatisfiesView, error) {
+// viewer cannot access is ErrNotFound. The current view is one keyed read;
+// the history view returns one page of the version's transitions after the
+// cursor after, with Next/More to continue.
+func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target domain.ObligationRef, currentOnly bool, after store.Cursor) (SatisfiesView, error) {
 	if err := viewer.Validate(); err != nil {
 		return SatisfiesView{}, err
 	}
@@ -115,25 +120,21 @@ func (s *Service) Satisfies(tx store.ReadTx, viewer domain.Principal, target dom
 		}
 		return view, nil
 	}
-	work := s.newBudget()
-	err = s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
-		pg, err := r.TransitionsByVersion(target, p)
-		if err != nil {
-			return 0, store.Cursor{}, false, err
-		}
-		for _, t := range pg.Records {
-			if t.To != domain.ObligationSatisfied || t.ProofID == "" {
-				continue
-			}
-			if err := add(t, isCurrent && o.CurrentProofID == t.ProofID); err != nil {
-				return 0, store.Cursor{}, false, err
-			}
-		}
-		return len(pg.Records), pg.Next, pg.More, nil
-	})
+	// History is served one store page per call, continued by cursor, so
+	// its cost is bounded whatever the version's history (DUR-3.8).
+	pg, err := r.TransitionsByVersion(target, store.Page{After: after, Limit: s.policy.MaxPageSize})
 	if err != nil {
 		return SatisfiesView{}, err
 	}
+	for _, t := range pg.Records {
+		if t.To != domain.ObligationSatisfied || t.ProofID == "" {
+			continue
+		}
+		if err := add(t, isCurrent && o.CurrentProofID == t.ProofID); err != nil {
+			return SatisfiesView{}, err
+		}
+	}
+	view.Next, view.More = pg.Next, pg.More
 	return view, nil
 }
 
@@ -173,4 +174,26 @@ func (s *Service) VisibleObligations(tx store.ReadTx, viewer domain.Principal, t
 		})
 	}
 	return out, nil
+}
+
+// SubjectApplicability is a subject state's applicability to the current
+// authoritative resource state, derived exactly at read (DUR-3.1 (B),
+// amending P3-22/23): the state's recorded Applicability is only its value
+// at filing, and a state is never presented as current once its path or
+// fingerprint changes. Planning and eligibility inputs use this value.
+func (s *Service) SubjectApplicability(tx store.ReadTx, st domain.SubjectState) (domain.ApplicabilityState, error) {
+	r, err := store.ReadSemantic(tx)
+	if err != nil {
+		return "", err
+	}
+	obs, err := r.Observation(st.ObservationID)
+	if err != nil {
+		return "", err
+	}
+	run, err := r.ObservationRun(obs.RunID)
+	if err != nil {
+		return "", err
+	}
+	a, _, _, err := s.applicability(r, s.newBudget(), obs, run)
+	return a, err
 }

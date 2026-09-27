@@ -10,32 +10,49 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
-// applicableNow reports whether a stored observation describes the current
+// applicability derives whether a stored observation describes the current
 // authoritative resource state of its subject, with the state it was judged
-// against. Only terminal complete results can be applicable.
-func (s *Service) applicableNow(r store.SemanticReader, work *budget, obs domain.ObservationRecord, run domain.ObservationRun) (bool, *domain.ResourceState, *domain.ResourcePathState, error) {
-	if !obs.TerminalComplete() {
-		return false, nil, nil, nil
-	}
+// against (DUR-3.1 (B)): UNKNOWN while the resource is unregistered or not
+// KNOWN, CURRENT when a tests run's fingerprint or a file read's content
+// equals the authoritative one, STALE otherwise. It is exact and costs a
+// few keyed reads, so no report ever marks subject states.
+func (s *Service) applicability(r store.SemanticReader, work *budget, obs domain.ObservationRecord, run domain.ObservationRun) (domain.ApplicabilityState, *domain.ResourceState, *domain.ResourcePathState, error) {
 	resource := targetResource(run.Subject.Target)
 	rs, err := r.ResourceState(resource)
 	if errors.Is(err, domain.ErrNotFound) {
-		return false, nil, nil, nil
+		return domain.ApplicabilityUnknown, nil, nil, nil
 	}
 	if err != nil {
-		return false, nil, nil, err
+		return "", nil, nil, err
 	}
 	if !knownResource(&rs, resource) {
-		return false, &rs, nil, nil
+		return domain.ApplicabilityUnknown, &rs, nil, nil
+	}
+	if !obs.TerminalComplete() {
+		return domain.ApplicabilityStale, &rs, nil, nil
 	}
 	if run.Subject.Family == domain.ObservationTests {
-		return obs.ObservedWorkspaceFingerprint == rs.WorkspaceFingerprint, &rs, nil, nil
+		if obs.ObservedWorkspaceFingerprint == rs.WorkspaceFingerprint {
+			return domain.ApplicabilityCurrent, &rs, nil, nil
+		}
+		return domain.ApplicabilityStale, &rs, nil, nil
 	}
 	ps, ok, err := s.currentPathState(r, work, run.Subject.Target.File.Locator, rs)
-	if err != nil || !ok {
-		return false, &rs, nil, err
+	if err != nil {
+		return "", &rs, nil, err
 	}
-	return obs.ObservedContentHash == ps.ContentHash, &rs, &ps, nil
+	if !ok || obs.ObservedContentHash != ps.ContentHash {
+		return domain.ApplicabilityStale, &rs, nil, nil
+	}
+	return domain.ApplicabilityCurrent, &rs, &ps, nil
+}
+
+// applicableNow reports whether a stored observation describes the current
+// authoritative resource state of its subject. Only terminal complete
+// results can be applicable.
+func (s *Service) applicableNow(r store.SemanticReader, work *budget, obs domain.ObservationRecord, run domain.ObservationRun) (bool, error) {
+	a, _, _, err := s.applicability(r, work, obs, run)
+	return a == domain.ApplicabilityCurrent, err
 }
 
 // deriveState applies obs-state/1 (P3-22, C-6, C-8): a terminal complete
@@ -46,7 +63,7 @@ func (s *Service) applicableNow(r store.SemanticReader, work *budget, obs domain
 // runtime actor. Everything else remains evidence only. Nothing in the
 // template comes from tool output or environment values.
 func (s *Service) deriveState(tx store.Tx, sem store.SemanticTx, work *budget, actor domain.Principal, obs domain.ObservationRecord, run domain.ObservationRun, seq uint64) error {
-	applicable, _, _, err := s.applicableNow(sem, work, obs, run)
+	applicable, err := s.applicableNow(sem, work, obs, run)
 	if err != nil || !applicable {
 		return err
 	}
@@ -84,8 +101,10 @@ func (s *Service) deriveState(tx store.Tx, sem store.SemanticTx, work *budget, a
 		ObservationID:   obs.ID,
 		Access:          run.Access,
 		AcceptedOrdinal: run.Ordinal,
-		Applicability:   domain.ApplicabilityCurrent,
-		Revision:        prior.Revision + 1, // CAS result; the store assigns it
+		// Applicability at filing; readers derive the live value with
+		// SubjectApplicability (DUR-3.1 (B)).
+		Applicability: domain.ApplicabilityCurrent,
+		Revision:      prior.Revision + 1, // CAS result; the store assigns it
 	}
 	if _, err := sem.PutSubjectState(next, prior.Revision, obs.ID); err != nil {
 		return w.fail(err)

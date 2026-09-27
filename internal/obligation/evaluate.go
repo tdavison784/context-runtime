@@ -2,6 +2,7 @@ package obligation
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -31,7 +32,67 @@ func (s *Service) evaluate(tx store.Tx, sem store.SemanticTx, work *budget, acto
 	}
 	for _, o := range candidates {
 		if _, err := s.evaluateOne(tx, sem, actor, o, obs, run, work); err != nil {
+			// Past the resource's dependent cap the observation stays
+			// evidence only, exactly as without a grant; nothing was
+			// written (DUR-3.1 (C)).
+			if errors.Is(err, errDependentCap) {
+				continue
+			}
 			return err
+		}
+	}
+	return nil
+}
+
+// errDependentCap refuses a proof whose live dependency rows would take a
+// resource past MaxLiveProofDependents (DUR-3.1 (C)).
+var errDependentCap = fmt.Errorf("%w: live proof dependents at the resource cap", domain.ErrResourceLimit)
+
+// dependentRoom checks, before anything is allocated or written, that a new
+// proof's live (non-FIXED) dependency rows, net of the rows of a proof it
+// replaces, keep every resource within MaxLiveProofDependents, so an ALL,
+// UNKNOWN or resync report can always invalidate the resource's whole live
+// set within its work budget (DUR-3.1 (C), G2).
+func (s *Service) dependentRoom(r store.SemanticReader, work *budget, claims []domain.ResourceClaim, old *domain.ApplicabilityProof) error {
+	add := map[string]int{}
+	for _, c := range claims {
+		if c.Kind != domain.DependencyFixedContent {
+			add[c.ResourceID]++
+		}
+	}
+	if len(add) == 0 {
+		return nil
+	}
+	if old != nil {
+		err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
+			pg, err := r.ProofDependencies(old.ID, p)
+			if err != nil {
+				return 0, store.Cursor{}, false, err
+			}
+			for _, d := range pg.Records {
+				if _, ok := add[d.ResourceID]; ok && d.Kind != domain.DependencyFixedContent {
+					add[d.ResourceID]--
+				}
+			}
+			return len(pg.Records), pg.Next, pg.More, nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	for resource, n := range add {
+		if n <= 0 {
+			continue
+		}
+		if err := work.spend(1); err != nil {
+			return err
+		}
+		live, err := r.LiveProofDependents(resource)
+		if err != nil {
+			return err
+		}
+		if live+uint64(n) > uint64(s.policy.MaxLiveProofDependents) {
+			return errDependentCap
 		}
 	}
 	return nil
@@ -95,9 +156,9 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	if v := m.Evaluate(in); v.Kind == VerdictPass {
 		switch {
 		case o.Status == domain.ObligationUnresolved:
-			return s.satisfy(tx, sem, actor, o, obs, v, nil)
+			return s.satisfy(tx, sem, work, actor, o, obs, v, nil)
 		case o.Status == domain.ObligationSatisfied && cur != nil && cur.ObservationID != obs.ID && run.Ordinal > curOrdinal:
-			return s.satisfy(tx, sem, actor, o, obs, v, cur)
+			return s.satisfy(tx, sem, work, actor, o, obs, v, cur)
 		}
 	}
 	return nil, nil
@@ -118,11 +179,13 @@ func failCovers(proof domain.AccessBoundary, obs domain.ObservationRecord, run d
 // is one keyed read, independent of run history.
 func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run domain.ObservationRun, o domain.ObligationVersion) (uint64, error) {
 	var high uint64
-	for _, p := range candidatePartitions(run, o) {
+	// The commit guard ranks proofs over exactly these partitions, so the
+	// matcher and the store share one rule (DUR-3.9).
+	for _, p := range store.ProofRankPartitions(run, o) {
 		if err := work.spend(1); err != nil {
 			return 0, err
 		}
-		mark, err := r.SubjectHighWater(run.SubjectKey, p.TaskID, p)
+		mark, err := r.SubjectHighWater(run.SubjectKey, p.TaskID, p.Access)
 		if errors.Is(err, domain.ErrNotFound) {
 			continue
 		}
@@ -132,18 +195,6 @@ func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run dom
 		high = max(high, mark)
 	}
 	return high, nil
-}
-
-// candidatePartitions lists the run's own partition and the obligation's
-// publishable partitions, deduplicated.
-func candidatePartitions(run domain.ObservationRun, o domain.ObligationVersion) []domain.AccessBoundary {
-	out := []domain.AccessBoundary{run.Access}
-	for _, b := range obligationPartitions(o) {
-		if b != run.Access {
-			out = append(out, b)
-		}
-	}
-	return out
 }
 
 // obligationPartitions lists the TASK partitions of the obligation's task
@@ -203,7 +254,10 @@ func (s *Service) currentMatcherProof(r store.SemanticReader, o domain.Obligatio
 // before anything is written: without a live exact grant, or when the
 // obligation's boundary is broader than the evidence or resource, nothing
 // changes and the old proof stands.
-func (s *Service) satisfy(tx store.Tx, sem store.SemanticTx, actor domain.Principal, o domain.ObligationVersion, obs domain.ObservationRecord, v Verdict, old *domain.ApplicabilityProof) ([]string, error) {
+func (s *Service) satisfy(tx store.Tx, sem store.SemanticTx, work *budget, actor domain.Principal, o domain.ObligationVersion, obs domain.ObservationRecord, v Verdict, old *domain.ApplicabilityProof) ([]string, error) {
+	if err := s.dependentRoom(sem, work, []domain.ResourceClaim{v.Dependency}, old); err != nil {
+		return nil, err
+	}
 	ref := domain.ObligationRef{SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version}
 	target := ref.Target()
 	releaseSeq := uint64(0)

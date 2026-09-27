@@ -264,7 +264,7 @@ func TestH2CurrentSatisfiesIgnoresHistory(t *testing.T) {
 	var v SatisfiesView
 	var err error
 	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
-		v, err = f.s.Satisfies(tx, f.harness, f.sysTests, true)
+		v, err = f.s.Satisfies(tx, f.harness, f.sysTests, true, store.Cursor{})
 		return nil
 	})
 	if err != nil || len(v.Relations) != 1 || v.Relations[0].Evidence.ItemID != obs.EvidenceItemID || !v.Relations[0].Current {
