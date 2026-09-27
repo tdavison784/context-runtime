@@ -80,9 +80,6 @@ func (s *Service) executeRecord(tx store.Tx, p domain.Principal, method, request
 
 func (s *Service) standaloneRecord(ctx context.Context, p domain.Principal, method, requestID string, intent any, run func(store.Tx, uint64) (MutationOutcome, error)) (domain.RecordResult, error) {
 	var out MutationOutcome
-	if err := domain.ValidateCallerRequestID(requestID); err != nil {
-		return domain.RecordResult{}, err // callers never name runtime namespaces (H5, SEC-2.2)
-	}
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
 		_, _, prior, err := s.begin(tx, p, domain.MutationGrantFamily, method, requestID, intent)
 		if err != nil {
@@ -90,6 +87,11 @@ func (s *Service) standaloneRecord(ctx context.Context, p domain.Principal, meth
 		}
 		var seq uint64
 		if prior == nil {
+			// Callers never name runtime namespaces (H5, SEC-2.2); an
+			// owner's committed receipt replays first (DUR-2.8).
+			if err := domain.ValidateCallerRequestID(requestID); err != nil {
+				return err
+			}
 			seq = tx.NextSeq()
 		}
 		out, err = run(tx, seq)

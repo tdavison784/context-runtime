@@ -160,9 +160,6 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 
 func (s *Service) ReplaceDirectiveStandalone(ctx context.Context, p domain.Principal, i domain.ReplaceDirectiveIntent) (MutationOutcome, error) {
 	var out MutationOutcome
-	if err := domain.ValidateCallerRequestID(i.RequestID); err != nil {
-		return out, err // callers never name runtime namespaces (H5, SEC-2.2)
-	}
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
 		_, _, prior, err := s.begin(tx, p, domain.MutationLifecycle, string(domain.ActionReplaceDirective), i.RequestID, i)
 		if err != nil {
@@ -170,6 +167,11 @@ func (s *Service) ReplaceDirectiveStandalone(ctx context.Context, p domain.Princ
 		}
 		var seq uint64
 		if prior == nil {
+			// Callers never name runtime namespaces (H5, SEC-2.2); an
+			// owner's committed receipt replays first (DUR-2.8).
+			if err := domain.ValidateCallerRequestID(i.RequestID); err != nil {
+				return err
+			}
 			seq = tx.NextSeq()
 		}
 		out, err = s.ReplaceDirective(tx, p, i, seq)

@@ -18,12 +18,6 @@ const methodCollect = "collect"
 // archived target needs its own Archive authority: entry authority is no
 // ownership wildcard. Exceeding any work bound fails the whole collection.
 func (s *Service) Collect(tx store.Tx, p domain.Principal, i domain.CollectIntent, seq uint64) (MutationOutcome, error) {
-	// A manual collection is a caller request: it can never name the runtime
-	// GC namespaces its queued requests use (H5, SEC-2.6).
-	if err := domain.ValidateCallerRequestID(i.RequestID); err != nil {
-		tx.Poison(err)
-		return MutationOutcome{}, err
-	}
 	return s.collect(tx, p, i, "", seq)
 }
 
@@ -43,6 +37,14 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 			return out, domain.ErrIntegrity
 		}
 		return MutationOutcome{MutationReceiptID: prior.ID, Result: prior.Result.Clone()}, nil
+	}
+	// A new manual collection is a caller request: it can never name the
+	// runtime GC namespaces its queued requests use (H5, SEC-2.6); a
+	// committed receipt replayed above first (DUR-2.8).
+	if gcRequestID == "" {
+		if err = domain.ValidateCallerRequestID(i.RequestID); err != nil {
+			return out, err
+		}
 	}
 	if err = i.Validate(); err != nil {
 		return out, err
