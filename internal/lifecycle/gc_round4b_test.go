@@ -2,12 +2,158 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
+
+// enqueueWithID persists a durable GC request with the given trigger identity.
+func enqueueWithID(t *testing.T, db store.Store, s *Service, trigger domain.GCTrigger, triggerID string) string {
+	t.Helper()
+	var id string
+	if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+		var err error
+		id, err = s.EnqueueGC(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), trigger, domain.CollectTask, "task", triggerID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// failRequest marks GC request id FAILED as the consumer would.
+func failRequest(t *testing.T, db store.Store, id string) {
+	t.Helper()
+	if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		return sem.InsertGCResult(domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID("s", id), SessionID: "s",
+			SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()}, GCRequestID: id, Outcome: domain.GCFailed, Reason: domain.GCFailureIntegrity})
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// storeManualRequest seeds a J7 manual session request directly, as the
+// manual Collect path would have, and returns its record ID.
+func storeManualRequest(t *testing.T, db store.Store, s *Service, requestID string) string {
+	t.Helper()
+	var id string
+	if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		r := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: "gcq_manual_" + requestID, SessionID: "s",
+			SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+			CollectIntent: domain.CollectIntent{RequestID: requestID, Scope: domain.CollectSession, Trigger: domain.GCManual},
+			Origin:        storetest.NewPrincipal("s", domain.AuthoritySystem), PolicyVersion: s.policy.Version}
+		id = r.ID
+		return sem.InsertGCRequest(r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// SEC-4.4 / SPEC-4.6: re-arm is bound to the request's task before any
+// outcome check, and a foreign principal's error is indistinguishable from
+// an absent request — no existence oracle over predictable gcq_ IDs.
+func TestRearmBindsToTheRequestTaskAndIsNoOracle_SEC44(t *testing.T) {
+	ctx := context.Background()
+	attacker := sec26Principal("attacker", domain.AuthorityHarness)
+	eachStore(t, func(t *testing.T, db store.Store) {
+		s, _ := New(db, testPolicy())
+		seedEphemeral(t, db, 0, 0)
+		pending := enqueueScratch(t, db, s)
+		failed := enqueueWithID(t, db, s, domain.GCSupersession, "scratch-2")
+		failRequest(t, db, failed)
+		try := func(id string) error {
+			return db.Update(ctx, "s", func(tx store.Tx) error {
+				_, err := s.RearmGCRequest(tx, attacker, id)
+				return err
+			})
+		}
+		absent := try("gcq_absent")
+		pend := try(pending)
+		fail := try(failed)
+		for _, err := range []error{absent, pend, fail} {
+			if !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("foreign re-arm is not not-found: %v", err)
+			}
+		}
+		if absent.Error() != pend.Error() || pend.Error() != fail.Error() {
+			t.Fatalf("foreign re-arm discloses request state: absent=%v pending=%v failed=%v", absent, pend, fail)
+		}
+		// An in-task HARNESS and SYSTEM both re-arm the same failed request
+		// to the same identity (idempotent across actors).
+		mate := storetest.NewPrincipal("s", domain.AuthorityHarness)
+		var first, second string
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			var err error
+			first, err = s.RearmGCRequest(tx, mate, failed)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			var err error
+			second, err = s.RearmGCRequest(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), failed)
+			return err
+		}); err != nil || second != first {
+			t.Fatalf("re-arm is actor-bound: %q %q %v", first, second, err)
+		}
+		if pendingList := pendingGC(t, db); len(pendingList) != 2 { // the re-armed one plus the still-pending scratch request
+			t.Fatalf("re-arm duplicated the request: %+v", pendingList)
+		}
+	})
+}
+
+// SEC-4.4 / SPEC-4.6 / DUR-4.8: a FAILED MANUAL (J7 session-scope) request
+// re-arms and collects, and a trigger this policy disables reports
+// ErrGCTriggerDisabled instead of a silent empty ID.
+func TestRearmSupportsManualAndReportsDisabledTriggers_SEC44(t *testing.T) {
+	ctx := context.Background()
+	harness := storetest.NewPrincipal("s", domain.AuthorityHarness)
+	pick := func(domain.GCRequest) (domain.Principal, bool) { return harness, true }
+	eachStore(t, func(t *testing.T, db store.Store) {
+		s, _ := New(db, testPolicy())
+		seedEphemeral(t, db, 0, 0)
+		manual := storeManualRequest(t, db, s, "m1")
+		failRequest(t, db, manual)
+		var rearmID string
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			var err error
+			rearmID, err = s.RearmGCRequest(tx, harness, manual)
+			return err
+		}); err != nil || rearmID == "" {
+			t.Fatalf("MANUAL re-arm: %q %v", rearmID, err)
+		}
+		if n, err := s.CollectPending(ctx, "s", pick, 4); n != 1 || err != nil {
+			t.Fatalf("re-armed MANUAL request: n=%d err=%v", n, err)
+		}
+		if res, found := gcResult(t, db, rearmID); !found || res.Outcome != domain.GCCollected {
+			t.Fatalf("re-armed MANUAL not collected: %+v found=%v", res, found)
+		}
+
+		off := testPolicy()
+		off.GCTriggers = []domain.GCTrigger{domain.GCManual, domain.GCTaskCompletion}
+		s2, _ := New(db, off)
+		disabled := enqueueScratch(t, db, s) // SUPERSESSION
+		failRequest(t, db, disabled)
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			_, err := s2.RearmGCRequest(tx, harness, disabled)
+			return err
+		}); !errors.Is(err, ErrGCTriggerDisabled) {
+			t.Fatalf("disabled trigger re-arm: %v", err)
+		}
+	})
+}
 
 // SEC-4.5 (J5 wedge): a pending request's continuation binds to authority
 // class and task, not the exact principal that ran batch 1. A same-task

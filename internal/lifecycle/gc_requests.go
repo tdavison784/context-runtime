@@ -125,10 +125,16 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 }
 
 // RearmGCRequest re-enqueues a FAILED request under a new, deterministic
-// request identity (DUR-3.3): same scope, task and trigger, triggered by the
-// failed request itself, so repeating the re-arm returns the same request.
-// The failed record stays immutable. Only SYSTEM/HARNESS may re-arm; the
-// actor is recorded as the new request's origin, never its collector.
+// request identity (DUR-3.3): same scope, task and trigger, keyed on the
+// failed request alone, so repeating the re-arm — by any authorized actor —
+// returns the same request. The failed record stays immutable. Only
+// SYSTEM/HARNESS may re-arm, and a task-scoped request re-arms only from
+// its own task (SYSTEM exempt); that binding is checked before any outcome
+// check and is indistinguishable from an absent request, so a foreign
+// principal learns nothing about whether a predictable gcq_ ID exists
+// (SEC-4.4). MANUAL and session-scope requests re-arm (DUR-4.8); a trigger
+// this executor's policy disables reports ErrGCTriggerDisabled. The actor
+// is recorded as the new request's origin, never its collector.
 func (s *Service) RearmGCRequest(tx store.Tx, actor domain.Principal, failedID string) (id string, err error) {
 	defer func() {
 		if err != nil {
@@ -156,6 +162,12 @@ func (s *Service) RearmGCRequest(tx store.Tx, actor domain.Principal, failedID s
 	if err != nil {
 		return "", err
 	}
+	// Task scope binds the re-arm to the request's task before any outcome
+	// check: a foreign principal sees ErrNotFound for pending, failed and
+	// absent requests alike (SEC-4.4: no existence oracle).
+	if req.Scope == domain.CollectTask && actor.Authority != domain.AuthoritySystem && actor.TaskID != req.TaskID {
+		return "", domain.ErrNotFound
+	}
 	res, err := sem.GCResult(req.ID)
 	if errors.Is(err, domain.ErrNotFound) || err == nil && res.Outcome != domain.GCFailed {
 		return "", domain.ErrInvalidTransition // only a FAILED request re-arms
@@ -163,7 +175,14 @@ func (s *Service) RearmGCRequest(tx store.Tx, actor domain.Principal, failedID s
 	if err != nil {
 		return "", err
 	}
-	return gcqueue.Enqueue(tx, s.policy, actor, req.Trigger, req.TaskID, "rearm/"+req.ID)
+	id, err = gcqueue.EnqueueRearm(tx, s.policy, actor, req)
+	if err != nil {
+		return "", err
+	}
+	if id == "" {
+		return "", ErrGCTriggerDisabled // the trigger is disabled under this policy
+	}
+	return id, nil
 }
 
 // gcProgress is the request's stored progress, or the zero progress
