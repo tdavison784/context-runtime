@@ -114,6 +114,8 @@ func TestSQLiteSuite(t *testing.T) {
 		{"XREV11StalePathClaim", TestXREV11StalePathClaim, false},
 		{"SPEC19ReevaluateAfterRevalidation", TestSPEC19ReevaluateAfterRevalidation, true},
 		{"SPEC110FailRejectsResourceBoundAssertion", TestSPEC110FailRejectsResourceBoundAssertion, true},
+		{"SPEC111ClaimsMustCoverTarget", TestSPEC111ClaimsMustCoverTarget, false},
+		{"SPEC111FixedHashTarget", TestSPEC111FixedHashTarget, false},
 		{"ObservationStateChain", TestObservationStateChain, true},
 		{"ObservationStateGating", TestObservationStateGating, true},
 		{"MatcherGrantT06", TestMatcherGrantT06, true},

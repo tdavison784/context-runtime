@@ -201,3 +201,67 @@ func TestSPEC110FailRejectsResourceBoundAssertion(t *testing.T) {
 		t.Errorf("rejection = %+v", last)
 	}
 }
+
+// SPEC-1.11 (P3-15/23): a RESOURCE_BOUND assertion must declare a dependency
+// that covers the obligation's own target.
+func TestSPEC111ClaimsMustCoverTarget(t *testing.T) {
+	f := newEvalFixture(t)
+	f.resourceReport(t, "W1c", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	rev := f.r.auth
+	unrelated := domain.ResourceLocator{ResourceID: "repo1", BaseDir: ".", Path: "unrelated.txt"}
+	other := domain.ResourceLocator{ResourceID: "repo1", BaseDir: ".", Path: "docs/b.md"}
+	assert := func(ref domain.ObligationRef, claims ...domain.ResourceClaim) error {
+		o := f.status(t, ref)
+		in := intent(ref, o.Revision, domain.ObligationSatisfied)
+		in.AssertionMode = domain.AssertionResourceBound
+		in.Resources = claims
+		_, err := f.s.transition(t, f.st, f.system, in)
+		return err
+	}
+	// tests_pass: a fixed-content claim on an unrelated file is not a
+	// workspace dependency of the suite.
+	if err := assert(f.sysTests, domain.ResourceClaim{Kind: domain.DependencyFixedContent, ResourceID: "repo1", Fingerprint: hashOf("anything"), Locator: &unrelated}); !errors.Is(err, domain.ErrUnknownApplicability) {
+		t.Errorf("tests target with unrelated fixed-content claim: %v", err)
+	}
+	// CURRENT_CONTENT read: a current claim on another path does not cover.
+	file := f.fileObligation(t, "8")
+	f.resourceReport(t, "W1d", false, false, []string{"docs/b.md"}, domain.ResourcePathContent{Path: "docs/b.md", ContentHash: hashOf("B1")})
+	if err := assert(file, domain.ResourceClaim{Kind: domain.DependencyCurrentPath, ResourceID: "repo1", ResourceRevision: f.r.auth, Fingerprint: hashOf("B1"), Locator: &other}); !errors.Is(err, domain.ErrUnknownApplicability) {
+		t.Errorf("file target with another path's claim: %v", err)
+	}
+	loc := domain.ResourceLocator{ResourceID: "repo1", BaseDir: ".", Path: "docs/a.md"}
+	if err := assert(file, domain.ResourceClaim{Kind: domain.DependencyCurrentPath, ResourceID: "repo1", ResourceRevision: rev, Fingerprint: hashOf("H1"), Locator: &loc}); err != nil {
+		t.Errorf("covering current-path claim: %v", err)
+	}
+	// Covering workspace claim for the tests target.
+	if err := assert(f.sysTests, domain.ResourceClaim{Kind: domain.DependencyWorkspace, ResourceID: "repo1", ResourceRevision: f.r.auth, Fingerprint: hashOf("W1d")}); err != nil {
+		t.Errorf("covering workspace claim: %v", err)
+	}
+}
+
+func TestSPEC111FixedHashTarget(t *testing.T) {
+	f := newEvalFixture(t)
+	target := fileTarget("repo1", "docs/a.md", domain.FileFixedHash, hashOf("REQ"))
+	in := domain.DeclareObligationIntent{RequestID: "d-fixed", SourceItemID: "pu", DeclarationSlot: "9", Description: "read it",
+		ExpectedSourceVersion: 1, Target: &target, Matcher: &FileReadV1}
+	if _, err := f.s.declare(t, f.st, f.harness, in); err != nil {
+		t.Fatal(err)
+	}
+	key, _ := f.item(t, "pu").CurrentKey()
+	ref := domain.ObligationRef{SessionID: testSession, ObligationID: domain.DerivedObligationID(key, 9), Version: 1}
+	loc := domain.ResourceLocator{ResourceID: "repo1", BaseDir: ".", Path: "docs/a.md"}
+	assert := func(hash string) error {
+		o := f.status(t, ref)
+		in := intent(ref, o.Revision, domain.ObligationSatisfied)
+		in.AssertionMode = domain.AssertionResourceBound
+		in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyFixedContent, ResourceID: "repo1", Fingerprint: hashOf(hash), Locator: &loc}}
+		_, err := f.s.transition(t, f.st, f.system, in)
+		return err
+	}
+	if err := assert("OTHER"); !errors.Is(err, domain.ErrUnknownApplicability) {
+		t.Errorf("fixed-content claim with a hash other than the required one: %v", err)
+	}
+	if err := assert("REQ"); err != nil {
+		t.Errorf("fixed-content claim of the required hash: %v", err)
+	}
+}
