@@ -26,7 +26,8 @@ var obligationStatusConstants = map[string]bool{
 
 // effectiveStatusAllowed are the functions allowed to compare stored status.
 var effectiveStatusAllowed = map[string]string{
-	"internal/obligation:EffectiveStatus": "the one K1 A2 effective-status helper",
+	"internal/obligation:EffectiveStatus":   "the one K1 A2 effective-status helper",
+	"internal/graph:settleBeforeRetirement": "M2 settlement pre-check before retirement (settlement machinery, like the store guards)",
 }
 
 // effectiveStatusPending lists stored-status comparisons that predate K1 and

@@ -179,7 +179,7 @@ func SupersedeSnapshot(tx store.Tx, actor domain.Principal, newIDs []string, tas
 	slices.SortFunc(olds, bySeqID)
 	plans := make([]supersessionPlan, 0, len(olds))
 	for _, old := range olds {
-		plan, err := planSupersession(tx, actor, retire[old.ID].ID, old.ID, eventID, "")
+		plan, err := planSupersession(tx, actor, retire[old.ID].ID, old.ID, eventID, "", collectOptions(opts))
 		if err != nil {
 			return SnapshotResult{}, err
 		}

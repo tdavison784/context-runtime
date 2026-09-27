@@ -195,7 +195,7 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 			tx.Poison(err)
 		}
 	}()
-	p, err := planSupersession(tx, actor, newID, oldID, eventID, ruleVersion)
+	p, err := planSupersession(tx, actor, newID, oldID, eventID, ruleVersion, collectOptions(opts))
 	if err != nil {
 		return domain.Relationship{}, err
 	}
@@ -210,7 +210,7 @@ type supersessionPlan struct {
 
 // Reserve each actual audit/edge sequence once, before authorization and writes.
 // A Working snapshot plans every retirement before applying the first one.
-func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (supersessionPlan, error) {
+func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string, o options) (supersessionPlan, error) {
 	newItem, err := loadAccessible(tx, actor, newID)
 	if err != nil {
 		return supersessionPlan{}, err
@@ -261,7 +261,7 @@ func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID
 		GrantID:    grantID,
 		EventID:    eventID,
 	}
-	obligations, err := planObligationRetirement(tx, actor, oldID)
+	obligations, err := planObligationRetirement(tx, actor, oldID, o.settler)
 	if err != nil {
 		return supersessionPlan{}, err
 	}
@@ -366,7 +366,7 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 				}
 			}
 		}
-		if _, err := Supersede(tx, actor, newItemID, previousID, eventID, ""); err != nil {
+		if _, err := Supersede(tx, actor, newItemID, previousID, eventID, "", opts...); err != nil {
 			return "", err
 		}
 	}
