@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -185,10 +184,10 @@ func TestUpgradeRestatesEveryCurrentDirective_G5(t *testing.T) {
 // agent's pre-upgrade key, in the form migration 0034 leaves it (no
 // explicit namespace, an unknown creation declaration), on the upgraded
 // Phase 2 database. Through the real round and tool pipeline, the owning
-// agent's identical restatement can neither dedup against unknown identity
-// nor rebind the key: it fails closed with nothing written, and the old
-// version stays current. A changed update by the same agent replaces its
-// own old key (SPEC-1.5) with an explicit AGENT_KEY version.
+// agent's identical restatement dedups (agent keys are attribute-free) and
+// never rebinds the key: the old version stays current. A changed update by
+// the same agent replaces its own old key (SPEC-1.5) with an explicit
+// AGENT_KEY version.
 func TestUpgradeAgentOwnOldKey_G5(t *testing.T) {
 	s := openPhase2Copy(t)
 	if !hasSemantic(s) {
@@ -241,16 +240,16 @@ func TestUpgradeAgentOwnOldKey_G5(t *testing.T) {
 		t.Fatal("legacy agent key is not current")
 	}
 
-	before := snapshotPhase2(t, f.s)
-	// graph.ErrUnknownDeclaration (domain.ErrUnsupportedSchema) reaches the
-	// model as the fixed UNAVAILABLE tool error; the changed update below
-	// succeeding on the same key shows the refusal is the identity check.
-	var te *tools.Error
-	if _, err := updateState("same", "status", "Working on the API."); !errors.As(err, &te) || te.Code() != domain.ToolErrorUnavailable {
-		t.Fatalf("identical restatement of an unknown-identity agent key: %v, want the fail-closed UNAVAILABLE refusal", err)
+	// A tool-written agent key is attribute-free, so the identical
+	// restatement dedups against the unknown pre-upgrade identity: it is a
+	// noncurrent DUPLICATE_OF occurrence and the old version stays current,
+	// never replaced or rebound (approved G5 residual rule, SPEC-2.10).
+	same, err := updateState("same", "status", "Working on the API.")
+	if err != nil {
+		t.Fatalf("identical restatement of an unknown-identity agent key: %v, want a duplicate", err)
 	}
-	if after := snapshotPhase2(t, f.s); !reflect.DeepEqual(normGolden(after), normGolden(before)) || !f.isCurrent(legacy.ID) {
-		t.Fatal("the refused restatement changed state or rebound the key")
+	if same.Keyed == nil || !same.Keyed.Duplicate || same.Keyed.SupersededItemID != "" || !f.isCurrent(legacy.ID) || f.isCurrent(same.Keyed.ItemID) {
+		t.Fatalf("identical restatement replaced or rebound the old key: %+v", same.Keyed)
 	}
 
 	changed, err := updateState("changed", "status", "API done; running tests.")
