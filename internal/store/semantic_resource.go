@@ -25,6 +25,32 @@ type ResourceReader interface {
 	// component, independent of history (H2, DUR-2.2).
 	LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error)
 	ResourcePathState(locator domain.ResourceLocator) (domain.ResourcePathState, error)
+	// LastWorkspaceDivergenceRev is resourceID's monotone write-time
+	// divergence pointer (K1 A1): the ResultingAuthoritativeRevision of
+	// the latest update whose workspace fingerprint changed or whose
+	// freshness became UNKNOWN, raised in that report's own O(1)
+	// transaction. 0 when never raised (never an error). The pointer only
+	// rises, so a WORKSPACE dependency's ResourceRevision below it is
+	// invalid for good.
+	LastWorkspaceDivergenceRev(resourceID string) (uint64, error)
+	// LastAffectingRev is the (resourceID, key) monotone write-time
+	// pointer (K1 A1): the latest revision of an update that touched key
+	// with content different from the path's prior content. key is a
+	// canonical resource-relative path or one of its ancestor
+	// directories; "" is the ALL key, raised by every UNKNOWN and
+	// ALL-paths report. A same-content path report does not raise its
+	// key; 0 when never raised (never an error).
+	LastAffectingRev(resourceID, key string) (uint64, error)
+	// FirstWorkspaceDivergenceAfter is the earliest divergence update of
+	// resourceID with resulting revision > rev (K1 A1): a keyset seek
+	// over the divergence raises, never a scan; ErrNotFound when none.
+	// Settlement takes its update ID as the cause (K1-api.2).
+	FirstWorkspaceDivergenceAfter(resourceID string, rev uint64) (domain.ResourceUpdate, error)
+	// FirstAffectingUpdateAfter is the earliest update raising
+	// (resourceID, key)'s pointer with revision > rev (K1 A1): a keyset
+	// seek over that exact key, never a prefix scan; ErrNotFound when
+	// none.
+	FirstAffectingUpdateAfter(resourceID, key string, rev uint64) (domain.ResourceUpdate, error)
 	WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error)
 	WorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
 	// CurrentWorkspaceBindingsByContext lists each binding ID once, at its
