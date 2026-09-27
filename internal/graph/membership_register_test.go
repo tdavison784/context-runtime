@@ -18,6 +18,14 @@ func membershipTestStore(t *testing.T) (store.Store, *MembershipService, domain.
 	t.Helper()
 	s := memory.New()
 	t.Cleanup(func() { s.Close() })
+	service, actor, intent := membershipTestServiceOn(t, s)
+	return s, service, actor, intent
+}
+
+// membershipTestServiceOn opens the test task on s and returns the service,
+// the trusted actor and a first registration intent.
+func membershipTestServiceOn(t *testing.T, s store.Store) (*MembershipService, domain.Principal, domain.RegisterExchangeIntent) {
+	t.Helper()
 	p := storetest.NewPrincipal("s", domain.AuthorityAgent)
 	a := p
 	a.Authority = domain.AuthorityHarness
@@ -29,7 +37,7 @@ func membershipTestStore(t *testing.T) (store.Store, *MembershipService, domain.
 		_, err := tx.PutTask(storetest.NewTask("s", p.TaskID), 0, domain.LifecycleEvent{ID: "task-open", SessionID: "s", Seq: tx.NextSeq(), TargetKind: domain.TargetTask, TargetID: p.TaskID, Action: "open", Actor: a})
 		return err
 	})
-	return s, service, a, domain.RegisterExchangeIntent{RequestID: "register", Principal: p, TurnID: "turn-1", Turn: 1}
+	return service, a, domain.RegisterExchangeIntent{RequestID: "register", Principal: p, TurnID: "turn-1", Turn: 1}
 }
 
 func TestMembershipRegisterPersistsOrderAndReplaysBeforeTurnAndRevision(t *testing.T) {

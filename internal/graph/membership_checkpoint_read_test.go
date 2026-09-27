@@ -12,7 +12,13 @@ import (
 // shared item must neither consume the viewer's work limit nor change its
 // (empty) result.
 func TestCheckpointLookupIgnoresPrivateMembershipsBeforeLimits(t *testing.T) {
-	s, service, actor, registration := membershipTestStore(t)
+	eachStore(t, func(t *testing.T, s store.Store) {
+		testPrivateMembershipsBeforeLimits(t, s)
+	})
+}
+
+func testPrivateMembershipsBeforeLimits(t *testing.T, s store.Store) {
+	service, actor, registration := membershipTestServiceOn(t, s)
 	var shared domain.ContextItem
 	update(t, s, "s", func(tx store.Tx) error {
 		shared = storetest.NewItem("s", "shared", tx.NextSeq(), "session-visible input")
