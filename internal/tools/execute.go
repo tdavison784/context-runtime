@@ -182,6 +182,9 @@ func (s *Service) associateResult(tx store.Tx, dispatcher domain.Principal, i do
 		}
 		ref = *source
 	} else {
+		// The acknowledgment is the runtime's receipt of the agent's own
+		// write, not an observation, so it is conversation, never a
+		// tool_result that could be cited as evidence support (FR-DOM-006).
 		text := ResultText(result)
 		if len(text) > s.policy.MaxToolResultBytes {
 			return domain.ErrResourceLimit
@@ -190,7 +193,7 @@ func (s *Service) associateResult(tx store.Tx, dispatcher domain.Principal, i do
 		item := domain.ContextItem{
 			ID: toolID("toolresult", invocationID), Role: domain.RoleTranscript, Seq: tx.NextSeq(),
 			SessionID: p.SessionID, WorkflowID: p.WorkflowID, TaskID: p.TaskID, AgentID: p.AgentID, TurnID: x.TurnID,
-			Kind: domain.KindToolResult, Generation: domain.GenerationWorking, Authority: domain.AuthorityTool,
+			Kind: domain.KindConversation, Generation: domain.GenerationWorking, Authority: domain.AuthorityTool,
 			Scope: domain.ScopeTask, Access: conversationBoundary(p), Residency: domain.ResidencyResident, Retention: domain.RetentionNormal,
 			Parts: parts, ContentHash: domain.ContentHash(parts), SemanticBytes: domain.SemanticBytes(parts),
 			CreatedTurn: x.Turn, Source: &domain.SourceRef{Kind: domain.SourceTool, ToolCallID: i.ToolCallID}, Version: 1,

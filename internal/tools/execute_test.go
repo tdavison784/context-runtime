@@ -2,6 +2,7 @@ package tools
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -26,7 +27,12 @@ func runStub(s *Service, tx store.Tx, i domain.ToolInvocation, intent stubIntent
 		if intent.Value == "fail" {
 			return domain.ToolResult{}, errors.New("private store detail")
 		}
-		return domain.ToolResult{CheckpointID: "effect-" + state.exchange.ID[:8]}, nil
+		// The store requires every record a frozen result names to exist.
+		it := storetest.NewItem("s", "effect-"+intent.RequestID+"-"+i.ToolCallID, tx.NextSeq(), "effect")
+		if err := tx.InsertItem(it); err != nil {
+			return domain.ToolResult{}, err
+		}
+		return domain.ToolResult{Keyed: &domain.KeyedWriteResult{ItemID: it.ID, CanonicalItemID: it.ID}}, nil
 	})
 }
 
@@ -45,7 +51,7 @@ func TestExecuteCommitsResultMembershipAndReceiptsOnce(t *testing.T) {
 		sem, _ := store.Semantic(tx)
 		id, _ := i.ID()
 		receipt, err := sem.ToolExecutionReceipt(id)
-		if err != nil || receipt.Result != first || receipt.Method != "stub" {
+		if err != nil || !reflect.DeepEqual(receipt.Result, first) || receipt.Method != "stub" {
 			t.Fatalf("receipt: %+v, %v", receipt, err)
 		}
 		members, err := sem.ExchangeMembers(i.ExchangeID, store.Page{Limit: 8})
@@ -70,7 +76,7 @@ func TestExecuteCommitsResultMembershipAndReceiptsOnce(t *testing.T) {
 	update(t, st, func(tx store.Tx) error {
 		before := tx.LastSeq()
 		again, err := runStub(s, tx, i, intent, &calls)
-		if err != nil || again != first || tx.LastSeq() != before+1 || calls != 1 {
+		if err != nil || !reflect.DeepEqual(again, first) || tx.LastSeq() != before+1 || calls != 1 {
 			t.Fatalf("replay: %+v, %v, calls %d", again, err, calls)
 		}
 		return nil
@@ -126,7 +132,7 @@ func TestExecuteDistinguishesToolCallsOfOneOutput(t *testing.T) {
 			return err
 		}
 		b, err := runStub(s, tx, second, stubIntent{RequestID: "b", Value: "v"}, &calls)
-		if err != nil || calls != 2 || a != b {
+		if err != nil || calls != 2 || a.Keyed == nil || b.Keyed == nil || a.Keyed.ItemID == b.Keyed.ItemID {
 			t.Fatalf("second call: %+v %+v, %v", a, b, err)
 		}
 		return nil
