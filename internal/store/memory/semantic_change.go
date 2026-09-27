@@ -28,7 +28,7 @@ func (r semRead) LifecycleByTarget(kind domain.TargetKind, targetID string, p st
 // InsertSemanticChange stores an immutable causal change record. Its target
 // (an item occurrence or exact obligation version) and its audit event,
 // which must audit that same target, are stored in this session; a named
-// grant must be stored too.
+// grant and cause must be stored too.
 func (t *semTx) InsertSemanticChange(c domain.SemanticChange) error {
 	if err := t.t.companion("semantic change", c.SemanticMeta, c.Validate); err != nil {
 		return err
@@ -45,6 +45,9 @@ func (t *semTx) InsertSemanticChange(c domain.SemanticChange) error {
 	}
 	if c.GrantID != "" && !t.r.grants.has(c.GrantID) {
 		return invalid("semantic change %s: grant %s is not stored", c.ID, c.GrantID)
+	}
+	if c.CauseID != "" && !t.causeStored(c.CauseID) {
+		return invalid("semantic change %s: cause %s is not a stored causal record", c.ID, c.CauseID)
 	}
 	t.r.sem.changes.put(c.ID, c)
 	t.r.sem.chByTarget.add(c.Target.AuthorizationKey, seqRef{c.Seq, c.ID})
@@ -80,4 +83,12 @@ func (r semRead) SemanticChanges(viewer domain.Principal, target domain.GrantTar
 		c, ok := r.r.sem.changes.get(id)
 		return c, ok && c.Access.Permits(viewer)
 	})
+}
+
+// causeStored reports whether id names a stored causal record: a
+// transition, resource update, observation, audit event, or mutation
+// receipt.
+func (t *semTx) causeStored(id string) bool {
+	s := &t.r.sem
+	return t.r.transitions.has(id) || s.res.updates.has(id) || s.res.observations.has(id) || t.r.lifecycle.has(id) || s.mutReceipts.has(id)
 }
