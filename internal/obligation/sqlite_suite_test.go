@@ -176,6 +176,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"K1MultiResourceProofsNeverWedgeReports_DUR42", TestK1MultiResourceProofsNeverWedgeReports_DUR42, false},
 		{"K1StableLiveProofsNeverBlockSatisfaction_DUR43", TestK1StableLiveProofsNeverBlockSatisfaction_DUR43, true},
 		{"K1PropertyEffectiveSatisfactionIsValid", TestK1PropertyEffectiveSatisfactionIsValid, true},
+		{"K1SettlementWorker", TestK1SettlementWorker, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {

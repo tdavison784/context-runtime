@@ -33,3 +33,9 @@ func EffectiveStatus(r store.SemanticReader, o domain.ObligationVersion) (status
 func proofDerivedValid(r store.SemanticReader, proofID string) (bool, error) {
 	return true, nil
 }
+
+// SettlePendingTx is one bounded pass of the asynchronous settlement worker
+// (K1 A4).
+func (s *Service) SettlePendingTx(tx store.Tx, actor domain.Principal, max int) (settled int, more bool, err error) {
+	return 0, false, nil
+}

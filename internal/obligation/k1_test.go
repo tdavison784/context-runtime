@@ -1,6 +1,7 @@
 package obligation
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -312,5 +313,84 @@ func TestK1StableLiveProofsNeverBlockSatisfaction_DUR43(t *testing.T) {
 	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
 	if st, _ := f.effective(t, f.sysTests); st != domain.ObligationSatisfied {
 		t.Errorf("granted PASS with 8 live path proofs on the resource: effective %s", st)
+	}
+}
+
+// settle runs one worker pass as SYSTEM.
+func (f fixture) settle(t *testing.T, max int) (int, bool) {
+	t.Helper()
+	var n int
+	var more bool
+	err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+		var err error
+		n, more, err = f.s.SettlePendingTx(tx, f.system, max)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("settlement pass: %v", err)
+	}
+	return n, more
+}
+
+// K1 A4: the asynchronous worker records the same exact-keyed settlement
+// as the inline path, in bounded resumable passes, as the session SYSTEM
+// runtime actor with the earliest affecting update as cause; it is
+// idempotent, skips re-satisfied versions and is SYSTEM-only.
+func TestK1SettlementWorker(t *testing.T) {
+	f := newResourceFixture(t)
+	refs := []domain.ObligationRef{f.user, f.sysTests}
+	for i := range 3 {
+		src := seedPinned(t, f.st, fmt.Sprintf("k1w%d", i), fmt.Sprintf("k1wdir%d", i), domain.AuthorityUser, "Keep the suite green.")
+		refs = append(refs, f.repo2Obligation(t, src.ID, f.harness))
+	}
+	for _, ref := range refs {
+		f.assertBound(t, ref, f.system)
+	}
+	f.edit(t, hashOf("W2"))
+	earliest := recordID("ru_", "resource-update", "repo2", fmt.Sprintf("rep-%d", f.n)) // send names requests rep-<n>
+	f.edit(t, hashOf("W3"))
+	err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+		_, _, err := f.s.SettlePendingTx(tx, f.harness, 10)
+		return err
+	})
+	if !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+		t.Errorf("HARNESS worker pass: %v, want ErrInvalidAuthorityPromotion", err)
+	}
+	total, passes := 0, 0
+	for more := true; more; passes++ {
+		if passes > 10 {
+			t.Fatal("worker never finishes")
+		}
+		var n int
+		n, more = f.settle(t, 2)
+		if n > 2 {
+			t.Errorf("pass settled %d, bound 2", n)
+		}
+		total += n
+	}
+	if total != len(refs) {
+		t.Errorf("worker settled %d, want %d", total, len(refs))
+	}
+	runtime := domain.Principal{SessionID: testSession, Authority: domain.AuthoritySystem}
+	for _, ref := range refs {
+		if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+			t.Errorf("%s stored %s after settlement", ref.ObligationID, o.Status)
+		}
+		if _, pending := f.effective(t, ref); pending {
+			t.Errorf("%s still pending after settlement", ref.ObligationID)
+		}
+		h := (&evalFixture{fixture: f.fixture}).history(t, ref)
+		last := h[len(h)-1]
+		if last.Cause != domain.CauseResourceInvalidation || last.CauseRecordID != earliest || last.Actor != runtime || last.OriginAuthorizationRef == nil {
+			t.Errorf("%s settlement = %+v", ref.ObligationID, last)
+		}
+	}
+	// Idempotent, and a re-satisfied version is left alone.
+	f.assertBound(t, refs[0], f.system)
+	if n, _ := f.settle(t, 10); n != 0 {
+		t.Errorf("second pass settled %d", n)
+	}
+	if o := f.status(t, refs[0]); o.Status != domain.ObligationSatisfied {
+		t.Errorf("worker touched a re-satisfied version: %+v", o)
 	}
 }
