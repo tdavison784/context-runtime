@@ -1,6 +1,12 @@
 package domain
 
 func (e Event) ValidateV3() error {
+	// Operations is nil (every span ingests in order) or an explicit stream
+	// covering every span; an empty stream would store spans it never
+	// ingests (G4, SEC-1.11, SPEC-1.2).
+	if e.Operations != nil && len(e.Operations) == 0 {
+		return invalid("operation stream: empty stream; omit Operations or cover every span")
+	}
 	if err := e.validateShape(len(e.Operations) > 0); err != nil {
 		return err
 	}
