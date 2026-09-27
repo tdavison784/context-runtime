@@ -31,11 +31,13 @@ func TestPackageBoundaries(t *testing.T) {
 	// the internal/store interface, never a concrete store. The root package
 	// re-exports domain types and nothing else.
 	allowOnly["internal/policy"] = []string{"internal/domain"}
-	allowOnly["internal/ingest"] = []string{"internal/domain", "internal/directive", "internal/policy", "internal/store", "internal/graph", "internal/lifecycle", "internal/obligation", "internal/tools", "internal/retrieve"}
+	allowOnly["internal/ingest"] = []string{"internal/domain", "internal/directive", "internal/policy", "internal/store", "internal/graph", "internal/lifecycle", "internal/obligation", "internal/tools", "internal/retrieve", "internal/gcqueue"}
 	allowOnly["internal/graph"] = []string{"internal/domain", "internal/store"}
-	allowOnly["internal/obligation"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy"}
-	allowOnly["internal/lifecycle"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy", "internal/obligation"}
-	allowOnly["internal/tools"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy", "internal/retrieve"}
+	// GC request producers below lifecycle enqueue through this leaf (P3-39).
+	allowOnly["internal/gcqueue"] = []string{"internal/domain", "internal/store"}
+	allowOnly["internal/obligation"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy", "internal/gcqueue"}
+	allowOnly["internal/lifecycle"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy", "internal/obligation", "internal/gcqueue"}
+	allowOnly["internal/tools"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy", "internal/retrieve", "internal/gcqueue"}
 	allowOnly["internal/retrieve"] = []string{"internal/domain", "internal/store", "internal/graph", "internal/policy"}
 	allowOnly["."] = []string{"internal/domain"}
 	for pkg, allowed := range allowOnly {
