@@ -173,3 +173,31 @@ func TestSPEC19ReevaluateAfterRevalidation(t *testing.T) {
 		t.Errorf("not re-satisfied after revert: %+v", o)
 	}
 }
+
+// SPEC-1.10 (P3-16): a newer complete applicable FAIL rejects the subject's
+// current resource-bound satisfaction, including an authorized RESOURCE_BOUND
+// assertion; a run registered before the assertion is not newer.
+func TestSPEC110FailRejectsResourceBoundAssertion(t *testing.T) {
+	f := newEvalFixture(t)
+	earlier := f.newRun(t)
+	o := f.status(t, f.sysTests)
+	in := intent(f.sysTests, o.Revision, domain.ObligationSatisfied)
+	in.AssertionMode = domain.AssertionResourceBound
+	in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyWorkspace, ResourceID: "repo1", ResourceRevision: f.r.auth, Fingerprint: hashOf("W1")}}
+	if _, err := f.s.transition(t, f.st, f.system, in); err != nil {
+		t.Fatal(err)
+	}
+	f.report(t, earlier, domain.OutcomeFail, hashOf("W1"), nil)
+	if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied {
+		t.Fatalf("FAIL of a run registered before the assertion rejected it: %+v", o)
+	}
+	f.report(t, f.newRun(t), domain.OutcomeFail, hashOf("W1"), nil)
+	o = f.status(t, f.sysTests)
+	if o.Status != domain.ObligationUnresolved {
+		t.Fatalf("newer complete FAIL kept the resource-bound assertion: %+v", o)
+	}
+	h := (&evalFixture{fixture: f.fixture}).history(t, f.sysTests)
+	if last := h[len(h)-1]; last.Cause != domain.CauseProofRejected || last.GrantID != "" {
+		t.Errorf("rejection = %+v", last)
+	}
+}
