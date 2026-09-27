@@ -198,14 +198,22 @@ both forms share.
   `domain.DefaultGCTriggers()`'s all-five set, which also includes `POLICY`.
   The stated rule is that only a trigger with a producer on every path that
   can raise it is enabled by default (`FR-GC-004` permits a disabled
-  trigger); `POLICY` has no producer yet, so it stays off. **This rule is
-  presently violated for SUPERSESSION (SPEC-2.3, open, assigned W7):** two
-  supersession paths — agent keyed writes (`internal/tools/keyed.go`, via
-  `graph.ReplaceDirective`) and observation-state supersession
-  (`graph.FileObservationState`, via `internal/obligation/subject_state.go`)
-  — currently produce no `GCRequest` even though SUPERSESSION is enabled by
-  default; fixing this means either adding the missing producers or
-  disabling the trigger until they exist. An enabled trigger whose executor
+  trigger); `POLICY` has no producer yet, so it stays off. **SPEC-2.3
+  (PR #6 round 2): this rule was violated for SUPERSESSION on two paths;
+  one is now fixed in this reconciliation, one is fixed but not yet merged
+  here.** Observation-state supersession
+  (`graph.FileObservationState`, via `internal/obligation/subject_state.go`'s
+  `deriveState`) now enqueues through `gcqueue.Enqueue`, keyed by the new
+  state occurrence, under the service's own recorded policy — a first state
+  (nothing to supersede) enqueues nothing, and a task-less trigger persists
+  nothing per H4 (`internal/gcqueue`, W4b). Tests:
+  `TestObservationStateSupersessionEnqueuesGC_SPEC23`. Agent keyed writes
+  (`internal/tools/keyed.go`, via `graph.ReplaceDirective`) have the
+  equivalent fix on W5's branch (`63efafd fix(tools): keyed replacements
+  enqueue a SUPERSESSION GC request`), not yet merged into this
+  reconciliation as of this pass — until it lands, a keyed replacement
+  still produces no `GCRequest` even though SUPERSESSION is enabled by
+  default. An enabled trigger whose executor
   cannot run it (a stale `PolicyVersion` on the request, or a missing
   authorized collector) fails that attempt closed rather than silently
   succeeding; it stays pending for a later, correctly-configured attempt.
