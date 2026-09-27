@@ -137,3 +137,22 @@ func TestGCProducers_WorkingSnapshot_SPEC16(t *testing.T) {
 		}
 	})
 }
+
+// TestGCProducers_DefaultPolicy_SPEC16 (W3): once ingest produces them, the
+// default manifest enables SUPERSESSION and TTL, so an unconfigured ingester
+// creates their durable GC requests: one per turn advance, one per parsed
+// replacement and one per retiring Working snapshot.
+func TestGCProducers_DefaultPolicy_SPEC16(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		user, sys := principal(domain.AuthorityUser), principal(domain.AuthoritySystem)
+		f.mustIngest(user, userEvent("q1", "hi", false))
+		f.mustIngest(sys, sysEvent("v1", "## Pinned\n- [p] one\n"))
+		f.mustIngest(sys, sysEvent("v2", "## Pinned\n- [p] two\n"))
+		f.mustIngest(sys, sysEvent("w1", "## Working\n- step one\n"))
+		f.mustIngest(sys, sysEvent("w2", "## Working\n- step two\n"))
+		got := f.gcRequests()
+		if len(got[domain.GCTTL]) != 1 || len(got[domain.GCSupersession]) != 2 {
+			t.Fatalf("default policy: TTL %d (want 1), supersession %d (want 2): %+v", len(got[domain.GCTTL]), len(got[domain.GCSupersession]), got)
+		}
+	})
+}
