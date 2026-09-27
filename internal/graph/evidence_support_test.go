@@ -23,14 +23,17 @@ func rawTranscript(sess, id string, seq uint64, authority domain.Authority, kind
 }
 
 // transcriptCases is the FR-DOM-006 ruling: only a TOOL-authority tool_result
-// transcript is evidence; every conversation transcript, and any source
-// the ruling does not name, stays provenance-only (fail closed).
+// transcript can be evidence; every conversation transcript, and any source
+// the ruling does not name, stays provenance-only (fail closed). A raw TOOL
+// result without trusted provenance (no dispatcher TOOL_RESULT membership,
+// no HARNESS/SYSTEM ingestion) is provenance-only too (SEC-1.3); the
+// qualifying cases are in evidence_provenance_test.go.
 var transcriptCases = []struct {
 	authority domain.Authority
 	kind      domain.Kind
 	evidence  bool
 }{
-	{domain.AuthorityTool, domain.KindToolResult, true},
+	{domain.AuthorityTool, domain.KindToolResult, false},
 	{domain.AuthorityTool, domain.KindEvidence, false},
 	{domain.AuthorityUser, domain.KindUserMessage, false},
 	{domain.AuthorityAgent, domain.KindAssistantMessage, false},
@@ -39,10 +42,9 @@ var transcriptCases = []struct {
 	{domain.AuthorityRetrievedContent, domain.KindEvidence, false},
 }
 
-// TestEvidenceSupportQualifiesOnlyToolResultTranscripts: a keyed write or
-// completion claim citing a raw TOOL result as EVIDENCE_SUPPORT succeeds;
-// citing a USER/AGENT/SYSTEM/HARNESS transcript is rejected as support but
-// remains valid PROVENANCE.
+// TestEvidenceSupportQualifiesOnlyToolResultTranscripts: citing a transcript
+// without trusted provenance as EVIDENCE_SUPPORT is rejected, but every
+// transcript remains valid PROVENANCE.
 func TestEvidenceSupportQualifiesOnlyToolResultTranscripts(t *testing.T) {
 	for _, tc := range transcriptCases {
 		t.Run(fmt.Sprintf("%s/%s", tc.authority, tc.kind), func(t *testing.T) {

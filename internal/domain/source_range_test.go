@@ -120,9 +120,22 @@ func TestTurnOwnershipAndTTL(t *testing.T) {
 }
 
 func TestOnlyToolResultTranscriptsQualifyAsEvidenceSupport(t *testing.T) {
-	semantic := ContextItem{Role: RoleSemantic, Authority: AuthorityUser, Kind: KindFact}
-	if !semantic.QualifiesAsEvidenceSupport() {
-		t.Fatal("semantic item rejected as support")
+	for _, tc := range []struct {
+		item ContextItem
+		want bool
+	}{
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityUser, Kind: KindEvidence}, true},
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityHarness, Kind: KindArtifact}, true},
+		{ContextItem{Role: RoleProjection, Authority: AuthorityTool, Kind: KindToolResult}, true},
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityUser, Kind: KindFact}, false},
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityAgent, Kind: KindEvidence}, false},
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityRetrievedContent, Kind: KindEvidence}, false},
+		{ContextItem{Role: RoleCheckpoint, Authority: AuthorityHarness, Kind: KindEvidence}, false},
+		{ContextItem{Role: RoleProjection, Authority: AuthorityTool, Kind: KindFact}, false},
+	} {
+		if got := tc.item.QualifiesAsEvidenceSupport(); got != tc.want {
+			t.Errorf("%s %s %s: structural support = %v, want %v (SEC-1.3)", tc.item.Role, tc.item.Authority, tc.item.Kind, got, tc.want)
+		}
 	}
 	for _, tc := range []struct {
 		authority Authority

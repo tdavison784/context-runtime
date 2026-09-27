@@ -55,8 +55,14 @@ func planDerivedCoverage(tx store.Tx, actor domain.Principal, derivedID string, 
 		if err != nil {
 			return plan, err
 		}
-		if purpose == domain.CoverageEvidenceSupport && !source.QualifiesAsEvidenceSupport() {
-			return plan, domain.ErrInvalidRecord
+		if purpose == domain.CoverageEvidenceSupport {
+			ok, err := qualifiesAsEvidenceSupport(tx, source)
+			if err != nil {
+				return plan, err
+			}
+			if !ok {
+				return plan, domain.ErrInvalidRecord
+			}
 		}
 		plan.sources = append(plan.sources, source)
 	}

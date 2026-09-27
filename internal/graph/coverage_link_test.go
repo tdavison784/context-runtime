@@ -16,6 +16,7 @@ func TestDerivedCoverageWritesOneSetAndLinearEdges(t *testing.T) {
 			a := taskItem("s", "a", tx.NextSeq(), domain.AuthorityUser)
 			b := taskItem("s", "b", tx.NextSeq(), domain.AuthorityUser)
 			d := taskItem("s", "d", tx.NextSeq(), domain.AuthorityUser)
+			a.Kind, b.Kind = domain.KindEvidence, domain.KindEvidence // user-supplied evidence qualifies as support (SEC-1.3)
 			mustInsert(t, tx, a, b, d)
 			rels, err := LinkDerivedCoverage(tx, principal("s", domain.AuthorityUser), d.ID, []string{b.ID, a.ID}, domain.CoverageEvidenceSupport, "event", 2)
 			if err != nil {

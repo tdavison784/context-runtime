@@ -44,6 +44,7 @@ func (r *evidenceReader) MembershipsByItem(id string, _ store.Page) (store.Resul
 }
 
 type evidenceFixture struct {
+	t      *testing.T
 	tx     store.Tx
 	wrap   evidenceTx
 	sess   string
@@ -73,7 +74,10 @@ func (f *evidenceFixture) ingestedBy(it *domain.ContextItem, authority domain.Au
 	f.wrap.receipts[domain.CallerOccurrenceID(f.sess, eventID)] = domain.IngestReceipt{SessionID: f.sess, EventID: eventID, Principal: principal(f.sess, authority), Items: []domain.ContextItem{*it}}
 }
 
+// projectionOf stores src (the returned projection is inserted by the test)
+// and a projection record naming its exact content.
 func (f *evidenceFixture) projectionOf(src domain.ContextItem, kind domain.Kind) domain.ContextItem {
+	mustInsert(f.t, f.tx, src)
 	p := f.item(domain.RoleProjection, domain.AuthorityTool, kind)
 	f.wrap.reader.projections[p.ID] = domain.ProjectionRecord{ItemID: p.ID, SemanticMeta: domain.SemanticMeta{SessionID: f.sess}, Source: domain.ItemContentRef{ItemID: src.ID, ContentHash: src.ContentHash}}
 	return p
@@ -170,7 +174,7 @@ func TestEvidenceSupportRequiresTrustedEvidenceProvenance(t *testing.T) {
 				eachStore(t, func(t *testing.T, s store.Store) {
 					const sess = "sess-sec13"
 					err := s.Update(ctx, sess, func(tx store.Tx) error {
-						f := &evidenceFixture{tx: tx, sess: sess, wrap: evidenceTx{Tx: tx, reader: &evidenceReader{projections: map[string]domain.ProjectionRecord{}, members: map[string][]domain.ExchangeMember{}}, receipts: map[string]domain.IngestReceipt{}}}
+						f := &evidenceFixture{t: t, tx: tx, sess: sess, wrap: evidenceTx{Tx: tx, reader: &evidenceReader{projections: map[string]domain.ProjectionRecord{}, members: map[string][]domain.ExchangeMember{}}, receipts: map[string]domain.IngestReceipt{}}}
 						r, err := store.ReadSemantic(tx)
 						if err != nil {
 							return err
