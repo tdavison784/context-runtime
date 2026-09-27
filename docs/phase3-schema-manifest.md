@@ -111,4 +111,10 @@ tables. Source item content and source ranges retain their existing immutable st
   items, grants, events, operations, receipt snapshots and command details.
 - No migration invents creation identity, proof applicability, resource baselines,
   workspace bindings, run order, membership, owner liveness, leases, or successful
-  semantic receipts. Legacy declaration absence is unknown and fails closed.
+  semantic receipts. **Superseded by migration 0034 (PR #6 round-1 review,
+  SPEC-1.3/SPEC-2.5): legacy declaration absence is reconciled to a known
+  declaration where the ingest receipt snapshot establishes a pre-upgrade
+  keyed item's creation identity, and remains unknown (fails closed) only
+  where it does not. This seed document is not otherwise updated after the
+  contract freeze; see ADR 3's Phase 3 amendment for the authoritative,
+  current migration list.**
