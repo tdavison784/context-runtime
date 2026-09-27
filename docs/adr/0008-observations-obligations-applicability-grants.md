@@ -1,13 +1,22 @@
 # 8. Observation identities, obligation matcher/claim versions, applicability fingerprints, mutation grants, and invalidation rules
 
-Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through PR #6 review
-round 2 with W1/W2/W3/W4/W7's round-2 fixes fully merged (`phase-3-semantic-state`
-head `75f5c45`, all integrated). `go test -race -count=1 ./...` passes with
-no exceptions; every decision below cites real, `grep`-verified code and
-tests, not a proposed contract. **P3-42's required-test mapping is still
-incomplete** (see "Outstanding required tests" below — SPEC-1.23/SPEC-2.14): this ADR remains Proposed for
-that reason, not merely pending a formality. G1's applicability rule (§6/§12)
-is now fully landed, matcher and store sides both.)
+Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through PR #6
+round 4 (head `4ff6ca1`; SPEC-4.4/DUR-4.10 correct the prior "reconciled
+through ... round 2" header), with W1-W7's round-3 fixes — including
+DUR-3.1's derive-at-read subject applicability and per-resource
+live-proof-dependents cap — fully merged. `go test -race -count=1
+-timeout 45m ./...` passes with no exceptions; every decision below cites
+real, `grep`-verified code and tests, not a proposed contract. **P3-42's
+required-test mapping is still incomplete** (see "Outstanding required
+tests" below — SPEC-1.23/SPEC-2.14/SPEC-3.9/SPEC-4.9): this ADR remains
+Proposed for that reason, not merely pending a formality. G1's
+applicability rule (§6/§12) is fully landed, matcher and store sides both.
+**The commander's FROZEN K1 ruling (`.worktrees/_commander/K1-final.md`)
+retires this round's live-proof-dependents cap (DUR-3.1 (C)) for a
+derive-at-read validity design with no cap at all; K1's own implementation
+has not yet landed as of this pass (round 4, `round4-p6-fixes.md`, W4b
+lead) — see the K1 subsection below, recorded here as decided but not yet
+built, the same way DUR-3.1 itself was recorded one round earlier.**)
 Date: 2026-09-26
 
 ## Context
@@ -491,25 +500,151 @@ produces, so its release step carries the evaluating actor's own
 section's restricted invalidation path, even though both share the
 SATISFIED→UNRESOLVED direction.
 
-**Subject-state applicability moves from recorded to derived at read time
+**Subject-state applicability is derived at read time, landed
 (PR #6 round 3 commander ruling, DUR-3.1; High; amends P3-22/P3-23's
-"recorded ... marked in the same transaction" text; assigned W4b, not yet
-landed).** A file subject state's `Applicability` (§12) is currently
-written once, at state-derivation time (`ApplicabilityCurrent`,
-`internal/obligation/subject_state.go`) — matching P3-22/P3-23's original
-"marked in the same transaction" design. DUR-3.1 replaces this: file
-applicability is instead **derived at read time** from the authoritative
-resource state, never stored as a static flag that a later resource
-change would otherwise have to walk out and update by hand. Proof
-invalidation stays atomic (§13's transaction, unchanged), but is now
-bounded by a **per-resource live-dependents cap** validated against
-`s.policy.MaxTransactionWork`, failing closed with `ErrResourceLimit`
-rather than an unbounded scan. A non-`ALL` KNOWN resource report reads
-only its *actually affected* dependents through an ancestor-key index
-(the same directory-intersects-files rule §13 already requires, now as an
-index rather than a linear scan). This changes §12's "recorded" framing
-for the file-content case specifically; the OBSERVATION-derived
-`task_state` item itself (§11/§12, TOOL authority, C-6) is unaffected.
+"recorded ... marked in the same transaction" text; landed at head
+`4ff6ca1` — SPEC-4.4/DUR-4.10 correct the prior "assigned W4b, not yet
+landed" text).** All three parts are implemented:
+
+- **(A) Reports read only what they can affect.**
+  `lookup_live_proof_path` (migration 0045, frozen step
+  `0045/proofs/reconcile-live-proof-paths-v1`) files each live proof's
+  `CURRENT_PATH` dependency under its exact path plus the hex of every
+  ancestor directory, and each `WORKSPACE` dependency under `"ws"`;
+  `affectedProofs` (`internal/obligation/invalidate.go`) reads only the
+  resource's live proofs an accepted report actually touches through
+  that index — a non-`ALL` KNOWN report reads its exact
+  path/ancestor/workspace keys, never the resource's whole live set, and
+  `FIXED_CONTENT` dependencies are excluded from the index and are never
+  affected. This is the same directory-intersects-files rule §13 already
+  requires, now an index rather than a linear scan. Tests:
+  `TestDUR31ReportsReadOnlyAffectedProofs`,
+  `TestDUR31ReportsIgnoreUntouchedLiveState`.
+- **(B) Applicability is derived, not recorded, for planning.**
+  `obligation.Service.SubjectApplicability(tx, st)`
+  (`internal/obligation/read.go`) re-derives a file subject state's
+  applicability from the authoritative resource state at read time,
+  never stored as a static flag a later resource change would otherwise
+  have to walk out and update by hand; the stored
+  `SubjectState.Applicability` (`subject_state.go`) is written once, at
+  filing, and is filing-time-only metadata. Test:
+  `TestDUR31SubjectApplicabilityIsDerived`. **Residual gap, not yet fixed
+  as of this pass (DUR-4.7/SEC-4.11/SPEC-4.10; recorded here as an
+  explicit Phase 4 deferral, not a Phase 3 defect):** `PutSubjectState`
+  only ever writes `ApplicabilityCurrent`, so SQLite's 0032 partial index
+  and `SubjectStatesByResource` ("only CURRENT states") both still
+  describe a set that includes states `SubjectApplicability` would
+  derive STALE — and `SubjectApplicability` itself has no production
+  caller today: nothing populates `policy.EligibilitySnapshot
+  .Applicability` (`internal/policy/eligibility.go`), and
+  `retrieve.readGet`'s `ItemHistorical`/`ItemCurrent` labeling is a
+  directive/agent-key-namespace currentness check (`graph.IsCurrent`),
+  an unrelated dimension from this OBSERVATION-namespace one. A future
+  `EligibilitySnapshot` builder must fill `Applicability` from
+  `SubjectApplicability`; only then should 0032's index and
+  `SubjectStatesByResource`'s filter be removed or redocumented as
+  "every filed state" — neither is Phase 3 scope.
+- **(C) A per-resource live-dependents cap, landed but with known gaps
+  (DUR-4.2/DUR-4.3, SEC-4.1/SPEC-4.1, unfixed as of this pass; retired
+  outright by the commander's FROZEN K1 ruling once K1 itself lands — see
+  below).** `domain.Phase3Policy.MaxLiveProofDependents` (default 256,
+  `internal/policy/phase3.go`) bounds a resource's live
+  non-`FIXED_CONTENT` proof-dependency rows so invalidating all of them
+  fits half of `MaxTransactionWork` at 5 work units per row
+  (`domain/semantic.go`). At the cap, a new proof is refused before any
+  write (`dependentRoom`, `internal/obligation/evaluate.go`); a matcher
+  satisfaction is silently left as evidence only, and an explicit
+  resource-bound assertion fails `ErrResourceLimit`
+  (`internal/obligation/transition.go`) — this is refusal to record a
+  *new* proof, never "invalidation failing closed" on an existing one.
+  Tests: `TestDUR31AssertionRespectsDependentCap`,
+  `TestDUR31MatcherRespectsDependentCap`. **Round 4 review found the cap
+  does not actually bound what an ALL/UNKNOWN/resync report costs:**
+  `proofAffected` (`internal/obligation/invalidate.go`) pages *every*
+  dependency of each live proof, including rows on other resources and
+  `FIXED_CONTENT` rows the cap never counted, so a handful of
+  multi-resource proofs exhaust the cap while leaving the resource far
+  from actually bounded, and the wedge (C) exists to prevent — every
+  report on that resource refused, its SATISFIED proofs stuck stale — is
+  still reachable (SEC-4.1/SPEC-4.1, High). Nothing but an ALL/UNKNOWN
+  report or task completion releases cap room, so long-lived path-stable
+  proofs can hold it indefinitely and silently starve a later, unrelated
+  satisfaction (DUR-4.3). This is P3-23/P3-19 failing open exactly as (C)
+  exists to prevent, not an accepted residual risk.
+
+This changes §12's "recorded" framing for the file-content case
+specifically; the OBSERVATION-derived `task_state` item itself (§11/§12,
+TOOL authority, C-6) is unaffected.
+
+**K1 — the FROZEN commander ruling that replaces (C) (round 4;
+`.worktrees/_commander/K1-final.md`, background `proposal-K1.md`/
+`K1-sec.md`/`K1-spec.md`; not yet landed as of this pass, W4b lead with
+W2c/W3c/W7b/W1).** In place of a write-time cap, K1 makes proof validity
+**derived at read**, exactly as (B) already does for subject-state
+applicability, and removes the cap and its refusal path entirely (K1a,
+K1d):
+
+- **A1 — monotone, write-time-pointer validity.** A proof is valid iff
+  its resource is KNOWN and, for every recorded non-`FIXED_CONTENT`
+  dependency, no accepted update with a later revision *affects* it under
+  today's `change.affects` rule (a `WORKSPACE` dependency only on a
+  fingerprint change or lost freshness; a `CURRENT_PATH` dependency only
+  on a touch to its path, an ancestor directory, `ALL`, or `UNKNOWN`,
+  never on a same-content path report; `FIXED_CONTENT` never). This is
+  decided from two write-time pointers maintained in the report's own
+  O(1) transaction — per resource, `LastWorkspaceDivergenceRev`; per
+  `(resource, key)` for the exact path/each ancestor directory/`ALL`,
+  `LastAffectingRev` — so a dependency is invalid iff a relevant pointer
+  exceeds its recorded `ResourceRevision`. Validity is monotone: once a
+  proof is derived invalid it is never valid again, so a W1→W2→W1 revert
+  cannot resurrect it.
+- **A2 — one effective-status helper, everywhere status is selected.**
+  Every status-selected query — `CompleteTask`/X8, GC protection
+  (including `gc_snapshot`'s `OpenObligationSource`), the FR-DOM-007
+  mandatory set, eligibility, the `SATISFIES` view, and inspection — also
+  selects stored-SATISFIED resource-bound versions and applies the
+  helper; a test fails on any other `domain.ObligationSatisfied`/
+  resource-bound `.Status` comparison outside the helper, the transition
+  table, and the store guards.
+- **A3/A4 — inline settle plus an async audit worker.** Before any
+  transition on a version whose effective status differs from its stored
+  status, the same transaction first writes the restricted
+  `RESOURCE_INVALIDATION` transition (cause: the earliest affecting
+  update, exact key `(proofID, causingUpdate)`, `OriginAuthorizationRef`
+  per C-10), then applies the requested transition from the effective
+  state — closing the gap where a fresh PASS over a stale proof would
+  otherwise take the ordinary `PROOF_REFRESH` path and the record would
+  never show the intervening invalidation. A durable, resumable async
+  audit worker (the GC-queue-cursor pattern) writes the same
+  exact-keyed settlement afterward, idempotent with the inline write, as
+  SYSTEM, under CAS on the obligation revision, recording the causing
+  update's actual reporter and `OriginAuthorizationRef` separately; it
+  never blocks a report and correctness never depends on it having run.
+- **A5 — INV-16 and the commit guard.** INV-16 becomes "SATISFIED
+  (effective) is backed by an assertion or proof that is valid at read";
+  the commit guard refuses a SATISFIED write whose proof is derived
+  invalid at commit, and the generated-history property is amended to
+  "stored SATISFIED ⇒ effective SATISFIED, or pending settlement whose
+  causing update is committed."
+- **A6 — the cap is retired, not narrowed.** Migration 0046's column and
+  the recorded `MaxLiveProofDependents` field stay (P3-40 request hashes
+  already include them, and committed migrations are never edited), but
+  K1 stops validating and using the field entirely — a historical policy
+  therefore keeps validating under its own recorded rule. Migration
+  0045's ancestor-key index is reused for A1's write-time pointers rather
+  than dropped.
+- **A7 — disclosure and a bounded fail-closed rule.** Pending settlement
+  is visible only through access-filtered obligation reads, as a fixed
+  code with no update, path, or ID; an unreadable pointer or dependency
+  makes the effective status UNRESOLVED (fail closed); dependencies per
+  proof are bounded at creation (the existing claim bound) so derivation
+  always fits the transaction's work budget regardless of a resource's
+  live-proof count.
+
+K1e's SDD amendment is recorded below, applied now per the commander's
+FROZEN ruling, independent of K1's own implementation landing — the same
+precedent SDD v0.9/v0.10's freeze-time amendments already set for this
+repository (ADR 19).
 
 **A changed directory intersects files under it (PR #6 round 1, SPEC-1.18).**
 `change.affects` (`internal/obligation/invalidate.go:39,50`) originally
@@ -698,6 +833,47 @@ FROZEN "Required normative amendments at freeze" table approved them
   resource-bound proof. Newer applicable rejected proof and proof refresh use
   the defined audited transitions."
 
+## SDD amendment (K1e, applied in v0.11 ahead of K1's own implementation)
+
+These sentences are applied to SDD.md as v0.11, per the commander's FROZEN
+K1 ruling (`.worktrees/_commander/K1-final.md`, adopting `proposal-K1.md`
+K1a/K1d/K1e as amended by `K1-spec.md` A1-A7) — the same precedent SDD
+v0.9/v0.10's freeze-time amendments already set (ADR 19): the normative
+text is applied on the ruling's freeze, independent of whether K1's own
+code has landed. This ADR does not itself edit SDD.md.
+
+- **FR-OBL-005.** Add: "A resource-bound obligation's SATISFIED status is
+  its effective status: derived at read from whether the current proof's
+  recorded dependencies still match the authoritative resource state,
+  never read from a stored status flag as authoritative. A resource
+  change that makes a stored-SATISFIED proof's effective status no
+  longer SATISFIED is recorded atomically by the next transition that
+  observes it, and independently by a bounded, resumable asynchronous
+  audit worker; the effective status is correct whether or not that
+  worker has run." This replaces this ADR's DUR-3.1 (C) live-proof-
+  dependents cap — a write-time refusal that round 4 review
+  (SEC-4.1/SPEC-4.1) found does not actually bound invalidation work —
+  with the derive-at-read design the "Subject-state applicability"
+  section above already uses for planning; K1 extends the same technique
+  to SATISFIED status itself.
+- **INV-16.** Replace "A current obligation can be SATISFIED only by proof
+  applicable to the declared current resource state or an explicit
+  authorized assertion." with: "A current obligation's effective
+  SATISFIED status (FR-OBL-005) is backed by an assertion or proof that is
+  valid at read, applicable to the declared current resource state; a
+  stored SATISFIED status whose proof has since become invalid is never
+  presented as current, whether or not its audit transition has yet been
+  recorded."
+
+**Not yet reflected in either amendment, because it depends on K1's own
+implementation landing:** the exact monotone validity rule (K1-spec.md
+A1), the "one effective-status helper" enforcement test (A2), the inline
+settle plus async audit worker (A3/A4), the commit guard and property-test
+wording (A5), and A6/A7's disclosure and bounded-dependency rules. Those
+remain this ADR's own Decision-section text once implemented, not SDD
+normative prose — the K1 subsection above records them as decided,
+pending code.
+
 ## Consequences / compatibility impact
 
 - `internal/obligation` is the sole owner of P3-12 through P3-23, 20 source
@@ -758,14 +934,18 @@ gate checklist (`phase3-decisions.md`):
 Serialized U delta/rebase, actual inherited-request removal, and rebase
 omission/order are explicitly Phase 5 and are not part of this gate.
 
-## Outstanding required tests (SPEC-1.23, SPEC-2.14)
+## Outstanding required tests (SPEC-1.23, SPEC-2.14, SPEC-3.9, SPEC-4.9)
 
 P3-42 requires every decision above to map to its named required tests.
 PR #6 review round 1 (`r6-spec1.md`, SPEC-1.23) searched every package and
 found no real counterpart for the required-test bullets below. Round 2
 (`r6-spec2.md`, SPEC-2.14) reconfirmed the gap is still open, noting that
 exactly three bullets have since gained a real test as a side effect of
-their round-1 code fix landing:
+their round-1 code fix landing. Rounds 3 and 4 (`r6-spec3.md` SPEC-3.9,
+`r6-spec4.md` SPEC-4.9) reconfirmed the list below unchanged again — no
+further bullet has gained a test, and no commander deferral ruling has
+been recorded for any of them, so the gate item stays open and this ADR
+correctly stays Proposed on this ground alone, independent of K1:
 
 - **Resolved.** **P3-1** "TargetCall sequence reuse rejected" for Phase 3
   record families — `internal/store/storetest`'s
