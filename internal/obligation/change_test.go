@@ -35,7 +35,7 @@ func TestSemanticChangeRecords(t *testing.T) {
 		sat.Actor != f.harness || sat.SourceAuthority != domain.AuthoritySystem || sat.CauseID != obs.ID || sat.BeforeRevision != 1 || sat.AfterRevision != 2 {
 		t.Errorf("satisfaction change = %+v", sat)
 	}
-	if inv.Cause != domain.CauseResourceInvalidation || inv.GrantID != "" || inv.BeforeStatus != "SATISFIED" || inv.AfterStatus != "UNRESOLVED" ||
+	if inv.Cause != domain.CauseResourceInvalidation || inv.GrantID != "" || inv.BeforeStatus != "SATISFIED" || inv.AfterStatus != "UNRESOLVED" || inv.CauseID == "" ||
 		inv.BeforeRevision != 2 || inv.AfterRevision != 3 || inv.Actor != f.harness {
 		t.Errorf("invalidation change = %+v", inv)
 	}

@@ -34,9 +34,15 @@ func appendTransition(tx store.Tx, sem store.SemanticTx, o domain.ObligationVers
 	if err := tx.AppendLifecycleEvent(ev); err != nil {
 		return domain.ObligationVersion{}, err
 	}
-	cause := t.CauseRecordID
-	if cause == "" {
-		cause = t.RequestID
+	// The cause names a stored record (P3-36): the resource update or
+	// rejecting observation of a runtime consequence, the evaluated
+	// observation of a matcher step, or else the transition itself.
+	cause := t.ID
+	switch {
+	case t.CauseRecordID != "":
+		cause = t.CauseRecordID
+	case t.Cause == domain.CauseMatcher || t.Cause == domain.CauseProofRefresh:
+		cause = t.RequestID // the observation that was evaluated
 	}
 	ref := domain.ObligationRef{SessionID: t.SessionID, ObligationID: t.ObligationID, Version: t.Version}
 	err = sem.InsertSemanticChange(domain.SemanticChange{
