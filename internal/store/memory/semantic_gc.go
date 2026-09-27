@@ -168,7 +168,7 @@ func (t *semTx) InsertCollectReceipt(c domain.CollectReceipt) error {
 	}
 	if c.GCRequestID != "" {
 		g, ok := t.r.sem.gc.requests.peek(c.GCRequestID)
-		if !ok || g.RequestID != c.RequestID {
+		if !ok || !store.CollectReceiptOf(g, c.RequestID) {
 			return invalid("collect receipt %s: GC request %s is not stored with its request identity", c.ID, c.GCRequestID)
 		}
 	}
@@ -195,8 +195,10 @@ func (t *semTx) InsertGCResult(g domain.GCResult) error {
 	if !ok {
 		return invalid("GC result %s: request %s is not stored", g.ID, g.GCRequestID)
 	}
-	if c, ok := t.r.sem.gc.receipts.peek(g.CollectReceiptID); !ok || c.GCRequestID != g.GCRequestID {
-		return invalid("GC result %s: receipt %s is not its request's collect receipt", g.ID, g.CollectReceiptID)
+	if g.Outcome == domain.GCCollected {
+		if c, ok := t.r.sem.gc.receipts.peek(g.CollectReceiptID); !ok || c.GCRequestID != g.GCRequestID {
+			return invalid("GC result %s: receipt %s is not its request's collect receipt", g.ID, g.CollectReceiptID)
+		}
 	}
 	t.r.sem.gc.results.put(g.GCRequestID, g)
 	t.r.sem.gc.resultIDs.put(g.ID, true)

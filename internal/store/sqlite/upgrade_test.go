@@ -988,3 +988,25 @@ func TestUpgradeCurrentWorkspaceBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeGCResultOutcome checks migration 0039 on a database migrated
+// through 0038 (H3): a result stored before it reads back COLLECTED with
+// no reason and validates.
+func TestUpgradeGCResultOutcome(t *testing.T) {
+	l := openLegacy(t, 38)
+	l.insert("gc_result", domain.GCResult{SemanticMeta: storetest.Meta("s", "gr", 5), GCRequestID: "gc1", CollectReceiptID: "cr1"}, nil)
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := r.GCResult("gc1")
+		if err != nil || g.Outcome != domain.GCCollected || g.Reason != "" || g.Validate() != nil {
+			t.Errorf("GCResult after 0039 = %+v (%v)", g, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

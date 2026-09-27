@@ -85,7 +85,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	}
 	if gcRequestID != "" {
 		link := domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID(p.SessionID, gcRequestID), SessionID: p.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
-			GCRequestID: gcRequestID, CollectReceiptID: receipt.ID}
+			GCRequestID: gcRequestID, CollectReceiptID: receipt.ID, Outcome: domain.GCCollected}
 		if err = sem.InsertGCResult(link); err != nil {
 			return out, err
 		}

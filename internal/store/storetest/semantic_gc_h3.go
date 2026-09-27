@@ -105,4 +105,3 @@ func testSemanticGCBatchReceipts(t *testing.T, s store.Store) {
 		return nil
 	})
 }
-

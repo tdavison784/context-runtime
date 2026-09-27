@@ -186,8 +186,20 @@ func (r GCResult) Validate() error {
 	if err := r.SemanticMeta.Validate(); err != nil {
 		return err
 	}
-	if !semanticID(r.GCRequestID) || !semanticID(r.CollectReceiptID) {
-		return invalid("GC result: request and effect receipt required")
+	if !semanticID(r.GCRequestID) {
+		return invalid("GC result: request required")
+	}
+	switch r.Outcome {
+	case GCCollected:
+		if !semanticID(r.CollectReceiptID) || r.Reason != "" {
+			return invalid("GC result: COLLECTED names its effect receipt and no reason")
+		}
+	case GCFailed:
+		if r.CollectReceiptID != "" || !r.Reason.Valid() {
+			return invalid("GC result: FAILED names a closed reason and no receipt")
+		}
+	default:
+		return invalid("GC result: outcome required")
 	}
 	return nil
 }
