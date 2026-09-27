@@ -172,7 +172,20 @@ provenance only and never a silent resource dependency (`ATTESTATION cannot
 carry a resource proof` per the schema manifest). **UNBOUND obligations
 (§W4-21):** a RESOURCE_BOUND assertion on an UNBOUND obligation is
 `ErrUnknownApplicability` — it can still be attested, matching W2's
-proof-target check.
+proof-target check. **A claim must cover the obligation's own target
+(PR #6 round 1, SPEC-1.11/SPEC-2.13).** `checkResourceClaims` originally
+accepted any well-formed dependency claim without comparing it to
+`o.TargetSpec`, so a RESOURCE_BOUND assertion could cite an unrelated
+resource or path and still satisfy the obligation — attestation semantics
+under a RESOURCE_BOUND label. It now requires at least one dependency that
+actually covers the target: a `DependencyWorkspace` claim must match the
+target resource's authoritative revision and fingerprint exactly: a
+`DependencyCurrentPath` claim must resolve through the same current-path
+read `file_read` observations use (§9/§10) and match the target's locator;
+and a `DependencyFixedContent` claim is meaningful only as the required
+snapshot of a `FIXED_HASH` file target, matching `TargetSpec.File.RequiredHash`
+exactly — anywhere else it is rejected as an unbound claim, never silently
+accepted as vacuous coverage.
 
 **Alternative considered and rejected (C-14).** Claude M10 proposed inferring
 `Applicability = ASSERTED` for a bare assertion and treating a citation
@@ -236,6 +249,19 @@ a SYSTEM source is never sufficient. The exception affects rendering only —
 it never satisfies, waives, protects, or permits completion
 (`TestUnfinishedTaskObligations`, ADR 16 §P3-9 amendment).
 
+**A source's declared obligations are bounded (PR #6 round 1, DUR-1.5,
+G2/SPEC-2.13).** `domain.Phase3Policy.ObligationDeclarationLimit()`
+(`internal/domain/semantic.go`) is `min(MaxTargets, MaxObligationsPerSource)`
+— the tighter of the policy's own target-set cap and a fixed 256 — and
+`createObligation` (`internal/obligation/declare.go:226`) refuses to bind
+one more obligation version to a source than this limit *before writing
+anything*, returning `ErrResourceLimit`. Without this bound, a source could
+accumulate more declared obligation versions than its tightest by-source
+consumer read (the lifecycle replacement/retirement path, ADR 16) could ever
+page, making the source permanently unreplaceable, undemoteable,
+unarchivable, and uncollectible — the same "producer limits never exceed
+consumer limits" principle round 1's G2 ruling states generally.
+
 ### 9. Resource currentness has an authenticated, ordered source (§P3-19, C-9, §W4-10..16)
 
 `obligation.RegisterResourceTx` and `obligation.ReportResourceChangeTx`
@@ -290,6 +316,21 @@ reconciliation.
 an exact TOOL evidence occurrence; only the run's registering reporter may
 report against it (§W4-12 restated), and malformed input is rejected
 atomically (C-7).
+
+**Evidence is bound to the run's own execution, not merely to the caller's
+say-so (PR #6 round 1, SPEC-1.12).** "Validate same session, execution and
+boundary" (P3-21) originally checked only that the intent's `ExecutionID`
+matched the run's — the reporter agreeing with itself, not a fact about the
+evidence occurrence. `evidenceInRun` (`internal/obligation/observation.go:221`)
+now additionally requires the evidence's own `Source.ToolCallID` to equal
+`run.ExecutionID`: **the documented harness contract is that a harness
+reporting an observation must set `ExecutionID` to the producing tool
+call's ID**, so the evidence occurrence a run cites is provably the one that
+tool call actually produced, not an unrelated TOOL item reused across runs.
+**Residual (SPEC-2.8, assigned W2, still open):** this check exists only at
+the service layer; `InsertObservation` in both store backends does not
+independently verify `ev.Source.ToolCallID == run.ExecutionID`, so P3-21's
+"validated by service and store" is only half true as of this pass.
 
 **T07 evidence ruling (§W4-22, commander-approved beyond the frozen text).**
 TOOL evidence may be TURN- or TASK-scoped **if it has exactly the run's own
@@ -347,6 +388,16 @@ produces, so its release step carries the evaluating actor's own
 `GrantID`, never `OriginAuthorization` — refresh is not part of this
 section's restricted invalidation path, even though both share the
 SATISFIED→UNRESOLVED direction.
+
+**A changed directory intersects files under it (PR #6 round 1, SPEC-1.18).**
+`change.affects` (`internal/obligation/invalidate.go:39,50`) originally
+compared a reported path to a dependency's path by exact string equality
+only, so a report naming a changed directory (e.g. `src`) never invalidated
+a `CURRENT_CONTENT` dependency on a file under it (`src/a.go`) — the
+opposite of P3-23's required conservative intersection. It now matches
+`p == q || strings.HasPrefix(p, q+"/")`: a directory report affects every
+path under it, and a sibling whose name merely shares a prefix (`doc` vs.
+`docs`) stays distinct because the comparison requires the exact separator.
 
 **Q-9 (commander-approved beyond the frozen text, §W4-17).** A matcher only
 ever satisfies obligations the reporting principal can access; rejection and
