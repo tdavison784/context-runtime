@@ -54,6 +54,7 @@ type resState struct {
 	runsBySubj   map[string][]seqRef
 	observations map[string]domain.ObservationRecord
 	obsByRun     map[string][]seqRef
+	runClosing   map[string]string // run -> closing observation (H2)
 	subjects     map[subjectKey]domain.SubjectState
 	subjByRes    map[string][]seqRef
 	subjIDs      map[string]subjectKey
@@ -65,7 +66,7 @@ func newResState() resState {
 		updByRes: map[string][]seqRef{}, updByPath: map[resPath][]seqRef{}, updRequests: map[resRequest]string{}, states: map[string]domain.ResourceState{},
 		paths: map[string]domain.ResourcePathState{}, wbindings: map[wbKey]domain.WorkspaceBinding{}, wbLatest: map[string]uint64{},
 		wbByContext: map[wsContext][]seqRef{}, runs: map[string]domain.ObservationRun{}, runsBySubj: map[string][]seqRef{},
-		observations: map[string]domain.ObservationRecord{}, obsByRun: map[string][]seqRef{}, subjects: map[subjectKey]domain.SubjectState{},
+		observations: map[string]domain.ObservationRecord{}, obsByRun: map[string][]seqRef{}, runClosing: map[string]string{}, subjects: map[subjectKey]domain.SubjectState{},
 		subjByRes: map[string][]seqRef{}, subjIDs: map[string]subjectKey{},
 	}
 }
@@ -86,6 +87,7 @@ type resView struct {
 	runsBySubj   orderedIndex[string]
 	observations table[string, domain.ObservationRecord]
 	obsByRun     orderedIndex[string]
+	runClosing   table[string, string]
 	subjects     table[subjectKey, domain.SubjectState]
 	subjByRes    orderedIndex[string]
 	subjIDs      table[string, subjectKey]
@@ -101,7 +103,8 @@ func newResView(st *resState, w bool) resView {
 		wbLatest: newTable(st.wbLatest, w, same[uint64]), wbByContext: newOrderedIndex(st.wbByContext, w),
 		runs: newTable(st.runs, w, domain.ObservationRun.Clone), runsBySubj: newOrderedIndex(st.runsBySubj, w),
 		observations: newTable(st.observations, w, domain.ObservationRecord.Clone), obsByRun: newOrderedIndex(st.obsByRun, w),
-		subjects: newTable(st.subjects, w, domain.SubjectState.Clone), subjByRes: newOrderedIndex(st.subjByRes, w),
+		runClosing: newTable(st.runClosing, w, same[string]),
+		subjects:   newTable(st.subjects, w, domain.SubjectState.Clone), subjByRes: newOrderedIndex(st.subjByRes, w),
 		subjIDs: newTable(st.subjIDs, w, same[subjectKey]),
 	}
 }
@@ -127,6 +130,7 @@ func (v *resView) commit() {
 	v.runsBySubj.commit()
 	v.observations.commit()
 	v.obsByRun.commit()
+	v.runClosing.commit()
 	v.subjects.commit()
 	v.subjByRes.commit()
 	v.subjIDs.commit()
@@ -452,10 +456,11 @@ func (t *semTx) InsertObservation(o domain.ObservationRecord) error {
 		return invalid("observation %s: evidence is not a stored TOOL item in its boundary", o.ID)
 	}
 	// A run closes once (DUR-1.1, G1).
-	for r := range t.r.sem.res.obsByRun.after(o.RunID, seqRef{}) {
-		if prior, _ := t.r.sem.res.observations.peek(r.id); store.ClosesRun(prior) {
-			return fmt.Errorf("observation %s: run %s already closed with %s: %w", o.ID, o.RunID, prior.ID, domain.ErrInvalidTransition)
-		}
+	if prior, ok := t.r.sem.res.runClosing.peek(o.RunID); ok {
+		return fmt.Errorf("observation %s: run %s already closed with %s: %w", o.ID, o.RunID, prior, domain.ErrInvalidTransition)
+	}
+	if store.ClosesRun(o) {
+		t.r.sem.res.runClosing.put(o.RunID, o.ID)
 	}
 	t.r.sem.res.observations.put(o.ID, o)
 	t.r.sem.res.obsByRun.add(o.RunID, seqRef{o.Seq, o.ID})
@@ -586,4 +591,50 @@ func (r semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.P
 		keys = append(keys, resPath{resourceID, k})
 	}
 	return page(p, dedup(mergeAfter(&r.r.sem.res.updByPath, keys, cursorRef(p.After))), loadAll(&r.r.sem.res.updates, ident))
+}
+
+// LatestResourceUpdateAffectingPath implements store.ResourceReader: the
+// newest entry of each affecting key in the path-change index, O(depth).
+func (r semRead) LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error) {
+	if err := r.r.check(); err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	affect, err := store.PathAffectKeys(path)
+	if err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	var newest seqRef
+	for _, k := range append([]string{allPathsKey}, affect...) {
+		for ref := range r.r.sem.res.updByPath.before(resPath{resourceID, k}, seqRef{}) {
+			if newest.less(ref) {
+				newest = ref
+			}
+			break
+		}
+	}
+	if newest == (seqRef{}) {
+		return domain.ResourceUpdate{}, notFound("resource update affecting", path)
+	}
+	u, ok := r.r.sem.res.updates.get(newest.id)
+	if !ok {
+		return domain.ResourceUpdate{}, domain.ErrIntegrity
+	}
+	return u, nil
+}
+
+// ClosingObservation implements store.ResourceReader through the run's
+// closing pointer, written with the closing observation.
+func (r semRead) ClosingObservation(runID string) (domain.ObservationRecord, error) {
+	if err := r.r.check(); err != nil {
+		return domain.ObservationRecord{}, err
+	}
+	id, ok := r.r.sem.res.runClosing.get(runID)
+	if !ok {
+		return domain.ObservationRecord{}, notFound("closing observation of run", runID)
+	}
+	o, ok := r.r.sem.res.observations.get(id)
+	if !ok {
+		return domain.ObservationRecord{}, domain.ErrIntegrity
+	}
+	return o, nil
 }

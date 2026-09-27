@@ -605,3 +605,9 @@ func (t *transaction) checkProofNotStale(ref domain.ObligationRef, proofID strin
 	}
 	return nil
 }
+
+// ObligationTransition implements store.ProofReader: one primary-key read.
+func (s semRead) ObligationTransition(id string) (domain.ObligationTransition, error) {
+	var tr domain.ObligationTransition
+	return tr, s.t.get("obligation_transition", id, 0, &tr)
+}

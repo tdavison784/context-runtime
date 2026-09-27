@@ -19,6 +19,11 @@ type ResourceReader interface {
 	// path or one of its ancestor directories. Its cost scales with those,
 	// not with unrelated edits (G2, SEC-1.7, DUR-1.2).
 	ResourceUpdatesAffectingPath(resourceID, path string, page Page) (ResultPage[domain.ResourceUpdate], error)
+	// LatestResourceUpdateAffectingPath is the newest update of resourceID
+	// that may change path (ALL-paths, or naming path or an ancestor
+	// directory), ErrNotFound when none: one keyed lookup per path
+	// component, independent of history (H2, DUR-2.2).
+	LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error)
 	ResourcePathState(locator domain.ResourceLocator) (domain.ResourcePathState, error)
 	WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error)
 	WorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
@@ -28,6 +33,10 @@ type ResourceReader interface {
 	// (Seq, ID) cursor is also the deterministic pre-execution run order.
 	RunsBySubject(subjectKey string, page Page) (ResultPage[domain.ObservationRun], error)
 	ObservationsByRun(runID string, page Page) (ResultPage[domain.ObservationRecord], error)
+	// ClosingObservation is the run's closing observation (ClosesRun),
+	// ErrNotFound while the run is open: one keyed lookup, independent of
+	// the run's partial reports (H2, DUR-2.6).
+	ClosingObservation(runID string) (domain.ObservationRecord, error)
 	SubjectState(subjectKey, taskID string, access domain.AccessBoundary) (domain.SubjectState, error)
 	// Only CURRENT states, in first-filing order: STALE/UNKNOWN history is
 	// not a live dependent and never counts toward a page (G2, SEC-1.8).
