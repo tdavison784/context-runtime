@@ -46,3 +46,12 @@ func (g *semanticGuard) InsertCollectReceipt(v domain.CollectReceipt) error {
 	g.base.noteWrite(err)
 	return err
 }
+
+func (g *semanticGuard) PutGCProgress(v domain.GCProgress, expected uint64) (domain.GCProgress, error) {
+	if g.base.err != nil {
+		return domain.GCProgress{}, g.base.err
+	}
+	out, err := g.backend.PutGCProgress(v, expected)
+	g.base.noteWrite(err)
+	return out, err
+}
