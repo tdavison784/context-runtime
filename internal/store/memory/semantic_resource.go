@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	path "path"
 	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -60,6 +61,12 @@ type resState struct {
 	subjects     map[subjectKey]domain.SubjectState
 	subjByRes    map[string][]seqRef
 	subjIDs      map[string]subjectKey
+	// K1 A1 write-time pointers, raised in the report's own transaction:
+	// divergence by resource, affecting raises by resource and key (the
+	// allPathsKey entry is the ALL key). Entries are
+	// (ResultingAuthoritativeRevision, update ID), so revisions order them.
+	divRaises    map[string][]seqRef
+	affectRaises map[resPath][]seqRef
 }
 
 func newResState() resState {
@@ -70,6 +77,7 @@ func newResState() resState {
 		wbByContext: map[wsContext][]seqRef{}, wbCurrent: map[wsContext][]seqRef{}, runs: map[string]domain.ObservationRun{}, runsBySubj: map[string][]seqRef{},
 		observations: map[string]domain.ObservationRecord{}, obsByRun: map[string][]seqRef{}, runClosing: map[string]string{}, highWater: map[subjectKey]uint64{}, subjects: map[subjectKey]domain.SubjectState{},
 		subjByRes: map[string][]seqRef{}, subjIDs: map[string]subjectKey{},
+		divRaises: map[string][]seqRef{}, affectRaises: map[resPath][]seqRef{},
 	}
 }
 
@@ -95,6 +103,8 @@ type resView struct {
 	subjects     table[subjectKey, domain.SubjectState]
 	subjByRes    orderedIndex[string]
 	subjIDs      table[string, subjectKey]
+	divRaises    orderedIndex[string]
+	affectRaises orderedIndex[resPath]
 }
 
 func newResView(st *resState, w bool) resView {
@@ -111,7 +121,8 @@ func newResView(st *resState, w bool) resView {
 		runClosing: newTable(st.runClosing, w, same[string]),
 		highWater:  newTable(st.highWater, w, same[uint64]),
 		subjects:   newTable(st.subjects, w, domain.SubjectState.Clone), subjByRes: newOrderedIndex(st.subjByRes, w),
-		subjIDs: newTable(st.subjIDs, w, same[subjectKey]),
+		subjIDs:   newTable(st.subjIDs, w, same[subjectKey]),
+		divRaises: newOrderedIndex(st.divRaises, w), affectRaises: newOrderedIndex(st.affectRaises, w),
 	}
 }
 
@@ -142,6 +153,8 @@ func (v *resView) commit() {
 	v.subjects.commit()
 	v.subjByRes.commit()
 	v.subjIDs.commit()
+	v.divRaises.commit()
+	v.affectRaises.commit()
 }
 
 func conflict(format string, args ...any) error {
@@ -260,6 +273,22 @@ func (t *semTx) PutResourceState(s domain.ResourceState, expectedRevision uint64
 	if found && s.AuthoritativeRevision <= cur.AuthoritativeRevision {
 		return domain.ResourceState{}, transition("resource state %s: revision %d does not advance %d", s.ResourceID, s.AuthoritativeRevision, cur.AuthoritativeRevision)
 	}
+	// K1 A1 write-time pointer raises, in the report's own transaction and
+	// without any dependent fan-out: the divergence pointer rises on lost
+	// freshness or a changed fingerprint (the first report's fingerprint is
+	// a change), the ALL affecting key rises on UNKNOWN and ALL-paths
+	// reports, and each changed path's exact key rises unless this
+	// transaction records the path's prior content for this update. The
+	// path keys resolve at commit, after the report's content writes.
+	if u.Freshness == domain.ResourceUnknown || u.WorkspaceFingerprint != cur.WorkspaceFingerprint {
+		t.r.sem.res.divRaises.add(u.ResourceID, seqRef{u.ResultingAuthoritativeRevision, u.ID})
+	}
+	if u.Freshness == domain.ResourceUnknown || u.AllPaths {
+		t.r.sem.res.affectRaises.add(resPath{u.ResourceID, allPathsKey}, seqRef{u.ResultingAuthoritativeRevision, u.ID})
+	}
+	for _, q := range u.ChangedPaths {
+		t.t.addPathRaise(pathRaise{resource: u.ResourceID, path: q, updateID: u.ID, revision: u.ResultingAuthoritativeRevision})
+	}
 	s.Revision = expectedRevision + 1
 	t.r.sem.res.states.put(s.ResourceID, s)
 	t.t.sequencedWrite(s.Seq)
@@ -302,6 +331,12 @@ func (t *semTx) PutResourcePathState(s domain.ResourcePathState, expectedRevisio
 	if found && s.ResourceRevision <= cur.ResourceRevision {
 		return domain.ResourcePathState{}, transition("path state %s: revision %d does not advance %d", s.Locator.Path, s.ResourceRevision, cur.ResourceRevision)
 	}
+	// K1 A1: the write settles whether this update's pending raise of the
+	// path stands — recording the row's prior content spares the raise,
+	// changing it forces it (resolved at commit, so write order inside the
+	// report's transaction does not matter).
+	t.t.recordPathWrite(pathWrite{resource: s.Locator.ResourceID, path: path.Join(s.Locator.BaseDir, s.Locator.Path),
+		updateID: s.ResourceUpdateID, revision: s.ResourceRevision, same: found && cur.ContentHash == s.ContentHash})
 	s.Revision = expectedRevision + 1
 	t.r.sem.res.paths.put(key, s)
 	t.t.sequencedWrite(s.Seq)

@@ -36,6 +36,7 @@ type proofState struct {
 	liveByRes   map[string][]seqRef // current proofs by resource
 	liveByPath  map[depKey][]seqRef // live CURRENT_PATH dependents by (resource, ancestor path) (DUR-3.1)
 	liveWS      map[string][]seqRef // live WORKSPACE dependents by resource (DUR-3.1)
+	liveAll     map[string][]seqRef // every live proof under "" in (Seq, ID) order (K1 A4)
 	dependents  map[string]uint64   // live non-FIXED dependency rows per resource (DUR-3.1)
 }
 
@@ -45,7 +46,7 @@ func newProofState() proofState {
 		deps: map[string]domain.ProofDependency{}, depsByProof: map[string][]seqRef{}, assertions: map[string]domain.AssertionRecord{},
 		details: map[string]domain.TransitionDetail{}, trByVersion: map[obligationKey][]seqRef{}, owners: map[string][]seqRef{},
 		bound: map[string][]seqRef{}, liveDeps: map[depKey][]seqRef{}, liveByRes: map[string][]seqRef{},
-		liveByPath: map[depKey][]seqRef{}, liveWS: map[string][]seqRef{}, dependents: map[string]uint64{},
+		liveByPath: map[depKey][]seqRef{}, liveWS: map[string][]seqRef{}, liveAll: map[string][]seqRef{}, dependents: map[string]uint64{},
 	}
 }
 
@@ -64,6 +65,7 @@ type proofView struct {
 	liveByRes   orderedIndex[string]
 	liveByPath  orderedIndex[depKey]
 	liveWS      orderedIndex[string]
+	liveAll     orderedIndex[string]
 	dependents  table[string, uint64]
 }
 
@@ -75,7 +77,7 @@ func newProofView(st *proofState, w bool) proofView {
 		details: newTable(st.details, w, domain.TransitionDetail.Clone), trByVersion: newOrderedIndex(st.trByVersion, w),
 		owners: newOrderedIndex(st.owners, w), bound: newOrderedIndex(st.bound, w), liveDeps: newOrderedIndex(st.liveDeps, w),
 		liveByRes: newOrderedIndex(st.liveByRes, w), liveByPath: newOrderedIndex(st.liveByPath, w),
-		liveWS: newOrderedIndex(st.liveWS, w), dependents: newTable(st.dependents, w, same[uint64]),
+		liveWS: newOrderedIndex(st.liveWS, w), liveAll: newOrderedIndex(st.liveAll, w), dependents: newTable(st.dependents, w, same[uint64]),
 	}
 }
 
@@ -98,6 +100,7 @@ func (v *proofView) commit() {
 	v.liveByRes.commit()
 	v.liveByPath.commit()
 	v.liveWS.commit()
+	v.liveAll.commit()
 	v.dependents.commit()
 }
 
@@ -151,6 +154,14 @@ func (t *tx) indexProofDeps(proofID string, live bool) {
 		return
 	}
 	ref := seqRef{p.Seq, p.ID}
+	// The audit worker's index holds every live proof — the current proof
+	// of a current obligation version — FIXED_CONTENT-only ones included
+	// (K1 A4, K1-api.2).
+	if live {
+		t.sem.proof.liveAll.add("", ref)
+	} else {
+		t.sem.proof.liveAll.remove("", ref)
+	}
 	keys, resources, paths, workspaces := map[depKey]bool{}, map[string]uint64{}, map[depKey]bool{}, map[string]bool{}
 	for _, id := range p.DependencyIDs {
 		d, _ := t.sem.proof.deps.peek(id)
