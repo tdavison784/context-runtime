@@ -64,3 +64,12 @@ func (g *semanticGuard) PutGCQueueCursor(v domain.GCQueueCursor, expected uint64
 	g.base.noteWrite(err)
 	return out, err
 }
+
+func (g *semanticGuard) PutSettlementCursor(v SettlementCursor, expected uint64) (SettlementCursor, error) {
+	if g.base.err != nil {
+		return SettlementCursor{}, g.base.err
+	}
+	out, err := g.backend.PutSettlementCursor(v, expected)
+	g.base.noteWrite(err)
+	return out, err
+}

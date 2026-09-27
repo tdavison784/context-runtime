@@ -13,6 +13,12 @@ type ProofReader interface {
 	Assertion(id string) (domain.AssertionRecord, error)
 	TransitionDetail(transitionID string) (domain.TransitionDetail, error)
 	ProofDependencies(proofID string, page Page) (ResultPage[domain.ProofDependency], error)
+	// LiveProofs pages the session's live proofs — the current proof of a
+	// current obligation version — in (Seq, ID) keyset order (K1 A4,
+	// K1-api.2): the SYSTEM async settlement audit worker's scan. It is
+	// operational state, never exposed through tools or retrieval, and a
+	// settled proof leaves the index.
+	LiveProofs(page Page) (ResultPage[domain.ApplicabilityProof], error)
 	CurrentBoundObligationsBySubject(subjectKey string, page Page) (ResultPage[domain.ObligationVersion], error)
 	// Empty pathKey means ALL potentially intersecting dependencies. Results
 	// must include workspace/unknown-path dependencies as well as exact paths.

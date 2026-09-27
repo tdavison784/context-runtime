@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -41,6 +42,9 @@ type ReceiptReader interface {
 	// GCQueueCursor is the session's exact-key GC queue scan position
 	// (DUR-3.2); domain.ErrNotFound before its first put.
 	GCQueueCursor() (domain.GCQueueCursor, error)
+	// SettlementCursor is the session's settlement-audit scan position
+	// (K1 A4); domain.ErrNotFound before its first put.
+	SettlementCursor() (SettlementCursor, error)
 	// GCProgress is the exact-key read of one GC request's batch progress
 	// (H3); domain.ErrNotFound before its first batch claim.
 	GCProgress(gcRequestID string) (domain.GCProgress, error)
@@ -68,6 +72,37 @@ type ReceiptWriter interface {
 	// transaction's session. Like GCProgress it is unsequenced operational
 	// state and never evidence of a collection.
 	PutGCQueueCursor(c domain.GCQueueCursor, expectedRevision uint64) (domain.GCQueueCursor, error)
+	// PutSettlementCursor CAS-writes the session's settlement cursor (K1
+	// A4, K1-api.2): expectedRevision is the stored Revision (0 to
+	// create), the stored Revision becomes expectedRevision+1 and is
+	// returned, and a mismatch is domain.ErrVersionConflict with nothing
+	// written. c.Session must be the transaction's session. Like
+	// PutGCQueueCursor it is unsequenced operational state and never
+	// evidence that a proof was settled.
+	PutSettlementCursor(c SettlementCursor, expectedRevision uint64) (SettlementCursor, error)
+}
+
+// SettlementCursor is the session's durable settlement-audit scan position
+// (K1 A4, K1-api.2): the (Seq, ID) of the last live proof the SYSTEM
+// async audit worker has audited, wrapping to the start when a page ends.
+// Like GCQueueCursor it is unsequenced operational state, CAS-written on
+// Revision, and never evidence that a proof was settled.
+type SettlementCursor struct {
+	Session  string
+	After    Cursor
+	Revision uint64
+}
+
+// Validate checks the cursor's own shape: After is either the zero start or
+// a full (Seq, ID) pair.
+func (c SettlementCursor) Validate() error {
+	if c.Session == "" {
+		return fmt.Errorf("%w: settlement cursor session is empty", domain.ErrInvalidRecord)
+	}
+	if c.After.Seq == 0 && c.After.ID != "" || c.After.Seq != 0 && c.After.ID == "" {
+		return fmt.Errorf("%w: settlement cursor after must be the zero start or a full (Seq, ID) pair", domain.ErrInvalidRecord)
+	}
+	return nil
 }
 
 // CollectReceiptOf reports whether a collect receipt's requestID belongs to
