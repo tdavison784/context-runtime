@@ -197,6 +197,11 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 			return domain.IngestReceipt{}, err
 		}
 		b, m, p = &o.binding, o.membership, o.binding.Principal
+	} else if isOutcomeEventID(e.EventID) {
+		// The outcome- namespace belongs to the outcome path (SEC-1.4, G3):
+		// a plain event can neither squat a call's output or tool-result
+		// EventID nor leave a receipt the outcome path would replay.
+		return domain.IngestReceipt{}, domain.ErrInvalidRecord
 	}
 	limits := g.Limits.Effective()
 	// Admission from lengths alone (SEC-2.1), as in Ingest: over the
@@ -237,8 +242,15 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	// allocated (D14): a retry returns the original receipt as stored,
 	// without reparsing or reading mutable state, canonicalized under the
 	// request schema, limits and policy its receipt recorded (P3-40).
+	// An outcome's dispatcher is authorized before its receipt is looked
+	// up, so an untrusted dispatcher is refused on a retry too (DUR-1.7).
+	if m != nil {
+		if err := checkDispatcher(tx, *b, *m); err != nil {
+			return domain.IngestReceipt{}, err
+		}
+	}
 	if e.EventID != "" {
-		if r, found, err := lookupReceipt(tx, p, occurrence, e); found || err != nil {
+		if r, found, err := lookupReceipt(tx, p, occurrence, e, o); found || err != nil {
 			return r, err
 		}
 	}
@@ -272,8 +284,10 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 // derived occurrence) if the request matches it, domain.ErrEventIDConflict
 // with no details if it does not, and found=false if the EventID is new. A
 // Phase 1 event record with no receipt cannot reproduce its original
-// result and is a conflict too.
-func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.Event) (domain.IngestReceipt, bool, error) {
+// result and is a conflict too. An outcome o replays only a receipt it
+// could have produced itself: its items carry the binding's turn and it
+// registered exactly o's membership (SEC-1.4, DUR-1.7).
+func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.Event, o *outcome) (domain.IngestReceipt, bool, error) {
 	r, err := tx.Receipt(occurrence)
 	switch {
 	case err == nil:
@@ -284,6 +298,11 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.
 		}
 		if h, err := recordedHash(e, p, r); err != nil || h != r.PayloadHash {
 			return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
+		}
+		if o != nil {
+			if err := checkOutcomeReplay(tx, r, e, *o); err != nil {
+				return domain.IngestReceipt{}, true, err
+			}
 		}
 		return r.Clone(), true, nil
 	case !isNotFound(err):

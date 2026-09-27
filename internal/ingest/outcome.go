@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/graph"
@@ -84,6 +85,85 @@ func checkOutcome(b domain.OutcomeBinding, e domain.Event) error {
 		}
 	}
 	return domain.ErrInvalidRecord
+}
+
+// isOutcomeEventID reports whether id is in the outcome- EventID namespace,
+// which only the outcome path may use (SEC-1.4).
+func isOutcomeEventID(id string) bool { return strings.HasPrefix(id, "outcome-") }
+
+// checkOutcomeReplay requires a stored receipt under an outcome's EventID
+// to be one this outcome produced (SEC-1.4, DUR-1.7): every item carries
+// the binding's turn, and the receipt registered exactly o's membership —
+// none without it; otherwise the output's OUTPUT member followed by one
+// TOOL_CALL member per tool call ID in order, or the tool result's one
+// TOOL_RESULT member, all for the binding's call. Membership is part of the
+// request identity, so a retry with other membership is a bare conflict
+// rather than a success for a round that never registered it. The
+// dispatcher itself is the call's immutable service actor, checked before
+// the lookup.
+func checkOutcomeReplay(tx store.ReadTx, rc domain.IngestReceipt, e domain.Event, o outcome) error {
+	b, m := o.binding, o.membership
+	items := map[string]bool{}
+	for _, it := range rc.Items {
+		if it.CreatedTurn != b.Turn {
+			return domain.ErrEventIDConflict
+		}
+		items[it.ID] = true
+	}
+	type want struct {
+		role       domain.ExchangeMemberRole
+		toolCallID string
+	}
+	var expect []want
+	switch {
+	case m == nil:
+	case e.Kind == domain.EventTool:
+		expect = []want{{domain.MemberToolResult, e.Spans[0].Source.ToolCallID}}
+	default:
+		expect = []want{{domain.MemberOutput, ""}}
+		for _, id := range m.ToolCallIDs {
+			expect = append(expect, want{domain.MemberToolCall, id})
+		}
+	}
+	if len(rc.MutationReceiptIDs) != len(expect) {
+		return domain.ErrEventIDConflict
+	}
+	if len(expect) == 0 {
+		return nil
+	}
+	if rc.Versions.Semantic == nil {
+		return domain.ErrEventIDConflict
+	}
+	sem, err := store.ReadSemantic(tx)
+	if err != nil {
+		return err
+	}
+	var got []domain.ExchangeMember
+	page := store.Page{Limit: rc.Versions.Semantic.MaxPageSize}
+	for {
+		res, err := sem.ExchangeMembers(b.ExchangeID, page)
+		if err != nil {
+			return err
+		}
+		for _, x := range res.Records {
+			if items[x.Source.ItemID] {
+				got = append(got, x)
+			}
+		}
+		if !res.More {
+			break
+		}
+		page.After = res.Next
+	}
+	if len(got) != len(expect) {
+		return domain.ErrEventIDConflict
+	}
+	for i, x := range got {
+		if x.Role != expect[i].role || x.ToolCallID != expect[i].toolCallID || x.CallID != b.CallID {
+			return domain.ErrEventIDConflict
+		}
+	}
+	return nil
 }
 
 // ToolResultEventID is the EventID of the external tool result for
@@ -189,8 +269,11 @@ func (r *run) registerOutput(m OutcomeMembership) error {
 // checkDispatcher requires the binding's call to be COMPLETED and
 // dispatched by exactly m.Dispatcher, a trusted SYSTEM or HARNESS actor.
 func (r *run) checkDispatcher(m OutcomeMembership) error {
-	b := r.binding
-	call, err := r.tx.Call(b.CallID)
+	return checkDispatcher(r.tx, *r.binding, m)
+}
+
+func checkDispatcher(tx store.ReadTx, b domain.OutcomeBinding, m OutcomeMembership) error {
+	call, err := tx.Call(b.CallID)
 	if err != nil {
 		return err
 	}
