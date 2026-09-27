@@ -2115,9 +2115,10 @@ isn't covered), that is called out explicitly rather than left silent.
   item among several rejects only that item and commits the rest, R13);
   `internal/ingest/working_test.go:TestLifecycle_ExecutesInOrder_P335`
   (Resolve on a non-OPEN goal / Unpin on a non-pinned target each produce a
-  `TargetMismatch`/`CommandNotExecuted` diagnostic and commit the rest of the
-  event, R14; this is the same test that now also carries D1's execution-order
-  scenario under Phase 3, above).
+  `TargetMismatch` diagnostic with result status `domain.CommandNotExecuted`
+  (`"NOT_EXECUTED"`, a `domain.CommandStatus` value, not itself a diagnostic)
+  and commit the rest of the event, R14; this is the same test that now also
+  carries D1's execution-order scenario under Phase 3, above).
 - **§21 (round 3 ruling, R16):** `internal/directive/policycheck_test.go`
   — `TestParserAcceptedImpliesPolicyAccepted`, `FuzzPolicyAgreement` (the
   fuzz/property cross-check that every `internal/directive`-accepted
