@@ -24,6 +24,7 @@ func (s *MembershipService) AdmitExchange(tx store.Tx, actor domain.Principal, i
 	if replay {
 		return receipt.Result.Records.Clone(), nil
 	}
+	seq = operationSeq(tx, seq)
 	if err = intent.Validate(); err != nil {
 		return result, err
 	}

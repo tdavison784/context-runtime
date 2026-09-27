@@ -34,7 +34,7 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 		actor.WorkflowID != recipient.WorkflowID || actor.TaskID != recipient.TaskID || actor.AgentID != recipient.AgentID {
 		return "", domain.ErrInvalidAuthorityPromotion
 	}
-	if seq == 0 || !tx.Allocated(seq) {
+	if seq != 0 && !tx.Allocated(seq) {
 		return "", domain.ErrInvalidRecord
 	}
 	sem, err := store.Semantic(tx)
@@ -56,6 +56,9 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 		return prior.Result.Records.IDs[0], nil
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return "", err
+	}
+	if seq == 0 {
+		seq = tx.NextSeq() // allocated only after the replay check (FR-ING-006)
 	}
 	args, err := domain.CanonicalSemanticArguments(request, s.policy.MaxMetadataBytes)
 	if err != nil {

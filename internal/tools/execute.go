@@ -45,7 +45,9 @@ type sourcedEffect func(tx store.Tx, sem store.SemanticTx, state invocationState
 // otherwise authenticates it, applies the effect, and commits the result
 // transcript, its TOOL_RESULT membership, and both receipts atomically. The
 // dispatcher is the trusted actor executing on the agent's behalf; seq is the
-// operation sequence the caller allocated in tx (W7-5).
+// operation sequence the caller allocated in tx (W7-5), or 0 to allocate it
+// only after the replay check, so an identical retry writes nothing and
+// consumes no sequence (FR-ING-006).
 func execute[I any](s *Service, tx store.Tx, dispatcher domain.Principal, request Request[I], method, requestID string, seq uint64, apply effect) (domain.ToolResult, error) {
 	return executeSourced(s, tx, dispatcher, request, method, requestID, seq, func(tx store.Tx, sem store.SemanticTx, state invocationState) (domain.ToolResult, *domain.ItemContentRef, error) {
 		result, err := apply(tx, sem, state)
@@ -66,7 +68,7 @@ func executeSourced[I any](s *Service, tx store.Tx, dispatcher domain.Principal,
 	if err = checkDispatcher(tx, dispatcher, i.Principal); err != nil {
 		return result, err
 	}
-	if seq == 0 || !tx.Allocated(seq) {
+	if seq != 0 && !tx.Allocated(seq) {
 		return result, domain.ErrInvalidRecord
 	}
 	sem, err := store.Semantic(tx)
@@ -89,6 +91,9 @@ func executeSourced[I any](s *Service, tx store.Tx, dispatcher domain.Principal,
 		return result, domain.ErrEventIDConflict // the request belongs to another invocation
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return result, err
+	}
+	if seq == 0 {
+		seq = tx.NextSeq()
 	}
 	args, err := domain.CanonicalSemanticArguments(request, s.policy.MaxMetadataBytes)
 	if err != nil {
