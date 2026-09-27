@@ -148,6 +148,11 @@ func typedGrantKey(authorizationKey string) string {
 }
 func legacyGrantKey(itemID string) string { return "legacy-item:" + hex.EncodeToString([]byte(itemID)) }
 
+// liveGrantRanges are the range reads behind LiveGrantsFor.
+var liveGrantRanges = []string{
+	"SELECT DISTINCT grant_id, issued_seq FROM lookup_grant_target WHERE session_id=? AND action=? AND target_key IN (?,?) AND issued_seq<=? AND (revoked_seq=0 OR revoked_seq>?) AND (expires_at_seq=0 OR expires_at_seq>=?) ORDER BY issued_seq, grant_id LIMIT ?",
+}
+
 // grantKeys are g's distinct lookup_grant_target keys.
 func grantKeys(g domain.MutationGrant) []string {
 	var keys []string

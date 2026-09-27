@@ -302,3 +302,19 @@ func assertNoSort(t *testing.T, s *Store, q string, args ...any) {
 		}
 	}
 }
+
+// TestLiveGrantRangesSkipDeadRows checks DUR-2.10 (H2): each range read
+// behind LiveGrantsFor searches 0036's liveness index on its full key and
+// never sorts, so revoked and expired rows are not visited.
+func TestLiveGrantRangesSkipDeadRows(t *testing.T) {
+	s, _ := openTemp(t)
+	for _, q := range liveGrantRanges {
+		args := make([]any, strings.Count(q, "?"))
+		for i := range args {
+			args[i] = 1
+		}
+		assertIndexed(t, s, []string{"session_id", "action", "target_key", "revoked_seq"}, q, args...)
+		assertNoSort(t, s, q, args...)
+		assertUsesIndex(t, s, "lookup_grant_target_liveness", q, args...)
+	}
+}
