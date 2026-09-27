@@ -19,14 +19,14 @@ var ErrGCTriggerDisabled = fmt.Errorf("lifecycle: GC trigger disabled by policy:
 // EnqueueGC persists a durable GC request in the producer's transaction
 // (P3-39) under this executor's policy; it is a thin wrapper over
 // gcqueue.Enqueue, which producers below lifecycle call directly with their
-// event's recorded policy (SPEC-2.11). A session-scoped (task-less) trigger
-// produces nothing: Phase 3 has no session-scoped GC (H4).
+// event's recorded policy (SPEC-2.11). A session-scoped (task-less) automatic
+// trigger produces nothing (H4); manual session Collect can resume (J7).
 func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain.GCTrigger, scope domain.CollectScope, taskID, triggerID string) (string, error) {
 	switch scope {
 	case domain.CollectTask:
 		return gcqueue.Enqueue(tx, s.policy, origin, trigger, taskID, triggerID)
 	case domain.CollectSession:
-		return "", nil // no session-scoped GC in Phase 3 (H4)
+		return "", nil // automatic task-less producers are disabled (H4)
 	}
 	tx.Poison(domain.ErrInvalidRecord)
 	return "", domain.ErrInvalidRecord
@@ -37,8 +37,8 @@ func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain
 // request identity.
 var ErrGCRequestFailed = fmt.Errorf("lifecycle: GC request quarantined: %w", domain.ErrInvalidTransition)
 
-// maxGCAttempts bounds transient failures of one GC request before it is
-// quarantined as ATTEMPTS_EXHAUSTED (H3).
+// maxGCAttempts bounds transient reads of one candidate before an explicit
+// SKIP_ATTEMPTS_EXHAUSTED decision (J4).
 const maxGCAttempts = 3
 
 // maxGCPagesPerCall bounds the pending-queue pages one CollectPending call
@@ -106,8 +106,24 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 	if err != nil {
 		return out, err
 	}
+	if progress.Batches > 0 {
+		firstID, e := req.BatchRequestID(1)
+		if domain.ValidateCallerRequestID(req.RequestID) == nil {
+			firstID = req.RequestID
+		}
+		if e != nil {
+			return out, e
+		}
+		first, e := sem.CollectReceipt(collectReceiptID(req.SessionID, firstID))
+		if e != nil {
+			return out, e
+		}
+		if first.Principal != collector {
+			return out, ErrGCConfiguration
+		}
+	}
 	i := req.CollectIntent
-	if i.RequestID, err = domain.GCBatchRequestID(req.RequestID, progress.Batches+1); err != nil {
+	if i.RequestID, err = req.BatchRequestID(progress.Batches + 1); err != nil {
 		return out, err
 	}
 	return s.collect(tx, collector, i, &gcBatch{requestID: req.ID, progress: progress}, seq)
@@ -251,9 +267,9 @@ func (s *Service) collectPendingOne(ctx context.Context, session string, p domai
 }
 
 // settleGCFailure records a failed attempt in its own transaction (H3). A
-// permanent failure quarantines at once with code; a transient one (attempt)
-// counts toward maxGCAttempts and quarantines as code on the last. A request
-// finished meanwhile is left alone.
+// permanent failure quarantines at once with code; an infrastructure
+// failure (attempt) records operational statistics and remains pending.
+// A request finished meanwhile is left alone.
 func (s *Service) settleGCFailure(ctx context.Context, session, id string, code domain.GCFailureCode, attempt bool) error {
 	return s.store.Update(ctx, session, func(tx store.Tx) error {
 		sem, err := store.Semantic(tx)

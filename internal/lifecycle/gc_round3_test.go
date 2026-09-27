@@ -420,3 +420,76 @@ func TestJ6QueuePrefixCannotHideRunnableTail(t *testing.T) {
 		})
 	}
 }
+
+// J7 / SEC-3.9: a manual session collection commits its first batch and
+// returns the durable request link used by the normal pending executor.
+func TestJ7ManualSessionCollectionResumesAndReplays(t *testing.T) {
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxGCDecisions = 2
+		s, _ := New(db, pol)
+		seedEphemeral(t, db, 7, 0)
+		if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+			for _, id := range []string{"session-old", "session-new"} {
+				it := storetest.NewDirective("s", id, "session-rule", tx.NextSeq(), id)
+				it.TaskID, it.TurnID, it.CreatedTurn = "", "", 0
+				it.Scope, it.Access = domain.ScopeSession, domain.AccessBoundary{Scope: domain.ScopeSession, SessionID: "s"}
+				if err := tx.InsertItem(it); err != nil {
+					return err
+				}
+				if err := storetest.UncheckedSetCurrentVersion(tx, id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		p := storetest.NewPrincipal("s", domain.AuthoritySystem)
+		i := domain.CollectIntent{RequestID: "manual-session", Scope: domain.CollectSession, Trigger: domain.GCManual}
+		var first MutationOutcome
+		if err := db.Update(context.Background(), "s", func(tx store.Tx) error { var err error; first, err = s.Collect(tx, p, i, 0); return err }); err != nil {
+			t.Fatal(err)
+		}
+		if first.Result.Collect.GCRequestID == "" || len(first.Result.Collect.Decisions) != 2 {
+			t.Fatalf("first batch: %+v", first)
+		}
+		// Recreate the service: progress, snapshot and adaptive limit are durable.
+		s, _ = New(db, pol)
+		runGC(t, db, s, first.Result.Collect.GCRequestID, 15)
+		before := lastSeq(t, db)
+		if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+			replay, err := s.Collect(tx, p, i, 0)
+			if err == nil && replay.Result.Collect.ID != first.Result.Collect.ID {
+				t.Error("manual retry did not replay first batch")
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if lastSeq(t, db) != before {
+			t.Error("manual replay consumed sequence")
+		}
+		if err := db.View(context.Background(), "s", func(tx store.ReadTx) error {
+			old, err := tx.Item("session-old")
+			if err != nil {
+				return err
+			}
+			if old.Residency != domain.ResidencyArchived {
+				t.Error("superseded task-less directive stranded")
+			}
+			for n := range 7 {
+				it, err := tx.Item(fmt.Sprintf("eph-%03d", n))
+				if err != nil {
+					return err
+				}
+				if it.Residency != domain.ResidencyArchived {
+					t.Errorf("%s stranded", it.ID)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

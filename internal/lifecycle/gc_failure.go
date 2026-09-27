@@ -14,8 +14,8 @@ const (
 	// gcNotCharged: the attempt says nothing about the request (cancelled,
 	// contended, trigger disabled, collector refused); it stays pending.
 	gcNotCharged gcFailureKind = iota
-	// gcTransient: the request may succeed later; count an attempt and
-	// quarantine as ATTEMPTS_EXHAUSTED at the policy bound.
+	// gcTransient: infrastructure may recover; record the attempt and
+	// leave the request pending. Item retry bounds live in the planner.
 	gcTransient
 	// gcPermanent: deterministic; quarantine at once with its reason code.
 	gcPermanent

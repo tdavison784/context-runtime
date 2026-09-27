@@ -250,6 +250,21 @@ func (p GCProgress) Validate() error {
 	return nil
 }
 
+// BatchRequestID keeps continuations of caller-named manual requests in the
+// reserved runtime namespace. The first manual batch retains the caller ID
+// for exact replay; subsequent batches use this authenticated derivation.
+func (r GCRequest) BatchRequestID(batch uint64) (string, error) {
+	root := r.RequestID
+	if ValidateCallerRequestID(root) == nil {
+		var err error
+		root, err = GCTriggerRequestID(r.Origin, r.Trigger, root)
+		if err != nil {
+			return "", err
+		}
+	}
+	return GCBatchRequestID(root, batch)
+}
+
 // GCBatchRequestID is the CollectReceipt request ID of batch n (from 1) of a
 // GC request: its collection request ID (GCRequest.RequestID, the reserved
 // "gc_" value, not the "gcq_" record ID) + "/batch/" + n. It inherits that

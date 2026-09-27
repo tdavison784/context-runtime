@@ -63,7 +63,21 @@ func CollectReceiptOf(g domain.GCRequest, requestID string) bool {
 	}
 	n, ok := strings.CutPrefix(requestID, g.RequestID+"/batch/")
 	if !ok {
-		return false
+		first, err := g.BatchRequestID(1)
+		if err != nil {
+			return false
+		}
+		root := strings.TrimSuffix(first, "/1") + "/"
+		n, ok = strings.CutPrefix(requestID, root)
+		if !ok {
+			return false
+		}
+		batch, err := strconv.ParseUint(n, 10, 64)
+		if err != nil {
+			return false
+		}
+		want, err := g.BatchRequestID(batch)
+		return err == nil && want == requestID
 	}
 	batch, err := strconv.ParseUint(n, 10, 64)
 	if err != nil {

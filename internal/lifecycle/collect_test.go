@@ -156,11 +156,9 @@ func TestCollectFailsClosedAtomically(t *testing.T) {
 		intent domain.CollectIntent
 		want   error
 	}{
-		"user collector":     {domain.AuthorityUser, nil, domain.CollectIntent{RequestID: "c", Scope: domain.CollectSession, Trigger: domain.GCManual}, domain.ErrInvalidAuthorityPromotion},
-		"agent collector":    {domain.AuthorityAgent, nil, domain.CollectIntent{RequestID: "c", Scope: domain.CollectSession, Trigger: domain.GCManual}, domain.ErrInvalidAuthorityPromotion},
-		"unknown task":       {domain.AuthoritySystem, nil, domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "nope", Trigger: domain.GCManual}, domain.ErrNotFound},
-		"decision overflow":  {domain.AuthoritySystem, func(p *domain.Phase3Policy) { p.MaxGCDecisions = 3 }, domain.CollectIntent{RequestID: "c", Scope: domain.CollectSession, Trigger: domain.GCManual}, domain.ErrResourceLimit},
-		"work bound overrun": {domain.AuthoritySystem, func(p *domain.Phase3Policy) { p.MaxTransactionWork = 30 }, domain.CollectIntent{RequestID: "c", Scope: domain.CollectSession, Trigger: domain.GCManual}, domain.ErrResourceLimit},
+		"user collector":  {domain.AuthorityUser, nil, domain.CollectIntent{RequestID: "c", Scope: domain.CollectSession, Trigger: domain.GCManual}, domain.ErrInvalidAuthorityPromotion},
+		"agent collector": {domain.AuthorityAgent, nil, domain.CollectIntent{RequestID: "c", Scope: domain.CollectSession, Trigger: domain.GCManual}, domain.ErrInvalidAuthorityPromotion},
+		"unknown task":    {domain.AuthoritySystem, nil, domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "nope", Trigger: domain.GCManual}, domain.ErrNotFound},
 	} {
 		t.Run(name, func(t *testing.T) {
 			mem := memory.New()

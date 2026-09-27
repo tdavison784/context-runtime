@@ -17,7 +17,9 @@ const methodCollect = "collect"
 // results freeze in the committed receipt; a retry replays it and never scans
 // again, even after later Unarchive. Only SYSTEM/HARNESS may collect, and each
 // archived target needs its own Archive authority: entry authority is no
-// ownership wildcard. Exceeding any work bound fails the whole collection.
+// ownership wildcard. Each call commits one bounded batch. Its GCRequestID
+// resumes through ExecuteGCRequest/CollectPending; the original intent replays
+// this receipt. Budget exhaustion preserves the unfinished candidate.
 func (s *Service) Collect(tx store.Tx, p domain.Principal, i domain.CollectIntent, seq uint64) (MutationOutcome, error) {
 	return s.collect(tx, p, i, nil, seq)
 }
@@ -46,7 +48,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 		gcRequestID = link.requestID
 	}
 	if prior != nil {
-		if prior.Result.Collect == nil || prior.Result.Collect.GCRequestID != gcRequestID {
+		if prior.Result.Collect == nil || link != nil && prior.Result.Collect.GCRequestID != gcRequestID {
 			return out, domain.ErrIntegrity
 		}
 		return MutationOutcome{MutationReceiptID: prior.ID, Result: prior.Result.Clone()}, nil
@@ -82,6 +84,22 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 			return out, err
 		}
 	}
+	// Every new caller collection has the same durable continuation as a trigger.
+	if link == nil {
+		runtimeID, e := domain.GCTriggerRequestID(p, i.Trigger, i.RequestID)
+		if e != nil {
+			return out, e
+		}
+		gcRequestID, e = domain.GCRequestRecordID(p.SessionID, runtimeID)
+		if e != nil {
+			return out, e
+		}
+		request := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: gcRequestID, SessionID: p.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()}, CollectIntent: i, Origin: p, PolicyVersion: s.policy.Version}
+		if err = sem.InsertGCRequest(request); err != nil {
+			return out, err
+		}
+		link = &gcBatch{requestID: gcRequestID}
+	}
 	var progress domain.GCProgress
 	if link != nil {
 		progress = link.progress
@@ -93,11 +111,6 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	plan, err = s.fitCollectionPlan(tx, p, i, args, gcRequestID, plan)
 	if err != nil {
 		return out, err
-	}
-	// A direct Collect is single-shot: exceeding one batch fails as a whole
-	// (P3-39). Durable GC requests continue across batches instead (H3).
-	if plan.more && link == nil {
-		return out, domain.ErrResourceLimit
 	}
 	receipt, effects, spare := plan.receipt, plan.effects, plan.spare
 	for _, e := range effects {
