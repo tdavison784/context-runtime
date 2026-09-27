@@ -120,13 +120,6 @@ func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal,
 }
 
 func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event, o *outcome) (domain.IngestReceipt, error) {
-	// A runtime-derived outcome EventID is refused on the plain path before
-	// any read, so no principal learns whether an outcome was recorded
-	// (SEC-3.3); see apply.
-	if o == nil && isRuntimeOutcomeEventID(e.EventID) {
-		return domain.IngestReceipt{}, domain.ErrInvalidRecord
-	}
-
 	// Admission (SEC-2.1), from lengths alone and outside any write
 	// transaction: the hard ceiling first, then the configured limits. An
 	// over-limit event is admitted only as the retry of a known EventID
@@ -198,16 +191,6 @@ func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 }
 
 func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string, o *outcome) (domain.IngestReceipt, error) {
-	// An EventID with the exact shape the outcome path derives (outcome-
-	// plus 64 hex, or that plus "/" and a tool call ID) names only an
-	// outcome occurrence; looking it up on the plain path would tell any
-	// principal whether that outcome was recorded (SEC-3.3), so it is refused
-	// before any read. Phase 2 never derived those shapes. Other outcome-
-	// names are ordinary reserved EventIDs below, which Phase 2 did accept as
-	// plain events (DUR-2.8).
-	if o == nil && isRuntimeOutcomeEventID(e.EventID) {
-		return domain.IngestReceipt{}, domain.ErrInvalidRecord
-	}
 
 	var b *domain.OutcomeBinding
 	var m *OutcomeMembership
@@ -219,11 +202,13 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	}
 	// The outcome- namespace belongs to the outcome path (SEC-1.4, G3) and
 	// the runtime prefixes to the runtime (R20.1, H5): a plain event can
-	// never create a record under one. It may only replay the receipt of a
-	// recorded plain event that Phase 2 accepted before the namespace was
-	// reserved (DUR-2.8), so structure is validated without the EventID,
-	// which is a lookup key and never payload, and a reserved EventID with
-	// no receipt is rejected after the lookup, before anything is written.
+	// never create a record under one. It may only replay its own principal's
+	// receipt of a plain event that Phase 2 accepted before the namespace was
+	// reserved, whatever its shape (DUR-2.8, SEC-4.9); anything else under a
+	// reserved EventID is one uniform ErrInvalidRecord (SEC-3.3, see
+	// lookupReceipt). Structure is validated without the EventID, which is a
+	// lookup key and never payload, and a reserved EventID with no receipt
+	// is rejected after the lookup, before anything is written.
 	reserved := o == nil && reservedEventID(e.EventID)
 	limits := g.Limits.Effective()
 	// Admission from lengths alone (SEC-2.1), as in Ingest: over the
@@ -321,7 +306,15 @@ func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.
 	switch {
 	case err == nil:
 		// Principal before detail: another principal's EventID is a bare
-		// conflict before anything of the request is canonicalized.
+		// conflict before anything of the request is canonicalized. Under a
+		// reserved EventID the plain path replays only its own principal's
+		// Phase 2 plain receipt: no Phase 3 plain event can hold one, so any
+		// other receipt there was written by the outcome (or runtime) path,
+		// and every probe of it, the owner's included, gets the same bare
+		// ErrInvalidRecord as an absent ID (SEC-3.3, SEC-4.9).
+		if o == nil && reservedEventID(e.EventID) && (r.Principal != p || !phase2Receipt(r)) {
+			return domain.IngestReceipt{}, true, domain.ErrInvalidRecord
+		}
 		if r.Principal != p {
 			if reservedEventID(e.EventID) {
 				return domain.IngestReceipt{}, true, domain.ErrInvalidRecord

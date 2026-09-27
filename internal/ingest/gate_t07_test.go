@@ -8,6 +8,7 @@ import (
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/obligation"
+	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -30,6 +31,7 @@ type t07 struct {
 	events   int
 	auth     uint64 // current authoritative resource revision
 	rev      uint64 // current resource-state revision
+	update   string // the last accepted report's ResourceUpdate ID
 }
 
 func t07Target(mod func(*domain.TestsTarget)) domain.TargetSpec {
@@ -57,11 +59,16 @@ func (w *t07) control(id string, ops ...domain.SemanticOperation) (domain.Ingest
 // reportAt ingests a resource report expecting authoritative revision exp
 // and producing result; on success it tracks the state revision.
 func (w *t07) reportAt(fp string, resync bool, exp, result uint64) error {
-	_, err := w.control(w.id("report"), domain.SemanticOperation{Kind: domain.OperationReportResource, ReportResource: &domain.ReportResourceChangeIntent{
+	r, err := w.control(w.id("report"), domain.SemanticOperation{Kind: domain.OperationReportResource, ReportResource: &domain.ReportResourceChangeIntent{
 		ResourceID: "repo1", ExpectedRevision: w.rev, ExpectedAuthoritativeRevision: exp, ResultingAuthoritativeRevision: result,
 		WorkspaceFingerprint: fp, Resynchronization: resync, AllPaths: !resync}})
 	if err == nil {
 		w.rev, w.auth = w.rev+1, result
+		if len(r.Operations) == 1 && r.Operations[0].Result != nil && r.Operations[0].Result.Records != nil && len(r.Operations[0].Result.Records.IDs) == 1 {
+			w.update = r.Operations[0].Result.Records.IDs[0]
+		} else {
+			w.f.t.Fatalf("report receipt names no resource update: %+v", r.Operations)
+		}
 	}
 	return err
 }
@@ -171,6 +178,100 @@ func (w *t07) effectiveOf(ref domain.ObligationRef) (domain.ObligationStatus, bo
 	return st, pending
 }
 
+// runtimeSystem is the session's SYSTEM runtime principal, the actor of
+// every K1 settlement (A3/A4).
+func runtimeSystem() domain.Principal {
+	return domain.Principal{SessionID: sess, Authority: domain.AuthoritySystem}
+}
+
+// history is ref's transition history in sequence order.
+func (w *t07) history(ref domain.ObligationRef) []domain.ObligationTransition {
+	w.f.t.Helper()
+	var out []domain.ObligationTransition
+	w.f.view(func(tx store.ReadTx) error {
+		sem, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		page := store.Page{Limit: 64}
+		for {
+			res, err := sem.TransitionsByVersion(ref, page)
+			if err != nil {
+				return err
+			}
+			out = append(out, res.Records...)
+			if !res.More {
+				return nil
+			}
+			page.After = res.Next
+		}
+	})
+	return out
+}
+
+// settle runs the asynchronous settlement worker (K1 A4) as the runtime
+// SYSTEM actor until its scan is exhausted, under the recorded policy.
+func (w *t07) settle() {
+	w.f.t.Helper()
+	pol := policy.DefaultPhase3Policy()
+	if w.f.in.Semantic != nil {
+		pol = *w.f.in.Semantic
+	}
+	svc, err := obligation.New(pol, obligation.DefaultRegistry())
+	if err != nil {
+		w.f.t.Fatal(err)
+	}
+	for more, passes := true, 0; more; passes++ {
+		if passes > 100 {
+			w.f.t.Fatal("settlement never finishes")
+		}
+		if err := w.f.s.Update(ctx, sess, func(tx store.Tx) error {
+			var err error
+			_, more, err = svc.SettlePendingTx(tx, runtimeSystem(), 64)
+			return err
+		}); err != nil {
+			w.f.t.Fatalf("SettlePendingTx: %v", err)
+		}
+	}
+}
+
+// wantSettled asserts ref's recorded K1 settlement (ruling M4): no longer
+// pending, stored UNRESOLVED with no current proof, and a restricted
+// RESOURCE_INVALIDATION transition (SATISFIED -> UNRESOLVED) caused by
+// exactly the report update cause, written by the runtime SYSTEM actor with
+// the original authorization reference. It returns that transition's index
+// in ref's history.
+func (w *t07) wantSettled(ref domain.ObligationRef, cause, msg string) int {
+	w.f.t.Helper()
+	if st, pending := w.effectiveOf(ref); pending || st != domain.ObligationUnresolved {
+		w.f.t.Fatalf("%s: effective %s pending=%v after settlement", msg, st, pending)
+	}
+	if o := w.statusOf(ref); o.Status != domain.ObligationUnresolved || o.CurrentProofID != "" {
+		w.f.t.Fatalf("%s: stored %+v after settlement", msg, o)
+	}
+	return w.wantInvalidation(ref, cause, msg)
+}
+
+// wantInvalidation finds ref's RESOURCE_INVALIDATION transition and checks
+// its cause, actor, direction and origin authorization; it returns the
+// transition's index in ref's history.
+func (w *t07) wantInvalidation(ref domain.ObligationRef, cause, msg string) int {
+	w.f.t.Helper()
+	h := w.history(ref)
+	for i, tr := range h {
+		if tr.Cause != domain.CauseResourceInvalidation {
+			continue
+		}
+		if tr.CauseRecordID != cause || tr.Actor != runtimeSystem() || tr.OriginAuthorizationRef == nil ||
+			tr.From != domain.ObligationSatisfied || tr.To != domain.ObligationUnresolved {
+			w.f.t.Fatalf("%s: settlement %+v, want cause %s by the runtime SYSTEM actor with an origin authorization", msg, tr, cause)
+		}
+		return i
+	}
+	w.f.t.Fatalf("%s: no RESOURCE_INVALIDATION transition in %+v", msg, h)
+	return -1
+}
+
 func (w *t07) resourceState() domain.ResourceState {
 	w.f.t.Helper()
 	var rs domain.ResourceState
@@ -248,39 +349,67 @@ func TestGateT07_SetupThroughIngest(t *testing.T) {
 }
 
 // TestGateT07_ProofsExpireThroughIngest is T07's state trace end to end.
+// It runs twice: once settling the invalidated proof by the asynchronous
+// worker right after the W2 report (K1 A4), once leaving it pending so the
+// re-satisfying transition settles it inline first (A3, ruling M4).
 func TestGateT07_ProofsExpireThroughIngest(t *testing.T) {
-	semanticStores(t, func(t *testing.T, f *fixture) {
-		w := newT07(t, f, true, 1)
+	for _, worker := range []bool{true, false} {
+		t.Run(map[bool]string{true: "worker settles", false: "inline settle"}[worker], func(t *testing.T) {
+			semanticStores(t, func(t *testing.T, f *fixture) {
+				w := newT07(t, f, true, 1)
 
-		// Step 1: the complete declared suite passes at W1.
-		w.run(t07Target(nil), fingerprint("W1"))
-		test1 := w.status()
-		if test1.Status != domain.ObligationSatisfied || test1.CurrentProofID == "" {
-			t.Fatalf("TEST1 did not satisfy: %+v", test1)
-		}
+				// Step 1: the complete declared suite passes at W1.
+				w.run(t07Target(nil), fingerprint("W1"))
+				test1 := w.status()
+				if test1.Status != domain.ObligationSatisfied || test1.CurrentProofID == "" {
+					t.Fatalf("TEST1 did not satisfy: %+v", test1)
+				}
 
-		// Step 2: the harness reports an edit producing W2; the obligation
-		// is effectively UNRESOLVED from the report's commit, before any
-		// next snapshot, with its settlement pending (K1a/A2).
-		w.report(fingerprint("W2"), false)
-		if st, pending := w.effective(); st != domain.ObligationUnresolved || !pending {
-			t.Fatalf("stale proof survived the W2 report: effective %s pending=%v", st, pending)
-		}
+				// Step 2: the harness reports an edit producing W2; the
+				// obligation is effectively UNRESOLVED from the report's
+				// commit, before any next snapshot, with its settlement
+				// pending (K1a/A2).
+				w.report(fingerprint("W2"), false)
+				w2 := w.update
+				if st, pending := w.effective(); st != domain.ObligationUnresolved || !pending {
+					t.Fatalf("stale proof survived the W2 report: effective %s pending=%v", st, pending)
+				}
+				if worker {
+					w.settle()
+					w.wantSettled(w.ref, w2, "W2 report settled by the worker")
+				}
 
-		// Repeats: the same command in another directory or with
-		// incomplete declared coverage never satisfies the suite.
-		w.run(t07Target(func(v *domain.TestsTarget) { v.WorkingDir = "svc" }), fingerprint("W2"))
-		w.run(t07Target(func(v *domain.TestsTarget) { v.CoverageSpec = "subset" }), fingerprint("W2"))
-		if st, _ := w.effective(); st != domain.ObligationUnresolved {
-			t.Fatalf("unrelated evidence satisfied the suite: effective %s", st)
-		}
+				// Repeats: the same command in another directory or with
+				// incomplete declared coverage never satisfies the suite.
+				w.run(t07Target(func(v *domain.TestsTarget) { v.WorkingDir = "svc" }), fingerprint("W2"))
+				w.run(t07Target(func(v *domain.TestsTarget) { v.CoverageSpec = "subset" }), fingerprint("W2"))
+				if st, _ := w.effective(); st != domain.ObligationUnresolved {
+					t.Fatalf("unrelated evidence satisfied the suite: effective %s", st)
+				}
+				if !worker {
+					for _, tr := range w.history(w.ref) {
+						if tr.Cause == domain.CauseResourceInvalidation {
+							t.Fatalf("settled before the re-satisfying transition: %+v", tr)
+						}
+					}
+				}
 
-		// Step 3: the suite passes at W2, with a new applicable proof.
-		w.run(t07Target(nil), fingerprint("W2"))
-		if got := w.status(); got.Status != domain.ObligationSatisfied || got.CurrentProofID == "" || got.CurrentProofID == test1.CurrentProofID {
-			t.Fatalf("TEST2 = %+v (TEST1 proof %s)", got, test1.CurrentProofID)
-		}
-	})
+				// Step 3: the suite passes at W2, with a new applicable
+				// proof; the invalidation is recorded, caused by the W2
+				// update, before the re-satisfaction (inline when pending).
+				w.run(t07Target(nil), fingerprint("W2"))
+				got := w.status()
+				if got.Status != domain.ObligationSatisfied || got.CurrentProofID == "" || got.CurrentProofID == test1.CurrentProofID {
+					t.Fatalf("TEST2 = %+v (TEST1 proof %s)", got, test1.CurrentProofID)
+				}
+				h := w.history(w.ref)
+				inv := w.wantInvalidation(w.ref, w2, "settlement before TEST2")
+				if last := h[len(h)-1]; len(h) <= inv+1 || last.To != domain.ObligationSatisfied || last.ProofID != got.CurrentProofID {
+					t.Fatalf("history does not settle before re-satisfying: %+v", h)
+				}
+			})
+		})
+	}
 }
 
 // TestGateT07_Repeats covers T07's repeat cases through ingest.
@@ -366,6 +495,8 @@ func TestGateT07_Repeats(t *testing.T) {
 			if st, pending := w.effective(); st != domain.ObligationUnresolved || !pending {
 				t.Fatalf("proof survived a revision gap: effective %s pending=%v", st, pending)
 			}
+			w.settle()
+			w.wantSettled(w.ref, w.update, "revision gap")
 			w.run(t07Target(nil), fingerprint("W3"))
 			if got := w.status(); got.Status != domain.ObligationUnresolved {
 				t.Fatalf("PASS under UNKNOWN satisfied: %+v", got)
@@ -403,6 +534,9 @@ func TestGateT07_Repeats(t *testing.T) {
 			if st, pending := w.effective(); st != domain.ObligationUnresolved || !pending {
 				t.Fatalf("revocation shielded a stale proof: effective %s pending=%v", st, pending)
 			}
+			// The revoked grant still settles through the restricted cause.
+			w.settle()
+			w.wantSettled(w.ref, w.update, "revoked grant")
 			w.run(t07Target(nil), fingerprint("W2"))
 			if got := w.status(); got.Status != domain.ObligationUnresolved {
 				t.Fatalf("revoked grant satisfied again: %+v", got)
@@ -450,6 +584,12 @@ func TestGateT07_Repeats(t *testing.T) {
 				if st, pending := w.effectiveOf(ref); st != domain.ObligationUnresolved || !pending {
 					t.Fatalf("an obligation beyond the first page is effective %s pending=%v", st, pending)
 				}
+			}
+			// Settlement reaches every obligation, across pages, under the
+			// same tight budget.
+			w.settle()
+			for i, ref := range w.refs {
+				w.wantSettled(ref, w.update, fmt.Sprintf("obligation %d", i))
 			}
 		})
 	})

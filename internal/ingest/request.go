@@ -44,6 +44,13 @@ func newRequestHash(e domain.Event, p domain.Principal, limits domain.Limits, po
 	return e.PayloadHashFor(domain.RequestHashV3, p, limits, *pol)
 }
 
+// phase2Receipt reports whether rc records a Phase 2 (frozen v2 identity)
+// request, the only kind of plain receipt that can exist under an EventID
+// later reserved (DUR-2.8, SEC-4.9).
+func phase2Receipt(rc domain.IngestReceipt) bool {
+	return rc.SchemaVersion == domain.IngestReceiptSchemaVersion && (rc.RequestHashVersion == "" || rc.RequestHashVersion == domain.RequestHashV2)
+}
+
 // recordedHash canonicalizes a retry under its receipt's recorded request
 // schema, limits and policy. Any failure means the retry cannot be the
 // recorded request: a Phase 3-only field under a v2 identity is never
