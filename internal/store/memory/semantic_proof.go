@@ -731,7 +731,14 @@ func (t *semTx) SetObligationMaterialization(target domain.ObligationRef, disabl
 	return next.Clone(), nil
 }
 
-// ObligationTransition implements store.ProofReader.
+// ObligationTransition implements store.ProofReader: one keyed lookup.
 func (r semRead) ObligationTransition(id string) (domain.ObligationTransition, error) {
-	return domain.ObligationTransition{}, domain.ErrUnsupportedSchema
+	if err := r.r.check(); err != nil {
+		return domain.ObligationTransition{}, err
+	}
+	tr, ok := r.r.transitions.get(id)
+	if !ok {
+		return tr, notFound("obligation transition", id)
+	}
+	return tr, nil
 }
