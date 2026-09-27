@@ -73,7 +73,11 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 		if o.TargetSpec == nil {
 			return domain.MutationResult{}, domain.ErrUnknownApplicability
 		}
-		if claims, err = s.checkResourceClaims(sem, s.newBudget(), o, in.Resources); err != nil {
+		work := s.newBudget()
+		if claims, err = s.checkResourceClaims(sem, work, o, in.Resources); err != nil {
+			return domain.MutationResult{}, err
+		}
+		if err := s.dependentRoom(sem, work, claims, nil); err != nil {
 			return domain.MutationResult{}, err
 		}
 	}
