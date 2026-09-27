@@ -78,7 +78,7 @@ func testSemanticStaleProof(t *testing.T, s store.Store) {
 		sem := semantic(t, tx)
 		run2 = NewObservationRun(t, sessA, "run2", "repo", "wb", tx.NextSeq())
 		noErr(t, sem.InsertObservationRun(run2))
-		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-obs2", tx.NextSeq())))
+		noErr(t, tx.InsertItem(ProducedEvidence(sessA, "ev-obs2", tx.NextSeq(), run2.ExecutionID)))
 		fail := NewObservation(run2, "obs2", "ev-obs2", tx.NextSeq(), fpA)
 		fail.Outcome, fail.Passed, fail.Failed = domain.OutcomeFail, 2, 1
 		noErr(t, sem.InsertObservation(fail))
@@ -134,7 +134,7 @@ func newerFail(t *testing.T, s store.Store, access domain.AccessBoundary, fp str
 		run := NewObservationRun(t, sessA, "run2", "repo", "wb", tx.NextSeq())
 		run.Access = access
 		noErr(t, sem.InsertObservationRun(run))
-		ev := ToolEvidence(sessA, "ev-obs2", tx.NextSeq())
+		ev := ProducedEvidence(sessA, "ev-obs2", tx.NextSeq(), run.ExecutionID)
 		ev.Access = access
 		if access.AgentID != "" {
 			ev.AgentID = access.AgentID
