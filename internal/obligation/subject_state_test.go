@@ -58,7 +58,7 @@ func (f fixture) report(t *testing.T, run domain.ObservationRun, outcome domain.
 }
 
 // subject returns the task partition's state of target with its
-// applicability as SubjectApplicability derives it (DUR-3.1 (B)).
+// applicability as store.SubjectApplicability derives it (DUR-3.1 (B), L1).
 func (f fixture) subject(t *testing.T, target domain.TargetSpec) (domain.SubjectState, bool) {
 	t.Helper()
 	var st domain.SubjectState
@@ -68,7 +68,7 @@ func (f fixture) subject(t *testing.T, target domain.TargetSpec) (domain.Subject
 		if st, err = r.SubjectState(mustSubjectKey(target), "task", taskBoundary()); err != nil {
 			return nil
 		}
-		a, aerr := f.s.SubjectApplicability(tx, st)
+		a, aerr := store.SubjectApplicability(r, st)
 		if aerr != nil {
 			t.Fatalf("SubjectApplicability: %v", aerr)
 		}

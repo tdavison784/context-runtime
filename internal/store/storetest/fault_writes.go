@@ -4,7 +4,10 @@
 
 package storetest
 
-import "github.com/tdavison784/context-runtime/internal/domain"
+import (
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
+)
 
 var _ = domain.ErrInvalidRecord
 
@@ -377,6 +380,13 @@ func (f *faultSemantic) PutGCQueueCursor(a0 domain.GCQueueCursor, a1 uint64) (do
 		return *new(domain.GCQueueCursor), err
 	}
 	return f.SemanticTx.PutGCQueueCursor(a0, a1)
+}
+
+func (f *faultSemantic) PutSettlementCursor(a0 store.SettlementCursor, a1 uint64) (store.SettlementCursor, error) {
+	if err := f.hit("PutSettlementCursor"); err != nil {
+		return *new(store.SettlementCursor), err
+	}
+	return f.SemanticTx.PutSettlementCursor(a0, a1)
 }
 
 func (f *faultSemantic) PutGCProgress(a0 domain.GCProgress, a1 uint64) (domain.GCProgress, error) {

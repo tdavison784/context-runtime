@@ -369,6 +369,13 @@ type transaction struct {
 	itemBytesLoaded uint64
 	// deferred are Phase 3 reference checks run at commit (semantic.go).
 	deferred []func() error
+	// pathRaises are this transaction's pending K1 A1 path-key raises with
+	// the path writes that may spare them, resolved once at commit — after
+	// the report's content writes, before any deferred check that reads
+	// the pointers (semantic_k1.go).
+	pathRaises    []pathRaise
+	pathWrites    []pathWrite
+	pathRaiseDone bool
 }
 
 var _ store.TxBase = (*transaction)(nil)

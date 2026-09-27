@@ -79,10 +79,11 @@ type Phase3Policy struct {
 	MaxOperations, MaxMetadataBytes, MaxTargets, MaxEvidence, MaxCoverageMembers     int
 	MaxTransactionWork, MaxToolResultBytes, MaxCheckpointSemanticBytes               int
 	DefaultLeaseCalls, MaxLeaseCalls                                                 uint64
-	// MaxLiveProofDependents bounds the live non-FIXED proof dependency rows
-	// per resource that one resource report must invalidate within its
-	// transaction work budget: at most 5 units of work per row (the list
-	// record, dependency page, origin read, list-page share and the row).
+	// MaxLiveProofDependents is a recorded capacity hint for the legacy
+	// fan-out invalidation, kept for replay of policies written before K1
+	// (migration 0046). K1 derives validity at read from monotone pointers
+	// instead, so it is no longer validated or enforced (K1 A6, GLM-2,
+	// DUR-4.6).
 	MaxLiveProofDependents int
 	// GCTriggers is the explicit enabled trigger set, sorted and unique. A
 	// trigger outside it never starts a collection; there is no implicit
@@ -138,11 +139,10 @@ func (p Phase3Policy) Validate() error {
 	if p.DefaultLeaseCalls == 0 || p.MaxLeaseCalls < p.DefaultLeaseCalls {
 		return invalid("semantic policy: invalid lease allowance")
 	}
-	// Invalidating every live dependency row of one resource costs at most 5
-	// units per row and must fit half the transaction work budget.
-	if p.MaxLiveProofDependents < 1 || 5*p.MaxLiveProofDependents > p.MaxTransactionWork/2 {
-		return invalid("semantic policy: live proof dependents must be positive and fit half the work budget")
-	}
+	// MaxLiveProofDependents is recorded (migration 0046) but unvalidated:
+	// K1 derives validity at read from monotone pointers instead of fanning
+	// invalidation out over live dependency rows, so the work-budget coupling
+	// is gone (K1 A6, GLM-2, DUR-4.6).
 	if len(p.GCTriggers) == 0 {
 		return invalid("semantic policy: explicit enabled GC trigger set required")
 	}

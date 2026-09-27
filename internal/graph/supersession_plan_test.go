@@ -16,7 +16,7 @@ func TestSupersessionUsesReservedPlanWithoutEarlyWrites(t *testing.T) {
 		old := taskItem("s", "old", tx.NextSeq(), domain.AuthorityUser)
 		fresh := taskItem("s", "new", tx.NextSeq(), domain.AuthorityUser)
 		mustInsert(t, tx, old, fresh)
-		p, err := planSupersession(tx, actor, fresh.ID, old.ID, "event", "")
+		p, err := planSupersession(tx, actor, fresh.ID, old.ID, "event", "", options{})
 		if err != nil {
 			return err
 		}

@@ -49,6 +49,17 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 	if err != nil || !o.Access.Permits(actor) {
 		return domain.MutationResult{}, notFound(err)
 	}
+	// The caller's CAS names the revision it read; a pending version is
+	// then settled in this transaction and the requested transition starts
+	// from its effective state at a later sequence (K1 A3).
+	read := o.Revision
+	o, settled, err := s.settle(tx, sem, s.newBudget(), o)
+	if err != nil {
+		return domain.MutationResult{}, err
+	}
+	if settled {
+		seq = tx.NextSeq()
+	}
 	action, ok := domain.TransitionAction(o.Status, in.To)
 	if !ok || !o.Current {
 		return domain.MutationResult{}, domain.ErrInvalidTransition
@@ -58,7 +69,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	if o.Revision != in.ExpectedRevision {
+	if read != in.ExpectedRevision {
 		return domain.MutationResult{}, domain.ErrVersionConflict
 	}
 	evidence, err := publishableEvidence(tx, actor, o, in.EvidenceIDs)
@@ -75,9 +86,6 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 		}
 		work := s.newBudget()
 		if claims, err = s.checkResourceClaims(sem, work, o, in.Resources); err != nil {
-			return domain.MutationResult{}, err
-		}
-		if err := s.dependentRoom(sem, work, claims, nil); err != nil {
 			return domain.MutationResult{}, err
 		}
 	}
@@ -98,9 +106,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 		GrantID:      auth.GrantIDs[target.AuthorizationKey],
 		EvidenceIDs:  evidence,
 	}
-	if o.Status == domain.ObligationSatisfied {
-		t.PriorProofID = o.CurrentProofID
-	}
+	t.PriorProofID = o.CurrentProofID // recorded only while SATISFIED
 	d := domain.TransitionDetail{
 		SemanticMeta:     domain.SemanticMeta{ID: t.ID, SessionID: actor.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
 		Target:           in.Target,
@@ -135,7 +141,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 		d.AssertionID = assertion.ID
 	}
 	w.start()
-	after, err := appendTransition(tx, sem, o, t, d, in.ExpectedRevision)
+	after, err := appendTransition(tx, sem, o, t, d, o.Revision)
 	if err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}

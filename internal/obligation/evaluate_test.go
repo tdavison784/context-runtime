@@ -131,9 +131,7 @@ func TestMatcherInvalidationAndReproofT07(t *testing.T) {
 	first := f.status(t, f.sysTests).CurrentProofID
 	// W2 reported before the next plan: UNRESOLVED without another run.
 	f.r.set(t, f.fixture, hashOf("W2"), false)
-	if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved {
-		t.Fatalf("W2 left satisfaction: %+v", o)
-	}
+	f.wantInvalidated(t, f.sysTests, "repo1", "W2 left satisfaction")
 	// Same command elsewhere or with partial coverage never satisfies.
 	for name, mod := range map[string]func(*domain.TestsTarget){
 		"other directory": func(v *domain.TestsTarget) { v.WorkingDir = "svc" },
@@ -365,9 +363,7 @@ func TestCurrentContentFreshness(t *testing.T) {
 	// The recorded content no longer describes the path after it is listed:
 	// the proof is invalidated and a re-read of the old content is stale.
 	f.editPaths(t, "W3", false, "docs/a.md")
-	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
-		t.Fatalf("path edit kept proof: %+v", o)
-	}
+	f.wantInvalidated(t, ref, "repo1", "path edit kept proof")
 	read("v1")
 	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
 		t.Errorf("read against superseded path content satisfied: %+v", o)
@@ -380,9 +376,7 @@ func TestCurrentContentFreshness(t *testing.T) {
 		t.Fatalf("re-read at new content = %+v", o)
 	}
 	f.editPaths(t, "W4", true)
-	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
-		t.Errorf("all-paths edit kept proof: %+v", o)
-	}
+	f.wantInvalidated(t, ref, "repo1", "all-paths edit kept proof")
 }
 
 func TestPathContentsEndToEnd(t *testing.T) {
@@ -434,9 +428,7 @@ func TestPathContentsEndToEnd(t *testing.T) {
 	}
 	// New content invalidates; the old content no longer applies.
 	report("W4", false, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("v2")})
-	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
-		t.Fatalf("changed content kept proof: %+v", o)
-	}
+	f.wantInvalidated(t, ref, "repo1", "changed content kept proof")
 	read("v1")
 	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
 		t.Fatalf("stale read satisfied: %+v", o)
@@ -447,7 +439,5 @@ func TestPathContentsEndToEnd(t *testing.T) {
 	}
 	// A resync that omits the path asserts nothing about it: conservative.
 	report("W5", true)
-	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
-		t.Errorf("resync without the path kept proof: %+v", o)
-	}
+	f.wantInvalidated(t, ref, "repo1", "resync without the path kept proof")
 }

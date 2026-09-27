@@ -71,27 +71,30 @@ func (s *Service) BindWorkspaceTx(tx store.Tx, actor domain.Principal, in domain
 	return result, nil
 }
 
-// checkPreviousBinding lets a new version of a binding ID follow only a
-// previous version the actor may read, reported at an authority the actor
-// meets (SEC-3.10, P3-20, FR-AUTH-002): a lower authority never overrides a
-// higher-authority binding, in its context or by moving it to another. A
-// hidden previous version answers as absent (no existence oracle); a
-// missing one is left to the store's dense-version check.
+// checkPreviousBinding lets a new version of a binding ID follow only the
+// latest version, which the actor may read and whose reporter's authority
+// it meets (SEC-3.10, P3-20, FR-AUTH-002). Versioning is no existence
+// oracle (SEC-4.10, SPEC-4.8): whatever version is named, a binding whose
+// latest version is hidden answers exactly as a binding that does not
+// exist, and the dense-version check runs only against a visible latest.
 func checkPreviousBinding(r store.SemanticReader, actor domain.Principal, in domain.WorkspaceBindingIntent) error {
-	if in.Version <= 1 {
-		return nil
-	}
-	prev, err := r.WorkspaceBinding(domain.WorkspaceBindingRef{ID: in.BindingID, Version: in.Version - 1})
+	latest, err := r.LatestWorkspaceBinding(in.BindingID)
 	if errors.Is(err, domain.ErrNotFound) {
+		if in.Version != 1 {
+			return domain.ErrNotFound
+		}
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if !prev.Access.Permits(actor) {
+	if !latest.Access.Permits(actor) {
 		return domain.ErrNotFound
 	}
-	if !actor.Authority.AtLeast(prev.Reporter.Authority) {
+	if in.Version != latest.Version+1 {
+		return domain.ErrInvalidRecord
+	}
+	if !actor.Authority.AtLeast(latest.Reporter.Authority) {
 		return domain.ErrInvalidAuthorityPromotion
 	}
 	return nil
