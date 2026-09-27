@@ -122,10 +122,11 @@ func admitKnownRetry(tx store.ReadTx, p domain.Principal, e domain.Event, limitE
 		return limitErr
 	case err != nil:
 		return err
+	case reservedEventID(e.EventID) && (rc.Principal != p || !phase2Receipt(rc)):
+		// As lookupReceipt: under a reserved EventID only the principal's
+		// own Phase 2 plain receipt may be retried (SEC-3.3, SEC-4.9).
+		return domain.ErrInvalidRecord
 	case rc.Principal != p:
-		if reservedEventID(e.EventID) {
-			return domain.ErrInvalidRecord
-		}
 		return domain.ErrEventIDConflict
 	}
 	env, err := tx.Envelope(occ)
