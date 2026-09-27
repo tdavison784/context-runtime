@@ -1046,7 +1046,7 @@ first time it appears in a row when not already obvious from context.
 | P3-14 | task-wide obligation with agent-private PASS rejected | `TestPrivateFailNeverRejectsTaskProof_SEC29` (rejection direction); satisfaction direction **MISSING** |
 | P3-14 | private evidence never leaks via receipt/cache/view | `TestRetrievalDeniedAuditCannotPublishSource` (adjacent; obligation-proof-specific case not confirmed — **MISSING** for this exact clause) |
 | P3-14 | historical/current views after invalidate/waive/retire | `TestObservationStateChain` |
-| P3-14 | bare attestation creates no edge | `TestDuplicateResultCannotClaimSupersession` (adjacent) — **MISSING** for the exact "no fabricated edge" assertion cited elsewhere in this ADR as `TestSatisfiesNoEdgeForAttestation` |
+| P3-14 | bare attestation creates no edge | `TestSatisfiesNoEdgeForAttestation` (`internal/obligation/read_test.go`) |
 | P3-14 | dangling proof rejected by both stores | `TestProofRequiresBackedDependencyIdentity` |
 | P3-15 | bare attestation | `TestAssertionModeIsExplicit` (`internal/obligation`) |
 | P3-15 | attestation with citations | `TestAssertionModeIsExplicit` (same test, citation subtests) |
