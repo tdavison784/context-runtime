@@ -311,6 +311,7 @@ var committedMigrations = map[string]string{
 	"0045_live_proof_paths.sql":                      "c0b0a62175f14ffef95b7f19e424c866bf83070fd69954f223f7d10a642528ce",
 	"0046_policy_max_live_proof_dependents.sql":      "2c920abd1a7a23af573d63161ccc7dd358602499647943fb328cd88e02464d05",
 	"0047_gc_queue.sql":                              "a33b61afa750bd86de7c46032888f5777c93f3b168314a6a4f1304dc4804c263",
+	"0048_k1_pointers.sql":                           "f3dc1891e7045345cdc5fc85c0af62c293bdd81d8f5df1b004d833d96eaacddb",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {
