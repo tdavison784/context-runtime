@@ -31,19 +31,13 @@ var effectiveStatusAllowed = map[string]string{
 }
 
 // effectiveStatusPending lists stored-status comparisons that predate K1 and
-// must move onto obligation.EffectiveStatus (W4b in internal/obligation, W3c
-// in internal/lifecycle). It may only shrink: a new comparison fails, and an
+// must move onto obligation.EffectiveStatus (W3c in internal/lifecycle; W4b
+// finished internal/obligation at 51a09a1). It may only shrink: a new comparison fails, and an
 // entry that no longer occurs fails until it is removed here.
 var effectiveStatusPending = map[string]string{
-	"internal/lifecycle/archive.go:Service.protectedRequirement":    "W3c: open-obligation archive protection",
-	"internal/lifecycle/completion_blockers.go:completionBlockers":  "W3c: CompleteTask X8 blockers",
-	"internal/lifecycle/gc_snapshot.go:Service.gcProtection":        "W3c: GC OpenObligationSource",
-	"internal/obligation/evaluate.go:Service.evaluateOne":           "W4b: evaluation and H1 rejection",
-	"internal/obligation/evaluate.go:Service.currentMatcherProof":   "W4b: current matcher proof / refresh",
-	"internal/obligation/invalidate.go:Service.invalidateProof":     "W4b: fan-out invalidation (retired by K1a)",
-	"internal/obligation/read.go:Service.UnfinishedTaskObligations": "W4b: unfinished-obligation read",
-	"internal/obligation/read.go:Service.Satisfies":                 "W4b: SATISFIES view",
-	"internal/obligation/transition.go:Service.ApplyTransitionTx":   "W4b: A3 inline settle before transitions",
+	"internal/lifecycle/archive.go:Service.protectedRequirement":   "W3c: open-obligation archive protection",
+	"internal/lifecycle/completion_blockers.go:completionBlockers": "W3c: CompleteTask X8 blockers",
+	"internal/lifecycle/gc_snapshot.go:Service.gcProtection":       "W3c: GC OpenObligationSource",
 }
 
 func TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2(t *testing.T) {
