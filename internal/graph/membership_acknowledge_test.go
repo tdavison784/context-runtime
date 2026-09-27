@@ -165,3 +165,45 @@ func acknowledgeWith(tx store.Tx, service *MembershipService, actor domain.Princ
 	_, err = service.AcknowledgeExchange(tx, actor, domain.AcknowledgeExchangeIntent{RequestID: "ack", ExchangeID: r.x.ID, ManifestID: manifest.ID, ConsumingCallID: callID, ExpectedRevision: r.x.Revision}, tx.NextSeq())
 	return err
 }
+
+// SEC-1.10 / SPEC-1.17: a round closes only if the consuming inference's
+// generation manifest actually contained the round's output, tool calls and
+// tool results; an unrelated or partial input is not consumption.
+func TestMembershipAcknowledgmentRequiresManifestToContainRound(t *testing.T) {
+	for name, sources := range map[string]func(r membershipRound, unrelated domain.ContextItem) []domain.ItemContentRef{
+		"unrelated input": func(_ membershipRound, u domain.ContextItem) []domain.ItemContentRef {
+			return []domain.ItemContentRef{storetest.ContentRef(u)}
+		},
+		"tool result only": func(r membershipRound, _ domain.ContextItem) []domain.ItemContentRef {
+			return []domain.ItemContentRef{storetest.ContentRef(r.toolResult)}
+		},
+		"output only": func(r membershipRound, _ domain.ContextItem) []domain.ItemContentRef {
+			return []domain.ItemContentRef{storetest.ContentRef(r.output)}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, service, actor, registration := membershipTestStore(t)
+			membershipFails(t, s, domain.ErrIncompleteCoverage, func(tx store.Tx) error {
+				r, err := registerMembershipRound(tx, service, actor, registration, "1", true)
+				if err != nil {
+					return err
+				}
+				unrelated, err := membershipRoundItem(tx, r.x, "unrelated", domain.AuthorityUser)
+				if err != nil {
+					return err
+				}
+				_, _, err = consumeMembershipRound(tx, service, actor, r, "consume", sources(r, unrelated)...)
+				return err
+			})
+		})
+	}
+	s, service, actor, registration := membershipTestStore(t)
+	update(t, s, "s", func(tx store.Tx) error {
+		r, err := registerMembershipRound(tx, service, actor, registration, "1", true)
+		if err != nil {
+			return err
+		}
+		_, _, err = consumeMembershipRound(tx, service, actor, r, "consume", storetest.ContentRef(r.output), storetest.ContentRef(r.toolResult))
+		return err
+	})
+}
