@@ -79,11 +79,6 @@ type Phase3Policy struct {
 	MaxOperations, MaxMetadataBytes, MaxTargets, MaxEvidence, MaxCoverageMembers     int
 	MaxTransactionWork, MaxToolResultBytes, MaxCheckpointSemanticBytes               int
 	DefaultLeaseCalls, MaxLeaseCalls                                                 uint64
-	// MaxLiveProofDependents bounds the live non-FIXED proof dependency rows
-	// per resource that one resource report must invalidate within its
-	// transaction work budget: at most 5 units of work per row (the list
-	// record, dependency page, origin read, list-page share and the row).
-	MaxLiveProofDependents int
 	// GCTriggers is the explicit enabled trigger set, sorted and unique. A
 	// trigger outside it never starts a collection; there is no implicit
 	// "all triggers" interpretation of an empty or missing set.

@@ -57,23 +57,3 @@ func TestObligationDeclarationLimitNeverExceedsConsumers(t *testing.T) {
 		}
 	}
 }
-
-// MaxLiveProofDependents bounds live non-FIXED proof dependency rows per
-// resource so invalidating all of them fits half the transaction work
-// budget at 5 units per row; it is required and finite.
-func TestMaxLiveProofDependentsFitsTheWorkBudget(t *testing.T) {
-	p := semanticPolicy()
-	p.MaxTransactionWork = 100 // half = 50, so at most 10 rows
-	for _, n := range []int{1, 10} {
-		p.MaxLiveProofDependents = n
-		if err := p.Validate(); err != nil {
-			t.Errorf("MaxLiveProofDependents %d rejected: %v", n, err)
-		}
-	}
-	for _, n := range []int{0, -1, 11} {
-		p.MaxLiveProofDependents = n
-		if p.Validate() == nil {
-			t.Errorf("MaxLiveProofDependents %d accepted with MaxTransactionWork 100", n)
-		}
-	}
-}
