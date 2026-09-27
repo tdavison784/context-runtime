@@ -625,9 +625,9 @@ func (r semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 			return domain.SubjectState{}, false
 		}
 		st, ok := r.r.sem.res.subjects.get(key)
-		// Only CURRENT states are live dependents (G2); dead ones are
-		// skipped without counting toward the page.
-		return st, ok && st.Applicability == domain.ApplicabilityCurrent
+		// Applicability is a filing-time fact, not a read-time filter (L1,
+		// SEC-4.11, DUR-4.7): every filed state pages.
+		return st, ok
 	})
 }
 

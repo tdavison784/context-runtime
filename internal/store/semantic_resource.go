@@ -79,8 +79,9 @@ type ResourceReader interface {
 	// with one keyed lookup (H1, H2).
 	SubjectHighWater(subjectKey, taskID string, access domain.AccessBoundary) (uint64, error)
 	SubjectState(subjectKey, taskID string, access domain.AccessBoundary) (domain.SubjectState, error)
-	// Only CURRENT states, in first-filing order: STALE/UNKNOWN history is
-	// not a live dependent and never counts toward a page (G2, SEC-1.8).
+	// Every state filed for the resource, whatever its applicability, in
+	// first-filing order: applicability is a filing-time fact, not a
+	// read-time filter (L1, SEC-4.11, DUR-4.7).
 	SubjectStatesByResource(resourceID string, page Page) (ResultPage[domain.SubjectState], error)
 }
 type ResourceWriter interface {

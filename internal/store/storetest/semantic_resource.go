@@ -521,10 +521,11 @@ func testSemanticRunClosesOnce(t *testing.T, s store.Store) {
 	}
 }
 
-// testSemanticLiveSubjectStates checks the live-only by-resource read (G2,
-// SEC-1.8, DUR-1.2): SubjectStatesByResource returns only CURRENT states,
-// so STALE/UNKNOWN history never counts toward a page or a work bound; a
-// state that becomes CURRENT again returns at its first-filing position.
+// testSemanticLiveSubjectStates checks the by-resource read's filing-time
+// order (G2, SEC-1.8, DUR-1.2): SubjectStatesByResource pages every filed
+// state, whatever its applicability — applicability is a filing-time fact,
+// not a read-time filter (L1, SEC-4.11, DUR-4.7) — and a state that becomes
+// CURRENT again returns at its first-filing position.
 func testSemanticLiveSubjectStates(t *testing.T, s store.Store) {
 	subject := func(suite string) domain.ObservationSubject {
 		sub := TestsSubject("repo")
@@ -581,8 +582,8 @@ func testSemanticLiveSubjectStates(t *testing.T, s store.Store) {
 		return ids, more
 	}
 	ids, more := byResource(1)
-	if !slicesEqual(ids, []string{"ss-b"}) || more {
-		t.Errorf("SubjectStatesByResource(limit 1) = %v more=%v, want only the CURRENT ss-b", ids, more)
+	if !slicesEqual(ids, []string{"ss-a"}) || !more {
+		t.Errorf("SubjectStatesByResource(limit 1) = %v more=%v, want the STALE ss-a first with more", ids, more)
 	}
 	// A newer run makes ss-a CURRENT again.
 	update(t, s, sessA, func(tx store.Tx) error {

@@ -477,8 +477,11 @@ func (s semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 	if err != nil {
 		return out, err
 	}
-	// Only CURRENT states, through migration 0032's partial index (G2).
-	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND f_state_applicability='CURRENT' AND (f_first_seq, f_state_semantic_meta_id) > (?, ?) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
+	// Every state filed for the resource pages, whatever its applicability:
+	// applicability is a filing-time fact, not a read-time filter (L1,
+	// SEC-4.11, DUR-4.7), so migration 0032's CURRENT-only partial index no
+	// longer bounds this read.
+	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND (f_first_seq, f_state_semantic_meta_id) > (?, ?) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
 		t.session, resourceID, p.After.Seq, p.After.ID, p.Limit+1)
 	if err != nil {
 		return out, err
