@@ -463,3 +463,50 @@ func testSemanticRunOrdinalUnique(t *testing.T, s store.Store) {
 		return sem.InsertObservationRun(NewObservationRun(t, sessA, "run2", "other", "wb-other", seq))
 	})
 }
+
+// testSemanticRunClosesOnce checks a run's single closing outcome (P3-16/22,
+// DUR-1.1, G1): partial progress may precede it, but once a run reports a
+// complete PASS/FAIL or an ERROR/TIMEOUT/CANCELLED it accepts no further
+// observation, so no second, contradictory result exists for one run.
+func testSemanticRunClosesOnce(t *testing.T, s store.Store) {
+	var run domain.ObservationRun
+	obs := func(tx store.Tx, id string, outcome domain.ObservationOutcome, c domain.ObservationCompleteness) domain.ObservationRecord {
+		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-"+id, tx.NextSeq())))
+		o := NewObservation(run, id, "ev-"+id, tx.NextSeq(), fpA)
+		o.Outcome, o.Completeness = outcome, c
+		switch {
+		case outcome == domain.OutcomeFail:
+			o.Passed, o.Failed = 2, 1
+		case c == domain.ObservationPartial:
+			o.Passed, o.Skipped = 1, 2
+		}
+		return o
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		putTask(t, tx)
+		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq())))
+		noErr(t, sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 1, tx.NextSeq())))
+		run = NewObservationRun(t, sessA, "run1", "repo", "wb", tx.NextSeq())
+		noErr(t, sem.InsertObservationRun(run))
+		noErr(t, sem.InsertObservation(obs(tx, "partial", domain.OutcomeFail, domain.ObservationPartial)))
+		return sem.InsertObservation(obs(tx, "pass", domain.OutcomePass, domain.ObservationComplete))
+	})
+	for _, tc := range []struct {
+		name    string
+		outcome domain.ObservationOutcome
+		c       domain.ObservationCompleteness
+	}{
+		{"contradictory complete FAIL", domain.OutcomeFail, domain.ObservationComplete},
+		{"repeated complete PASS", domain.OutcomePass, domain.ObservationComplete},
+		{"ERROR", domain.OutcomeError, domain.ObservationComplete},
+		{"late partial", domain.OutcomePass, domain.ObservationPartial},
+	} {
+		err := s.Update(ctx, sessA, func(tx store.Tx) error {
+			return semantic(t, tx).InsertObservation(obs(tx, "late-"+string(tc.outcome)+"-"+string(tc.c), tc.outcome, tc.c))
+		})
+		if !errors.Is(err, domain.ErrInvalidTransition) {
+			t.Errorf("%s after the run closed: error = %v, want ErrInvalidTransition", tc.name, err)
+		}
+	}
+}
