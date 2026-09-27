@@ -1,6 +1,8 @@
 package lifecycle
 
 import (
+	"fmt"
+
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -9,9 +11,14 @@ import (
 // Charge a page lookup and every returned record; never return truncated success.
 type workBudget struct{ remaining, pageSize int }
 
+// errBudget is exhaustion of the shared transaction work budget. It is an
+// ErrResourceLimit, but distinct from one read's own bound overflowing, so a
+// batched collection can stop cleanly instead of failing (H3).
+var errBudget = fmt.Errorf("%w: transaction work budget", domain.ErrResourceLimit)
+
 func (b *workBudget) spend(n int) error {
 	if n < 0 || n > b.remaining {
-		return domain.ErrResourceLimit
+		return errBudget
 	}
 	b.remaining -= n
 	return nil

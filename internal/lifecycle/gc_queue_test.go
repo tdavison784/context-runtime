@@ -11,11 +11,17 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
 
-// enqueue persists a SUPERSESSION request for session scope.
+// enqueue persists a SUPERSESSION request for task "task" (stored on first
+// use); Phase 3 has no session-scoped requests (H4).
 func enqueue(t *testing.T, db store.Store, s *Service, trigger string) {
 	t.Helper()
 	if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
-		_, err := s.EnqueueGC(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), domain.GCSupersession, domain.CollectSession, "", trigger)
+		if _, err := tx.Task("task"); errors.Is(err, domain.ErrNotFound) {
+			if _, err := tx.PutTask(storetest.NewTask("s", "task"), 0, storetest.NewLifecycleEvent("s", "created", tx.NextSeq(), domain.TargetTask, "task")); err != nil {
+				return err
+			}
+		}
+		_, err := s.EnqueueGC(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), domain.GCSupersession, domain.CollectTask, "task", trigger)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -69,17 +75,22 @@ func TestGCQueueNeverBlocksBehindSkippedOrFailingRequests(t *testing.T) {
 				t.Fatal(err)
 			}
 			enqueue(t, db, s, "event-1")
+			// H3: the failing head is quarantined on its first failure, the
+			// request behind it still runs, and nothing is retried later.
 			for pass := range 3 {
 				n, err := s.CollectPending(ctx, "s", pick, 4)
 				want := 1
 				if pass > 0 {
 					want = 0
 				}
-				if n != want || !errors.Is(err, domain.ErrUnsupportedSchema) {
-					t.Fatalf("pass %d: n=%d err=%v, want %d and the head failure reported", pass, n, err, want)
+				if n != want || err != nil {
+					t.Fatalf("pass %d: n=%d err=%v, want %d", pass, n, err, want)
 				}
 			}
-			if pending := pendingGC(t, db); len(pending) != 1 || pending[0].ID != "gcq_old" {
+			if res, found := gcResult(t, db, "gcq_old"); !found || res.Outcome != domain.GCFailed || res.Reason != domain.GCFailurePolicyMismatch {
+				t.Fatalf("failing head not quarantined: %+v", res)
+			}
+			if pending := pendingGC(t, db); len(pending) != 0 {
 				t.Fatalf("pending: %+v", pending)
 			}
 		})

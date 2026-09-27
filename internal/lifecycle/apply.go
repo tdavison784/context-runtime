@@ -69,9 +69,6 @@ func (s *Service) executeItem(tx store.Tx, p domain.Principal, op itemOp, seq ui
 
 func (s *Service) standaloneItem(ctx context.Context, p domain.Principal, op itemOp) (domain.ItemMutationResult, error) {
 	var out domain.ItemMutationResult
-	if err := domain.ValidateCallerRequestID(op.requestID); err != nil {
-		return out, err // callers never name runtime namespaces (H5, SEC-2.2)
-	}
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
 		// Look up replay before allocating even the caller-supplied effect seq.
 		_, _, prior, err := s.begin(tx, p, domain.MutationLifecycle, string(op.action), op.requestID, op.intent)
@@ -84,6 +81,11 @@ func (s *Service) standaloneItem(ctx context.Context, p domain.Principal, op ite
 			}
 			out = prior.Result.Item.Clone()
 			return nil
+		}
+		// Callers never name runtime namespaces (H5, SEC-2.2); an owner's
+		// committed receipt replayed above first (DUR-2.8).
+		if err := domain.ValidateCallerRequestID(op.requestID); err != nil {
+			return err
 		}
 		out, err = s.applyItem(tx, p, op, tx.NextSeq())
 		return err
