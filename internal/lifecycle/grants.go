@@ -180,8 +180,11 @@ func (s *Service) revokeGrant(tx store.Tx, sem store.SemanticReader, p domain.Pr
 // tuple, which one user can multiply across agents and tasks: USER issuers
 // together hold at most half of the live slots, USER and HARNESS together
 // three quarters, SYSTEM all of them. So HARNESS and SYSTEM each keep a
-// reserve no lower tier can take. Below four slots there are no reserves,
-// so a valid small MaxTargets never makes issuance impossible.
+// reserve no lower tier can take. Within its tier one identity holds at
+// most half the tier's slots (SEC-4.6), so no single issuer — however many
+// grants it issues — can starve its own class's peers. Below four slots
+// there are no reserves, so a valid small MaxTargets never makes issuance
+// impossible.
 func (s *Service) liveGrantRoom(sem store.SemanticReader, issuer domain.Principal, action domain.Action, targets []domain.GrantTarget, seq uint64) error {
 	max := s.policy.MaxTargets
 	for _, t := range targets {
@@ -198,7 +201,11 @@ func (s *Service) liveGrantRoom(sem store.SemanticReader, issuer domain.Principa
 		if max < 4 || issuer.Authority == domain.AuthoritySystem {
 			continue
 		}
-		users, nonSystem := 0, 0
+		users, nonSystem, mine := 0, 0, 0
+		tier := max * 3 / 4
+		if issuer.Authority == domain.AuthorityUser {
+			tier = max / 2
+		}
 		for _, g := range live {
 			switch g.Issuer.Authority {
 			case domain.AuthorityUser:
@@ -207,8 +214,11 @@ func (s *Service) liveGrantRoom(sem store.SemanticReader, issuer domain.Principa
 			case domain.AuthorityHarness:
 				nonSystem++
 			}
+			if g.Issuer == issuer {
+				mine++
+			}
 		}
-		if nonSystem >= max*3/4 || issuer.Authority == domain.AuthorityUser && users >= max/2 {
+		if nonSystem >= max*3/4 || issuer.Authority == domain.AuthorityUser && users >= max/2 || mine >= tier/2 {
 			return domain.ErrResourceLimit
 		}
 	}

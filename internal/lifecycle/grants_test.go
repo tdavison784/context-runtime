@@ -332,6 +332,77 @@ func TestGrantRoomIsTieredByAuthority(t *testing.T) {
 	})
 }
 
+// SEC-4.6 (SEC-3.8 residual): the tiers bound authority classes, not
+// identities — one USER could take the whole USER half and one HARNESS three
+// quarters, starving every peer identity of its class. Each identity keeps a
+// sub-share of its tier (half), so a peer always has room; SYSTEM is never
+// sub-shared.
+func TestOneIdentityCannotTakeItsWholeGrantTier_SEC46(t *testing.T) {
+	ctx := context.Background()
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxTargets = 8
+		s, _ := New(db, pol)
+		seedItem(t, db, storetest.NewItem("s", "u", 0, "shared USER fact"))
+		seedItem(t, db, storetest.NewItem("s", "h", 0, "shared HARNESS fact"))
+		withAgent := func(a domain.Authority, agent string) domain.Principal {
+			p := storetest.NewPrincipal("s", a)
+			p.AgentID = agent
+			return p
+		}
+		issue := func(issuer domain.Principal, item, id string) error {
+			grantee := storetest.NewPrincipal("s", domain.AuthorityUser)
+			_, err := s.IssueGrantStandalone(ctx, issuer, archiveGrant("r-"+id, id, item, grantee))
+			return err
+		}
+		// The USER half of "u" (4 slots) is two identities' sub-shares.
+		one := withAgent(domain.AuthorityUser, "one")
+		for n := range 2 {
+			if err := issue(one, "u", fmt.Sprintf("mine%d", n)); err != nil {
+				t.Fatalf("one USER within its sub-share: %v", err)
+			}
+		}
+		if err := issue(one, "u", "mine2"); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("one USER took its whole tier: %v", err)
+		}
+		peer := withAgent(domain.AuthorityUser, "peer")
+		for n := range 2 {
+			if err := issue(peer, "u", fmt.Sprintf("peer%d", n)); err != nil {
+				t.Fatalf("peer USER denied by one identity: %v", err)
+			}
+		}
+		if err := issue(peer, "u", "peer2"); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("USER tier exceeded: %v", err)
+		}
+		// The HARNESS tier of "h" (6 slots) halves per identity too: one
+		// HARNESS holds 3, a peer 3 more, and SYSTEM keeps the reserve.
+		h := withAgent(domain.AuthorityHarness, "harness-one")
+		for n := range 3 {
+			if err := issue(h, "h", fmt.Sprintf("h%d", n)); err != nil {
+				t.Fatalf("one HARNESS within its sub-share: %v", err)
+			}
+		}
+		if err := issue(h, "h", "h3"); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("one HARNESS took its whole tier: %v", err)
+		}
+		hpeer := withAgent(domain.AuthorityHarness, "harness-peer")
+		for n := range 3 {
+			if err := issue(hpeer, "h", fmt.Sprintf("hp%d", n)); err != nil {
+				t.Fatalf("peer HARNESS denied by one identity: %v", err)
+			}
+		}
+		sys := withAgent(domain.AuthoritySystem, "sys")
+		for n := range 2 {
+			if err := issue(sys, "h", fmt.Sprintf("sys%d", n)); err != nil {
+				t.Fatalf("SYSTEM reserve: %v", err)
+			}
+		}
+		if err := issue(sys, "h", "sys2"); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("live grants beyond the read limit: %v", err)
+		}
+	})
+}
+
 // DUR-3.6: with fewer than four slots there are no reserves, so a valid
 // small MaxTargets never makes non-SYSTEM issuance impossible.
 func TestSmallGrantRoomHasNoReserves(t *testing.T) {
