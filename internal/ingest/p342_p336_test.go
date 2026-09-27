@@ -9,6 +9,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/sqlite"
 	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
+	"github.com/tdavison784/context-runtime/internal/tools"
 )
 
 // p336Mutate writes the clause's history through ingest: a capable USER pin
@@ -146,5 +147,78 @@ func TestP336_HistoryReconstructibleAfterFurtherMutationsAndRestart(t *testing.T
 			t.Fatalf("reopen changed last seq: %d -> %d", before, got)
 		}
 		p336Verify(t, g, p1, p2, p3)
+	})
+}
+
+// TestP336_CheckpointNeverRetiresRequirementBySourceCoverage (P3-36): a
+// checkpoint whose parts restate a mandatory requirement and whose coverage
+// closes over the rounds around its declaration never retires it: the pin
+// stays current, its obligation stays live at the same version with no
+// retirement record, and an authorized replacement afterwards still applies
+// (coverage does not suppress authority-preserving semantic deltas).
+func TestP336_CheckpointNeverRetiresRequirementBySourceCoverage(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		needsObligations(t, f)
+		c := newT16(t, f)
+		sys := principal(domain.AuthoritySystem)
+		rp := f.mustIngest(sys, sysEvent("p336-pin", "## Pinned\n- [dep] {obligation=tests_pass} Use dependency v2.\n"))
+		pin := mustDirective(t, rp, "dep")
+		x1, _ := c.round(1)
+		c.external(x1, "db: postgres 16 detected")
+		x2, _ := c.round(2)
+		c.external(x2, "dependency pinned at v2")
+		x3, manifest := c.round(3)
+		k, err := tools.Execute(ctx, f.s, sess, func(tx store.Tx, seq uint64) (domain.ToolResult, error) {
+			return c.svc.CreateCheckpoint(tx, c.dispatcher, tools.Request[domain.CheckpointIntent]{Invocation: c.invocation(x3),
+				Intent: domain.CheckpointIntent{RequestID: "k336", GenerationManifestID: manifest,
+					Parts: textParts("The dependency stays v2 and the tests must pass; steps 1 and 2 done.")}}, seq)
+		})
+		if err != nil {
+			t.Fatalf("checkpoint: %v", err)
+		}
+		if !f.isCurrent(pin.ID) {
+			t.Fatalf("checkpoint coverage retired the pinned requirement")
+		}
+		f.view(func(tx store.ReadTx) error {
+			sem, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			ck, err := sem.Checkpoint(k.CheckpointID)
+			if err != nil || ck.CoveredFrontier != 2 || ck.IssuingExchangeID != x3.ExchangeID {
+				t.Fatalf("checkpoint = %+v (%v)", ck, err)
+			}
+			it, err := tx.Item(pin.ID)
+			if err != nil || it.Generation != domain.GenerationPinned || it.Parts[0].Text != "Use dependency v2." {
+				t.Errorf("requirement changed: %+v (%v)", it, err)
+			}
+			obs, err := tx.ObligationsBySource(pin.ID, 10)
+			if err != nil || len(obs) != 1 || !obs[0].Current || obs[0].Version != 1 || obs[0].Status != domain.ObligationUnresolved || obs[0].RetiredSeq != 0 {
+				t.Errorf("requirement obligation after the checkpoint = %+v (%v)", obs, err)
+			}
+			if evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetObligation, TargetID: obs[0].ObligationID}); err != nil || len(evs) != 0 {
+				t.Errorf("checkpoint wrote obligation lifecycle records: %+v (%v)", evs, err)
+			}
+			return nil
+		})
+		// Coverage does not suppress later authorized deltas: replacing the
+		// pin after the checkpoint still retires the old version and opens
+		// the next one.
+		rr := f.mustIngest(sys, sysEvent("p336-rep", "## Pinned\n- [dep] {obligation=tests_pass} Use dependency v3.\n"))
+		next := mustDirective(t, rr, "dep")
+		if !f.isCurrent(next.ID) || f.isCurrent(pin.ID) {
+			t.Fatalf("replacement after the checkpoint: new current %v, old current %v", f.isCurrent(next.ID), f.isCurrent(pin.ID))
+		}
+		f.view(func(tx store.ReadTx) error {
+			old, _ := tx.ObligationsBySource(pin.ID, 10)
+			cur, _ := tx.ObligationsBySource(next.ID, 10)
+			if len(old) != 1 || old[0].Current || old[0].RetiredSeq == 0 {
+				t.Errorf("old obligation not retired by the replacement: %+v", old)
+			}
+			if len(cur) != 1 || !cur[0].Current || cur[0].Version != 2 || cur[0].ObligationID != old[0].ObligationID {
+				t.Errorf("new obligation = %+v (old %+v)", cur, old)
+			}
+			return nil
+		})
 	})
 }
