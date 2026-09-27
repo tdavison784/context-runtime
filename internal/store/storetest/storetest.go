@@ -118,6 +118,7 @@ var suite = []testCase{
 	{"SemanticResourceUpdatesAffectingPath", testSemanticResourceUpdatesAffectingPath},
 	{"SemanticWorkspaceBindings", testSemanticWorkspaceBindings},
 	{"SemanticObservations", testSemanticObservations},
+	{"SemanticObservationEvidenceExecution", testSemanticObservationEvidenceExecution},
 	{"SemanticRunOrdinalUnique", testSemanticRunOrdinalUnique},
 	{"SemanticRunClosesOnce", testSemanticRunClosesOnce},
 	{"SemanticLiveSubjectStates", testSemanticLiveSubjectStates},

@@ -84,6 +84,15 @@ func ToolEvidence(sess, id string, seq uint64) domain.ContextItem {
 	return it
 }
 
+// ProducedEvidence is ToolEvidence produced by tool call execution: its
+// source records the producing tool call, which must be the observed run's
+// execution identity (P3-21).
+func ProducedEvidence(sess, id string, seq uint64, execution string) domain.ContextItem {
+	it := ToolEvidence(sess, id, seq)
+	it.Source = &domain.SourceRef{Kind: domain.SourceTool, Locator: "run " + execution, ToolCallID: execution}
+	return it
+}
+
 // NewObservation is a complete PASS of run r observed on fingerprint fp,
 // evidenced by TOOL item evidence.
 func NewObservation(r domain.ObservationRun, id, evidence string, seq uint64, fp string) domain.ObservationRecord {
@@ -640,5 +649,32 @@ func testSemanticResourceUpdatesAffectingPath(t *testing.T, s store.Store) {
 			}
 		}
 		return nil
+	})
+}
+
+// testSemanticObservationEvidenceExecution checks P3-21 in the store
+// (SPEC-2.8): an observation's evidence must be produced by its run's own
+// execution; TOOL content without a producing call, or from another call,
+// never evidences a run.
+func testSemanticObservationEvidenceExecution(t *testing.T, s store.Store) {
+	var run domain.ObservationRun
+	update(t, s, sessA, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		putTask(t, tx)
+		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq())))
+		noErr(t, sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 1, tx.NextSeq())))
+		run = NewObservationRun(t, sessA, "run1", "repo", "wb", tx.NextSeq())
+		noErr(t, sem.InsertObservationRun(run))
+		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-none", tx.NextSeq())))
+		noErr(t, tx.InsertItem(ProducedEvidence(sessA, "ev-other", tx.NextSeq(), "exec-other")))
+		return tx.InsertItem(ProducedEvidence(sessA, "ev-own", tx.NextSeq(), run.ExecutionID))
+	})
+	for _, ev := range []string{"ev-none", "ev-other"} {
+		rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+			return semantic(t, tx).InsertObservation(NewObservation(run, "obs-"+ev, ev, tx.NextSeq(), fpA))
+		})
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		return semantic(t, tx).InsertObservation(NewObservation(run, "obs-own", "ev-own", tx.NextSeq(), fpA))
 	})
 }
