@@ -17,6 +17,19 @@ type ProofReader interface {
 	// Empty pathKey means ALL potentially intersecting dependencies. Results
 	// must include workspace/unknown-path dependencies as well as exact paths.
 	CurrentProofsByDependency(resourceID, pathKey string, page Page) (ResultPage[domain.ApplicabilityProof], error)
+	// LiveProofsByPath pages the live proofs with a CURRENT_PATH dependency
+	// on resourceID at path or below it: each such dependency is indexed
+	// under every ancestor key of its path, so a changed file or directory
+	// is one exact key (DUR-3.1). FIXED_CONTENT dependencies are in no live
+	// index.
+	LiveProofsByPath(resourceID, path string, page Page) (ResultPage[domain.ApplicabilityProof], error)
+	// LiveWorkspaceProofs pages the live proofs with a WORKSPACE dependency
+	// on resourceID, read only when the workspace fingerprint changes.
+	LiveWorkspaceProofs(resourceID string, page Page) (ResultPage[domain.ApplicabilityProof], error)
+	// LiveProofDependents is the write-time count of live CURRENT_PATH and
+	// WORKSPACE dependency rows on resourceID across live proofs (0 when
+	// none), the input to the per-resource policy cap.
+	LiveProofDependents(resourceID string) (uint64, error)
 	// No access filter: completion must inspect all declared TURN/TASK owners.
 	ObligationsByTaskOwner(taskID string, page Page) (ResultPage[domain.ObligationVersion], error)
 	// ObligationTransition is one transition by its exact ID (H2): a

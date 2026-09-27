@@ -412,11 +412,14 @@ func TestGateT07_Repeats(t *testing.T) {
 			}
 			// Too little transaction work for the fan-out: the whole
 			// report rolls back and every proof stays.
+			// The smallest valid budget (10, with one live dependent allowed)
+			// is still too small, and the error must be the budget's, not
+			// an invalid policy's.
 			tight := pol
-			tight.MaxTransactionWork = 3
+			tight.MaxTransactionWork, tight.MaxLiveProofDependents = 10, 1
 			f.in.Semantic = &tight
 			before := f.lastSeq()
-			if err := w.reportAt(fingerprint("W2"), false, w.auth, w.auth+1); err == nil || f.lastSeq() != before {
+			if err := w.reportAt(fingerprint("W2"), false, w.auth, w.auth+1); !errors.Is(err, domain.ErrResourceLimit) || f.lastSeq() != before {
 				t.Fatalf("over-limit invalidation: err %v, seq %d -> %d", err, before, f.lastSeq())
 			}
 			for _, ref := range w.refs {

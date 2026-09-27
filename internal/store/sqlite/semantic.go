@@ -130,11 +130,11 @@ func pageQuery[T any](t *transaction, kind, where string, args []any, seqCol str
 	args = append([]any{t.session}, args...)
 	switch {
 	case !desc:
-		q += " AND (" + seqCol + ">? OR (" + seqCol + "=? AND id>?)) ORDER BY " + seqCol + ",id"
-		args = append(args, p.After.Seq, p.After.Seq, p.After.ID)
+		q += " AND (" + seqCol + ", id) > (?, ?) ORDER BY " + seqCol + ",id"
+		args = append(args, p.After.Seq, p.After.ID)
 	case p.After != (store.Cursor{}):
-		q += " AND (" + seqCol + "<? OR (" + seqCol + "=? AND id<?)) ORDER BY " + seqCol + " DESC,id DESC"
-		args = append(args, p.After.Seq, p.After.Seq, p.After.ID)
+		q += " AND (" + seqCol + ", id) < (?, ?) ORDER BY " + seqCol + " DESC,id DESC"
+		args = append(args, p.After.Seq, p.After.ID)
 	default:
 		q += " ORDER BY " + seqCol + " DESC,id DESC"
 	}

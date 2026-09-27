@@ -18,13 +18,16 @@ type gcState struct {
 	resident    map[string][]seqRef // "" -> all resident items; task -> its resident items
 	openGoals   map[string][]seqRef // task -> TURN/TASK-owned OPEN goals
 	residentAll map[string][]seqRef
-	progress    map[string]domain.GCProgress // by GC request ID (H3)
+	progress    map[string]domain.GCProgress    // by GC request ID (H3)
+	byTrigger   map[domain.GCTrigger][]seqRef   // pending requests per trigger (DUR-3.2)
+	queue       map[string]domain.GCQueueCursor // the session queue cursor under "" (DUR-3.2)
 }
 
 func newGCState() gcState {
 	return gcState{requests: map[string]domain.GCRequest{}, reqIDs: map[string]string{}, pending: map[string][]seqRef{},
 		receipts: map[string]domain.CollectReceipt{}, results: map[string]domain.GCResult{}, resultIDs: map[string]bool{},
-		resident: map[string][]seqRef{}, openGoals: map[string][]seqRef{}, residentAll: map[string][]seqRef{}, progress: map[string]domain.GCProgress{}}
+		resident: map[string][]seqRef{}, openGoals: map[string][]seqRef{}, residentAll: map[string][]seqRef{}, progress: map[string]domain.GCProgress{},
+		byTrigger: map[domain.GCTrigger][]seqRef{}, queue: map[string]domain.GCQueueCursor{}}
 }
 
 type gcView struct {
@@ -38,6 +41,8 @@ type gcView struct {
 	openGoals   orderedIndex[string]
 	residentAll orderedIndex[string]
 	progress    table[string, domain.GCProgress]
+	byTrigger   orderedIndex[domain.GCTrigger]
+	queue       table[string, domain.GCQueueCursor]
 }
 
 func newGCView(st *gcState, w bool) gcView {
@@ -45,11 +50,12 @@ func newGCView(st *gcState, w bool) gcView {
 		pending: newOrderedIndex(st.pending, w), receipts: newTable(st.receipts, w, domain.CollectReceipt.Clone),
 		results: newTable(st.results, w, domain.GCResult.Clone), resultIDs: newTable(st.resultIDs, w, same[bool]),
 		resident: newOrderedIndex(st.resident, w), openGoals: newOrderedIndex(st.openGoals, w), residentAll: newOrderedIndex(st.residentAll, w),
-		progress: newTable(st.progress, w, domain.GCProgress.Clone)}
+		progress: newTable(st.progress, w, domain.GCProgress.Clone), byTrigger: newOrderedIndex(st.byTrigger, w),
+		queue: newTable(st.queue, w, domain.GCQueueCursor.Clone)}
 }
 
 func (v *gcView) dirty() bool {
-	return v.requests.dirty() || v.receipts.dirty() || v.results.dirty() || v.progress.dirty()
+	return v.requests.dirty() || v.receipts.dirty() || v.results.dirty() || v.progress.dirty() || v.queue.dirty()
 }
 
 func (v *gcView) commit() {
@@ -63,6 +69,8 @@ func (v *gcView) commit() {
 	v.openGoals.commit()
 	v.residentAll.commit()
 	v.progress.commit()
+	v.byTrigger.commit()
+	v.queue.commit()
 }
 
 // openTaskGoal reports whether it is an OPEN goal whose declared owning
@@ -158,6 +166,7 @@ func (t *semTx) InsertGCRequest(g domain.GCRequest) error {
 	t.r.sem.gc.requests.put(g.ID, g)
 	t.r.sem.gc.reqIDs.put(g.RequestID, g.ID)
 	t.r.sem.gc.pending.add("", seqRef{g.Seq, g.ID})
+	t.r.sem.gc.byTrigger.add(g.Trigger, seqRef{g.Seq, g.ID})
 	t.t.sequencedWrite(g.Seq)
 	return nil
 }
@@ -209,6 +218,7 @@ func (t *semTx) InsertGCResult(g domain.GCResult) error {
 	t.r.sem.gc.results.put(g.GCRequestID, g)
 	t.r.sem.gc.resultIDs.put(g.ID, true)
 	t.r.sem.gc.pending.remove("", seqRef{req.Seq, req.ID})
+	t.r.sem.gc.byTrigger.remove(req.Trigger, seqRef{req.Seq, req.ID})
 	t.t.sequencedWrite(g.Seq)
 	return nil
 }

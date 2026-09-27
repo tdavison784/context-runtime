@@ -291,12 +291,13 @@ func TestResourceInvalidationPagingAndLimit(t *testing.T) {
 	}
 	// Five proofs span three pages of two. A policy whose work bound cannot
 	// cover them rejects the whole report: state and every status unchanged.
-	tight := testPolicy()
-	tight.MaxTransactionWork = 6
-	small, err := New(tight, DefaultRegistry())
+	// The budget is shrunk after New: a valid policy needs room for its
+	// live-proof dependents, a work bound of 6 does not.
+	small, err := New(testPolicy(), DefaultRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
+	small.policy.MaxTransactionWork = 6
 	before := f.state(t)
 	in := domain.ReportResourceChangeIntent{RequestID: "big", ResourceID: "repo2", ExpectedRevision: f.rev, ExpectedAuthoritativeRevision: f.auth, ResultingAuthoritativeRevision: f.auth + 1, WorkspaceFingerprint: hashOf("W2")}
 	if _, err := small.report(t, f.st, f.reporter, in); !errors.Is(err, domain.ErrResourceLimit) {

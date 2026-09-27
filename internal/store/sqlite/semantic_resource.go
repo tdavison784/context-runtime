@@ -230,7 +230,7 @@ func (s semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 		return err
 	}
 	var last, lastSeq uint64
-	if err := t.conn.QueryRowContext(t.ctx, "SELECT COALESCE(MAX(subkey),0), COALESCE(MAX(f_seq),0) FROM rec_workspace_binding WHERE session_id=? AND id=?", t.session, b.ID).Scan(&last, &lastSeq); err != nil {
+	if err := t.conn.QueryRowContext(t.ctx, latestBindingVersion, t.session, b.ID).Scan(&last, &lastSeq); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if b.Version != last+1 || last > 0 && b.Seq <= lastSeq {
@@ -452,8 +452,8 @@ func (s semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 		return out, err
 	}
 	// Only CURRENT states, through migration 0032's partial index (G2).
-	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND f_state_applicability='CURRENT' AND (f_first_seq>? OR (f_first_seq=? AND f_state_semantic_meta_id>?)) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
-		t.session, resourceID, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND f_state_applicability='CURRENT' AND (f_first_seq, f_state_semantic_meta_id) > (?, ?) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
+		t.session, resourceID, p.After.Seq, p.After.ID, p.Limit+1)
 	if err != nil {
 		return out, err
 	}
@@ -512,9 +512,9 @@ func (s semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.P
 	for _, k := range affect {
 		args = append(args, updatePathKey(k))
 	}
-	args = append(args, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	args = append(args, p.After.Seq, p.After.ID, p.Limit+1)
 	rows, err := t.query("SELECT DISTINCT seq, update_id FROM lookup_resource_update_path WHERE session_id=? AND resource_id=? AND path_key IN (?"+
-		strings.Repeat(",?", len(affect))+") AND (seq>? OR (seq=? AND update_id>?)) ORDER BY seq, update_id LIMIT ?", args...)
+		strings.Repeat(",?", len(affect))+") AND (seq, update_id) > (?, ?) ORDER BY seq, update_id LIMIT ?", args...)
 	if err != nil {
 		return out, err
 	}
@@ -602,8 +602,13 @@ func (s semRead) SubjectHighWater(subjectKey, taskID string, access domain.Acces
 	return hw, err
 }
 
+// latestBindingVersion is a binding's latest version and sequence.
+// It is one keyed read of migration 0038's current pointer, never an
+// aggregate over every version (DUR-3.7); no row means version 0.
+const latestBindingVersion = "SELECT version, seq FROM lookup_current_workspace_binding WHERE session_id=? AND binding_id=?"
+
 // currentBindingPage is the keyed page read of migration 0038's pointers.
-const currentBindingPage = "SELECT seq, binding_id, version FROM lookup_current_workspace_binding WHERE session_id=? AND context_kind=? AND context_id=? AND (seq>? OR (seq=? AND binding_id>?)) ORDER BY seq, binding_id LIMIT ?"
+const currentBindingPage = "SELECT seq, binding_id, version FROM lookup_current_workspace_binding WHERE session_id=? AND context_kind=? AND context_id=? AND (seq, binding_id) > (?, ?) ORDER BY seq, binding_id LIMIT ?"
 
 // CurrentWorkspaceBindingsByContext implements store.ResourceReader over
 // migration 0038's one-row-per-binding pointers.
@@ -622,7 +627,7 @@ func (s semRead) CurrentWorkspaceBindingsByContext(sourceItemID, taskID, convers
 	if len(ctx) != 1 {
 		return out, invalid("workspace bindings: exactly one context required")
 	}
-	rows, err := t.query(currentBindingPage, t.session, string(ctx[0].Kind), ctx[0].ID, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	rows, err := t.query(currentBindingPage, t.session, string(ctx[0].Kind), ctx[0].ID, p.After.Seq, p.After.ID, p.Limit+1)
 	if err != nil {
 		return out, err
 	}
