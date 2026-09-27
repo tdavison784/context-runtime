@@ -87,3 +87,75 @@ func Enqueue(tx store.Tx, pol domain.Phase3Policy, origin domain.Principal, trig
 func RequestID(session, requestID string) (string, error) {
 	return domain.GCRequestRecordID(session, requestID)
 }
+
+// EnqueueRearm persists the re-arm of a FAILED GC request under the
+// executor's policy pol (DUR-3.3, SEC-4.4, DUR-4.8). The new durable
+// request keeps the failed one's scope, task and trigger — MANUAL and J7
+// session scope included — and its identity is
+// domain.GCRearmRequestID(failed.ID): derived from the failed request
+// alone, so any authorized actor re-arming yields the same request
+// (idempotent), in an encoder domain no runtime trigger, manual collection
+// or caller can alias. actor is recorded as the new request's origin
+// context only, never its collector.
+//
+// As in Enqueue, task completion always persists (P3-39); any other
+// trigger this policy disables persists nothing and returns ("", nil) —
+// the lifecycle re-arm path reports that as ErrGCTriggerDisabled. Any
+// failure poisons tx.
+func EnqueueRearm(tx store.Tx, pol domain.Phase3Policy, actor domain.Principal, failed domain.GCRequest) (id string, err error) {
+	defer func() {
+		if err != nil {
+			tx.Poison(err)
+			id = ""
+		}
+	}()
+	if err := pol.Validate(); err != nil {
+		return "", err
+	}
+	if err := actor.Validate(); err != nil {
+		return "", err
+	}
+	if actor.SessionID != tx.SessionID() || failed.SessionID != tx.SessionID() {
+		return "", domain.ErrNotFound
+	}
+	if err := failed.Validate(); err != nil {
+		return "", err
+	}
+	if failed.Trigger != domain.GCTaskCompletion && !pol.GCTriggerEnabled(failed.Trigger) {
+		return "", nil
+	}
+	sem, err := store.Semantic(tx)
+	if err != nil {
+		return "", err
+	}
+	requestID, err := domain.GCRearmRequestID(failed.ID)
+	if err != nil {
+		return "", err
+	}
+	recordID, err := domain.GCRequestRecordID(actor.SessionID, requestID)
+	if err != nil {
+		return "", err
+	}
+	r := domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: recordID, SessionID: actor.SessionID, SchemaVersion: domain.SemanticSchemaV1},
+		CollectIntent: domain.CollectIntent{RequestID: requestID, Scope: failed.Scope, TaskID: failed.TaskID, Trigger: failed.Trigger},
+		Origin:        actor, PolicyVersion: pol.Version}
+	prior, err := sem.GCRequest(r.ID)
+	if err == nil {
+		// The identity ignores the actor, so a re-arm by any other
+		// authorized actor replays the first one's request; only different
+		// intent content is a conflict.
+		if prior.CollectIntent != r.CollectIntent {
+			return "", domain.ErrEventIDConflict
+		}
+		r.Seq = prior.Seq
+		return r.ID, nil
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		return "", err
+	}
+	r.Seq = tx.NextSeq()
+	if err := sem.InsertGCRequest(r); err != nil {
+		return "", err
+	}
+	return r.ID, nil
+}
