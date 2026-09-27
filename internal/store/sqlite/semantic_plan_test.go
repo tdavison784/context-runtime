@@ -66,6 +66,10 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 			return err
 		}},
 		{"ResourceUpdates", []string{"session_id", "f_resource_id"}, func(r store.SemanticReader) error { _, err := r.ResourceUpdates("repo", page); return err }},
+		{"ResourceUpdatesAffectingPath", []string{"session_id", "resource_id"}, func(r store.SemanticReader) error {
+			_, err := r.ResourceUpdatesAffectingPath("repo", "src/a.go", page)
+			return err
+		}},
 		{"WorkspaceBindingsByContext", []string{"session_id", "f_context_kind", "f_context_id"}, func(r store.SemanticReader) error {
 			_, err := r.WorkspaceBindingsByContext("", "task", "", page)
 			return err

@@ -1,6 +1,12 @@
 package store
 
-import "github.com/tdavison784/context-runtime/internal/domain"
+import (
+	"fmt"
+	path "path"
+	"strings"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+)
 
 type ResourceReader interface {
 	ResourceBinding(resourceID string) (domain.ResourceBinding, error)
@@ -46,4 +52,20 @@ type ResourceWriter interface {
 // obligation service's rule.
 func ClosesRun(o domain.ObservationRecord) bool {
 	return o.TerminalComplete() || o.Outcome == domain.OutcomeError || o.Outcome == domain.OutcomeTimeout || o.Outcome == domain.OutcomeCancelled
+}
+
+// PathAffectKeys returns the ChangedPaths entries that affect the canonical
+// resource-relative path p: p itself and each of its ancestor directories,
+// shallowest first. A noncanonical p is ErrInvalidRecord.
+func PathAffectKeys(p string) ([]string, error) {
+	if p == "" || p == "." || p == ".." || path.IsAbs(p) || strings.HasPrefix(p, "../") || path.Clean(p) != p {
+		return nil, fmt.Errorf("%w: noncanonical resource path %q", domain.ErrInvalidRecord, p)
+	}
+	var keys []string
+	for i, c := range p {
+		if c == '/' {
+			keys = append(keys, p[:i])
+		}
+	}
+	return append(keys, p), nil
 }

@@ -772,3 +772,37 @@ func TestInterruptedReconciliationRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradeResourceUpdatePaths checks migration 0033 on a database
+// migrated through 0032 (G2, SEC-1.7): updates stored before it are filed
+// under the hex keys live writes use, so ResourceUpdatesAffectingPath finds
+// an ALL-paths update and one naming an ancestor directory, and skips an
+// unrelated edit.
+func TestUpgradeResourceUpdatePaths(t *testing.T) {
+	l := openLegacy(t, 32)
+	fp := domain.HashBytes([]byte("w"))
+	for i, paths := range [][]string{{"docs/b.md"}, {"src"}, nil} {
+		l.insert("resource_update", storetest.NewResourceUpdate("s", fmt.Sprintf("u%d", i+1), "repo", uint64(i+1), uint64(i), fp, paths...), nil)
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pg, err := r.ResourceUpdatesAffectingPath("repo", "src/a.go", store.Page{Limit: 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, u := range pg.Records {
+			ids = append(ids, u.ID)
+		}
+		if strings.Join(ids, ",") != "u2,u3" {
+			t.Errorf("ResourceUpdatesAffectingPath after 0033 = %v, want [u2 u3]", ids)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

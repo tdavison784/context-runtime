@@ -109,7 +109,12 @@ func (s semTx) InsertResourceUpdate(u domain.ResourceUpdate) error {
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return err
 	}
-	return t.put("resource_update", u.ID, 0, u, false)
+	return t.atomic(func() error {
+		if err := t.put("resource_update", u.ID, 0, u, false); err != nil {
+			return err
+		}
+		return t.indexUpdatePaths(u)
+	})
 }
 
 func (s semRead) ResourceUpdate(id string) (domain.ResourceUpdate, error) {
@@ -441,7 +446,72 @@ func (s semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 	return out, rows.Err()
 }
 
-// ResourceUpdatesAffectingPath implements store.ResourceReader.
+// updatePathKey is a lookup_resource_update_path key (migration 0033).
+func updatePathKey(p string) string { return "path:" + hex.EncodeToString([]byte(p)) }
+
+// indexUpdatePaths files u under every path it may change.
+func (t *transaction) indexUpdatePaths(u domain.ResourceUpdate) error {
+	var keys []string
+	if u.AllPaths {
+		keys = append(keys, "all")
+	}
+	for _, p := range u.ChangedPaths {
+		keys = append(keys, updatePathKey(p))
+	}
+	for _, k := range keys {
+		if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_resource_update_path(session_id,resource_id,path_key,seq,update_id) VALUES(?,?,?,?,?)",
+			t.session, u.ResourceID, k, u.Seq, u.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResourceUpdatesAffectingPath implements store.ResourceReader over
+// migration 0033's index: ALL-paths updates, and updates naming path or an
+// ancestor directory, in (Seq, ID) order.
 func (s semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.Page) (store.ResultPage[domain.ResourceUpdate], error) {
-	return store.ResultPage[domain.ResourceUpdate]{}, domain.ErrUnsupportedSchema
+	t := s.t
+	var out store.ResultPage[domain.ResourceUpdate]
+	if p.Limit <= 0 {
+		return out, invalid("page limit must be positive")
+	}
+	affect, err := store.PathAffectKeys(path)
+	if err != nil {
+		return out, err
+	}
+	args := []any{t.session, resourceID, "all"}
+	for _, k := range affect {
+		args = append(args, updatePathKey(k))
+	}
+	args = append(args, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	rows, err := t.query("SELECT DISTINCT seq, update_id FROM lookup_resource_update_path WHERE session_id=? AND resource_id=? AND path_key IN (?"+
+		strings.Repeat(",?", len(affect))+") AND (seq>? OR (seq=? AND update_id>?)) ORDER BY seq, update_id LIMIT ?", args...)
+	if err != nil {
+		return out, err
+	}
+	var refs []store.Cursor
+	for rows.Next() {
+		var c store.Cursor
+		if err := rows.Scan(&c.Seq, &c.ID); err != nil {
+			rows.Close()
+			return out, err
+		}
+		refs = append(refs, c)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+	if len(refs) > p.Limit {
+		refs, out.More = refs[:p.Limit], true
+	}
+	for _, c := range refs {
+		var u domain.ResourceUpdate
+		if err := t.get("resource_update", c.ID, 0, &u); err != nil {
+			return out, fmt.Errorf("%w: path index names missing update %s", domain.ErrIntegrity, c.ID)
+		}
+		out.Records = append(out.Records, u)
+		out.Next = c
+	}
+	return out, nil
 }

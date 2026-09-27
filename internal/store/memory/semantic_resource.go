@@ -30,11 +30,19 @@ type subjectKey struct {
 
 type resRequest struct{ resource, request string }
 
+// resPath keys the path-change index: a ChangedPaths entry of a resource,
+// or allPathsKey for an ALL-paths update (G2).
+type resPath struct{ resource, path string }
+
+// allPathsKey is never a canonical path.
+const allPathsKey = "\x00all"
+
 type resState struct {
 	bindings     map[string]domain.ResourceBinding // by resource
 	bindingIDs   map[string]string
 	updates      map[string]domain.ResourceUpdate
 	updByRes     map[string][]seqRef
+	updByPath    map[resPath][]seqRef
 	updRequests  map[resRequest]string
 	states       map[string]domain.ResourceState     // by resource
 	paths        map[string]domain.ResourcePathState // by locator key
@@ -53,7 +61,7 @@ type resState struct {
 func newResState() resState {
 	return resState{
 		bindings: map[string]domain.ResourceBinding{}, bindingIDs: map[string]string{}, updates: map[string]domain.ResourceUpdate{},
-		updByRes: map[string][]seqRef{}, updRequests: map[resRequest]string{}, states: map[string]domain.ResourceState{},
+		updByRes: map[string][]seqRef{}, updByPath: map[resPath][]seqRef{}, updRequests: map[resRequest]string{}, states: map[string]domain.ResourceState{},
 		paths: map[string]domain.ResourcePathState{}, wbindings: map[wbKey]domain.WorkspaceBinding{}, wbLatest: map[string]uint64{},
 		wbByContext: map[wsContext][]seqRef{}, runs: map[string]domain.ObservationRun{}, runsBySubj: map[string][]seqRef{},
 		observations: map[string]domain.ObservationRecord{}, obsByRun: map[string][]seqRef{}, subjects: map[subjectKey]domain.SubjectState{},
@@ -66,6 +74,7 @@ type resView struct {
 	bindingIDs   table[string, string]
 	updates      table[string, domain.ResourceUpdate]
 	updByRes     orderedIndex[string]
+	updByPath    orderedIndex[resPath]
 	updRequests  table[resRequest, string]
 	states       table[string, domain.ResourceState]
 	paths        table[string, domain.ResourcePathState]
@@ -85,6 +94,7 @@ func newResView(st *resState, w bool) resView {
 	return resView{
 		bindings: newTable(st.bindings, w, domain.ResourceBinding.Clone), bindingIDs: newTable(st.bindingIDs, w, same[string]),
 		updates: newTable(st.updates, w, domain.ResourceUpdate.Clone), updByRes: newOrderedIndex(st.updByRes, w),
+		updByPath:   newOrderedIndex(st.updByPath, w),
 		updRequests: newTable(st.updRequests, w, same[string]), states: newTable(st.states, w, domain.ResourceState.Clone),
 		paths: newTable(st.paths, w, domain.ResourcePathState.Clone), wbindings: newTable(st.wbindings, w, domain.WorkspaceBinding.Clone),
 		wbLatest: newTable(st.wbLatest, w, same[uint64]), wbByContext: newOrderedIndex(st.wbByContext, w),
@@ -105,6 +115,7 @@ func (v *resView) commit() {
 	v.bindingIDs.commit()
 	v.updates.commit()
 	v.updByRes.commit()
+	v.updByPath.commit()
 	v.updRequests.commit()
 	v.states.commit()
 	v.paths.commit()
@@ -181,6 +192,12 @@ func (t *semTx) InsertResourceUpdate(u domain.ResourceUpdate) error {
 	t.r.sem.res.updates.put(u.ID, u)
 	t.r.sem.res.updRequests.put(resRequest{u.ResourceID, u.RequestID}, u.ID)
 	t.r.sem.res.updByRes.add(u.ResourceID, seqRef{u.Seq, u.ID})
+	if u.AllPaths {
+		t.r.sem.res.updByPath.add(resPath{u.ResourceID, allPathsKey}, seqRef{u.Seq, u.ID})
+	}
+	for _, p := range u.ChangedPaths {
+		t.r.sem.res.updByPath.add(resPath{u.ResourceID, p}, seqRef{u.Seq, u.ID})
+	}
 	t.t.sequencedWrite(u.Seq)
 	return nil
 }
@@ -544,7 +561,20 @@ func (r semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 	})
 }
 
-// ResourceUpdatesAffectingPath implements store.ResourceReader.
+// ResourceUpdatesAffectingPath implements store.ResourceReader over the
+// path-change index: ALL-paths updates, and updates naming path or an
+// ancestor directory, merged in (Seq, ID) order.
 func (r semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.Page) (store.ResultPage[domain.ResourceUpdate], error) {
-	return store.ResultPage[domain.ResourceUpdate]{}, domain.ErrUnsupportedSchema
+	if err := r.r.check(); err != nil {
+		return store.ResultPage[domain.ResourceUpdate]{}, err
+	}
+	affect, err := store.PathAffectKeys(path)
+	if err != nil {
+		return store.ResultPage[domain.ResourceUpdate]{}, err
+	}
+	keys := []resPath{{resourceID, allPathsKey}}
+	for _, k := range affect {
+		keys = append(keys, resPath{resourceID, k})
+	}
+	return page(p, dedup(mergeAfter(&r.r.sem.res.updByPath, keys, cursorRef(p.After))), loadAll(&r.r.sem.res.updates, ident))
 }
