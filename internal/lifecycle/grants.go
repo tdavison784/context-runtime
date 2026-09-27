@@ -177,31 +177,41 @@ func (s *Service) revokeGrant(tx store.Tx, sem store.SemanticReader, p domain.Pr
 // authorization reads at most MaxTargets live grants per (action, target),
 // so issuance refuses a grant that would exceed that many live at seq. The
 // read is the store's live-only index, so revoked or expired history never
-// counts and can never block issuance (SEC-2.3, DUR-2.4). The live set is
-// also shared (SEC-2.7): one issuer holds at most a quarter of it, and the
-// last quarter is reserved for SYSTEM, so no lower-authority issuer, alone
-// or together, can deny issuance to everyone.
+// counts and can never block issuance (SEC-2.3, DUR-2.4).
+//
+// Room is tiered by authority class (SEC-3.8, DUR-3.6), never by principal
+// tuple, which one user can multiply across agents and tasks: USER issuers
+// together hold at most half of the live slots, USER and HARNESS together
+// three quarters, SYSTEM all of them. So HARNESS and SYSTEM each keep a
+// reserve no lower tier can take. Below four slots there are no reserves,
+// so a valid small MaxTargets never makes issuance impossible.
 func (s *Service) liveGrantRoom(sem store.SemanticReader, issuer domain.Principal, action domain.Action, targets []domain.GrantTarget, seq uint64) error {
-	share := max(1, s.policy.MaxTargets/4)
+	max := s.policy.MaxTargets
 	for _, t := range targets {
-		live, err := sem.LiveGrantsFor(action, t, seq, s.policy.MaxTargets)
+		live, err := sem.LiveGrantsFor(action, t, seq, max)
 		if errors.Is(err, store.ErrLimitExceeded) {
 			return domain.ErrResourceLimit
 		}
 		if err != nil {
 			return err
 		}
-		mine := 0
+		if len(live) >= max {
+			return domain.ErrResourceLimit
+		}
+		if max < 4 || issuer.Authority == domain.AuthoritySystem {
+			continue
+		}
+		users, nonSystem := 0, 0
 		for _, g := range live {
-			if g.Issuer == issuer {
-				mine++
+			switch g.Issuer.Authority {
+			case domain.AuthorityUser:
+				users++
+				nonSystem++
+			case domain.AuthorityHarness:
+				nonSystem++
 			}
 		}
-		room := s.policy.MaxTargets
-		if issuer.Authority != domain.AuthoritySystem {
-			room -= share
-		}
-		if len(live) >= room || issuer.Authority != domain.AuthoritySystem && mine >= share {
+		if nonSystem >= max*3/4 || issuer.Authority == domain.AuthorityUser && users >= max/2 {
 			return domain.ErrResourceLimit
 		}
 	}
