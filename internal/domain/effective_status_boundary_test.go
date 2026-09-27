@@ -34,11 +34,7 @@ var effectiveStatusAllowed = map[string]string{
 // must move onto obligation.EffectiveStatus (W3c in internal/lifecycle; W4b
 // finished internal/obligation at 51a09a1). It may only shrink: a new comparison fails, and an
 // entry that no longer occurs fails until it is removed here.
-var effectiveStatusPending = map[string]string{
-	"internal/lifecycle/archive.go:Service.protectedRequirement":   "W3c: open-obligation archive protection",
-	"internal/lifecycle/completion_blockers.go:completionBlockers": "W3c: CompleteTask X8 blockers",
-	"internal/lifecycle/gc_snapshot.go:Service.gcProtection":       "W3c: GC OpenObligationSource",
-}
+var effectiveStatusPending = map[string]string{}
 
 func TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2(t *testing.T) {
 	root := filepath.Join("..", "..")

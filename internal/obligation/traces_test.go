@@ -80,9 +80,7 @@ func TestTraceT07(t *testing.T) {
 	proof1 := f.status(t, f.sysTests).CurrentProofID
 	// Step 2: the harness reports a source edit producing W2.
 	f.r.set(t, f.fixture, hashOf("W2"), false)
-	if got := f.status(t, f.sysTests); got.Status != domain.ObligationUnresolved {
-		t.Fatalf("tests not UNRESOLVED before the next plan: %+v", got)
-	}
+	f.wantInvalidated(t, f.sysTests, "repo1", "tests not UNRESOLVED before the next plan")
 	hist, _ := f.satisfies(t, f.system, false)
 	if len(hist.Relations) != 1 || hist.Relations[0].ProofID != proof1 || hist.Relations[0].Current {
 		t.Errorf("TEST1 lost its historical satisfaction: %+v", hist)
@@ -127,8 +125,19 @@ func TestConcurrentINV16(t *testing.T) {
 	check := func() {
 		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
 			r, _ := store.ReadSemantic(tx)
+			// INV-16 (K1 A5): SATISFIED (effective) is backed by a proof
+			// valid at read, and stored SATISFIED is effective SATISFIED
+			// or pending settlement.
 			o, _ := r.ExactObligation(f.sysTests)
-			if o.Status != domain.ObligationSatisfied {
+			eff, pending, err := EffectiveStatus(r, o)
+			if err != nil {
+				t.Errorf("EffectiveStatus: %v", err)
+				return nil
+			}
+			if o.CurrentProofID != "" && eff != domain.ObligationSatisfied && !pending {
+				t.Errorf("stored SATISFIED is effectively %s without pending settlement", eff)
+			}
+			if eff != domain.ObligationSatisfied || o.CurrentProofID == "" {
 				return nil
 			}
 			p, _ := r.ApplicabilityProof(o.CurrentProofID)
@@ -344,14 +353,21 @@ func TestTraceT07PublicAPI(t *testing.T) {
 			return s.ReportObservationTx(tx, harness, obsIntent("obs-"+n, r, ev.ID, domain.OutcomePass, fp), seq)
 		})
 	}
+	// The effective status: what every consumer reads (K1 A2).
 	status := func() domain.ObligationStatus {
-		var o domain.ObligationVersion
+		var eff domain.ObligationStatus
 		_ = st.View(t.Context(), testSession, func(tx store.ReadTx) error {
 			sem, _ := store.ReadSemantic(tx)
-			o, _ = sem.ExactObligation(*ref)
+			o, err := sem.ExactObligation(*ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if eff, _, err = EffectiveStatus(sem, o); err != nil {
+				t.Fatal(err)
+			}
 			return nil
 		})
-		return o.Status
+		return eff
 	}
 	run("1", hashOf("W1"))
 	if got := status(); got != domain.ObligationSatisfied {

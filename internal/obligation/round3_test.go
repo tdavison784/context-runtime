@@ -118,9 +118,7 @@ func TestDUR31ReportsIgnoreUntouchedLiveState(t *testing.T) {
 	if _, err := f.s.report(t, f.st, f.harness, all); err != nil {
 		t.Fatalf("ALL-paths report with %d live file states: %v", files, err)
 	}
-	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
-		t.Errorf("ALL-paths report kept the file proof: %+v", o)
-	}
+	f.wantInvalidated(t, ref, "repo1", "ALL-paths report kept the file proof")
 }
 
 // DUR-3.1 (B), commander ruling: subject-state applicability is derived
@@ -185,10 +183,11 @@ func TestDUR38HistorySatisfiesPages(t *testing.T) {
 	}
 }
 
-// DUR-3.1 (A), commander ruling: a KNOWN, non-ALL report reads only what it
-// can affect — live CURRENT_PATH proofs at or below each changed path, and
-// WORKSPACE proofs only when the fingerprint changes — never the resource's
-// whole live proof set. Directory changes still reach the files below them.
+// DUR-3.1 (A), superseded by K1a: a report reads no proof at all, whatever
+// it changes; each dependent's validity is derived at read. An unrelated path
+// at the same fingerprint keeps both proofs, a containing directory
+// invalidates the file proof below it, and a new fingerprint invalidates the
+// workspace proof.
 func TestDUR31ReportsReadOnlyAffectedProofs(t *testing.T) {
 	f := newEvalFixture(t)
 	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
@@ -208,25 +207,23 @@ func TestDUR31ReportsReadOnlyAffectedProofs(t *testing.T) {
 		}
 	}
 	f.st.counting.Store(true)
-	step := func(name string, fp string, changed []string, wantWorkspace bool, tests, fileStatus domain.ObligationStatus) {
+	step := func(name string, fp string, changed []string, tests, fileStatus domain.ObligationStatus) {
 		t.Helper()
 		f.st.wholeReads.Store(0)
 		f.st.workspaceReads.Store(0)
+		f.st.pathReads.Store(0)
 		f.resourceReport(t, fp, false, false, changed)
-		if n := f.st.wholeReads.Load(); n != 0 {
-			t.Errorf("%s: %d whole-resource proof reads", name, n)
+		if n := f.st.wholeReads.Load() + f.st.workspaceReads.Load() + f.st.pathReads.Load(); n != 0 {
+			t.Errorf("%s: report read %d proof pages", name, n)
 		}
-		if got := f.st.workspaceReads.Load() > 0; got != wantWorkspace {
-			t.Errorf("%s: workspace proofs read = %v, want %v", name, got, wantWorkspace)
+		if st, _ := f.effective(t, f.sysTests); st != tests {
+			t.Errorf("%s: tests obligation effective %s, want %s", name, st, tests)
 		}
-		if o := f.status(t, f.sysTests); o.Status != tests {
-			t.Errorf("%s: tests obligation = %s, want %s", name, o.Status, tests)
-		}
-		if o := f.status(t, file); o.Status != fileStatus {
-			t.Errorf("%s: file obligation = %s, want %s", name, o.Status, fileStatus)
+		if st, _ := f.effective(t, file); st != fileStatus {
+			t.Errorf("%s: file obligation effective %s, want %s", name, st, fileStatus)
 		}
 	}
-	step("unrelated path, same fingerprint", "W1", []string{"other/z.md"}, false, domain.ObligationSatisfied, domain.ObligationSatisfied)
-	step("containing directory, same fingerprint", "W1", []string{"docs"}, false, domain.ObligationSatisfied, domain.ObligationUnresolved)
-	step("new fingerprint", "W2", []string{"other/z.md"}, true, domain.ObligationUnresolved, domain.ObligationUnresolved)
+	step("unrelated path, same fingerprint", "W1", []string{"other/z.md"}, domain.ObligationSatisfied, domain.ObligationSatisfied)
+	step("containing directory, same fingerprint", "W1", []string{"docs"}, domain.ObligationSatisfied, domain.ObligationUnresolved)
+	step("new fingerprint", "W2", []string{"other/z.md"}, domain.ObligationUnresolved, domain.ObligationUnresolved)
 }

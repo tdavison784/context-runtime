@@ -20,7 +20,7 @@ func EffectiveStatus(r store.SemanticReader, o domain.ObligationVersion) (status
 	if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
 		return o.Status, false, nil
 	}
-	valid, err := proofDerivedValid(r, o.CurrentProofID)
+	valid, err := store.ProofDerivedValid(r, o.CurrentProofID)
 	if err != nil {
 		return domain.ObligationUnresolved, false, err
 	}
@@ -28,13 +28,6 @@ func EffectiveStatus(r store.SemanticReader, o domain.ObligationVersion) (status
 		return domain.ObligationUnresolved, true, nil
 	}
 	return domain.ObligationSatisfied, false, nil
-}
-
-// proofDerivedValid is the shared K1 A1 validity rule. Until the store's
-// write-time pointers land (store.ProofDerivedValid, W2c) every stored proof
-// is treated as valid, which is exactly today's eager-invalidation behavior.
-func proofDerivedValid(r store.SemanticReader, proofID string) (bool, error) {
-	return true, nil
 }
 
 // SettlePendingTx is one bounded pass of the asynchronous settlement worker

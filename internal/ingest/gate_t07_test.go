@@ -147,6 +147,30 @@ func (w *t07) statusOf(ref domain.ObligationRef) domain.ObligationVersion {
 
 func (w *t07) status() domain.ObligationVersion { return w.statusOf(w.ref) }
 
+// effective is the obligation's effective status and whether its
+// RESOURCE_INVALIDATION settlement is still pending (K1 A2): what every
+// reader acts on. A report no longer rewrites the stored status (K1a).
+func (w *t07) effective() (domain.ObligationStatus, bool) { return w.effectiveOf(w.ref) }
+
+func (w *t07) effectiveOf(ref domain.ObligationRef) (domain.ObligationStatus, bool) {
+	w.f.t.Helper()
+	var st domain.ObligationStatus
+	var pending bool
+	w.f.view(func(tx store.ReadTx) error {
+		sem, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		o, err := sem.ExactObligation(ref)
+		if err != nil {
+			return err
+		}
+		st, pending, err = obligation.EffectiveStatus(sem, o)
+		return err
+	})
+	return st, pending
+}
+
 func (w *t07) resourceState() domain.ResourceState {
 	w.f.t.Helper()
 	var rs domain.ResourceState
@@ -236,18 +260,19 @@ func TestGateT07_ProofsExpireThroughIngest(t *testing.T) {
 		}
 
 		// Step 2: the harness reports an edit producing W2; the obligation
-		// is UNRESOLVED in the same transaction, before any next snapshot.
+		// is effectively UNRESOLVED from the report's commit, before any
+		// next snapshot, with its settlement pending (K1a/A2).
 		w.report(fingerprint("W2"), false)
-		if got := w.status(); got.Status != domain.ObligationUnresolved || got.CurrentProofID != "" {
-			t.Fatalf("stale proof survived the W2 report: %+v", got)
+		if st, pending := w.effective(); st != domain.ObligationUnresolved || !pending {
+			t.Fatalf("stale proof survived the W2 report: effective %s pending=%v", st, pending)
 		}
 
 		// Repeats: the same command in another directory or with
 		// incomplete declared coverage never satisfies the suite.
 		w.run(t07Target(func(v *domain.TestsTarget) { v.WorkingDir = "svc" }), fingerprint("W2"))
 		w.run(t07Target(func(v *domain.TestsTarget) { v.CoverageSpec = "subset" }), fingerprint("W2"))
-		if got := w.status(); got.Status != domain.ObligationUnresolved {
-			t.Fatalf("unrelated evidence satisfied the suite: %+v", got)
+		if st, _ := w.effective(); st != domain.ObligationUnresolved {
+			t.Fatalf("unrelated evidence satisfied the suite: effective %s", st)
 		}
 
 		// Step 3: the suite passes at W2, with a new applicable proof.
@@ -338,8 +363,8 @@ func TestGateT07_Repeats(t *testing.T) {
 			if rs := w.resourceState(); rs.Freshness != domain.ResourceUnknown {
 				t.Fatalf("gap left state %+v", rs)
 			}
-			if got := w.status(); got.Status != domain.ObligationUnresolved {
-				t.Fatalf("proof survived a revision gap: %+v", got)
+			if st, pending := w.effective(); st != domain.ObligationUnresolved || !pending {
+				t.Fatalf("proof survived a revision gap: effective %s pending=%v", st, pending)
 			}
 			w.run(t07Target(nil), fingerprint("W3"))
 			if got := w.status(); got.Status != domain.ObligationUnresolved {
@@ -375,8 +400,8 @@ func TestGateT07_Repeats(t *testing.T) {
 			f.mustIngest(principal(domain.AuthoritySystem), domain.Event{EventID: "revoke", Kind: domain.EventSystem, Operations: []domain.SemanticOperation{{
 				Kind: domain.OperationRevokeGrant, RevokeGrant: &domain.RevokeGrantIntent{GrantID: "g-tests-0"}}}})
 			w.report(fingerprint("W2"), false)
-			if got := w.status(); got.Status != domain.ObligationUnresolved {
-				t.Fatalf("revocation shielded a stale proof: %+v", got)
+			if st, pending := w.effective(); st != domain.ObligationUnresolved || !pending {
+				t.Fatalf("revocation shielded a stale proof: effective %s pending=%v", st, pending)
 			}
 			w.run(t07Target(nil), fingerprint("W2"))
 			if got := w.status(); got.Status != domain.ObligationUnresolved {
@@ -398,7 +423,7 @@ func TestGateT07_Repeats(t *testing.T) {
 			}
 		})
 	})
-	t.Run("invalidation fans out beyond one page or rolls back whole", func(t *testing.T) {
+	t.Run("a report never fans out: every dependent is invalid at read under any budget", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
 			pol := testPolicy()
 			pol.MaxPageSize = 2
@@ -410,28 +435,20 @@ func TestGateT07_Repeats(t *testing.T) {
 					t.Fatalf("one PASS did not satisfy every granted obligation: %+v", got)
 				}
 			}
-			// Too little transaction work for the fan-out: the whole
-			// report rolls back and every proof stays.
-			// The smallest valid budget (10, with one live dependent allowed)
-			// is still too small, and the error must be the budget's, not
-			// an invalid policy's.
+			// K1a: under the smallest valid budget, far too little for a
+			// fan-out over five proofs spanning three pages, the report is
+			// accepted and commits, and every dependent is effectively
+			// UNRESOLVED at read, pending settlement, from that commit on.
 			tight := pol
 			tight.MaxTransactionWork, tight.MaxLiveProofDependents = 10, 1
 			f.usePolicy(tight)
 			before := f.lastSeq()
-			if err := w.reportAt(fingerprint("W2"), false, w.auth, w.auth+1); !errors.Is(err, domain.ErrResourceLimit) || f.lastSeq() != before {
-				t.Fatalf("over-limit invalidation: err %v, seq %d -> %d", err, before, f.lastSeq())
+			if err := w.reportAt(fingerprint("W2"), false, w.auth, w.auth+1); err != nil || f.lastSeq() == before {
+				t.Fatalf("report under a tight budget: err %v, seq %d -> %d", err, before, f.lastSeq())
 			}
 			for _, ref := range w.refs {
-				if got := w.statusOf(ref); got.Status != domain.ObligationSatisfied {
-					t.Fatalf("partial invalidation: %+v", got)
-				}
-			}
-			f.usePolicy(pol)
-			w.report(fingerprint("W2"), false)
-			for _, ref := range w.refs {
-				if got := w.statusOf(ref); got.Status != domain.ObligationUnresolved {
-					t.Fatalf("fan-out missed an obligation beyond the first page: %+v", got)
+				if st, pending := w.effectiveOf(ref); st != domain.ObligationUnresolved || !pending {
+					t.Fatalf("an obligation beyond the first page is effective %s pending=%v", st, pending)
 				}
 			}
 		})

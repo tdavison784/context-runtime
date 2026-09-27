@@ -134,21 +134,14 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 		ResultingAuthoritativeRevision: in.ResultingAuthoritativeRevision,
 		Resynchronization:              in.Resynchronization,
 	}
-	var c change
 	gap := in.ExpectedAuthoritativeRevision != prior || in.ResultingAuthoritativeRevision-prior != 1
 	switch {
 	case in.Resynchronization:
 		u.Freshness, u.WorkspaceFingerprint, u.AllPaths = domain.ResourceKnown, in.WorkspaceFingerprint, true
-		c = change{allPaths: true, fingerprint: in.WorkspaceFingerprint, contents: pathContents(in)}
 	case gap || state.Freshness != domain.ResourceKnown:
 		u.Freshness, u.AllPaths = domain.ResourceUnknown, true
-		c = change{unknown: true, allPaths: true}
 	default:
 		u.Freshness, u.WorkspaceFingerprint, u.AllPaths, u.ChangedPaths = domain.ResourceKnown, in.WorkspaceFingerprint, in.AllPaths, in.Clone().ChangedPaths
-		c = change{allPaths: in.AllPaths, paths: map[string]bool{}, fingerprint: in.WorkspaceFingerprint, priorPrint: state.WorkspaceFingerprint, contents: pathContents(in)}
-		for _, p := range in.ChangedPaths {
-			c.paths[p] = true
-		}
 	}
 	work := s.newBudget() // one budget for the whole report (DUR-1.12)
 	w := &writes{tx: tx}
@@ -174,23 +167,15 @@ func (s *Service) ReportResourceChangeTx(tx store.Tx, actor domain.Principal, in
 			return domain.MutationResult{}, w.fail(err)
 		}
 	}
-	inv := invalidation{cause: domain.CauseResourceInvalidation, causeRecord: u.ID, requestID: in.RequestID, reason: domain.ReasonResourceChanged, rule: ResourceInvalidationRule}
-	if err := s.invalidateResource(tx, sem, work, actor, seq, in.ResourceID, c, inv); err != nil {
-		return domain.MutationResult{}, w.fail(err)
-	}
+	// K1a: the report never fans out. Every dependent proof's validity is
+	// derived at read from the store's write-time pointers, which this
+	// report's own writes maintain; settlement is recorded inline before the
+	// next transition on a version or by the asynchronous worker.
 	result := domain.MutationResult{Records: &domain.RecordResult{Kind: "RESOURCE_UPDATE", IDs: []string{u.ID}}}
 	if err := s.recordReceipt(tx, sem, actor, req, seq, result); err != nil {
 		return domain.MutationResult{}, w.fail(err)
 	}
 	return result, nil
-}
-
-func pathContents(in domain.ReportResourceChangeIntent) map[string]string {
-	out := make(map[string]string, len(in.PathContents))
-	for _, c := range in.PathContents {
-		out[c.Path] = c.ContentHash
-	}
-	return out
 }
 
 // canonicalLocator is a locator's resource-relative form (base "."), the

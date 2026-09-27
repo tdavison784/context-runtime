@@ -432,3 +432,47 @@ func TestK1SettleBeforeRetire(t *testing.T) {
 		t.Errorf("repeat call wrote %d transitions", n-len(h))
 	}
 }
+
+// wantInvalidated is the K1 form of "the accepted report invalidated ref":
+// right after the report ref is effectively UNRESOLVED and pending; the
+// settlement worker then records the restricted RESOURCE_INVALIDATION
+// transition, caused by an update of resource and written by the session
+// SYSTEM runtime actor, leaving ref stored UNRESOLVED with no current proof.
+// It returns that settlement.
+func (f fixture) wantInvalidated(t *testing.T, ref domain.ObligationRef, resource, msg string) domain.ObligationTransition {
+	t.Helper()
+	if st, pending := f.effective(t, ref); st != domain.ObligationUnresolved || !pending {
+		t.Fatalf("%s: effective %s pending=%v, want UNRESOLVED pending settlement", msg, st, pending)
+	}
+	for more, passes := true, 0; more; passes++ {
+		if passes > 100 {
+			t.Fatalf("%s: settlement never finishes", msg)
+		}
+		_, more = f.settle(t, 64)
+	}
+	return f.wantSettled(t, ref, resource, msg)
+}
+
+// wantSettled checks ref's recorded settlement: stored UNRESOLVED with no
+// current proof, its last transition the restricted RESOURCE_INVALIDATION
+// caused by an update of resource, by the session SYSTEM runtime actor,
+// with the original authorization.
+func (f fixture) wantSettled(t *testing.T, ref domain.ObligationRef, resource, msg string) domain.ObligationTransition {
+	t.Helper()
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved || o.CurrentProofID != "" {
+		t.Fatalf("%s: after settlement stored %+v", msg, o)
+	}
+	h := (&evalFixture{fixture: f}).history(t, ref)
+	last := h[len(h)-1]
+	var u domain.ResourceUpdate
+	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		r, _ := store.ReadSemantic(tx)
+		u, _ = r.ResourceUpdate(last.CauseRecordID)
+		return nil
+	})
+	if last.Cause != domain.CauseResourceInvalidation || last.Actor != runtimeActor(testSession) || last.GrantID != "" ||
+		last.From != domain.ObligationSatisfied || last.To != domain.ObligationUnresolved || u.ResourceID != resource || last.OriginAuthorizationRef == nil {
+		t.Fatalf("%s: settlement = %+v (cause update %+v)", msg, last, u)
+	}
+	return last
+}

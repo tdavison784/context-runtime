@@ -20,6 +20,10 @@ func staleProof(t *testing.T) {
 	prev := effectiveStatus
 	effectiveStatus = func(r store.SemanticReader, o domain.ObligationVersion) (domain.ObligationStatus, bool, error) {
 		switch o.CurrentProofID {
+		case "valid":
+			// A fake proof on a fake reader: answer for the real rule,
+			// which reads store pointers since the K1 switch.
+			return domain.ObligationSatisfied, false, nil
 		case "stale":
 			return domain.ObligationUnresolved, true, nil
 		case "broken":
