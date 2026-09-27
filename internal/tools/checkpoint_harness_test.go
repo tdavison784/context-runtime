@@ -57,3 +57,36 @@ func TestHarnessCheckpointKeepsHarnessAuthorityAndReplays(t *testing.T) {
 		}
 	}
 }
+
+// SEC-2.8: another principal's derived HARNESS-checkpoint request ID gives
+// the same error whether or not its receipt exists (no existence oracle).
+func TestHarnessCheckpointDerivedRequestIDIsNoExistenceOracle(t *testing.T) {
+	st, s, i2, manifest := checkpointConversation(t, true)
+	owner := dispatcher(i2)
+	// H5: a runtime request ID binds the event sequence allocated in the
+	// transaction that first uses it.
+	var registered, absent string
+	update(t, st, func(tx store.Tx) error {
+		seq, occurrence := tx.NextSeq(), domain.CallerOccurrenceID("s", "event-1")
+		var err error
+		if registered, err = domain.OperationRequestID(owner, owner, occurrence, seq, 1, 0); err != nil {
+			return err
+		}
+		if absent, err = domain.OperationRequestID(owner, owner, occurrence, seq, 2, 0); err != nil {
+			return err
+		}
+		_, err = s.ApplyHarnessCheckpoint(tx, owner, HarnessCheckpointRequest{i2.Principal, i2.ExchangeID, summary(registered, manifest, "owner")}, 0)
+		return err
+	})
+	b := seedAgentInvocation(t, st, "b")
+	probe := func(requestID string) error {
+		return st.Update(testContext, "s", func(tx store.Tx) error {
+			_, err := s.ApplyHarnessCheckpoint(tx, dispatcher(b), HarnessCheckpointRequest{b.Principal, b.ExchangeID, summary(requestID, manifest, "probe")}, 0)
+			return err
+		})
+	}
+	existing, missing := probe(registered), probe(absent)
+	if existing == nil || missing == nil || existing.Error() != missing.Error() || errors.Is(existing, domain.ErrEventIDConflict) {
+		t.Fatalf("existence oracle: existing=%v missing=%v", existing, missing)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -16,12 +17,11 @@ type ReplacementHandoff struct{ PriorID, ReplacementID string }
 // obligation for an actor whose authority came from the supersession itself
 // (XREV-1.2): an exact ActionReplaceDirective grant lets HARNESS replace a
 // SYSTEM pin. Nothing in the handoff is trusted. It requires this
-// transaction's SUPERSEDES edge ReplacementID→PriorID and its "superseded"
-// audit by actor, and re-authorizes the recorded grant with
-// domain.AuthorizeMutation at the edge's own sequence (live, exact target,
-// matching grantee, issuer authority over the source). Without a grant the
-// actor needs direct authority, exactly as DeclareForReplacementTx. The
-// replacement must preserve the prior's authority, key and boundary.
+// transaction's SUPERSEDES edge ReplacementID→PriorID created at the actor's
+// authority, and re-authorizes the actor for ActionReplaceDirective at the
+// edge's own sequence: direct authority, or a live exact grant whose issuer
+// has authority over the source. The replacement must preserve the prior's
+// authority, key and boundary.
 func (s *Service) DeclareForAuthorizedReplacementTx(tx store.Tx, actor domain.Principal, h ReplacementHandoff, seq uint64) (*domain.ObligationRef, error) {
 	sem, err := beginAt(tx, actor, seq)
 	if err != nil {
@@ -39,7 +39,7 @@ func (s *Service) DeclareForAuthorizedReplacementTx(tx store.Tx, actor domain.Pr
 		src.Authority != prior.Authority || src.DirectiveID != prior.DirectiveID || src.TaskID != prior.TaskID || src.Access != prior.Access || src.Namespace != prior.Namespace {
 		return nil, domain.ErrInvalidRecord
 	}
-	if err := authorizedSupersession(tx, sem, actor, prior, src); err != nil {
+	if err := authorizedSupersession(tx, actor, prior, src, s.policy.MaxTargets); err != nil {
 		return nil, err
 	}
 	decl, err := sem.CreationDeclaration(src.ID)
@@ -63,60 +63,22 @@ func (s *Service) DeclareForAuthorizedReplacementTx(tx store.Tx, actor domain.Pr
 	return s.declarePinned(tx, sem, actor, src, claim, seq)
 }
 
-// authorizedSupersession proves prior→src was superseded in this transaction
-// by actor, under direct authority or the exact grant graph recorded.
-func authorizedSupersession(tx store.Tx, sem store.SemanticReader, actor domain.Principal, prior, src domain.ContextItem) error {
+// authorizedSupersession proves prior→src was superseded in this
+// transaction by an actor authorized for it. It reads only exact keys: the
+// SUPERSEDES edge, then graph.AuthorizeAtSequence at the edge's own seq
+// (direct authority, or a grant live at that seq whose issuer has authority
+// over the source), so history length never matters (SPEC-2.6, DUR-2.11).
+func authorizedSupersession(tx store.Tx, actor domain.Principal, prior, src domain.ContextItem, maxGrants int) error {
 	rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: src.ID, ToID: prior.ID})
 	if err != nil {
 		return err
 	}
-	if len(rels) != 1 || !tx.Allocated(rels[0].Seq) {
+	if len(rels) != 1 || !tx.Allocated(rels[0].Seq) || rels[0].Authority != actor.Authority {
 		return domain.ErrInvalidRecord
 	}
-	edge := rels[0]
-	audit, err := supersessionAudit(tx, sem, prior.ID, src.ID)
-	if err != nil {
-		return err
-	}
-	if audit.Actor != actor {
-		return domain.ErrInvalidRecord
-	}
-	if audit.GrantID == "" {
-		if !actor.Authority.CanHoldLifecycleAuthority() || !actor.Authority.AtLeast(src.Authority) {
-			return domain.ErrInvalidRecord
-		}
-		return nil
-	}
-	g, err := tx.Grant(audit.GrantID)
-	if err != nil {
-		return notFound(err)
-	}
-	target := domain.MutationTarget{Ref: domain.ItemGrantTarget(prior.SessionID, prior.ID), ID: prior.ID, Authority: prior.Authority, Access: prior.Access}
-	auth, err := domain.AuthorizeMutation(domain.MutationRequest{Actor: actor, Action: domain.ActionReplaceDirective, Targets: []domain.MutationTarget{target}, Grants: []domain.MutationGrant{g}, Seq: edge.Seq})
-	if err != nil || auth.GrantIDs[target.AuthorizationID()] != g.ID {
+	target := domain.ItemGrantTarget(prior.SessionID, prior.ID)
+	if _, err := graph.AuthorizeAtSequence(tx, actor, domain.ActionReplaceDirective, []domain.GrantTarget{target}, nil, rels[0].Seq, maxGrants); err != nil {
 		return domain.ErrInvalidRecord
 	}
 	return nil
-}
-
-// supersessionAudit finds the "superseded" audit graph wrote in this
-// transaction for prior→src; the audit is immutable and bounded per item.
-func supersessionAudit(tx store.Tx, sem store.SemanticReader, priorID, srcID string) (domain.LifecycleEvent, error) {
-	var after store.Cursor
-	for range 64 {
-		page, err := sem.LifecycleByTarget(domain.TargetItem, priorID, store.Page{After: after, Limit: 64})
-		if err != nil {
-			return domain.LifecycleEvent{}, err
-		}
-		for _, ev := range page.Records {
-			if ev.Action == "superseded" && ev.From == priorID && ev.To == srcID && tx.Allocated(ev.Seq) {
-				return ev, nil
-			}
-		}
-		if !page.More {
-			return domain.LifecycleEvent{}, domain.ErrInvalidRecord
-		}
-		after = page.Next
-	}
-	return domain.LifecycleEvent{}, domain.ErrResourceLimit
 }

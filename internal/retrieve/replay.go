@@ -26,12 +26,22 @@ func retrievalArguments(i AdmissionIntent, p domain.Phase3Policy) ([]byte, error
 // replayRetrieval runs before source, turn, lease and lifecycle checks. A
 // committed request retains its original result after its lease expires.
 func replayRetrieval(r retrievalReplayReader, actor domain.Principal, i AdmissionIntent, _ domain.Phase3Policy) (domain.RetrievalResult, bool, error) {
+	// Look the receipt up first so its owner replays, including a legacy
+	// pre-derivation receipt (DUR-2.8). Anyone else, and any new request, is
+	// checked for request-ID ownership before existence can change the
+	// outcome, so another principal's receipt is no oracle (SEC-2.8).
 	receipt, err := r.MutationReceipt(domain.MutationRetrieval, i.Rehydrate.RequestID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return domain.RetrievalResult{}, false, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return domain.RetrievalResult{}, false, err
+	}
+	if err != nil || receipt.Principal != actor {
+		if idErr := domain.RuntimeRequestOwnedBy(actor, i.Rehydrate.RequestID); idErr != nil {
+			return domain.RetrievalResult{}, false, idErr
+		}
+		if err != nil {
+			return domain.RetrievalResult{}, false, nil
+		}
+		return domain.RetrievalResult{}, false, domain.ErrEventIDConflict
 	}
 	// A committed receipt retains the canonical arguments it accepted. A
 	// later policy with a smaller limit cannot invalidate that replay (P3-2).

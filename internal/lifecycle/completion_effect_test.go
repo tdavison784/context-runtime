@@ -17,6 +17,15 @@ type rejectGC struct {
 }
 
 func (f rejectGC) InsertGCRequest(r domain.GCRequest) error { return f.check(r) }
+
+// rejectGCTx exposes the fault-injecting semantic handle through the
+// transaction, where gcqueue.Enqueue obtains it.
+type rejectGCTx struct {
+	store.Tx
+	sem rejectGC
+}
+
+func (t rejectGCTx) SemanticTransaction() (store.SemanticTx, error) { return t.sem, nil }
 func (f rejectGC) GCRequest(string) (domain.GCRequest, error) {
 	return domain.GCRequest{}, domain.ErrNotFound
 }
@@ -60,7 +69,9 @@ func TestCompletionGCFailureRollsBackGoalsAndTask(t *testing.T) {
 			}
 			return failure
 		}}
-		out, err := s.writeCompletion(tx, fault, p, domain.CompleteTaskIntent{RequestID: "request", TaskID: "task"}, task, plan, seq)
+		// The GC request is produced through gcqueue on the transaction, so the
+		// fault is injected there as well as on the semantic handle.
+		out, err := s.writeCompletion(rejectGCTx{Tx: tx, sem: fault}, fault, p, domain.CompleteTaskIntent{RequestID: "request", TaskID: "task"}, task, plan, seq)
 		if err != failure || out.TaskID != "" {
 			t.Fatalf("failed result: %+v %v", out, err)
 		}

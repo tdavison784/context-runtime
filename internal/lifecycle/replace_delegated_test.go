@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -97,6 +98,46 @@ func TestForgedReplacementHandoffIsRefused(t *testing.T) {
 		})
 		if !errors.Is(err, domain.ErrInvalidRecord) {
 			t.Fatalf("forged handoff: %v", err)
+		}
+	})
+}
+
+// SPEC-2.6 / DUR-2.11 (H2): the replacement handoff never pages the prior
+// item's lifecycle history, so a long audit history cannot make a pin
+// unreplaceable; and a grant from a lower-authority issuer never lets
+// HARNESS replace a SYSTEM pin.
+func TestPinReplacementIndependentOfAuditHistory(t *testing.T) {
+	ctx := context.Background()
+	const history = 4200 // beyond the old 64×64 audit scan
+	system, harness := storetest.NewPrincipal("s", domain.AuthoritySystem), storetest.NewPrincipal("s", domain.AuthorityHarness)
+	eachStore(t, func(t *testing.T, db store.Store) {
+		seedW4PinAs(t, db, domain.AuthoritySystem, "Ship it.", nil)
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			for n := range history {
+				if err := tx.AppendLifecycleEvent(storetest.NewItemEvent("s", fmt.Sprintf("hist-%d", n), tx.NextSeq(), "prior")); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		s, err := New(db, w4Policy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// HARNESS-issued grant: the issuer lacks authority over the SYSTEM pin.
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			return tx.InsertGrant(domain.MutationGrant{ID: "weak", SessionID: "s", Action: domain.ActionReplaceDirective,
+				Targets: []domain.GrantTarget{domain.ItemGrantTarget("s", "prior")}, Issuer: harness, Grantee: &harness, IssuedSeq: tx.NextSeq()})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ReplaceDirectiveStandalone(ctx, harness, replaceIntent("weak", 1, "Ship it.")); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Fatalf("lower-authority grant replaced a SYSTEM pin: %v", err)
+		}
+		if _, err := s.ReplaceDirectiveStandalone(ctx, system, replaceIntent("r", 1, "Ship it.")); err != nil {
+			t.Fatalf("replacement after %d audit events: %v", history, err)
 		}
 	})
 }

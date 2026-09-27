@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/gcqueue"
 	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -105,6 +106,14 @@ func (s *Service) keyedWrite(tx store.Tx, dispatcher domain.Principal, r Request
 		previous, err := graph.ReplaceDirective(tx, p, p.TaskID, item.DirectiveID, item.ID, eventID)
 		if err != nil {
 			return none, err
+		}
+		if previous != "" {
+			// A replacement is a SUPERSESSION (SPEC-2.3), enqueued under the
+			// recorded policy this receipt records; gcqueue writes nothing
+			// for a disabled trigger or a task-less item (H4).
+			if _, err = gcqueue.Enqueue(tx, s.policy, p, domain.GCSupersession, item.TaskID, item.ID); err != nil {
+				return none, err
+			}
 		}
 		return domain.ToolResult{Keyed: &domain.KeyedWriteResult{ItemID: item.ID, CanonicalItemID: item.ID, SupersededItemID: previous}}, nil
 	})

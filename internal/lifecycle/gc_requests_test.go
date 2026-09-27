@@ -113,25 +113,35 @@ func TestEnqueueGCDeduplicatesTriggerIdentity(t *testing.T) {
 	s, _ := New(mem, testPolicy())
 	f := newFacets()
 	p := storetest.NewPrincipal("s", domain.AuthoritySystem)
+	if err := f.update(mem, func(tx store.Tx) error {
+		for _, id := range []string{"task", "other"} {
+			if _, err := tx.PutTask(storetest.NewTask("s", id), 0, storetest.NewLifecycleEvent("s", "created-"+id, tx.NextSeq(), domain.TargetTask, id)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var ids []string
 	for range 2 {
 		if err := f.update(mem, func(tx store.Tx) error {
-			id, err := s.EnqueueGC(tx, p, domain.GCSupersession, domain.CollectSession, "", "event-1")
+			id, err := s.EnqueueGC(tx, p, domain.GCSupersession, domain.CollectTask, "task", "event-1")
 			ids = append(ids, id)
 			return err
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if pending := pendingGC(t, mem); ids[0] != ids[1] || len(pending) != 1 {
+	if pending := pendingGC(t, mem); ids[0] == "" || ids[0] != ids[1] || len(pending) != 1 {
 		t.Fatalf("duplicate trigger: %v %+v", ids, pending)
 	}
 	for name, enqueue := range map[string]func(store.Tx) (string, error){
-		"changed scope": func(tx store.Tx) (string, error) {
-			return s.EnqueueGC(tx, p, domain.GCSupersession, domain.CollectTask, "task", "event-1")
+		"changed task": func(tx store.Tx) (string, error) {
+			return s.EnqueueGC(tx, p, domain.GCSupersession, domain.CollectTask, "other", "event-1")
 		},
 		"manual": func(tx store.Tx) (string, error) {
-			return s.EnqueueGC(tx, p, domain.GCManual, domain.CollectSession, "", "event-2")
+			return s.EnqueueGC(tx, p, domain.GCManual, domain.CollectTask, "task", "event-2")
 		},
 	} {
 		if err := f.update(mem, func(tx store.Tx) error { _, err := enqueue(tx); return err }); err == nil {

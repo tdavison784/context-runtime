@@ -8,13 +8,15 @@ import (
 	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/gcqueue"
 	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 // RecordResult family for an explicit replacement. IDs are, in order, the new
-// occurrence, its creation declaration and the superseded occurrence.
+// occurrence, its creation declaration, the superseded occurrence and, when
+// a grant authorized the supersession, that grant.
 const recordReplacement = "REPLACEMENT"
 
 // ReplacementObligations is W4's in-transaction declaration of a replacement
@@ -68,7 +70,7 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 		return out, err
 	}
 	if prior != nil {
-		return s.replayReplacement(sem, p, *prior)
+		return s.replayReplacement(p, *prior)
 	}
 	if err = i.Validate(); err != nil {
 		return out, err
@@ -137,13 +139,18 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 	}
 	// The supersession is a durable GC trigger (P3-39, SPEC-1.6); its
 	// identity is the new occurrence, so the trigger fires exactly once.
-	if _, err = s.enqueueGC(tx, sem, p, domain.GCSupersession, domain.CollectTask, old.TaskID, fresh.ID); err != nil {
+	// A task-less directive's supersession produces no request (H4).
+	if _, err = gcqueue.Enqueue(tx, s.policy, p, domain.GCSupersession, old.TaskID, fresh.ID); err != nil {
 		return out, err
 	}
-	out.Result.Records = &domain.RecordResult{Kind: recordReplacement, IDs: []string{fresh.ID, created.ID, old.ID}}
-	if out.GrantID, err = supersessionGrant(sem, p, old.ID, fresh.ID); err != nil {
+	if out.GrantID, err = s.replacementGrant(tx, p, old, fresh); err != nil {
 		return out, err
 	}
+	ids := []string{fresh.ID, created.ID, old.ID}
+	if out.GrantID != "" {
+		ids = append(ids, out.GrantID) // frozen for replay; no history read
+	}
+	out.Result.Records = &domain.RecordResult{Kind: recordReplacement, IDs: ids}
 	if err = s.finish(tx, sem, p, domain.MutationLifecycle, method, i.RequestID, args, out.Result); err != nil {
 		return out, err
 	}
@@ -153,9 +160,6 @@ func (s *Service) ReplaceDirective(tx store.Tx, p domain.Principal, i domain.Rep
 
 func (s *Service) ReplaceDirectiveStandalone(ctx context.Context, p domain.Principal, i domain.ReplaceDirectiveIntent) (MutationOutcome, error) {
 	var out MutationOutcome
-	if err := domain.ValidateCallerRequestID(i.RequestID); err != nil {
-		return out, err // callers never name runtime namespaces (H5, SEC-2.2)
-	}
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
 		_, _, prior, err := s.begin(tx, p, domain.MutationLifecycle, string(domain.ActionReplaceDirective), i.RequestID, i)
 		if err != nil {
@@ -163,6 +167,11 @@ func (s *Service) ReplaceDirectiveStandalone(ctx context.Context, p domain.Princ
 		}
 		var seq uint64
 		if prior == nil {
+			// Callers never name runtime namespaces (H5, SEC-2.2); an
+			// owner's committed receipt replays first (DUR-2.8).
+			if err := domain.ValidateCallerRequestID(i.RequestID); err != nil {
+				return err
+			}
 			seq = tx.NextSeq()
 		}
 		out, err = s.ReplaceDirective(tx, p, i, seq)
@@ -208,39 +217,35 @@ func replacementItem(tx store.Tx, i domain.ReplaceDirectiveIntent, old domain.Co
 	return n, n.ValidateSemantic()
 }
 
-// supersessionGrant reads the immutable supersession audit graph wrote for
-// old→fresh and returns the grant that authorized it, if any.
-func supersessionGrant(r store.DeclarationReader, p domain.Principal, oldID, freshID string) (string, error) {
-	var after store.Cursor
-	for range 64 {
-		page, err := r.LifecycleByTarget(domain.TargetItem, oldID, store.Page{After: after, Limit: 64})
-		if err != nil {
-			return "", err
-		}
-		for _, ev := range page.Records {
-			if ev.Action == "superseded" && ev.From == oldID && ev.To == freshID {
-				if ev.Actor != p {
-					return "", domain.ErrIntegrity
-				}
-				return ev.GrantID, nil
-			}
-		}
-		if !page.More {
-			return "", domain.ErrIntegrity
-		}
-		after = page.Next
+// replacementGrant returns the grant that authorized old's supersession in
+// this transaction, re-authorizing at the SUPERSEDES edge's own sequence:
+// exact keys only, so audit history length never matters (SPEC-2.6).
+func (s *Service) replacementGrant(tx store.Tx, p domain.Principal, old, fresh domain.ContextItem) (string, error) {
+	rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: fresh.ID, ToID: old.ID})
+	if err != nil {
+		return "", err
 	}
-	return "", domain.ErrResourceLimit
+	if len(rels) != 1 || !tx.Allocated(rels[0].Seq) {
+		return "", domain.ErrIntegrity
+	}
+	target := domain.ItemGrantTarget(p.SessionID, old.ID)
+	auth, err := graph.AuthorizeAtSequence(tx, p, domain.ActionReplaceDirective, []domain.GrantTarget{target}, nil, rels[0].Seq, s.policy.MaxTargets)
+	if err != nil {
+		return "", err
+	}
+	return auth.GrantIDs[target.AuthorizationKey], nil
 }
 
-func (s *Service) replayReplacement(r store.DeclarationReader, p domain.Principal, receipt domain.MutationReceipt) (MutationOutcome, error) {
+// replayReplacement returns the frozen outcome; the authorizing grant, if
+// any, is the receipt's fourth record ID.
+func (s *Service) replayReplacement(p domain.Principal, receipt domain.MutationReceipt) (MutationOutcome, error) {
 	rec := receipt.Result.Records
-	if rec == nil || rec.Kind != recordReplacement || len(rec.IDs) != 3 {
+	if rec == nil || rec.Kind != recordReplacement || len(rec.IDs) != 3 && len(rec.IDs) != 4 || receipt.Principal != p {
 		return MutationOutcome{}, domain.ErrIntegrity
 	}
-	grant, err := supersessionGrant(r, p, rec.IDs[2], rec.IDs[0])
-	if err != nil {
-		return MutationOutcome{}, err
+	grant := ""
+	if len(rec.IDs) == 4 {
+		grant = rec.IDs[3]
 	}
 	return MutationOutcome{MutationReceiptID: receipt.ID, GrantID: grant, Result: receipt.Result.Clone()}, nil
 }

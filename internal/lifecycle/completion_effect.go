@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/gcqueue"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -40,6 +41,6 @@ func (s *Service) writeCompletion(tx store.Tx, sem store.SemanticTx, p domain.Pr
 	}
 	out.AfterVersion = after.Version
 	// A task completes once, so its ID is the trigger identity.
-	out.GCRequestID, err = s.enqueueGC(tx, sem, p, domain.GCTaskCompletion, domain.CollectTask, task.TaskID, task.TaskID)
+	out.GCRequestID, err = gcqueue.Enqueue(tx, s.policy, p, domain.GCTaskCompletion, task.TaskID, task.TaskID)
 	return out, err
 }

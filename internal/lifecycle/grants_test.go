@@ -220,3 +220,103 @@ func TestGrantHistoryOverflowDoesNotAbortCollection(t *testing.T) {
 		}
 	})
 }
+
+// SEC-2.3 / DUR-2.4 (H2): dead grant history never blocks issuance; only
+// grants live at the issuance seq count, and authorization precedes the
+// capacity check.
+func TestDeadGrantHistoryNeverBlocksIssuance(t *testing.T) {
+	ctx := context.Background()
+	for _, dead := range []string{"revoked", "expired"} {
+		t.Run(dead, func(t *testing.T) {
+			eachStore(t, func(t *testing.T, db store.Store) {
+				pol := testPolicy()
+				pol.MaxTargets = 3
+				s, _ := New(db, pol)
+				sys := storetest.NewItem("s", "sys", 0, "system fact")
+				sys.Authority = domain.AuthoritySystem
+				seedItem(t, db, sys)
+				system, harness := storetest.NewPrincipal("s", domain.AuthoritySystem), storetest.NewPrincipal("s", domain.AuthorityHarness)
+				for n := range pol.MaxTargets + 1 {
+					id := fmt.Sprintf("old-%d", n)
+					g := archiveGrant("g-"+id, id, "sys", harness)
+					if dead == "expired" {
+						g.ExpiresAtSeq = lastSeq(t, db) + 1 // valid only through its own issuance seq
+					}
+					if _, err := s.IssueGrantStandalone(ctx, system, g); err != nil {
+						t.Fatalf("history grant %d: %v", n, err)
+					}
+					if dead == "revoked" {
+						if _, err := s.RevokeGrantStandalone(ctx, system, domain.RevokeGrantIntent{RequestID: "r-" + id, GrantID: id}); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				if _, err := s.IssueGrantStandalone(ctx, system, archiveGrant("fresh", "fresh", "sys", harness)); err != nil {
+					t.Fatalf("issuance after %d %s grants: %v", pol.MaxTargets+1, dead, err)
+				}
+				if _, err := s.ArchiveStandalone(ctx, harness, domain.ArchiveIntent{RequestID: "a", ItemID: "sys", ExpectedVersion: 1}); err != nil {
+					t.Fatalf("authorization through the fresh grant: %v", err)
+				}
+			})
+		})
+	}
+	t.Run("authority before capacity", func(t *testing.T) {
+		eachStore(t, func(t *testing.T, db store.Store) {
+			pol := testPolicy()
+			pol.MaxTargets = 3
+			s, _ := New(db, pol)
+			sys := storetest.NewItem("s", "sys", 0, "system fact")
+			sys.Authority = domain.AuthoritySystem
+			seedItem(t, db, sys)
+			system := storetest.NewPrincipal("s", domain.AuthoritySystem)
+			for n := range pol.MaxTargets {
+				p := storetest.NewPrincipal("s", domain.AuthorityHarness)
+				p.AgentID = fmt.Sprintf("a%d", n)
+				if _, err := s.IssueGrantStandalone(ctx, system, archiveGrant(fmt.Sprintf("g%d", n), fmt.Sprintf("grant-%d", n), "sys", p)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.IssueGrantStandalone(ctx, storetest.NewPrincipal("s", domain.AuthorityUser), archiveGrant("u", "user-grant", "sys", storetest.NewPrincipal("s", domain.AuthorityHarness))); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+				t.Fatalf("unauthorized issuer against a full cap: %v", err)
+			}
+		})
+	})
+}
+
+// SEC-2.7 (H2): one issuer cannot fill the live-grant cap, and issuers below
+// SYSTEM cannot take the slots reserved for SYSTEM.
+func TestLiveGrantCapIsSharedFairly(t *testing.T) {
+	ctx := context.Background()
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxTargets = 4 // one live grant per issuer, one slot reserved for SYSTEM
+		s, _ := New(db, pol)
+		seedItem(t, db, storetest.NewItem("s", "shared", 0, "shared USER fact"))
+		user := func(n int) domain.Principal {
+			p := storetest.NewPrincipal("s", domain.AuthorityUser)
+			p.AgentID = fmt.Sprintf("user-%d", n)
+			return p
+		}
+		issue := func(issuer domain.Principal, id string) error {
+			_, err := s.IssueGrantStandalone(ctx, issuer, archiveGrant("r-"+id, id, "shared", issuer))
+			return err
+		}
+		if err := issue(user(0), "u0-a"); err != nil {
+			t.Fatal(err)
+		}
+		if err := issue(user(0), "u0-b"); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("one USER exceeded its share: %v", err)
+		}
+		for n := 1; n <= 2; n++ {
+			if err := issue(user(n), fmt.Sprintf("u%d", n)); err != nil {
+				t.Fatalf("user %d: %v", n, err)
+			}
+		}
+		if err := issue(user(3), "u3"); !errors.Is(err, domain.ErrResourceLimit) {
+			t.Fatalf("lower authority took the SYSTEM reserve: %v", err)
+		}
+		if err := issue(storetest.NewPrincipal("s", domain.AuthoritySystem), "sys"); err != nil {
+			t.Fatalf("SYSTEM denied by lower-authority grants: %v", err)
+		}
+	})
+}

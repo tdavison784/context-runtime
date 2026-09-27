@@ -44,7 +44,9 @@ func TestGCProtectsOnlyTheNewestRelevantCheckpoint(t *testing.T) {
 		"newest protected":           {newest: true, want: domain.GCProtected},
 		"older collectible":          {newest: false, want: domain.GCArchive},
 		"invisible counts as newest": {err: domain.ErrNotFound, want: domain.GCProtected},
-		"bounded lookup aborts":      {err: domain.ErrResourceLimit, fails: domain.ErrResourceLimit},
+		// H3: an overflowing lookup keeps the checkpoint (never archived)
+		// without aborting the rest of the collection.
+		"bounded lookup is ineligible": {err: domain.ErrResourceLimit, want: domain.GCIneligible},
 	} {
 		t.Run(name, func(t *testing.T) {
 			mem := memory.New()

@@ -86,9 +86,6 @@ func (s *Service) CompleteTask(tx store.Tx, p domain.Principal, i domain.Complet
 
 func (s *Service) CompleteTaskStandalone(ctx context.Context, p domain.Principal, i domain.CompleteTaskIntent) (domain.CompletionReceipt, error) {
 	var out MutationOutcome
-	if err := domain.ValidateCallerRequestID(i.RequestID); err != nil {
-		return domain.CompletionReceipt{}, err // callers never name runtime namespaces (H5, SEC-2.2)
-	}
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
 		_, _, prior, err := s.begin(tx, p, domain.MutationLifecycle, string(domain.ActionCompleteTask), i.RequestID, i)
 		if err != nil {
@@ -96,6 +93,11 @@ func (s *Service) CompleteTaskStandalone(ctx context.Context, p domain.Principal
 		}
 		var seq uint64
 		if prior == nil {
+			// Callers never name runtime namespaces (H5, SEC-2.2); an
+			// owner's committed receipt replays first (DUR-2.8).
+			if err := domain.ValidateCallerRequestID(i.RequestID); err != nil {
+				return err
+			}
 			seq = tx.NextSeq()
 		}
 		out, err = s.CompleteTask(tx, p, i, seq)

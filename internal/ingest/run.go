@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/gcqueue"
 	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -205,21 +206,16 @@ func (r *run) advanceTask() error {
 }
 
 // enqueueGC produces a durable GC trigger in the event's transaction
-// (P3-39, SPEC-1.6) when the event's recorded policy enables it. An enabled
-// trigger with no lifecycle producer fails closed: the event never commits
-// without its durable trigger. Without a task the request is session-scoped.
+// (P3-39, SPEC-1.6) through the leaf producer, under the event's RECORDED
+// policy (SPEC-2.11): it alone decides whether the trigger is enabled and is
+// recorded on the request. A task-less trigger produces nothing (H4): Phase
+// 3 has no session-scoped GC. Frozen v2 history records no policy and
+// produces no trigger.
 func (r *run) enqueueGC(origin domain.Principal, trigger domain.GCTrigger, taskID, triggerID string) error {
-	if r.pol == nil || !r.pol.GCTriggerEnabled(trigger) {
+	if r.pol == nil {
 		return nil
 	}
-	if r.g.Lifecycle == nil {
-		return domain.ErrUnsupportedSchema
-	}
-	scope := domain.CollectTask
-	if taskID == "" {
-		scope = domain.CollectSession
-	}
-	_, err := r.g.Lifecycle.EnqueueGC(r.tx, origin, trigger, scope, taskID, triggerID)
+	_, err := gcqueue.Enqueue(r.tx, *r.pol, origin, trigger, taskID, triggerID)
 	return err
 }
 

@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/domain"
 
 	"github.com/tdavison784/context-runtime/internal/store"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
 
 // TestUnknownIdentityRestatementIsALineDiagnostic is SPEC-1.3 (ruling 3,
@@ -103,4 +105,78 @@ type unknownDeclSem struct{ store.SemanticTx }
 func (s unknownDeclSem) InsertCreationDeclaration(d domain.CreationDeclaration) error {
 	d.Signature, d.LegacyKnown, d.AcceptedSemantics = "", false, domain.CreationSemantics{}
 	return s.SemanticTx.InsertCreationDeclaration(d)
+}
+
+// TestUnknownIdentityWorkingSnapshotDedups_SPEC29 (SPEC-2.9, G5, C-1;
+// commander ruling: attribute-free classes match over unknown identity): an
+// identical Working snapshot restated over members whose creation identity
+// is unknown (pre-upgrade, unreconciled) is a duplicate. It links
+// DUPLICATE_OF, replaces and rebinds nothing, never aborts the event, and
+// the rest of the event is ingested. A changed snapshot still replaces.
+func TestUnknownIdentityWorkingSnapshotDedups_SPEC29(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		sys := principal(domain.AuthoritySystem)
+		f.mustIngest(sys, sysEvent("start", "hello"))
+		priors := f.legacyUnknownWorking("## Working\n- step one\n- step two\n")
+		r, err := f.ingest(sys, sysEvent("restate-w", "## Working\n- step one\n- step two\n## Pinned\n- [q] A new rule.\n"))
+		if err != nil {
+			t.Fatalf("identical snapshot over unknown identity aborted the event: %v", err)
+		}
+		if len(r.Replacements) != 0 || len(r.Duplicates) != len(priors) {
+			t.Fatalf("restatement: dups %+v repls %+v, want %d duplicates", r.Duplicates, r.Replacements, len(priors))
+		}
+		for _, id := range priors {
+			if !f.isCurrent(id) {
+				t.Fatalf("prior member %s is no longer current", id)
+			}
+		}
+		if q := mustDirective(t, r, "q"); !f.isCurrent(q.ID) {
+			t.Fatal("the rest of the event was not ingested")
+		}
+		c := f.mustIngest(sys, sysEvent("change-w", "## Working\n- step three\n"))
+		if len(c.Replacements) != len(priors) {
+			t.Fatalf("changed snapshot replaced %d of %d", len(c.Replacements), len(priors))
+		}
+	})
+}
+
+// legacyUnknownWorking files the Working snapshot text in task T the way a
+// pre-upgrade snapshot that migration 0034 could not reconcile looks: the
+// exact rows ingest would write (minted by ingesting it in another task),
+// with no namespace, an unknown creation declaration, no snapshot
+// declaration, and current. It returns the member IDs.
+func (f *fixture) legacyUnknownWorking(text string) []string {
+	f.t.Helper()
+	probe := principal(domain.AuthoritySystem)
+	probe.TaskID = "T-probe"
+	e := sysEvent("probe-"+domain.HashBytes([]byte(text))[7:19], text)
+	e.Spans[0].Access.TaskID = "T-probe"
+	var ids []string
+	members := semantic(f.mustIngest(probe, e))
+	if err := f.s.Update(ctx, sess, func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		for i, it := range members {
+			it.ID = fmt.Sprintf("itm_legacy_working_%d", i)
+			it.TaskID, it.Access.TaskID, it.Namespace, it.SourceRanges = "T", "T", "", nil
+			it.Seq = tx.NextSeq()
+			if err := tx.InsertItem(it); err != nil {
+				return err
+			}
+			if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
+				return err
+			}
+			if err := sem.InsertCreationDeclaration(domain.CreationDeclaration{SemanticMeta: domain.SemanticMeta{ID: "decl_" + it.ID, SessionID: sess,
+				SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()}, ItemID: it.ID, PolicyVersion: "legacy-creation-reconciliation/v1"}); err != nil {
+				return err
+			}
+			ids = append(ids, it.ID)
+		}
+		return nil
+	}); err != nil {
+		f.t.Fatalf("legacy Working snapshot: %v", err)
+	}
+	return ids
 }
