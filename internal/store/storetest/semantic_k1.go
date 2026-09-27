@@ -410,13 +410,18 @@ func testSemanticProofDerivedValid(t *testing.T, s store.Store) {
 	report(t, s, "u1", 0, fpA, []string{"src/a.go"}, map[string]string{"src/a.go": "v1"})
 	// One view resolves the obligation's current proof and derives its
 	// validity; the sqlite store serves one view at a time, so a helper
-	// that opened a second view here would deadlock.
+	// that opened a second view here would deadlock. The obligation must
+	// have a current proof, or an expect-invalid case could pass vacuously
+	// on an empty proof ID.
 	valid := func(id string) bool {
 		t.Helper()
 		var ok bool
 		view(t, s, sessA, func(tx store.ReadTx) error {
 			o, err := readSemantic(t, tx).ExactObligation(domain.ObligationRef{SessionID: sessA, ObligationID: id, Version: 1})
 			noErr(t, err)
+			if o.CurrentProofID == "" {
+				t.Fatalf("obligation %s has no current proof", id)
+			}
 			ok, err = store.ProofDerivedValid(readSemantic(t, tx), o.CurrentProofID)
 			noErr(t, err)
 			return nil
