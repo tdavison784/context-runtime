@@ -29,6 +29,9 @@ const (
 // subtest gets a fresh, empty store, which the suite closes when the subtest
 // ends (Close is idempotent, so implementations may also close it).
 func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
+	for _, tc := range atomicSuite {
+		t.Run(tc.name, func(t *testing.T) { tc.fn(t, newStore) })
+	}
 	for _, tc := range suite {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newStore(t)
