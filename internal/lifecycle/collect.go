@@ -81,11 +81,11 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 			return out, err
 		}
 	}
-	var cursor domain.GCCursor
+	var progress domain.GCProgress
 	if link != nil {
-		cursor = link.progress.Cursor
+		progress = link.progress
 	}
-	plan, err := s.planBatch(tx, sem, p, i, seq, cursor)
+	plan, err := s.planBatch(tx, sem, p, i, seq, progress)
 	if err != nil {
 		return out, err
 	}
@@ -118,7 +118,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 		// More candidates remain: advance the durable cursor (CAS); the next
 		// pass runs batch n+1 from it.
 		next := domain.GCProgress{SessionID: p.SessionID, GCRequestID: link.requestID, Cursor: plan.next,
-			Batches: link.progress.Batches + 1, Attempts: link.progress.Attempts, Revision: link.progress.Revision + 1}
+			Batches: link.progress.Batches + 1, Attempts: link.progress.Attempts, SnapshotSeq: receipt.SnapshotSeq, Revision: link.progress.Revision + 1}
 		if _, err = sem.PutGCProgress(next, link.progress.Revision); err != nil {
 			return out, err
 		}
@@ -158,8 +158,12 @@ type batchPlan struct {
 // returns its reserved seq for the next one. Candidates the collector may
 // access but not archive, or whose own bounded read overflows, are recorded
 // INELIGIBLE, never forced.
-func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Principal, i domain.CollectIntent, seq uint64, after domain.GCCursor) (batchPlan, error) {
+func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Principal, i domain.CollectIntent, seq uint64, progress domain.GCProgress) (batchPlan, error) {
+	after := progress.Cursor
 	snap := seq - 1
+	if progress.Batches > 0 {
+		snap = progress.SnapshotSeq
+	}
 	plan := batchPlan{receipt: domain.CollectReceipt{RequestID: i.RequestID, PolicyVersion: s.policy.Version, Principal: p, SnapshotSeq: snap}, spare: seq, next: after}
 	b := workBudget{remaining: s.policy.MaxTransactionWork, pageSize: s.policy.MaxPageSize}
 	seqs := seqPool{spare: seq, next: tx.NextSeq}

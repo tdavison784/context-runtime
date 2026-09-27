@@ -118,18 +118,37 @@ func gcProgress(sem store.SemanticReader, id string) (domain.GCProgress, error) 
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.GCProgress{}, nil
 	}
-	return p, err
+	if err != nil {
+		return p, err
+	}
+	// Pre-J2 progress recovers the ceiling from its first committed receipt.
+	if p.Batches > 0 && p.SnapshotSeq == 0 {
+		req, err := sem.GCRequest(id)
+		if err != nil {
+			return p, err
+		}
+		firstID, err := domain.GCBatchRequestID(req.RequestID, 1)
+		if err != nil {
+			return p, err
+		}
+		first, err := sem.CollectReceipt(collectReceiptID(req.SessionID, firstID))
+		if err != nil {
+			return p, err
+		}
+		p.SnapshotSeq = first.SnapshotSeq
+	}
+	return p, nil
 }
 
 // CollectPending executes up to max request batches, each in its own
 // transaction, paging through the queue (G2, H3). collectorFor supplies the
 // authenticated collector for a request, or false to leave it pending;
 // disabled triggers and requests already collected by another worker stay
-// uncounted. A failing batch never blocks later requests: a deterministic
-// failure is quarantined FAILED at once, a transient one counts an attempt
-// (FAILED/ATTEMPTS_EXHAUSTED at maxGCAttempts), and one not attributable to
-// the request is only reported. Each call makes at most max attempts, scans
-// at most maxGCPagesPerCall pages, and stops when ctx is done.
+// uncounted. Only request-level permanent failures quarantine. Configuration
+// errors are reported without charging; infrastructure failures record an
+// attempt and remain pending. Item retries and skips belong to the batch.
+// Each call makes at most max attempts, scans at most maxGCPagesPerCall
+// pages, and stops when ctx is done.
 func (s *Service) CollectPending(ctx context.Context, session string, collectorFor func(domain.GCRequest) (domain.Principal, bool), max int) (int, error) {
 	if collectorFor == nil || max <= 0 {
 		return 0, domain.ErrInvalidRecord
@@ -241,7 +260,10 @@ func (s *Service) settleGCFailure(ctx context.Context, session, id string, code 
 				return err
 			}
 			if p.Attempts+1 < maxGCAttempts {
-				next := domain.GCProgress{SessionID: session, GCRequestID: id, Cursor: p.Cursor, Batches: p.Batches, Attempts: p.Attempts + 1, Revision: p.Revision + 1}
+				next := p
+				next.SessionID, next.GCRequestID = session, id
+				next.Attempts++
+				next.Revision++
 				_, err := sem.PutGCProgress(next, p.Revision)
 				return err
 			}

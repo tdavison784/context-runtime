@@ -66,3 +66,50 @@ func TestJ1BudgetBoundaryCollectsEveryCandidate(t *testing.T) {
 		}
 	})
 }
+
+// J2 / SPEC-3.6: later insertions cannot extend the first batch's snapshot.
+func TestJ2SnapshotAndCursorStayFrozen(t *testing.T) {
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxGCDecisions = 1
+		s, _ := New(db, pol)
+		seedEphemeral(t, db, 3, 0)
+		id := enqueueScratch(t, db, s)
+		var first MutationOutcome
+		if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+			var err error
+			first, err = s.ExecuteGCRequest(tx, storetest.NewPrincipal("s", domain.AuthoritySystem), id, 0)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Update(context.Background(), "s", func(tx store.Tx) error {
+			it := storetest.NewItem("s", "late", tx.NextSeq(), "late")
+			it.Generation = domain.GenerationEphemeral
+			return tx.InsertItem(it)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		runGC(t, db, s, id, 8)
+		readSemantic(t, db, func(sem store.SemanticReader) error {
+			r, err := sem.GCResult(id)
+			if err != nil {
+				return err
+			}
+			last, err := sem.CollectReceipt(r.CollectReceiptID)
+			if last.SnapshotSeq != first.Result.Collect.SnapshotSeq {
+				t.Errorf("snapshot moved: %d -> %d", first.Result.Collect.SnapshotSeq, last.SnapshotSeq)
+			}
+			return err
+		})
+		if err := db.View(context.Background(), "s", func(tx store.ReadTx) error {
+			it, err := tx.Item("late")
+			if it.Residency != domain.ResidencyResident {
+				t.Error("later insertion collected by old snapshot")
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
