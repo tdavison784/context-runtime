@@ -14,7 +14,7 @@ import (
 var testContext = context.Background()
 
 func testPolicy() domain.Phase3Policy {
-	return domain.Phase3Policy{MaxPageSize: 16, MaxReceiptBytes: 32768, MaxGCDecisions: 64, CheckpointGeneration: domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh, Version: domain.Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs/1", Eligibility: "eligibility/1", Locator: "locator/1", Coverage: "coverage/1", Dedup: "dedup/1", MaxOperations: 64, MaxMetadataBytes: 16384, MaxTargets: 64, MaxEvidence: 64, MaxCoverageMembers: 128, MaxTransactionWork: 1024, MaxToolResultBytes: 16384, MaxCheckpointSemanticBytes: 16384, DefaultLeaseCalls: 2, MaxLeaseCalls: 8, GCTriggers: domain.DefaultGCTriggers()}
+	return domain.Phase3Policy{MaxPageSize: 16, MaxReceiptBytes: 32768, MaxGCDecisions: 64, CheckpointGeneration: domain.GenerationDurable, CheckpointRetention: domain.RetentionHigh, Version: domain.Phase3PolicyVersion, Claim: "claim/1", Matcher: "matcher/1", ObservationState: "obs/1", Eligibility: "eligibility/1", Locator: "locator/1", Coverage: "coverage/1", Dedup: "dedup/1", MaxOperations: 64, MaxMetadataBytes: 16384, MaxTargets: 64, MaxEvidence: 64, MaxCoverageMembers: 128, MaxTransactionWork: 1024, MaxToolResultBytes: 16384, MaxCheckpointSemanticBytes: 16384, DefaultLeaseCalls: 2, MaxLeaseCalls: 8, MaxLiveProofDependents: 64, GCTriggers: domain.DefaultGCTriggers()}
 }
 
 func update(t *testing.T, s store.Store, fn func(store.Tx) error) {

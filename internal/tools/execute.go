@@ -105,6 +105,11 @@ func executeSourced[I any](s *Service, tx store.Tx, dispatcher domain.Principal,
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return result, err
 	}
+	// Tool requests are always caller requests: no tool executes a runtime
+	// operation, so no reserved namespace is ever valid here (SEC-3.7).
+	if err := domain.ValidateCallerRequestID(requestID); err != nil {
+		return result, err
+	}
 	if seq == 0 {
 		seq = tx.NextSeq()
 	}

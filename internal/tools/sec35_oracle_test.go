@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"errors"
+
 	"github.com/tdavison784/context-runtime/internal/store/memory"
 	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 	"strings"
@@ -17,13 +19,18 @@ func TestOversizedCheckpointProbeIsNotAnOracle_SEC35(t *testing.T) {
 			_, s, i2, manifest := checkpointConversationOn(t, st, seedToolFixture(t, st), true)
 			owner := dispatcher(i2)
 			var registered, absent string
-			update(t, st, func(tx store.Tx) error {
+			err := st.Update(testContext, "s", func(tx store.Tx) error {
 				seq, occ := tx.NextSeq(), domain.CallerOccurrenceID("s", "event-1")
 				registered, _ = domain.OperationRequestID(owner, owner, occ, seq, 1, 0)
 				absent, _ = domain.OperationRequestID(owner, owner, occ, seq, 2, 0)
+				// Registering under a runtime ID is refused (SEC-3.7); the probes
+				// below must still be indistinguishable.
 				_, err := s.ApplyHarnessCheckpoint(tx, owner, HarnessCheckpointRequest{i2.Principal, i2.ExchangeID, summary(registered, manifest, "owner")}, 0)
 				return err
 			})
+			if !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Fatalf("owner registered a checkpoint under a runtime request ID: %v", err)
+			}
 			b := seedAgentInvocation(t, st, "b")
 			text := "probe"
 			if big {

@@ -408,8 +408,8 @@ func (s semRead) CurrentProofsByDependency(resourceID, pathKey string, p store.P
 		q += " AND path_key IN (?,'')"
 		args = append(args, pathKey)
 	}
-	q += " AND (seq>? OR (seq=? AND proof_id>?)) ORDER BY seq, proof_id LIMIT ?"
-	args = append(args, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	q += " AND (seq, proof_id) > (?, ?) ORDER BY seq, proof_id LIMIT ?"
+	args = append(args, p.After.Seq, p.After.ID, p.Limit+1)
 	rows, err := t.query(q, args...)
 	if err != nil {
 		return out, err

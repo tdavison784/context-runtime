@@ -1076,3 +1076,32 @@ func TestUpgradeLiveProofPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradePolicyMaxLiveProofDependents checks migration 0046 on a
+// database migrated through 0045 (W4b, DUR-3.1): an envelope and receipt
+// recorded under a Phase 3 policy read back with the largest
+// MaxLiveProofDependents their own work budget allows, capped at 256, so
+// the recorded policy still validates and replays verbatim.
+func TestUpgradePolicyMaxLiveProofDependents(t *testing.T) {
+	l := openLegacy(t, 45)
+	env, r := storetest.NewIngestion("s", "evt", domain.CallerOccurrenceID("s", "evt"), 1)
+	small, large := storetest.SemanticPolicy(), storetest.SemanticPolicy()
+	small.MaxTransactionWork, large.MaxTransactionWork = 100, 1<<20
+	env.SemanticPolicy, r.Versions.Semantic = &small, &large
+	l.insert("envelope", env, nil)
+	l.insert("receipt", receiptRow{SessionID: "s", OccurrenceID: r.OccurrenceID, Versions: r.Versions}, nil)
+	s := l.upgrade()
+	var n int
+	if err := s.db.QueryRow("SELECT f_versions_semantic_max_live_proof_dependents FROM rec_receipt WHERE session_id='s' AND id=?", r.OccurrenceID).Scan(&n); err != nil || n != 256 {
+		t.Errorf("receipt policy after 0046: max live proof dependents = %d (%v), want 256", n, err)
+	}
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		e, err := tx.Envelope(env.OccurrenceID)
+		if err != nil || e.SemanticPolicy == nil || e.SemanticPolicy.MaxLiveProofDependents != 10 || e.SemanticPolicy.Validate() != nil {
+			t.Errorf("envelope policy after 0046 = %+v (%v), want MaxLiveProofDependents 10", e.SemanticPolicy, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

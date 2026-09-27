@@ -51,23 +51,26 @@ func TestLifecycleDerivedRequestIDIsNoExistenceOracle(t *testing.T) {
 		if existing == nil || missing == nil || existing.Error() != missing.Error() || errors.Is(existing, domain.ErrEventIDConflict) {
 			t.Fatalf("existence oracle: existing=%v missing=%v", existing, missing)
 		}
-		// A later transaction: the owner replays because the exact lookup
-		// precedes the current-transaction check (DUR-2.8).
+		// A later transaction: runtime receipts never replay through a
+		// service (an event retry replays its event receipt), so even the
+		// owner is refused on the standalone and transaction-level paths,
+		// identically to an absent receipt (SEC-3.6).
 		i := intent
 		i.RequestID = registered
 		if _, err := s.ArchiveStandalone(ctx, owner, i); !errors.Is(err, domain.ErrInvalidRecord) {
 			t.Fatalf("caller named a current runtime ID: %v", err)
 		}
-		// Runtime replay remains available inside the authenticated executor path.
-		if err := db.Update(ctx, "s", func(tx store.Tx) error {
-			again, err := s.Archive(tx, owner, i, 0)
-			if err == nil && again.Result.AuditID != first.Result.AuditID {
-				t.Fatal("runtime replay changed")
+		for _, id := range []string{registered, absent} {
+			i.RequestID = id
+			err := db.Update(ctx, "s", func(tx store.Tx) error {
+				_, err := s.Archive(tx, owner, i, 0)
+				return err
+			})
+			if !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Fatalf("later-transaction runtime request %q: %v", id, err)
 			}
-			return err
-		}); err != nil {
-			t.Fatal(err)
 		}
+		_ = first
 	})
 }
 
