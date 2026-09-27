@@ -238,9 +238,13 @@ func (s *Service) recordPathContents(sem store.SemanticTx, work *budget, u domai
 }
 
 // currentPathState returns the path's recorded content if it still describes
-// the resource's current KNOWN state: no later update was UNKNOWN, covered
-// all paths, or listed the path (P3-19). Otherwise ok is false, which the
-// file_read matcher treats as unknown.
+// the resource's current KNOWN state: no update after the one that recorded
+// it was UNKNOWN, covered all paths, or named the path or a directory
+// containing it (P3-19, SPEC-1.18). Otherwise ok is false, which the
+// file_read matcher and CURRENT_PATH claims treat as unknown. Content is
+// recorded at its update's resulting revision, so the newest affecting
+// update decides in one keyed read, whatever the history (H2, DUR-2.2,
+// SEC-2.5, XREV-2.2).
 func (s *Service) currentPathState(r store.SemanticReader, work *budget, loc domain.ResourceLocator, rs domain.ResourceState) (domain.ResourcePathState, bool, error) {
 	loc, err := canonicalLocator(loc)
 	if err != nil {
@@ -256,41 +260,17 @@ func (s *Service) currentPathState(r store.SemanticReader, work *budget, loc dom
 	if rs.Freshness != domain.ResourceKnown || ps.Freshness != domain.ResourceKnown || ps.ResourceRevision > rs.AuthoritativeRevision {
 		return domain.ResourcePathState{}, false, nil
 	}
-	full := path.Join(loc.BaseDir, loc.Path)
-	// Only updates after the one that recorded this content can supersede
-	// it; start paging there instead of at the start of history (SEC-1.7,
-	// DUR-1.2). A fully bounded read awaits W2's indexed path-change read.
-	recorded, err := r.ResourceUpdate(ps.ResourceUpdateID)
-	if err != nil {
+	if err := work.spend(1); err != nil {
 		return domain.ResourcePathState{}, false, err
 	}
-	after := store.Cursor{Seq: recorded.Seq, ID: recorded.ID}
-	stale := false
-	err = s.eachPageFrom(work, after, func(p store.Page) (int, store.Cursor, bool, error) {
-		pg, err := r.ResourceUpdates(loc.ResourceID, p)
-		if err != nil {
-			return 0, store.Cursor{}, false, err
-		}
-		for _, u := range pg.Records {
-			if u.ResultingAuthoritativeRevision > ps.ResourceRevision &&
-				(u.Freshness != domain.ResourceKnown || u.AllPaths || containsPath(u.ChangedPaths, full)) {
-				stale = true
-			}
-		}
-		return len(pg.Records), pg.Next, pg.More, nil
-	})
-	if err != nil || stale {
+	latest, err := r.LatestResourceUpdateAffectingPath(loc.ResourceID, loc.Path)
+	if err != nil {
+		// The recording update itself names the path, so none is an
+		// integrity failure, never "current".
 		return domain.ResourcePathState{}, false, err
+	}
+	if latest.ResultingAuthoritativeRevision > ps.ResourceRevision {
+		return domain.ResourcePathState{}, false, nil
 	}
 	return ps, true, nil
-}
-
-// containsPath reports whether any changed path equals p or contains it.
-func containsPath(paths []string, p string) bool {
-	for _, q := range paths {
-		if under(p, q) {
-			return true
-		}
-	}
-	return false
 }
