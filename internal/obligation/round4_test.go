@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 // SEC-4.10 = SPEC-4.8 (P3-14/P3-20): versioning a workspace binding is no
@@ -45,4 +46,34 @@ func TestSEC410BindingVersionIsNoOracle(t *testing.T) {
 	if _, err := s.bindWS(t, st, system, bindIntent("ws-absent", 1, task)); err != nil {
 		t.Errorf("new binding v1: %v", err)
 	}
+}
+
+// K1 A2: EffectiveStatus passes non-SATISFIED statuses and attestations
+// through, and keeps a SATISFIED matcher proof SATISFIED while it is valid.
+func TestEffectiveStatusPassThrough(t *testing.T) {
+	f := newEvalFixture(t)
+	check := func(step string, ref domain.ObligationRef, want domain.ObligationStatus) {
+		t.Helper()
+		o := f.status(t, ref)
+		var got domain.ObligationStatus
+		var pending bool
+		var err error
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			got, pending, err = EffectiveStatus(r, o)
+			return nil
+		})
+		if err != nil || got != want || pending {
+			t.Errorf("%s: effective = %s pending=%v err=%v, want %s", step, got, pending, err, want)
+		}
+	}
+	check("unresolved", f.sysTests, domain.ObligationUnresolved)
+	f.matcherGrant(t, "g", f.sysTests, TestsPassV1, f.system)
+	f.report(t, f.newRun(t), domain.OutcomePass, hashOf("W1"), nil)
+	check("matcher proof", f.sysTests, domain.ObligationSatisfied)
+	o := f.status(t, f.user)
+	if _, err := f.s.transition(t, f.st, f.system, intent(f.user, o.Revision, domain.ObligationSatisfied)); err != nil {
+		t.Fatal(err)
+	}
+	check("attestation", f.user, domain.ObligationSatisfied)
 }
