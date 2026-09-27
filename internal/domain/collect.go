@@ -19,6 +19,14 @@ const (
 	GCPolicy         GCTrigger = "POLICY"
 )
 
+func (t GCTrigger) Valid() bool {
+	switch t {
+	case GCManual, GCTaskCompletion, GCSupersession, GCTTL, GCPolicy:
+		return true
+	}
+	return false
+}
+
 type CollectIntent struct {
 	RequestID string
 	Scope     CollectScope
@@ -30,11 +38,10 @@ func (i CollectIntent) Validate() error {
 	if !semanticID(i.RequestID) || i.Scope != CollectSession && i.Scope != CollectTask || i.Scope == CollectTask && !semanticID(i.TaskID) || i.Scope == CollectSession && i.TaskID != "" {
 		return invalid("collect intent: explicit collection scope required")
 	}
-	switch i.Trigger {
-	case GCManual, GCTaskCompletion, GCSupersession, GCTTL, GCPolicy:
-		return nil
+	if !i.Trigger.Valid() {
+		return invalid("collect intent: unknown trigger")
 	}
-	return invalid("collect intent: unknown trigger")
+	return nil
 }
 
 type GCRequest struct {

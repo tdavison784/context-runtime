@@ -132,7 +132,7 @@ func (v EventEnvelope) Validate() error {
 func (v EventEnvelope) Clone() EventEnvelope {
 	v.Event = v.Event.Clone()
 	if v.SemanticPolicy != nil {
-		p := *v.SemanticPolicy
+		p := v.SemanticPolicy.Clone()
 		v.SemanticPolicy = &p
 	}
 	return v
@@ -186,7 +186,7 @@ func (r IngestReceipt) Clone() IngestReceipt {
 		r.Operations[i] = r.Operations[i].Clone()
 	}
 	if r.Versions.Semantic != nil {
-		p := *r.Versions.Semantic
+		p := r.Versions.Semantic.Clone()
 		r.Versions.Semantic = &p
 	}
 	items := make([]ContextItem, len(r.Items))
