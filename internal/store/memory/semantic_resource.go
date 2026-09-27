@@ -587,3 +587,8 @@ func (r semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.P
 	}
 	return page(p, dedup(mergeAfter(&r.r.sem.res.updByPath, keys, cursorRef(p.After))), loadAll(&r.r.sem.res.updates, ident))
 }
+
+// LatestResourceUpdateAffectingPath implements store.ResourceReader.
+func (r semRead) LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error) {
+	return domain.ResourceUpdate{}, domain.ErrUnsupportedSchema
+}

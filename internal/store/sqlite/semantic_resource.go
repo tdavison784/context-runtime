@@ -515,3 +515,8 @@ func (s semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.P
 	}
 	return out, nil
 }
+
+// LatestResourceUpdateAffectingPath implements store.ResourceReader.
+func (s semRead) LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error) {
+	return domain.ResourceUpdate{}, domain.ErrUnsupportedSchema
+}

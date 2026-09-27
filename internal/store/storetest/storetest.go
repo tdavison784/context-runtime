@@ -122,6 +122,7 @@ var suite = []testCase{
 	{"SemanticRunClosesOnce", testSemanticRunClosesOnce},
 	{"SemanticLiveSubjectStates", testSemanticLiveSubjectStates},
 	{"SemanticObligationTransitionByID", testSemanticObligationTransitionByID},
+	{"SemanticLatestUpdateAffectingPath", testSemanticLatestUpdateAffectingPath},
 	{"SemanticIndexedVersions", testSemanticIndexedVersions},
 	{"SemanticWorkspaceBindingCursor", testSemanticWorkspaceBindingCursor},
 	{"SemanticOwnerIDReuse", testSemanticOwnerIDReuse},
