@@ -18,7 +18,7 @@ func testPolicy() domain.Phase3Policy {
 		Coverage: "coverage/1", Dedup: "declaration/1",
 		MaxOperations: 64, MaxMetadataBytes: 1 << 16, MaxTargets: 8, MaxEvidence: 8, MaxCoverageMembers: 64,
 		MaxTransactionWork: 64, MaxToolResultBytes: 1 << 16, MaxCheckpointSemanticBytes: domain.DefaultMaxCheckpointSemanticBytes,
-		DefaultLeaseCalls: 2, MaxLeaseCalls: 8,
+		DefaultLeaseCalls: 2, MaxLeaseCalls: 8, GCTriggers: domain.DefaultGCTriggers(),
 	}
 }
 
@@ -54,6 +54,16 @@ func TestNewPinsRuleVersions(t *testing.T) {
 	}
 	if _, err := New(testPolicy(), nil); err == nil {
 		t.Error("nil registry accepted")
+	}
+	// The service keeps its own copy of the policy.
+	p = testPolicy()
+	s, err := New(p, DefaultRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.GCTriggers[0] = "MUTATED"
+	if s.policy.GCTriggers[0] == "MUTATED" {
+		t.Error("service aliases the caller's policy")
 	}
 }
 
