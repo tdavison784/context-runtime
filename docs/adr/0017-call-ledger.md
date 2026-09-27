@@ -56,6 +56,23 @@ provider transport — that remains Phase 5.
   Phase 3; `policy.LeaseLive` and `retrieve.Apply` read it, they do not
   duplicate it. `TestRandomizedLedgerInvariants`, `TestSQLiteRandomizedInvariants`
   continue to lock this ADR's ledger invariants unchanged.
+- **`CompleteTask` (ADR 16's amendment, P3-9) is the one place task
+  completion checks this ADR's ledger reservation directly (P3-42's
+  "late-outcome/completion integration").** `lifecycle.completionBlockers`
+  (`internal/lifecycle/completion_blockers.go`) reads
+  `ReservingCallsByTask`/`OpenExchangesByTask` and returns this ADR's own
+  `ErrCallInFlight` for either a reserving call (`PREPARED`/`SENT`/`UNKNOWN`,
+  this ADR's `Reserving()` states) or an open/unacknowledged exchange —
+  completion never races ahead of an in-flight operation or an unclosed
+  round, and never cancels one itself; the caller must reconcile, cancel, or
+  abandon through this ADR's existing recovery paths first. A late outcome
+  for an already-completed task is audit-only under `domain.OutcomeBinding`
+  above, never silently joining a newer epoch or reactivating the task —
+  this is the same non-reactivation rule this ADR's FR-CALL-004 discipline
+  already states, now exercised by completion specifically. Tests:
+  `TestCompletionX8RejectsEveryReservationAndOpenExchange`,
+  `TestCompletionRejectsInFlightWorkOnRealStores`,
+  `TestOutcome_CompletedTaskAuditOnly`.
 
 ## Context
 
