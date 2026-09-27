@@ -588,7 +588,31 @@ func (r semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.P
 	return page(p, dedup(mergeAfter(&r.r.sem.res.updByPath, keys, cursorRef(p.After))), loadAll(&r.r.sem.res.updates, ident))
 }
 
-// LatestResourceUpdateAffectingPath implements store.ResourceReader.
+// LatestResourceUpdateAffectingPath implements store.ResourceReader: the
+// newest entry of each affecting key in the path-change index, O(depth).
 func (r semRead) LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error) {
-	return domain.ResourceUpdate{}, domain.ErrUnsupportedSchema
+	if err := r.r.check(); err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	affect, err := store.PathAffectKeys(path)
+	if err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	var newest seqRef
+	for _, k := range append([]string{allPathsKey}, affect...) {
+		for ref := range r.r.sem.res.updByPath.before(resPath{resourceID, k}, seqRef{}) {
+			if newest.less(ref) {
+				newest = ref
+			}
+			break
+		}
+	}
+	if newest == (seqRef{}) {
+		return domain.ResourceUpdate{}, notFound("resource update affecting", path)
+	}
+	u, ok := r.r.sem.res.updates.get(newest.id)
+	if !ok {
+		return domain.ResourceUpdate{}, domain.ErrIntegrity
+	}
+	return u, nil
 }

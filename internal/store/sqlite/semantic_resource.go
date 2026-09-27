@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -516,7 +517,40 @@ func (s semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.P
 	return out, nil
 }
 
-// LatestResourceUpdateAffectingPath implements store.ResourceReader.
+// LatestResourceUpdateAffectingPath implements store.ResourceReader: one
+// newest-first LIMIT 1 search of migration 0033's index per affecting key
+// (ALL and each path component), O(depth) and independent of history.
 func (s semRead) LatestResourceUpdateAffectingPath(resourceID, path string) (domain.ResourceUpdate, error) {
-	return domain.ResourceUpdate{}, domain.ErrUnsupportedSchema
+	t := s.t
+	affect, err := store.PathAffectKeys(path)
+	if err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	keys := []string{"all"}
+	for _, k := range affect {
+		keys = append(keys, updatePathKey(k))
+	}
+	var best store.Cursor
+	for _, k := range keys {
+		var c store.Cursor
+		err := t.conn.QueryRowContext(t.ctx, "SELECT seq, update_id FROM lookup_resource_update_path WHERE session_id=? AND resource_id=? AND path_key=? ORDER BY seq DESC, update_id DESC LIMIT 1",
+			t.session, resourceID, k).Scan(&c.Seq, &c.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return domain.ResourceUpdate{}, err
+		}
+		if c.Seq > best.Seq || c.Seq == best.Seq && c.ID > best.ID {
+			best = c
+		}
+	}
+	if best.ID == "" {
+		return domain.ResourceUpdate{}, fmt.Errorf("resource update affecting %s: %w", path, domain.ErrNotFound)
+	}
+	var u domain.ResourceUpdate
+	if err := t.get("resource_update", best.ID, 0, &u); err != nil {
+		return domain.ResourceUpdate{}, fmt.Errorf("%w: path index names missing update %s", domain.ErrIntegrity, best.ID)
+	}
+	return u, nil
 }
