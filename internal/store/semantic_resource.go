@@ -17,6 +17,8 @@ type ResourceReader interface {
 	RunsBySubject(subjectKey string, page Page) (ResultPage[domain.ObservationRun], error)
 	ObservationsByRun(runID string, page Page) (ResultPage[domain.ObservationRecord], error)
 	SubjectState(subjectKey, taskID string, access domain.AccessBoundary) (domain.SubjectState, error)
+	// Only CURRENT states, in first-filing order: STALE/UNKNOWN history is
+	// not a live dependent and never counts toward a page (G2, SEC-1.8).
 	SubjectStatesByResource(resourceID string, page Page) (ResultPage[domain.SubjectState], error)
 }
 type ResourceWriter interface {

@@ -418,7 +418,8 @@ func (s semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 	if err != nil {
 		return out, err
 	}
-	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND (f_first_seq>? OR (f_first_seq=? AND f_state_semantic_meta_id>?)) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
+	// Only CURRENT states, through migration 0032's partial index (G2).
+	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND f_state_applicability='CURRENT' AND (f_first_seq>? OR (f_first_seq=? AND f_state_semantic_meta_id>?)) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
 		t.session, resourceID, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
 	if err != nil {
 		return out, err

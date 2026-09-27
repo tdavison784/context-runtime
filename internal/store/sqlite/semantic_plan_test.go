@@ -53,6 +53,10 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 			_, err := r.GrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i"), 5)
 			return err
 		}},
+		{"LiveGrantsFor", []string{"session_id", "action", "target_key"}, func(r store.SemanticReader) error {
+			_, err := r.LiveGrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i"), 9, 5)
+			return err
+		}},
 		{"LifecycleByTarget", []string{"session_id", "f_target_kind", "f_target_id"}, func(r store.SemanticReader) error {
 			_, err := r.LifecycleByTarget(domain.TargetItem, "i", page)
 			return err
@@ -152,6 +156,8 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 		{[]string{"session_id", "f_resource_id", "f_request_id"}, "SELECT id FROM rec_resource_update WHERE session_id=? AND f_resource_id=? AND f_request_id=?"},
 		{[]string{"session_id", "f_state_semantic_meta_id"}, "SELECT id FROM rec_subject_state WHERE session_id=? AND f_state_semantic_meta_id=?"},
 		{[]string{"session_id", "f_item_id"}, "SELECT id FROM rec_projection WHERE session_id=? AND f_item_id=?"},
+		{[]string{"session_id", "f_subject_key", "f_ordinal"}, "SELECT id FROM rec_observation_run WHERE session_id=? AND f_subject_key=? AND f_ordinal=?"},
+		{[]string{"session_id", "f_run_id"}, "SELECT id FROM rec_observation WHERE session_id=? AND f_run_id=? AND " + closingObservation},
 		{[]string{"session_id", "f_collect_intent_request_id"}, "SELECT id FROM rec_gc_request WHERE session_id=? AND f_collect_intent_request_id=?"},
 		{[]string{"session_id", "f_declaration_semantic_meta_id"}, "SELECT id FROM rec_obligation_declaration WHERE session_id=? AND f_declaration_semantic_meta_id=?"},
 		{[]string{"session_id", "f_type", "f_to_id"}, "SELECT 1 FROM rec_relationship WHERE session_id=? AND f_type=? AND f_to_id=? LIMIT 1"},
@@ -162,5 +168,62 @@ func TestSemanticReadsUseIndex(t *testing.T) {
 			args[i] = "x"
 		}
 		assertIndexed(t, s, c.keys, c.q, args...)
+	}
+}
+
+// TestLiveReadsUseLiveIndexes checks the G2 live-only reads search their
+// live indexes, so dead history is never visited row by row: CURRENT
+// subject states through 0032's partial index, and unrevoked grants
+// through 0031's liveness index.
+func TestLiveReadsUseLiveIndexes(t *testing.T) {
+	s, _ := openTemp(t)
+	for _, c := range []struct {
+		index string
+		read  func(r store.SemanticReader) error
+	}{
+		{"subject_state_resource_current", func(r store.SemanticReader) error {
+			_, err := r.SubjectStatesByResource("repo", store.Page{Limit: 5})
+			return err
+		}},
+		{"lookup_grant_target_live", func(r store.SemanticReader) error {
+			_, err := r.LiveGrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i"), 9, 5)
+			return err
+		}},
+	} {
+		var q string
+		if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+			r, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			if err := c.read(r); err != nil {
+				return err
+			}
+			q = tx.(*transaction).lastQuery
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		args := make([]any, strings.Count(q, "?"))
+		for i := range args {
+			args[i] = 1
+		}
+		rows, err := s.db.Query("EXPLAIN QUERY PLAN "+q, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		rows.Close()
+		if !strings.Contains(strings.Join(plan, "\n"), c.index) {
+			t.Errorf("%q does not use %s\nplan: %v", q, c.index, plan)
+		}
 	}
 }

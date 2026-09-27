@@ -537,6 +537,9 @@ func (r semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 		if !ok {
 			return domain.SubjectState{}, false
 		}
-		return r.r.sem.res.subjects.get(key)
+		st, ok := r.r.sem.res.subjects.get(key)
+		// Only CURRENT states are live dependents (G2); dead ones are
+		// skipped without counting toward the page.
+		return st, ok && st.Applicability == domain.ApplicabilityCurrent
 	})
 }
