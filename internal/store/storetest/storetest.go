@@ -128,6 +128,7 @@ var suite = []testCase{
 	{"SemanticEarliestExchangeWithItem", testSemanticEarliestExchangeWithItem},
 	{"SemanticLiveGrantsMatchGrantLiveAt", testSemanticLiveGrantsMatchGrantLiveAt},
 	{"SemanticSubjectHighWater", testSemanticSubjectHighWater},
+	{"SemanticCurrentWorkspaceBindings", testSemanticCurrentWorkspaceBindings},
 	{"SemanticIndexedVersions", testSemanticIndexedVersions},
 	{"SemanticWorkspaceBindingCursor", testSemanticWorkspaceBindingCursor},
 	{"SemanticOwnerIDReuse", testSemanticOwnerIDReuse},
@@ -145,6 +146,8 @@ var suite = []testCase{
 	{"SemanticLedgerSeqIsolation", testSemanticLedgerSeqIsolation},
 	{"SemanticSatisfactionBacking", testSemanticSatisfactionBacking},
 	{"SemanticStaleProof", testSemanticStaleProof},
+	{"SemanticStaleProofWithoutState", testSemanticStaleProofWithoutState},
+	{"SemanticStaleProofPrivateFail", testSemanticStaleProofPrivateFail},
 
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},

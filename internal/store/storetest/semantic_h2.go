@@ -377,3 +377,53 @@ func testSemanticSubjectHighWater(t *testing.T, s store.Store) {
 		t.Errorf("private partition mark = %d (%v), want rb's %d", hw, err, runs["rb"].Ordinal)
 	}
 }
+
+// testSemanticCurrentWorkspaceBindings checks the current-binding pointer
+// (H2, W4b): a context's page lists each binding ID once, at its latest
+// version, only while that version is in the context, so pages count live
+// bindings, not versions.
+func testSemanticCurrentWorkspaceBindings(t *testing.T, s store.Store) {
+	put := func(id string, version uint64, source bool) {
+		update(t, s, sessA, func(tx store.Tx) error {
+			b := NewWorkspaceBinding(sessA, id, "repo", version, tx.NextSeq())
+			if source {
+				b.Context, b.SourceItemID, b.TaskID = domain.WorkspaceSourceContext{Kind: domain.WorkspaceSource, ID: "src"}, "src", ""
+			}
+			return semantic(t, tx).InsertWorkspaceBinding(b)
+		})
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		return semantic(t, tx).InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq()))
+	})
+	put("wb1", 1, false)
+	put("wb2", 1, false)
+	put("wb3", 1, false)
+	for v := uint64(2); v <= 12; v++ {
+		put("wb1", v, false) // version history
+	}
+	put("wb3", 2, true) // moves to the source context
+	page := func(source, task string) []string {
+		var out []string
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			p := store.Page{Limit: 1}
+			for {
+				pg, err := readSemantic(t, tx).CurrentWorkspaceBindingsByContext(source, task, "", p)
+				noErr(t, err)
+				for _, b := range pg.Records {
+					out = append(out, b.ID+"/"+strconv.FormatUint(b.Version, 10))
+				}
+				if !pg.More {
+					return nil
+				}
+				p.After = pg.Next
+			}
+		})
+		return out
+	}
+	if got := page("", "task"); !slicesEqual(got, []string{"wb2/1", "wb1/12"}) {
+		t.Errorf("CurrentWorkspaceBindingsByContext(task) = %v, want [wb2/1 wb1/12]", got)
+	}
+	if got := page("src", ""); !slicesEqual(got, []string{"wb3/2"}) {
+		t.Errorf("CurrentWorkspaceBindingsByContext(src) = %v, want [wb3/2]", got)
+	}
+}

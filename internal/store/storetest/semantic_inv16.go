@@ -100,11 +100,69 @@ func testSemanticStaleProof(t *testing.T, s store.Store) {
 	if !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Errorf("older PASS after a newer CURRENT FAIL: error = %v, want ErrInvalidTransition", err)
 	}
-	// Once the FAIL no longer describes the current resource state, it no
-	// longer outranks the older run.
+	// Ordering is by run ordinal, not applicability (H1): the newer
+	// complete FAIL still outranks the older PASS once its state is STALE.
 	update(t, s, sessA, func(tx store.Tx) error {
 		_, err := semantic(t, tx).PutSubjectState(state(tx.NextSeq(), run2, "obs2", domain.ApplicabilityStale), 1, "obs2")
 		return err
 	})
-	update(t, s, sessA, satisfy)
+	if err := s.Update(ctx, sessA, satisfy); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("older PASS after a newer STALE FAIL: error = %v, want ErrInvalidTransition", err)
+	}
+}
+
+// satisfyO1 satisfies proofWorld's o1 with its matcher proof on obs1.
+func satisfyO1(t *testing.T, o domain.ObligationVersion) func(tx store.Tx) error {
+	return func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		seq := tx.NextSeq()
+		proof, deps := MatcherProof(t, o, "tr1", "obs1", "ev1", "evcov", seq)
+		if err := sem.InsertApplicabilityProof(proof, deps); err != nil {
+			return err
+		}
+		tr, d := MatcherTransition(o, "tr1", seq, proof, "g-m")
+		_, err := sem.AppendSemanticObligationTransition(tr, d, 1)
+		return err
+	}
+}
+
+// newerFail records a complete FAIL on a new run of o1's subject in
+// boundary access, observed on fingerprint fp, filing no subject state.
+func newerFail(t *testing.T, s store.Store, access domain.AccessBoundary, fp string) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		run := NewObservationRun(t, sessA, "run2", "repo", "wb", tx.NextSeq())
+		run.Access = access
+		noErr(t, sem.InsertObservationRun(run))
+		ev := ToolEvidence(sessA, "ev-obs2", tx.NextSeq())
+		ev.Access = access
+		if access.AgentID != "" {
+			ev.AgentID = access.AgentID
+		}
+		noErr(t, tx.InsertItem(ev))
+		fail := NewObservation(run, "obs2", "ev-obs2", tx.NextSeq(), fp)
+		fail.Outcome, fail.Passed, fail.Failed = domain.OutcomeFail, 2, 1
+		return sem.InsertObservation(fail)
+	})
+}
+
+// testSemanticStaleProofWithoutState checks H1 at commit: a newer complete
+// FAIL outranks an older PASS even when it observed another fingerprint
+// and so filed no subject state.
+func testSemanticStaleProofWithoutState(t *testing.T, s store.Store) {
+	o := proofWorld(t, s)
+	newerFail(t, s, o.Access, fpB)
+	if err := s.Update(ctx, sessA, satisfyO1(t, o)); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("older PASS after a newer inapplicable FAIL: error = %v, want ErrInvalidTransition", err)
+	}
+}
+
+// testSemanticStaleProofPrivateFail checks H1's applicability boundary
+// (SEC-2.9) at commit: a newer FAIL private to another agent does not
+// cover a TASK-wide obligation, so it never rejects its proof.
+func testSemanticStaleProofPrivateFail(t *testing.T, s store.Store) {
+	o := proofWorld(t, s)
+	private := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sessA, TaskID: "task", AgentID: "b"}
+	newerFail(t, s, private, fpA)
+	update(t, s, sessA, satisfyO1(t, o))
 }

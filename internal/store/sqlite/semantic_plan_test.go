@@ -242,6 +242,7 @@ func TestH2LatestReadsAreKeyed(t *testing.T) {
 		keys  []string
 		q     string
 	}{
+		{"", []string{"session_id", "context_kind", "context_id"}, currentBindingPage},
 		{"", []string{"session_id", "item_id", "conversation_id"}, "SELECT exchange_id FROM lookup_item_exchange WHERE session_id=? AND item_id=? AND conversation_id=? ORDER BY ordinal, exchange_id LIMIT 1"},
 		{"", []string{"session_id", "resource_id", "path_key"}, "SELECT seq, update_id FROM lookup_resource_update_path WHERE session_id=? AND resource_id=? AND path_key=? ORDER BY seq DESC, update_id DESC LIMIT 1"},
 		// The closing lookup must use 0030's one-row-per-run partial index,
