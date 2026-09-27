@@ -291,7 +291,16 @@ func TestK1StableLiveProofsNeverBlockSatisfaction_DUR43(t *testing.T) {
 	f.resourceReport(t, "W1", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
 	rev := f.r.auth
 	for i := range 8 {
-		ref := f.fileObligation(t, fmt.Sprint(60+i))
+		// One declaration per source keeps within the per-source limit.
+		src := seedPinned(t, f.st, fmt.Sprintf("d43src%d", i), fmt.Sprintf("d43dir%d", i), domain.AuthorityUser, "Read the doc.")
+		target := fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, "")
+		in := domain.DeclareObligationIntent{RequestID: fmt.Sprintf("d43-%d", i), SourceItemID: src.ID, DeclarationSlot: "1", Description: "read it",
+			ExpectedSourceVersion: 1, Target: &target, Matcher: &FileReadV1}
+		if _, err := f.s.declare(t, f.st, f.harness, in); err != nil {
+			t.Fatal(err)
+		}
+		key, _ := f.item(t, src.ID).CurrentKey()
+		ref := domain.ObligationRef{SessionID: testSession, ObligationID: domain.DerivedObligationID(key, 1), Version: 1}
 		if err := f.assertPath(t, ref, rev, "H1"); err != nil {
 			t.Fatalf("path assertion %d: %v", i, err)
 		}

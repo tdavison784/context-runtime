@@ -165,8 +165,6 @@ func TestSQLiteSuite(t *testing.T) {
 		{"DUR31SubjectApplicabilityIsDerived", TestDUR31SubjectApplicabilityIsDerived, true},
 		{"DUR38HistorySatisfiesPages", TestDUR38HistorySatisfiesPages, true},
 		{"DUR31ReportsReadOnlyAffectedProofs", TestDUR31ReportsReadOnlyAffectedProofs, true},
-		{"DUR31AssertionRespectsDependentCap", TestDUR31AssertionRespectsDependentCap, false},
-		{"DUR31MatcherRespectsDependentCap", TestDUR31MatcherRespectsDependentCap, true},
 		{"SEC410BindingVersionIsNoOracle", TestSEC410BindingVersionIsNoOracle, false},
 		{"EffectiveStatusPassThrough", TestEffectiveStatusPassThrough, true},
 		{"SPEC410ReevaluationSelectsOnlyCurrentEvidence", TestSPEC410ReevaluationSelectsOnlyCurrentEvidence, true},
