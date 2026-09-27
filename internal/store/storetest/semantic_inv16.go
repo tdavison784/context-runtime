@@ -166,3 +166,30 @@ func testSemanticStaleProofPrivateFail(t *testing.T, s store.Store) {
 	newerFail(t, s, private, fpA)
 	update(t, s, sessA, satisfyO1(t, o))
 }
+
+// testRawTransitionCannotSatisfy checks INV-16 on the frozen Phase 2 path
+// (DUR-2.12): the raw AppendObligationTransition carries no proof or
+// assertion, so it can never make a version SATISFIED; only
+// AppendSemanticObligationTransition can.
+func testRawTransitionCannotSatisfy(t *testing.T, s store.Store) {
+	update(t, s, sessA, func(tx store.Tx) error {
+		return tx.InsertObligationVersion(NewObligation(sessA, "o1", 1, tx.NextSeq(), "src"))
+	})
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+		_, err := tx.AppendObligationTransition(NewTransition(sessA, "t1", "o1", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied), 1)
+		return err
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		got, err := readSemantic(t, tx).ExactObligation(domain.ObligationRef{SessionID: sessA, ObligationID: "o1", Version: 1})
+		noErr(t, err)
+		if got.Status != domain.ObligationUnresolved || got.Revision != 1 {
+			t.Errorf("raw SATISFIED changed the version: %+v", got)
+		}
+		return nil
+	})
+	// Non-satisfying raw transitions still apply.
+	update(t, s, sessA, func(tx store.Tx) error {
+		_, err := tx.AppendObligationTransition(NewTransition(sessA, "t2", "o1", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationBlocked), 1)
+		return err
+	})
+}

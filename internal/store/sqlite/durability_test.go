@@ -81,7 +81,8 @@ func TestRestartPreservesRecords(t *testing.T) {
 		if err := tx.InsertObligationVersion(ob); err != nil {
 			return err
 		}
-		tr := domain.ObligationTransition{ID: "tr1", SessionID: "s", ObligationID: "o1", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation, Actor: harness, EvidenceIDs: []string{"i2"}}
+		// BLOCKED: the raw path never satisfies (INV-16, DUR-2.12).
+		tr := domain.ObligationTransition{ID: "tr1", SessionID: "s", ObligationID: "o1", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationBlocked, Action: domain.ActionBlockObligation, Actor: harness, EvidenceIDs: []string{"i2"}}
 		updated, err := tx.AppendObligationTransition(tr, 1)
 		if err != nil {
 			return err
@@ -302,6 +303,7 @@ var committedMigrations = map[string]string{
 	"0037_subject_high_water.sql":                    "ce0b04c656d69097e1243c91fc078f646d17f9d5ff14f7557ea87bdf34150f1a",
 	"0038_current_workspace_binding.sql":             "1fb418d1c42929965d677321bdc4838239ea2aded616cb5bf9b296f57e28d11d",
 	"0039_gc_result_outcome.sql":                     "3253aa012e0a8114a9d9f6cbe17e76b6285a5769781a27ce8a4d46e3f1e676fa",
+	"0040_gc_progress.sql":                           "92b6237ce7c203f5bf5feb6d458e977d545fdd6e73bdf39b56b249290699b305",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {
@@ -659,7 +661,7 @@ func TestObligationTransitionCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	transition := func(tx store.Tx) domain.ObligationTransition {
-		return domain.ObligationTransition{ID: "tr", SessionID: "s", ObligationID: "o", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation, Actor: actor, EvidenceIDs: []string{"e"}}
+		return domain.ObligationTransition{ID: "tr", SessionID: "s", ObligationID: "o", Version: 1, Seq: tx.NextSeq(), From: domain.ObligationUnresolved, To: domain.ObligationBlocked, Action: domain.ActionBlockObligation, Actor: actor, EvidenceIDs: []string{"e"}}
 	}
 	// Probed alone: a rejected write after a successful one would poison
 	// the transaction (P3-1).
@@ -675,7 +677,7 @@ func TestObligationTransitionCAS(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if updated.Revision != 2 || updated.Status != domain.ObligationSatisfied {
+		if updated.Revision != 2 || updated.Status != domain.ObligationBlocked {
 			t.Fatalf("updated obligation = %+v", updated)
 		}
 		return nil

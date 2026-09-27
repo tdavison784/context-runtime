@@ -118,6 +118,7 @@ var suite = []testCase{
 	{"SemanticResourceUpdatesAffectingPath", testSemanticResourceUpdatesAffectingPath},
 	{"SemanticWorkspaceBindings", testSemanticWorkspaceBindings},
 	{"SemanticObservations", testSemanticObservations},
+	{"SemanticObservationEvidenceExecution", testSemanticObservationEvidenceExecution},
 	{"SemanticRunOrdinalUnique", testSemanticRunOrdinalUnique},
 	{"SemanticRunClosesOnce", testSemanticRunClosesOnce},
 	{"SemanticLiveSubjectStates", testSemanticLiveSubjectStates},
@@ -151,6 +152,7 @@ var suite = []testCase{
 	{"SemanticStaleProof", testSemanticStaleProof},
 	{"SemanticStaleProofWithoutState", testSemanticStaleProofWithoutState},
 	{"SemanticStaleProofPrivateFail", testSemanticStaleProofPrivateFail},
+	{"RawTransitionCannotSatisfy", testRawTransitionCannotSatisfy},
 
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},
