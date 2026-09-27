@@ -2,6 +2,7 @@ package obligation
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -62,5 +63,62 @@ func TestSEC310BindingVersionNeedsReporterAuthority(t *testing.T) {
 	}
 	if _, err := s.bindWS(t, st, system, bindIntent("ws-b", 2, task)); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("v2 over a previous version hidden from the actor: %v, want ErrNotFound", err)
+	}
+}
+
+// DUR-3.1 (G2/H2): a resource report reads only what it can affect. More
+// live file states than the work budget, on paths a report never touches,
+// must not wedge an unrelated-path report or an ALL-paths report, and the
+// ALL-paths report still invalidates the satisfied file proof it affects.
+func TestDUR31ReportsIgnoreUntouchedLiveState(t *testing.T) {
+	f := newEvalFixture(t)
+	ref := f.fileObligation(t, "31")
+	f.matcherGrant(t, "g-file", ref, FileReadV1, f.userP)
+	const files = 70
+	path := func(i int) string {
+		if i == 0 {
+			return "docs/a.md" // the obligation's target
+		}
+		return fmt.Sprintf("docs/f%02d.md", i)
+	}
+	for start := 0; start < files; start += 10 {
+		var contents []domain.ResourcePathContent
+		var changed []string
+		for i := start; i < start+10; i++ {
+			contents = append(contents, domain.ResourcePathContent{Path: path(i), ContentHash: hashOf(path(i))})
+			changed = append(changed, path(i))
+		}
+		f.resourceReport(t, fmt.Sprintf("W-rec%d", start), false, false, changed, contents...)
+	}
+	for i := range files {
+		runN++
+		run, err := f.registerRun(t, f.harness, runIntent(fmt.Sprintf("run-%d", runN), fmt.Sprintf("exec-%d", runN), fileTarget("repo1", path(i), domain.FileCurrentContent, "")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.report(t, run, domain.OutcomePass, hashOf(path(i)), nil)
+	}
+	if o := f.status(t, ref); o.Status != domain.ObligationSatisfied {
+		t.Fatalf("setup: file obligation = %+v", o)
+	}
+	f.r.n++
+	unrelated := domain.ReportResourceChangeIntent{RequestID: "dur31-unrelated", ResourceID: "repo1", ExpectedRevision: f.r.rev,
+		ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf("W-unrelated"), ChangedPaths: []string{"other/z.md"}}
+	if _, err := f.s.report(t, f.st, f.harness, unrelated); err != nil {
+		t.Fatalf("unrelated-path report with %d live file states: %v", files, err)
+	}
+	f.r.rev++
+	f.r.auth++
+	if o := f.status(t, ref); o.Status != domain.ObligationSatisfied {
+		t.Errorf("unrelated-path report invalidated the file proof: %+v", o)
+	}
+	f.r.n++
+	all := domain.ReportResourceChangeIntent{RequestID: "dur31-all", ResourceID: "repo1", ExpectedRevision: f.r.rev,
+		ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf("W-all"), AllPaths: true}
+	if _, err := f.s.report(t, f.st, f.harness, all); err != nil {
+		t.Fatalf("ALL-paths report with %d live file states: %v", files, err)
+	}
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Errorf("ALL-paths report kept the file proof: %+v", o)
 	}
 }

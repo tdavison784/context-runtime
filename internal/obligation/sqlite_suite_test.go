@@ -161,6 +161,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"H2CurrentSatisfiesIgnoresHistory", TestH2CurrentSatisfiesIgnoresHistory, true},
 		{"H2BindingVersionsDoNotWedgeDeclaration", TestH2BindingVersionsDoNotWedgeDeclaration, false},
 		{"SEC310BindingVersionNeedsReporterAuthority", TestSEC310BindingVersionNeedsReporterAuthority, false},
+		{"DUR31ReportsIgnoreUntouchedLiveState", TestDUR31ReportsIgnoreUntouchedLiveState, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {
