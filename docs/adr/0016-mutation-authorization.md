@@ -93,7 +93,7 @@ both forms share.
   actual mutation sequence; any inaccessible or unauthorized member yields
   the fixed `ErrInvalidAuthorityPromotion`. It then separately rejects any
   unresolved/blocked current task-owned obligation (via `obligation.UnfinishedTaskObligations`,
-  ADR 8 §4) with the fixed `ErrUnfinishedObligations`
+  ADR 8 §8) with the fixed `ErrUnfinishedObligations`
   (`TestCompletionRejectsAllOwnerBlockersBeforeLedger`). After authorization,
   an in-flight operation or unacknowledged exchange blocks completion
   (`TestCompletionX8RejectsEveryReservationAndOpenExchange`,
@@ -170,8 +170,14 @@ both forms share.
   fact to `lifecycle.Service.Collect` (`internal/lifecycle/collect.go`).
   `domain.Phase3Policy.GCTriggers`/`GCTriggerEnabled`
   (`internal/domain/semantic.go`) is the explicit, sorted, unique enabled
-  trigger set `lifecycle.EnqueueGC` checks before creating a `GCRequest`; an
-  unlisted trigger never fires GC merely because the enum value exists.
+  trigger set `lifecycle.enqueueGC` checks before creating a `GCRequest` for
+  a supersession/TTL/policy trigger — an unlisted one persists nothing and
+  returns an empty ID, never firing GC merely because the enum value
+  exists. `domain.GCTaskCompletion` is the one exempt trigger: task
+  completion's request always persists regardless of the enabled set
+  (P3-39's "task completion always persists its request"), then waits
+  pending until an operator or a later policy enables its actual
+  collection.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
   idempotently after producer commit, never inline with it. Tests:
   `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,
