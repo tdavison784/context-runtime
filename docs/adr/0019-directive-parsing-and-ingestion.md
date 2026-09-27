@@ -108,12 +108,13 @@ P3-35, P3-40) — implemented in `internal/ingest`, this ADR's own package.**
 control, and mutation-intent operations) hashed under
 `ingest-payload/v3` (ADR 4), replacing the frozen v2 encoder for new events
 only — v2 stays frozen and still validated for legacy replay. A submitted
-operation's `RequestID` must be empty; `domain.OperationRequestID(p
-Principal, occurrence string, operation, command uint64)` derives it only
-after acceptance, so no caller can forge or predict one — its current
-signature binds a full principal, not just a session ID (PR #6 round 1,
-G3/SEC-1.2, fixing the stale `(session, occurrence, opIndex, ordinal)`
-signature this ADR previously described). **H5 landed in this
+operation's `RequestID` must be empty; `domain.OperationRequestID` derives
+it only after acceptance, so no caller can forge or predict one. At G3/SEC-1.2
+(PR #6 round 1) its signature became `(p Principal, occurrence string,
+operation, command uint64)`, binding a full principal instead of the stale
+`(session, occurrence, opIndex, ordinal)` signature this ADR originally
+described — that four-argument form is itself now superseded (below), not
+the current one. **H5 landed in this
 reconciliation (PR #6 round 2, SEC-2.2/SEC-2.6, commit `a1d734f`, W1):
 `OperationRequestID` now binds both principals explicitly, not one.** Its
 current signature is `OperationRequestID(authenticated, owner Principal,

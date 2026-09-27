@@ -213,11 +213,21 @@ both forms share.
   (`internal/lifecycle/replace.go`) also enqueue through `gcqueue.Enqueue`
   now, closing the round-1/round-2 gap where a keyed replacement or a
   session-scoped directive replacement produced no `GCRequest`, or failed
-  outright, despite SUPERSESSION being enabled by default. An enabled
-  trigger whose executor
-  cannot run it (a stale `PolicyVersion` on the request, or a missing
-  authorized collector) fails that attempt closed rather than silently
-  succeeding; it stays pending for a later, correctly-configured attempt.
+  outright, despite SUPERSESSION being enabled by default. Producers and
+  the executor must share a Phase 3 policy version: since SPEC-2.11, a
+  request carries its producer's recorded policy version, so a version
+  mismatch affects every attempt from the first pass, not an occasional
+  one. **A stale `PolicyVersion`, a disabled trigger, and a missing
+  authorized collector are all J5 "configuration errors": the attempt
+  fails closed and the request stays pending, uncharged, never
+  quarantined** (`classifyGCFailure`, `internal/lifecycle/gc_failure.go`,
+  maps `ErrUnsupportedSchema` to `gcNotCharged`; `domain.GCFailurePolicyMismatch`
+  remains a defined reason code but is not produced by this path). This
+  is J5's rule exactly ("a misconfigured collector … returns an error to
+  the caller and leaves the request pending — never quarantined"), which
+  is stricter than, and supersedes, SPEC-3.4's originally suggested
+  "quarantines at once as `POLICY_MISMATCH`" text — that text described
+  round-2 code J1–J7's redesign has since replaced.
   **GC collection resumes in bounded batches (round 3 rulings J1–J7;
   XREV-3.1–3.3, SEC-3.1/3.2/3.9, SPEC-3.2/3.3/3.6).** The first
   batch pins the eligibility ceiling `SnapshotSeq`; all batches traverse
@@ -263,13 +273,34 @@ both forms share.
   `TestJ5ConfigurationErrorsLeaveRequestsPending`,
   `TestJ6QueuePrefixCannotHideRunnableTail`, and
   `TestJ7ManualSessionCollectionResumesAndReplays` run on both stores.
-  **Grant issuance shares its live-count cap fairly and reserves room for
-  SYSTEM (SEC-2.7).** `liveGrantRoom` (`internal/lifecycle/grants.go`)
-  limits any one issuer to at most a quarter of the policy's live-grant
-  cap per `(action, target)`, with the last quarter reserved for SYSTEM —
-  so no lower-authority issuer, alone or in combination, can exhaust the
-  cap and deny issuance to everyone else. Test:
-  `TestLiveGrantCapIsSharedFairly`.
+  **DUR round 3 strengthens three of these rulings; confirmed by W3, not
+  yet merged into this reconciliation (DUR-3.2/3.3/3.4).** J6's queue
+  continuation must be durable (a persisted cursor plus a per-trigger
+  pending index), never reset by a new service instance or a restart — the
+  code above still keeps `gcQueueCursors` as an in-process `sync.Map` on
+  `*Service` (DUR-3.2, waiting on W1/W2, commit pending). J5's
+  configuration-error path must never quarantine even for a collector-side
+  fault: a bad collector principal/header or a cross-session collector is
+  the closed `ErrGCConfiguration`, not charged, request stays pending; a
+  `FAILED` request becomes re-armable only through SYSTEM/HARNESS calling
+  `lifecycle.RearmGCRequest`, which creates a new deterministic request
+  identity (`"rearm/" + failed request ID`) and leaves the original
+  `FAILED` record immutable (DUR-3.3, committing on W3's branch as of this
+  pass). J4's attempt counter must reset whenever a batch makes any
+  progress, not only on full success (DUR-3.4, not yet landed). This ADR
+  will need a further correction once these land.
+  **Grant issuance room is tiered by authority, not a flat quarter-share
+  (SEC-2.7, superseded by SEC-3.8/DUR-3.6; confirmed by W3, commit
+  `4a00b06` on `p3fix3/w3`, not yet merged here).** `liveGrantRoom`
+  (`internal/lifecycle/grants.go`) **as landed in this reconciliation**
+  still limits any one issuer to at most a quarter of the policy's
+  live-grant cap per `(action, target)`, with the last quarter reserved
+  for SYSTEM (test: `TestLiveGrantCapIsSharedFairly`). The tiered
+  replacement: USER issuers together hold at most half of `MaxTargets`
+  live grants per `(action, target)`; USER+HARNESS together at most three
+  quarters; SYSTEM may use all of it; no reserve applies when
+  `MaxTargets < 4`. This ADR will need updating to the tiered rule and its
+  own tests once `4a00b06` is merged.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
   idempotently after producer commit, never inline with it. Tests:
   `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,
