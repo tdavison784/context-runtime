@@ -23,6 +23,11 @@ func w4Policy() domain.Phase3Policy {
 // declaration, first-version filing, then W4's own declaration of its claim.
 func seedW4Pin(t *testing.T, db store.Store, text string, attrs []string) *domain.ObligationRef {
 	t.Helper()
+	return seedW4PinAs(t, db, domain.AuthorityUser, text, attrs)
+}
+
+func seedW4PinAs(t *testing.T, db store.Store, authority domain.Authority, text string, attrs []string) *domain.ObligationRef {
+	t.Helper()
 	w4, err := obligation.New(w4Policy(), obligation.DefaultRegistry())
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +39,7 @@ func seedW4Pin(t *testing.T, db store.Store, text string, attrs []string) *domai
 			return err
 		}
 		it := storetest.NewDirective("s", "prior", "d", tx.NextSeq(), text)
-		it.Namespace, it.Section = domain.NamespaceDirective, domain.SectionPinned
+		it.Namespace, it.Section, it.Authority = domain.NamespaceDirective, domain.SectionPinned, authority
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
