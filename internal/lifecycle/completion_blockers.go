@@ -18,7 +18,13 @@ func completionBlockers(r store.SemanticReader, taskID string, b *workBudget) er
 		if !o.Current || !o.Status.Valid() {
 			return domain.ErrIntegrity
 		}
-		if o.Status == domain.ObligationUnresolved || o.Status == domain.ObligationBlocked {
+		// Effective status (K1 A2): a stored-SATISFIED version whose proof is
+		// derived invalid blocks completion; unreadable validity fails closed.
+		open, err := openObligation(r, o)
+		if err != nil {
+			return err
+		}
+		if open {
 			return domain.ErrUnfinishedObligations
 		}
 	}

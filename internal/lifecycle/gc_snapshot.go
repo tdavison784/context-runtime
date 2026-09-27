@@ -95,10 +95,20 @@ func (s *Service) gcProtection(tx store.Tx, sem store.SemanticReader, it domain.
 	if err := b.spend(len(obs)); err != nil {
 		return err
 	}
-	out.ObligationsKnown = true
+	// Every version is read, stored SATISFIED included, and decided by its
+	// effective status (K1 A2); an unreadable derivation is an item read
+	// failure, so the candidate is retried or skipped, never archived.
 	for _, o := range obs {
-		out.OpenObligationSource = out.OpenObligationSource || o.Current && (o.Status == domain.ObligationUnresolved || o.Status == domain.ObligationBlocked)
+		open, err := openObligation(sem, o)
+		if err != nil {
+			return err
+		}
+		if open {
+			out.OpenObligationSource = true
+			break
+		}
 	}
+	out.ObligationsKnown = true
 	if it.Role == domain.RoleCheckpoint {
 		if out.NewestCheckpoint, err = s.newestCheckpoint(tx, it, b); err != nil {
 			return err
