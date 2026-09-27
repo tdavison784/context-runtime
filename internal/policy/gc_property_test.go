@@ -76,7 +76,7 @@ func TestCollectDecisionSafetyProperties(t *testing.T) {
 			t.Fatalf("case %d: archived the newest checkpoint of a live conversation", n)
 		case life == domain.ExpiryUnknown && current(s.Currentness):
 			t.Fatalf("case %d: archived a current item of unknown lifetime", n)
-		case life == domain.ExpiryLive && (s.OpenObligationSource || current(s.Currentness) && requirement(it)):
+		case life == domain.ExpiryLive && (s.OpenObligationSource || current(s.Currentness) && requirement(it, ttlExpired(it, task))):
 			t.Fatalf("case %d: archived a live requirement (%s)", n, reason)
 		}
 	}

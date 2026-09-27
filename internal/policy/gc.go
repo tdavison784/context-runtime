@@ -64,7 +64,7 @@ func CollectDecision(it domain.ContextItem, s GCSnapshot) (domain.GCDecisionCode
 		return domain.GCProtected, GCReasonActiveCheckpoint, nil
 	case lifetime == domain.ExpiryLive && s.OpenObligationSource:
 		return domain.GCProtected, GCReasonRequirement, nil
-	case lifetime == domain.ExpiryLive && current(s.Currentness) && requirement(it):
+	case lifetime == domain.ExpiryLive && current(s.Currentness) && requirement(it, ttlExpired(it, task)):
 		return domain.GCProtected, GCReasonRequirement, nil
 	}
 	switch {
@@ -74,8 +74,7 @@ func CollectDecision(it domain.ContextItem, s GCSnapshot) (domain.GCDecisionCode
 		return domain.GCArchive, GCReasonExpiredScope, nil
 	case lifetime == domain.ExpiryUnknown:
 		return domain.GCIneligible, GCReasonUnknown, nil
-	case it.TTLTurns != nil && task != nil && task.WorkflowID == it.WorkflowID && it.CreatedTurn != 0 && task.Turn >= it.CreatedTurn &&
-		(task.Status != domain.TaskActive || !domain.TTLLive(it.CreatedTurn, task.Turn, *it.TTLTurns)):
+	case ttlExpired(it, task):
 		return domain.GCArchive, GCReasonExpiredTTL, nil
 	case it.Generation == domain.GenerationEphemeral && it.TurnID != "" && task != nil && (task.Status != domain.TaskActive || task.TurnID != it.TurnID):
 		return domain.GCArchive, GCReasonEndedTurn, nil
@@ -87,10 +86,18 @@ func current(c domain.ItemCurrentness) bool {
 	return c == domain.ItemCurrent || c == domain.ItemUnkeyed
 }
 
-// requirement is a current pin, OPEN goal or SYSTEM instruction/constraint.
-func requirement(it domain.ContextItem) bool {
+// requirement is a current pin, OPEN goal or eligible SYSTEM
+// instruction/constraint: an expired TTL ends only the last (SPEC-1.15).
+func requirement(it domain.ContextItem, expired bool) bool {
 	return it.Generation == domain.GenerationPinned || it.Kind == domain.KindGoal && it.GoalStatus != nil && *it.GoalStatus == domain.GoalOpen ||
-		it.Authority == domain.AuthoritySystem && (it.Kind == domain.KindInstruction || it.Kind == domain.KindConstraint)
+		!expired && it.Authority == domain.AuthoritySystem && (it.Kind == domain.KindInstruction || it.Kind == domain.KindConstraint)
+}
+
+// ttlExpired reports a TTL the snapshot proves expired against the known
+// originating task; unknown TTL state is not expiry.
+func ttlExpired(it domain.ContextItem, task *domain.TaskState) bool {
+	return it.TTLTurns != nil && task != nil && task.WorkflowID == it.WorkflowID && it.CreatedTurn != 0 && task.Turn >= it.CreatedTurn &&
+		(task.Status != domain.TaskActive || !domain.TTLLive(it.CreatedTurn, task.Turn, *it.TTLTurns))
 }
 
 // knownTask is the item's originating task when the snapshot establishes it.
