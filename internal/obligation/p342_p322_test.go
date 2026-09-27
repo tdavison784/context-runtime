@@ -102,3 +102,102 @@ func testP3_22WorkedExampleChain(t *testing.T) {
 		t.Errorf("final state item = %+v %q", final, final.Parts[0].Text)
 	}
 }
+
+// p342TestsPassV2 is tests_pass/2: tests_pass/1's deterministic evaluation
+// under an upgraded registry version tag.
+type p342TestsPassV2 struct{ testsPass }
+
+func (p342TestsPassV2) Ref() domain.MatcherRef {
+	return domain.MatcherRef{Name: "tests_pass", Version: "2"}
+}
+
+// p342UpgradedRegistry is the registry with tests_pass upgraded to version
+// 2, as a build upgrade republishes it.
+func p342UpgradedRegistry() *Registry {
+	r := &Registry{byRef: map[domain.MatcherRef]Matcher{}, byClaim: map[string]Matcher{}}
+	for _, m := range []Matcher{p342TestsPassV2{}, fileRead{}} {
+		r.byRef[m.Ref()] = m
+		r.byClaim[m.Ref().Name] = m
+	}
+	return r
+}
+
+// P3-22: a matcher upgrade does not split identity. SubjectKey excludes the
+// matcher implementation version, so after the registry upgrades tests_pass
+// to version 2, an observation of the same subject under the new version
+// replaces the watermark in the SAME state record — one keyed state, the new
+// item superseding the old — rather than opening a parallel state.
+func TestP3_22_MatcherUpgradeDoesNotSplitIdentity(t *testing.T) {
+	p342BothStores(t, testP3_22MatcherUpgrade)
+}
+
+func testP3_22MatcherUpgrade(t *testing.T) {
+	f := newFixture(t)
+	var r repo1
+	target := testsTarget(nil)
+	r.set(t, f, hashOf("W1"), true)
+	v1run, v1obs := f.observeTests(t, target, domain.OutcomePass, hashOf("W1"), nil)
+	st1, ok := f.subject(t, target)
+	if !ok || st1.Applicability != domain.ApplicabilityCurrent || st1.ObservationID != v1obs.ID || st1.AcceptedOrdinal != v1run.Ordinal {
+		t.Fatalf("v1 state = %+v ok=%v", st1, ok)
+	}
+
+	// Upgrade the registry and observe the same subject again.
+	upgraded, err := New(testPolicy(), p342UpgradedRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := f
+	g.s = upgraded
+	v2run, v2obs := g.observeTests(t, target, domain.OutcomePass, hashOf("W1"), nil)
+	if v2obs.ReportingMatcher != (domain.MatcherRef{Name: "tests_pass", Version: "2"}) {
+		t.Fatalf("observation reported under %v", v2obs.ReportingMatcher)
+	}
+	if v2run.SubjectKey != v1run.SubjectKey {
+		t.Fatalf("matcher version changed the subject key: %q vs %q", v2run.SubjectKey, v1run.SubjectKey)
+	}
+
+	// The replacement lands in the same state record, not a parallel one.
+	st2, ok := f.subject(t, target)
+	if !ok {
+		t.Fatal("no state after the upgraded observation")
+	}
+	if st2.ID != st1.ID {
+		t.Fatalf("matcher upgrade split the state: %s vs %s", st2.ID, st1.ID)
+	}
+	if st2.CurrentItemID == st1.CurrentItemID || st2.ObservationID != v2obs.ID || st2.AcceptedOrdinal != v2run.Ordinal || st2.Applicability != domain.ApplicabilityCurrent {
+		t.Fatalf("upgraded observation did not replace in place: %+v", st2)
+	}
+	var states int
+	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		sr, _ := store.ReadSemantic(tx)
+		pg, _ := sr.SubjectStatesByResource("repo1", store.Page{Limit: 50})
+		for _, s := range pg.Records {
+			if s.SubjectKey == v1run.SubjectKey {
+				states++
+			}
+		}
+		return nil
+	})
+	if states != 1 {
+		t.Fatalf("keyed states for the subject = %d, want 1", states)
+	}
+	// The new item supersedes the old; only the new item is current.
+	var superseded []string
+	var cur1, cur2 bool
+	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		rels, _ := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, FromID: st2.CurrentItemID})
+		for _, rel := range rels {
+			superseded = append(superseded, rel.ToID)
+		}
+		cur1, _ = graph.IsCurrent(tx, st1.CurrentItemID)
+		cur2, _ = graph.IsCurrent(tx, st2.CurrentItemID)
+		return nil
+	})
+	if strings.Join(superseded, ",") != st1.CurrentItemID {
+		t.Errorf("new item supersedes %v, want [%s]", superseded, st1.CurrentItemID)
+	}
+	if cur1 || !cur2 {
+		t.Errorf("currentness after upgrade: old=%v new=%v, want false/true", cur1, cur2)
+	}
+}
