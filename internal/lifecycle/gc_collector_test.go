@@ -52,14 +52,17 @@ func TestFailedGCRequestCanBeRearmed(t *testing.T) {
 	eachStore(t, func(t *testing.T, db store.Store) {
 		base, _ := New(db, testPolicy())
 		id := completeLarge(t, db, base, 1)
-		tight := testPolicy()
-		tight.MaxTransactionWork = 4
-		s, _ := New(db, tight)
-		for range maxGCAttempts {
-			_, _ = s.CollectPending(ctx, "s", pick, 1)
-		}
-		if res, found := gcResult(t, db, id); !found || res.Outcome != domain.GCFailed {
-			t.Fatalf("setup: request not quarantined: %+v", res)
+		// A request-level permanent failure (J4: size alone never FAILs a
+		// request), recorded as the consumer would.
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			sem, err := store.Semantic(tx)
+			if err != nil {
+				return err
+			}
+			return sem.InsertGCResult(domain.GCResult{SemanticMeta: domain.SemanticMeta{ID: gcResultID("s", id), SessionID: "s", SchemaVersion: domain.SemanticSchemaV1, Seq: tx.NextSeq()},
+				GCRequestID: id, Outcome: domain.GCFailed, Reason: domain.GCFailureIntegrity})
+		}); err != nil {
+			t.Fatal(err)
 		}
 		rearm := func(p domain.Principal) (string, error) {
 			var out string

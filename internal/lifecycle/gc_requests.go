@@ -62,8 +62,16 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 			out = MutationOutcome{}
 		}
 	}()
+	// Collector faults are configuration errors, never the request's:
+	// they are not charged and the request stays pending (J5, DUR-3.3).
 	if err = collector.Validate(); err != nil {
 		return out, errors.Join(ErrGCConfiguration, err)
+	}
+	if _, err = domain.MutationRequestHash(collector, domain.MutationCollection, methodCollect, []byte{0}); err != nil {
+		return out, errors.Join(ErrGCConfiguration, err)
+	}
+	if collector.SessionID != tx.SessionID() {
+		return out, fmt.Errorf("%w: collector belongs to another session", ErrGCConfiguration)
 	}
 	sem, err := store.Semantic(tx)
 	if err != nil {
@@ -127,6 +135,48 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 		return out, err
 	}
 	return s.collect(tx, collector, i, &gcBatch{requestID: req.ID, progress: progress}, seq)
+}
+
+// RearmGCRequest re-enqueues a FAILED request under a new, deterministic
+// request identity (DUR-3.3): same scope, task and trigger, triggered by the
+// failed request itself, so repeating the re-arm returns the same request.
+// The failed record stays immutable. Only SYSTEM/HARNESS may re-arm; the
+// actor is recorded as the new request's origin, never its collector.
+func (s *Service) RearmGCRequest(tx store.Tx, actor domain.Principal, failedID string) (id string, err error) {
+	defer func() {
+		if err != nil {
+			tx.Poison(err)
+			id = ""
+		}
+	}()
+	if err = actor.Validate(); err != nil {
+		return "", err
+	}
+	if actor.SessionID != tx.SessionID() {
+		return "", domain.ErrNotFound
+	}
+	if actor.Authority != domain.AuthoritySystem && actor.Authority != domain.AuthorityHarness {
+		return "", domain.ErrInvalidAuthorityPromotion
+	}
+	sem, err := store.Semantic(tx)
+	if err != nil {
+		return "", err
+	}
+	req, err := sem.GCRequest(failedID)
+	if errors.Is(err, domain.ErrNotFound) || err == nil && req.SessionID != actor.SessionID {
+		return "", domain.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	res, err := sem.GCResult(req.ID)
+	if errors.Is(err, domain.ErrNotFound) || err == nil && res.Outcome != domain.GCFailed {
+		return "", domain.ErrInvalidTransition // only a FAILED request re-arms
+	}
+	if err != nil {
+		return "", err
+	}
+	return gcqueue.Enqueue(tx, s.policy, actor, req.Trigger, req.TaskID, "rearm/"+req.ID)
 }
 
 // gcProgress is the request's stored progress, or the zero progress
