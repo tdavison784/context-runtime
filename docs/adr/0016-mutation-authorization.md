@@ -273,23 +273,34 @@ both forms share.
   `TestJ5ConfigurationErrorsLeaveRequestsPending`,
   `TestJ6QueuePrefixCannotHideRunnableTail`, and
   `TestJ7ManualSessionCollectionResumesAndReplays` run on both stores.
-  **DUR round 3 strengthens three of these rulings; not yet landed in
-  this reconciliation, assigned W3 (DUR-3.2/3.3/3.4).** J6's queue
-  continuation must be durable (a persisted cursor), never reset by a new
-  service instance or a restart — the code above still keeps
-  `gcQueueCursors` as an in-process `sync.Map` on `*Service`. J5's
+  **DUR round 3 strengthens three of these rulings; confirmed by W3, not
+  yet merged into this reconciliation (DUR-3.2/3.3/3.4).** J6's queue
+  continuation must be durable (a persisted cursor plus a per-trigger
+  pending index), never reset by a new service instance or a restart — the
+  code above still keeps `gcQueueCursors` as an in-process `sync.Map` on
+  `*Service` (DUR-3.2, waiting on W1/W2, commit pending). J5's
   configuration-error path must never quarantine even for a collector-side
-  fault, and a `FAILED` request must be explicitly re-armable through a new
-  request identity. J4's attempt counter must reset whenever a batch makes
-  any progress, not only on full success. This ADR will need a further
-  correction once W3's fix lands.
-  **Grant issuance shares its live-count cap fairly and reserves room for
-  SYSTEM (SEC-2.7).** `liveGrantRoom` (`internal/lifecycle/grants.go`)
-  limits any one issuer to at most a quarter of the policy's live-grant
-  cap per `(action, target)`, with the last quarter reserved for SYSTEM —
-  so no lower-authority issuer, alone or in combination, can exhaust the
-  cap and deny issuance to everyone else. Test:
-  `TestLiveGrantCapIsSharedFairly`.
+  fault: a bad collector principal/header or a cross-session collector is
+  the closed `ErrGCConfiguration`, not charged, request stays pending; a
+  `FAILED` request becomes re-armable only through SYSTEM/HARNESS calling
+  `lifecycle.RearmGCRequest`, which creates a new deterministic request
+  identity (`"rearm/" + failed request ID`) and leaves the original
+  `FAILED` record immutable (DUR-3.3, committing on W3's branch as of this
+  pass). J4's attempt counter must reset whenever a batch makes any
+  progress, not only on full success (DUR-3.4, not yet landed). This ADR
+  will need a further correction once these land.
+  **Grant issuance room is tiered by authority, not a flat quarter-share
+  (SEC-2.7, superseded by SEC-3.8/DUR-3.6; confirmed by W3, commit
+  `4a00b06` on `p3fix3/w3`, not yet merged here).** `liveGrantRoom`
+  (`internal/lifecycle/grants.go`) **as landed in this reconciliation**
+  still limits any one issuer to at most a quarter of the policy's
+  live-grant cap per `(action, target)`, with the last quarter reserved
+  for SYSTEM (test: `TestLiveGrantCapIsSharedFairly`). The tiered
+  replacement: USER issuers together hold at most half of `MaxTargets`
+  live grants per `(action, target)`; USER+HARNESS together at most three
+  quarters; SYSTEM may use all of it; no reserve applies when
+  `MaxTargets < 4`. This ADR will need updating to the tiered rule and its
+  own tests once `4a00b06` is merged.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
   idempotently after producer commit, never inline with it. Tests:
   `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,
