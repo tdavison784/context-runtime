@@ -24,10 +24,10 @@ func transitionEvent(id string, kind domain.EventKind, o domain.ObligationVersio
 
 // eligibility evaluates W3's pure eligibility policy for itemID as p at
 // the task's current turn, from one consistent read of ingested state: the
-// item's exact revision, its currentness, and the dispatching task. No
-// lease exists (retrieval is W6's); a semantic item has no raw or opaque
-// representation dependency.
-func (f *fixture) eligibility(itemID string, p domain.Principal) policy.EligibilityResult {
+// item's exact revision, its currentness, the dispatching task, and, when
+// leaseIDs are given, those retrieval leases and p's conversation. A
+// semantic item has no raw or opaque representation dependency.
+func (f *fixture) eligibility(itemID string, p domain.Principal, leaseIDs ...string) policy.EligibilityResult {
 	f.t.Helper()
 	var out policy.EligibilityResult
 	f.view(func(tx store.ReadTx) error {
@@ -54,6 +54,24 @@ func (f *fixture) eligibility(itemID string, p domain.Principal) policy.Eligibil
 			Currentness:    cur,
 			Representation: domain.ExpiryLive,
 			DispatchTask:   &task,
+		}
+		if len(leaseIDs) > 0 {
+			conv, err := tx.Conversation(domain.ConversationIDFor(p.TaskID, p.AgentID))
+			if err != nil {
+				return err
+			}
+			snap.Conversation = &conv
+			sem, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			for _, id := range leaseIDs {
+				l, err := sem.RetrievalLease(id)
+				if err != nil {
+					return err
+				}
+				snap.Leases = append(snap.Leases, l)
+			}
 		}
 		out = policy.Eligibility(it, snap, p, task.TurnID)
 		return nil
@@ -223,8 +241,9 @@ func TestGateT03_NewTurnExpiresTurnContent(t *testing.T) {
 			}
 		})
 	})
-	t.Run("rehydrate issues exact current-turn lease; E1 not a directive", func(t *testing.T) { pending(t, depW6) })
-	t.Run("lease expiry propagates through nested projections", func(t *testing.T) { pending(t, depW6+"; "+depW3Elig) })
+	t.Run("lease expiry propagates through nested projections", func(t *testing.T) {
+		pending(t, "gate-level nested projection chain (W6 covers it in TestNestedOldLeaseCannotBeRenewedByNewRootLease and TestApplyProjectionSourceCarriesOldLeaseAndRejectsExpiry)")
+	})
 }
 
 // TestGateT05_ResolvedGoalStaysResolved: Resolve→Archive→Get/Rehydrate
@@ -289,7 +308,6 @@ func TestGateT05_ResolvedGoalStaysResolved(t *testing.T) {
 			})
 		})
 	})
-	t.Run("Get/Rehydrate never reopen or change residency", func(t *testing.T) { pending(t, depW6) })
 	t.Run("identical restatement stays resolved", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
 			first, again := f.restate("## Goal [G]\nExplain earlier work.\n", "## Resolve [G]\n")
