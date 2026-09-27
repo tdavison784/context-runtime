@@ -220,7 +220,8 @@ func (p GCProgress) Validate() error {
 }
 
 // GCBatchRequestID is the CollectReceipt request ID of batch n (from 1) of a
-// GC request: request + "/batch/" + n. It inherits the GC request's
+// GC request: its collection request ID (GCRequest.RequestID, the reserved
+// "gc_" value, not the "gcq_" record ID) + "/batch/" + n. It inherits that
 // reserved runtime namespace, so no caller can name it.
 func GCBatchRequestID(gcRequestID string, batch uint64) (string, error) {
 	id := gcRequestID + "/batch/" + strconv.FormatUint(batch, 10)
