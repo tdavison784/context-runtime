@@ -40,11 +40,14 @@ func ApplicabilityProofID(target ObligationRef, transitionID string) (string, er
 	}
 	return "proof_" + shortHash(NewCanonicalEncoder("context-runtime/proof-id/v1").String(target.Target().AuthorizationKey).String(transitionID)), nil
 }
+
+const operationRequestPrefix = "req_"
+
 func OperationRequestID(session, occurrence string, operation, command uint64) (string, error) {
 	if !semanticID(session) || !ValidOccurrenceID(occurrence) {
 		return "", invalid("operation request: occurrence required")
 	}
-	return "req_" + shortHash(NewCanonicalEncoder("context-runtime/operation-request-id/v1").String(session).String(occurrence).Uint(operation).Uint(command)), nil
+	return operationRequestPrefix + shortHash(NewCanonicalEncoder("context-runtime/operation-request-id/v1").String(session).String(occurrence).Uint(operation).Uint(command)), nil
 }
 
 // These records contain value fields only. Explicit Clone methods give stores

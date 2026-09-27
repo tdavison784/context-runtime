@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // G3 / SEC-1.2: runtime-derived request IDs live in a reserved namespace no
 // caller may name, as an EventID or as a standalone intent RequestID.
@@ -11,6 +14,19 @@ func TestRuntimeRequestNamespaceIsReserved(t *testing.T) {
 		}
 		if err := (Event{EventID: id, Kind: EventUser}).validateShape(true); err == nil {
 			t.Errorf("caller EventID %q accepted in the runtime request namespace", id)
+		}
+		if err := ValidateCallerRequestID(id); !errors.Is(err, ErrInvalidRecord) {
+			t.Errorf("ValidateCallerRequestID(%q) = %v; want ErrInvalidRecord", id, err)
+		}
+	}
+	for _, id := range []string{"request-1", "requests", "req-1", "REQ_1"} {
+		if err := ValidateCallerRequestID(id); err != nil {
+			t.Errorf("ValidateCallerRequestID(%q) = %v; ordinary caller IDs are allowed", id, err)
+		}
+	}
+	for _, id := range []string{"", "a b", "itm_x", "evt_x", "evc_x"} {
+		if ValidateCallerRequestID(id) == nil {
+			t.Errorf("ValidateCallerRequestID(%q) accepted a malformed or reserved ID", id)
 		}
 	}
 }
