@@ -33,6 +33,10 @@ type ResourceReader interface {
 	// (Seq, ID) cursor is also the deterministic pre-execution run order.
 	RunsBySubject(subjectKey string, page Page) (ResultPage[domain.ObservationRun], error)
 	ObservationsByRun(runID string, page Page) (ResultPage[domain.ObservationRecord], error)
+	// ClosingObservation is the run's closing observation (ClosesRun),
+	// ErrNotFound while the run is open: one keyed lookup, independent of
+	// the run's partial reports (H2, DUR-2.6).
+	ClosingObservation(runID string) (domain.ObservationRecord, error)
 	SubjectState(subjectKey, taskID string, access domain.AccessBoundary) (domain.SubjectState, error)
 	// Only CURRENT states, in first-filing order: STALE/UNKNOWN history is
 	// not a live dependent and never counts toward a page (G2, SEC-1.8).

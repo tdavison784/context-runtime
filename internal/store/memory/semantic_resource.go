@@ -616,3 +616,8 @@ func (r semRead) LatestResourceUpdateAffectingPath(resourceID, path string) (dom
 	}
 	return u, nil
 }
+
+// ClosingObservation implements store.ResourceReader.
+func (r semRead) ClosingObservation(runID string) (domain.ObservationRecord, error) {
+	return domain.ObservationRecord{}, domain.ErrUnsupportedSchema
+}

@@ -105,3 +105,55 @@ func testSemanticLatestUpdateAffectingPath(t *testing.T, s store.Store) {
 }
 
 func errorsIs(err, target error) bool { return errors.Is(err, target) }
+
+// testSemanticClosingObservation checks the run-closure pointer (H2,
+// DUR-2.6): a run's closing observation is one keyed lookup however many
+// partial reports precede it, and an open run is ErrNotFound.
+func testSemanticClosingObservation(t *testing.T, s store.Store) {
+	var run domain.ObservationRun
+	partial := func(tx store.Tx, id string) domain.ObservationRecord {
+		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-"+id, tx.NextSeq())))
+		o := NewObservation(run, id, "ev-"+id, tx.NextSeq(), fpA)
+		o.Completeness, o.Passed, o.Skipped = domain.ObservationPartial, 1, 2
+		return o
+	}
+	update(t, s, sessA, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		putTask(t, tx)
+		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq())))
+		noErr(t, sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 1, tx.NextSeq())))
+		run = NewObservationRun(t, sessA, "run1", "repo", "wb", tx.NextSeq())
+		return sem.InsertObservationRun(run)
+	})
+	closing := func() (domain.ObservationRecord, error) {
+		var o domain.ObservationRecord
+		var err error
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			o, err = readSemantic(t, tx).ClosingObservation("run1")
+			return nil
+		})
+		return o, err
+	}
+	for i := range 30 {
+		update(t, s, sessA, func(tx store.Tx) error {
+			return semantic(t, tx).InsertObservation(partial(tx, "p"+string(rune('a'+i%26))+string(rune('a'+i/26))))
+		})
+	}
+	if _, err := closing(); !errorsIs(err, domain.ErrNotFound) {
+		t.Errorf("open run: error = %v, want ErrNotFound", err)
+	}
+	var final domain.ObservationRecord
+	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-final", tx.NextSeq())))
+		final = NewObservation(run, "final", "ev-final", tx.NextSeq(), fpA)
+		return semantic(t, tx).InsertObservation(final)
+	})
+	got, err := closing()
+	noErr(t, err)
+	assertEqual(t, "ClosingObservation", got, final)
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		_, err := readSemantic(t, tx).ClosingObservation("nope")
+		wantErr(t, err, domain.ErrNotFound)
+		return nil
+	})
+}
