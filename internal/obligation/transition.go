@@ -72,7 +72,7 @@ func (s *Service) ApplyTransitionTx(tx store.Tx, actor domain.Principal, in doma
 		if o.TargetSpec == nil {
 			return domain.MutationResult{}, domain.ErrUnknownApplicability
 		}
-		if claims, err = s.checkResourceClaims(sem, o, in.Resources); err != nil {
+		if claims, err = s.checkResourceClaims(sem, s.newBudget(), o, in.Resources); err != nil {
 			return domain.MutationResult{}, err
 		}
 	}
@@ -189,7 +189,7 @@ func publishableEvidence(tx store.ReadTx, actor domain.Principal, o domain.Oblig
 // authoritative resource state (P3-15, P3-19). A claim must match the current
 // KNOWN state exactly; anything else is ErrUnknownApplicability. The
 // obligation's boundary must lie within each resource registration's.
-func (s *Service) checkResourceClaims(r store.SemanticReader, o domain.ObligationVersion, claims []domain.ResourceClaim) ([]domain.ResourceClaim, error) {
+func (s *Service) checkResourceClaims(r store.SemanticReader, work *budget, o domain.ObligationVersion, claims []domain.ResourceClaim) ([]domain.ResourceClaim, error) {
 	out := make([]domain.ResourceClaim, 0, len(claims))
 	for _, c := range claims {
 		c = c.Clone()
@@ -218,8 +218,14 @@ func (s *Service) checkResourceClaims(r store.SemanticReader, o domain.Obligatio
 			if err != nil || !knownResource(&st, c.ResourceID) {
 				return nil, domain.ErrUnknownApplicability
 			}
-			ps, err := r.ResourcePathState(*c.Locator)
-			if err != nil || ps.Freshness != domain.ResourceKnown || ps.ContentHash != c.Fingerprint || ps.ResourceRevision != c.ResourceRevision {
+			// The same currentness rule as file_read (XREV-1.1): a cached
+			// path state that a later changed-path, all-path, UNKNOWN, or
+			// resync report superseded is not current content.
+			ps, ok, err := s.currentPathState(r, work, *c.Locator, st)
+			if err != nil {
+				return nil, err
+			}
+			if !ok || ps.ContentHash != c.Fingerprint || ps.ResourceRevision != c.ResourceRevision {
 				return nil, domain.ErrUnknownApplicability
 			}
 		case domain.DependencyFixedContent:
