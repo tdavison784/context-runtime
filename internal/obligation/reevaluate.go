@@ -1,6 +1,8 @@
 package obligation
 
 import (
+	"errors"
+
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -8,11 +10,11 @@ import (
 // ReevaluateTx is the trusted exact-version reevaluation of C-4 (P3-17): after
 // a grant issuance, an authorized unblock or revalidation, or a replacement,
 // a SYSTEM or HARNESS actor asks the bound matcher to consider evidence that
-// already exists. It names no matcher, outcome, or text. The newest terminal
-// complete observation of the version's subject, in pre-execution run order,
-// is selected; the ordinary grant, applicability, and publication checks
-// apply. A new grant alone never satisfies anything. The receipt records the
-// selected observation.
+// already exists. It names no matcher, outcome, or text. The newest accepted
+// observation of the version's subject, in a partition publishable at its
+// boundary and accessible to the caller, is selected; the ordinary grant,
+// applicability, and publication checks apply. A new grant alone never
+// satisfies anything. The receipt records the selected observation.
 func (s *Service) ReevaluateTx(tx store.Tx, actor domain.Principal, in domain.ReevaluateIntent, seq uint64) (domain.MutationResult, error) {
 	if err := in.Validate(); err != nil {
 		return domain.MutationResult{}, err
@@ -46,7 +48,7 @@ func (s *Service) ReevaluateTx(tx store.Tx, actor domain.Principal, in domain.Re
 	}
 	ids := []string{o.DeclarationID}
 	work := s.newBudget()
-	obs, run, found, err := s.newestTerminal(sem, work, o.TargetSubjectKey)
+	obs, run, found, err := s.selectEvidence(sem, work, actor, o)
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
@@ -64,42 +66,42 @@ func (s *Service) ReevaluateTx(tx store.Tx, actor domain.Principal, in domain.Re
 	return result, nil
 }
 
-// newestTerminal returns the terminal complete observation of the subject
-// with the highest run ordinal (latest stored observation within a run).
-func (s *Service) newestTerminal(r store.SemanticReader, work *budget, subjectKey string) (domain.ObservationRecord, domain.ObservationRun, bool, error) {
-	var runs []domain.ObservationRun
-	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
-		pg, err := r.RunsBySubject(subjectKey, p)
-		if err != nil {
-			return 0, store.Cursor{}, false, err
+// selectEvidence picks the newest accepted observation among the subject
+// states of the partitions whose evidence is publishable at the obligation's
+// boundary (DUR-1.2: a few indexed lookups, independent of run history).
+// Observations the caller cannot access are never selected, returned, or
+// allowed to shadow an accessible one (SEC-1.9, P3-14/24).
+func (s *Service) selectEvidence(r store.SemanticReader, work *budget, actor domain.Principal, o domain.ObligationVersion) (domain.ObservationRecord, domain.ObservationRun, bool, error) {
+	var best domain.SubjectState
+	for _, p := range obligationPartitions(o) {
+		if err := work.spend(1); err != nil {
+			return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
 		}
-		runs = append(runs, pg.Records...)
-		return len(pg.Records), pg.Next, pg.More, nil
-	})
-	if err != nil {
-		return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
-	}
-	for i := len(runs) - 1; i >= 0; i-- {
-		var best domain.ObservationRecord
-		found := false
-		err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
-			pg, err := r.ObservationsByRun(runs[i].ID, p)
-			if err != nil {
-				return 0, store.Cursor{}, false, err
-			}
-			for _, o := range pg.Records {
-				if o.TerminalComplete() {
-					best, found = o, true
-				}
-			}
-			return len(pg.Records), pg.Next, pg.More, nil
-		})
+		st, err := r.SubjectState(o.TargetSubjectKey, p.TaskID, p)
+		if errors.Is(err, domain.ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
 		}
-		if found {
-			return best, runs[i], true, nil
+		obs, err := r.Observation(st.ObservationID)
+		if err != nil {
+			return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
+		}
+		if obs.Access.Permits(actor) && st.AcceptedOrdinal > best.AcceptedOrdinal {
+			best = st
 		}
 	}
-	return domain.ObservationRecord{}, domain.ObservationRun{}, false, nil
+	if best.ObservationID == "" {
+		return domain.ObservationRecord{}, domain.ObservationRun{}, false, nil
+	}
+	obs, err := r.Observation(best.ObservationID)
+	if err != nil {
+		return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
+	}
+	run, err := r.ObservationRun(obs.RunID)
+	if err != nil {
+		return domain.ObservationRecord{}, domain.ObservationRun{}, false, err
+	}
+	return obs, run, true, nil
 }

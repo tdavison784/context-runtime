@@ -124,20 +124,29 @@ func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run dom
 	return high, nil
 }
 
-// candidatePartitions lists the run's own partition and the TASK partitions
-// of the obligation's task whose owners are a subset of the obligation's
-// (evidence there is publishable at the obligation's boundary), deduplicated.
+// candidatePartitions lists the run's own partition and the obligation's
+// publishable partitions, deduplicated.
 func candidatePartitions(run domain.ObservationRun, o domain.ObligationVersion) []domain.AccessBoundary {
 	out := []domain.AccessBoundary{run.Access}
-	if o.TaskID == "" {
-		return out
+	for _, b := range obligationPartitions(o) {
+		if b != run.Access {
+			out = append(out, b)
+		}
 	}
+	return out
+}
+
+// obligationPartitions lists the TASK partitions of the obligation's task
+// whose owners are a subset of the obligation's: evidence there is
+// publishable at the obligation's boundary (P3-14).
+func obligationPartitions(o domain.ObligationVersion) []domain.AccessBoundary {
+	if o.TaskID == "" {
+		return nil
+	}
+	var out []domain.AccessBoundary
 	for _, wf := range uniq("", o.Access.WorkflowID) {
 		for _, ag := range uniq("", o.Access.AgentID) {
-			b := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: o.SessionID, TaskID: o.TaskID, WorkflowID: wf, AgentID: ag}
-			if b != run.Access {
-				out = append(out, b)
-			}
+			out = append(out, domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: o.SessionID, TaskID: o.TaskID, WorkflowID: wf, AgentID: ag})
 		}
 	}
 	return out
