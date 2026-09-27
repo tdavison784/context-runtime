@@ -2,14 +2,13 @@ package graph
 
 import (
 	"errors"
-	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/memory"
-	"github.com/tdavison784/context-runtime/internal/store/sqlite"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
 
@@ -24,12 +23,9 @@ func eachStore(t *testing.T, fn func(t *testing.T, s store.Store)) {
 		fn(t, s)
 	})
 	t.Run("sqlite", func(t *testing.T) {
-		s, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "graph.db"))
-		if err != nil {
-			t.Fatalf("sqlite.Open: %v", err)
-		}
-		defer s.Close()
-		fn(t, s)
+		// A copy of the per-binary migrated template; Open still verifies
+		// every migration checksum.
+		fn(t, sqlitetest.Open(t))
 	})
 }
 

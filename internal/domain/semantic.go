@@ -1,6 +1,9 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"slices"
+)
 
 // Independent versions: request identity must never depend on execution policy
 // or on the storage envelope version (P3-2/40/41).
@@ -76,6 +79,25 @@ type Phase3Policy struct {
 	MaxOperations, MaxMetadataBytes, MaxTargets, MaxEvidence, MaxCoverageMembers     int
 	MaxTransactionWork, MaxToolResultBytes, MaxCheckpointSemanticBytes               int
 	DefaultLeaseCalls, MaxLeaseCalls                                                 uint64
+	// GCTriggers is the explicit enabled trigger set, sorted and unique. A
+	// trigger outside it never starts a collection; there is no implicit
+	// "all triggers" interpretation of an empty or missing set.
+	GCTriggers []GCTrigger
+}
+
+// DefaultGCTriggers returns a fresh canonical set of every registered trigger.
+func DefaultGCTriggers() []GCTrigger {
+	return []GCTrigger{GCManual, GCPolicy, GCSupersession, GCTaskCompletion, GCTTL}
+}
+
+func (p Phase3Policy) Clone() Phase3Policy {
+	p.GCTriggers = slices.Clone(p.GCTriggers)
+	return p
+}
+
+// GCTriggerEnabled reports whether t is in the policy's enabled set.
+func (p Phase3Policy) GCTriggerEnabled(t GCTrigger) bool {
+	return t.Valid() && slices.Contains(p.GCTriggers, t)
 }
 
 func (p Phase3Policy) Validate() error {
@@ -94,6 +116,14 @@ func (p Phase3Policy) Validate() error {
 	}
 	if p.DefaultLeaseCalls == 0 || p.MaxLeaseCalls < p.DefaultLeaseCalls {
 		return invalid("semantic policy: invalid lease allowance")
+	}
+	if len(p.GCTriggers) == 0 {
+		return invalid("semantic policy: explicit enabled GC trigger set required")
+	}
+	for i, t := range p.GCTriggers {
+		if !t.Valid() || i > 0 && p.GCTriggers[i-1] >= t {
+			return invalid("semantic policy: GC triggers must be known, sorted and unique")
+		}
 	}
 	return nil
 }
