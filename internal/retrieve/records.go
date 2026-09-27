@@ -26,6 +26,7 @@ type recordInput struct {
 	// InheritedMembers is the complete member list of Inherited's
 	// dependency coverage; its closure is carried forward (SEC-1.14).
 	InheritedMembers []domain.CoverageMember
+	LatencyNanos     uint64 // audit only (SPEC-1.20)
 	Seqs             recordSeqs
 }
 
@@ -171,7 +172,7 @@ func buildRetrievalRecords(in recordInput) (retrievalRecords, error) {
 	}
 	out.Event = domain.RetrievalEvent{SemanticMeta: retrievalMeta("event", session, request, in.Seqs.Event),
 		RequestID: request, Principal: in.Actor, TriggeringActor: in.Actor, InvocationID: invocationID,
-		ResultID: out.Result.ID, Source: &source}
+		ResultID: out.Result.ID, Source: &source, LatencyNanos: in.LatencyNanos}
 	hash, err := domain.MutationRequestHash(in.Actor, domain.MutationRetrieval, in.Intent.Method, in.Arguments)
 	if err != nil {
 		return retrievalRecords{}, err

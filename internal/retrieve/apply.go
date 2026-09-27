@@ -24,7 +24,7 @@ func (s *Service) Rehydrate(ctx context.Context, actor domain.Principal, intent 
 	if err := execution.Validate(); err != nil {
 		return domain.RetrievalResult{}, ErrRetrievalUnavailable
 	}
-	start := time.Now()
+	start := retrievalClock()
 	var out domain.RetrievalResult
 	err := s.store.Update(ctx, actor.SessionID, func(tx store.Tx) error {
 		var err error
@@ -36,7 +36,7 @@ func (s *Service) Rehydrate(ctx context.Context, actor domain.Principal, intent 
 			return domain.RetrievalResult{}, err
 		}
 		_, fixed := FixedRetrievalError(err)
-		latency := uint64(time.Since(start).Nanoseconds())
+		latency := elapsedNanos(start)
 		if auditErr := s.store.Update(ctx, actor.SessionID, func(tx store.Tx) error {
 			return AppendDenial(tx, actor, intent, err, latency, execution)
 		}); auditErr != nil {
@@ -47,9 +47,23 @@ func (s *Service) Rehydrate(ctx context.Context, actor domain.Principal, intent 
 	return out.Clone(), nil
 }
 
+// retrievalClock times retrieval for audit only; latency is never a policy
+// or eligibility input (P3-30/31). Tests replace it.
+var retrievalClock = time.Now
+
+func elapsedNanos(start time.Time) uint64 {
+	d := retrievalClock().Sub(start)
+	if d < 0 {
+		return 0
+	}
+	return uint64(d.Nanoseconds())
+}
+
 // Apply lets a tool handler include retrieval and its tool execution receipt
 // in one Store.Update. Every failure after allocation poisons that transaction.
+// The success event records the latency from entry to record construction.
 func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, execution domain.Phase3Policy, allowStub bool) (out domain.RetrievalResult, err error) {
+	start := retrievalClock()
 	if err = actor.Validate(); err != nil {
 		return out, err
 	}
@@ -134,6 +148,7 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	if found {
 		input.Existing = &lease
 	}
+	input.LatencyNanos = elapsedNanos(start)
 	records, err := buildRetrievalRecords(input)
 	if err != nil {
 		return out, err
