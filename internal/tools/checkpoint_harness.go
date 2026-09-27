@@ -47,7 +47,7 @@ func (s *Service) ApplyHarnessCheckpoint(tx store.Tx, actor domain.Principal, r 
 		if prior.Principal != actor {
 			// Ownership of the request ID is checked before another
 			// principal's receipt can change the outcome (SEC-2.8).
-			if _, idErr := domain.MutationReceiptID(actor, domain.MutationMembership, intent.RequestID); idErr != nil {
+			if idErr := domain.RuntimeRequestOwnedBy(actor, intent.RequestID); idErr != nil {
 				return "", idErr
 			}
 			return "", domain.ErrEventIDConflict

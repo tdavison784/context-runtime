@@ -35,7 +35,7 @@ func replayRetrieval(r retrievalReplayReader, actor domain.Principal, i Admissio
 		return domain.RetrievalResult{}, false, err
 	}
 	if err != nil || receipt.Principal != actor {
-		if _, idErr := domain.MutationReceiptID(actor, domain.MutationRetrieval, i.Rehydrate.RequestID); idErr != nil {
+		if idErr := domain.RuntimeRequestOwnedBy(actor, i.Rehydrate.RequestID); idErr != nil {
 			return domain.RetrievalResult{}, false, idErr
 		}
 		if err != nil {

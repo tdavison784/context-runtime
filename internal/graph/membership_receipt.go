@@ -21,7 +21,7 @@ func prepareMembershipReceipt(tx store.Tx, actor domain.Principal, requestID, me
 	// matter, so another principal's receipt is no oracle (SEC-2.8).
 	receipt, err = sem.MutationReceipt(domain.MutationMembership, requestID)
 	if err == nil && receipt.Principal != actor {
-		if _, idErr := domain.MutationReceiptID(actor, domain.MutationMembership, requestID); idErr != nil {
+		if idErr := domain.RuntimeRequestOwnedBy(actor, requestID); idErr != nil {
 			return nil, domain.MutationReceipt{}, false, idErr
 		}
 		return sem, receipt.Clone(), true, domain.ErrEventIDConflict
