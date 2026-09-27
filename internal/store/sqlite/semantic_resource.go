@@ -45,6 +45,10 @@ func subjectPartitionKey(subject, task string, a domain.AccessBoundary) string {
 	return strings.Join(parts, ".")
 }
 
+// closingObservation is store.ClosesRun over rec_observation columns. It
+// is also the predicate of migration 0030's partial unique index.
+const closingObservation = "(f_outcome IN ('ERROR','TIMEOUT','CANCELLED') OR f_completeness='COMPLETE' AND f_outcome IN ('PASS','FAIL'))"
+
 // subjectResource is the resource a subject's target lives in.
 func subjectResource(s domain.ObservationSubject) string {
 	if s.Target.Tests != nil {
@@ -297,6 +301,14 @@ func (s semTx) InsertObservation(o domain.ObservationRecord) error {
 	}
 	if err != nil || ev.Authority != domain.AuthorityTool || ev.Access != o.Access {
 		return invalid("observation %s: evidence is not a stored TOOL item in its boundary", o.ID)
+	}
+	// A run closes once (DUR-1.1, G1); migration 0030's partial unique
+	// index backs this check.
+	var closed domain.ObservationRecord
+	if err := t.getWhere("observation", "f_run_id=? AND "+closingObservation, &closed, o.RunID); err == nil {
+		return fmt.Errorf("observation %s: run %s already closed with %s: %w", o.ID, o.RunID, closed.ID, domain.ErrInvalidTransition)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
 	}
 	return t.put("observation", o.ID, 0, o, false)
 }

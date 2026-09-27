@@ -425,6 +425,12 @@ func (t *semTx) InsertObservation(o domain.ObservationRecord) error {
 	if !ok || ev.Authority != domain.AuthorityTool || ev.Access != o.Access {
 		return invalid("observation %s: evidence is not a stored TOOL item in its boundary", o.ID)
 	}
+	// A run closes once (DUR-1.1, G1).
+	for r := range t.r.sem.res.obsByRun.after(o.RunID, seqRef{}) {
+		if prior, _ := t.r.sem.res.observations.peek(r.id); store.ClosesRun(prior) {
+			return fmt.Errorf("observation %s: run %s already closed with %s: %w", o.ID, o.RunID, prior.ID, domain.ErrInvalidTransition)
+		}
+	}
 	t.r.sem.res.observations.put(o.ID, o)
 	t.r.sem.res.obsByRun.add(o.RunID, seqRef{o.Seq, o.ID})
 	t.t.sequencedWrite(o.Seq)

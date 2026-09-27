@@ -31,3 +31,11 @@ type ResourceWriter interface {
 	// current applicability changed and cannot be a caller-authored string.
 	PutSubjectState(state domain.SubjectState, expectedRevision uint64, causeID string) (domain.SubjectState, error)
 }
+
+// ClosesRun reports whether o is its run's closing outcome: a complete
+// PASS/FAIL, or an ERROR, TIMEOUT or CANCELLED. Stores accept no
+// observation of a run after its closing one (DUR-1.1, G1), matching the
+// obligation service's rule.
+func ClosesRun(o domain.ObservationRecord) bool {
+	return o.TerminalComplete() || o.Outcome == domain.OutcomeError || o.Outcome == domain.OutcomeTimeout || o.Outcome == domain.OutcomeCancelled
+}

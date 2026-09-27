@@ -129,8 +129,13 @@ func TestReportObservation(t *testing.T) {
 	if obs.RunID != run.ID || obs.SubjectKey != run.SubjectKey || obs.ReportingMatcher != TestsPassV1 || obs.Access != run.Access || !obs.TerminalComplete() {
 		t.Errorf("observation = %+v", obs)
 	}
-	// ERROR with valid evidence is legitimate historical evidence.
-	if _, err := f.observe(t, f.harness, obsIntent("o2", run, f.evidence.ID, domain.OutcomeError, "")); err != nil {
+	// ERROR with valid evidence is legitimate historical evidence (on its own
+	// run: a run has one closing outcome, DUR-1.1).
+	errRun, err := f.registerRun(t, f.harness, runIntent("r-err", "exec-err", testsTarget(nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.observe(t, f.harness, obsIntent("o2", errRun, f.evidence.ID, domain.OutcomeError, "")); err != nil {
 		t.Errorf("error outcome rejected: %v", err)
 	}
 
