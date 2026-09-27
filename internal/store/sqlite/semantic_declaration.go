@@ -265,6 +265,19 @@ func (s semTx) InsertSemanticChange(c domain.SemanticChange) error {
 			return errors.Join(err, invalidIf(!ok, "semantic change %s: grant %s is not stored", c.ID, c.GrantID))
 		}
 	}
+	if c.CauseID != "" {
+		stored := false
+		for _, kind := range []string{"obligation_transition", "resource_update", "observation", "lifecycle", "mutation_receipt"} {
+			ok, err := t.exists(kind, c.CauseID)
+			if err != nil {
+				return err
+			}
+			stored = stored || ok
+		}
+		if !stored {
+			return invalid("semantic change %s: cause %s is not a stored causal record", c.ID, c.CauseID)
+		}
+	}
 	return t.put("semantic_change", c.ID, 0, c, false)
 }
 
