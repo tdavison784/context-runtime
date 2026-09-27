@@ -445,7 +445,10 @@ func (r semRead) CurrentBoundObligationsBySubject(subjectKey string, p store.Pag
 	if err := r.r.check(); err != nil {
 		return store.ResultPage[domain.ObligationVersion]{}, err
 	}
-	return page(p, r.r.sem.proof.bound.after(subjectKey, cursorRef(p.After)), r.currentVersion)
+	return pageRefs(p, r.r.sem.proof.bound.after(subjectKey, cursorRef(p.After)), func(ref seqRef) (domain.ObligationVersion, bool) {
+		o, ok := r.indexedVersion(ref)
+		return o, ok && o.BindingState == domain.BindingBound && o.TargetSubjectKey == subjectKey
+	})
 }
 
 // ObligationsByTaskOwner pages the current versions whose declared owning
@@ -454,17 +457,32 @@ func (r semRead) ObligationsByTaskOwner(taskID string, p store.Page) (store.Resu
 	if err := r.r.check(); err != nil {
 		return store.ResultPage[domain.ObligationVersion]{}, err
 	}
-	return page(p, r.r.sem.proof.owners.after(taskID, cursorRef(p.After)), r.currentVersion)
+	return pageRefs(p, r.r.sem.proof.owners.after(taskID, cursorRef(p.After)), func(ref seqRef) (domain.ObligationVersion, bool) {
+		o, ok := r.indexedVersion(ref)
+		return o, ok && o.Access.TaskID == taskID && (o.Access.Scope == domain.ScopeTask || o.Access.Scope == domain.ScopeTurn)
+	})
 }
 
-// currentVersion loads the current version of an obligation ID.
-func (r semRead) currentVersion(id string) (domain.ObligationVersion, bool) {
-	latest, ok := r.r.latest.peek(id)
+// indexedVersion loads the exact current version an index entry names by
+// its (CreatedSeq, ObligationID), not the obligation's latest version
+// (DUR-1.13): versions take increasing creation sequences, so the newest
+// matching one is found walking back from the latest.
+func (r semRead) indexedVersion(ref seqRef) (domain.ObligationVersion, bool) {
+	latest, ok := r.r.latest.peek(ref.id)
 	if !ok {
 		return domain.ObligationVersion{}, false
 	}
-	o, ok := r.r.obligations.get(obligationKey{id, latest})
-	return o, ok && o.Current
+	for v := latest; v > 0; v-- {
+		o, ok := r.r.obligations.peek(obligationKey{ref.id, v})
+		if !ok || o.CreatedSeq < ref.seq {
+			return domain.ObligationVersion{}, false
+		}
+		if o.CreatedSeq == ref.seq {
+			o, ok = r.r.obligations.get(obligationKey{ref.id, v})
+			return o, ok && o.Current
+		}
+	}
+	return domain.ObligationVersion{}, false
 }
 
 func (r semRead) TransitionsByVersion(target domain.ObligationRef, p store.Page) (store.ResultPage[domain.ObligationTransition], error) {

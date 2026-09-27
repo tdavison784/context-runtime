@@ -525,10 +525,11 @@ func (t *semTx) InsertOwnerRegistration(o domain.OwnerRegistration) error {
 	if err := t.t.companion("owner registration", o.SemanticMeta, o.Validate); err != nil {
 		return err
 	}
-	if t.r.sem.owners.has(ownerKey{o.Kind, o.OwnerID}) {
+	if t.r.sem.owners.has(ownerKey{o.Kind, o.OwnerID}) || t.r.sem.ownerIDs.has(o.ID) {
 		return immutable("owner registration", o.OwnerID)
 	}
 	t.r.sem.owners.put(ownerKey{o.Kind, o.OwnerID}, o)
+	t.r.sem.ownerIDs.put(o.ID, true)
 	t.t.sequencedWrite(o.Seq)
 	return nil
 }

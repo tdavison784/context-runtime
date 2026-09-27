@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -336,13 +337,26 @@ func (t *semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 	}
 	t.r.sem.res.wbindings.put(wbKey{b.ID, b.Version}, b)
 	t.r.sem.res.wbLatest.put(b.ID, b.Version)
-	t.r.sem.res.wbByContext.add(wsContext{b.Context.Kind, b.Context.ID}, seqRef{b.Seq, wbRefID(b.ID, b.Version)})
+	t.r.sem.res.wbByContext.add(wsContext{b.Context.Kind, b.Context.ID}, seqRef{b.Seq, b.ID})
 	t.t.sequencedWrite(b.Seq)
 	return nil
 }
 
 // wbRefID is a binding version's index entry ID.
-func wbRefID(id string, version uint64) string { return fmt.Sprintf("%s\x00%020d", id, version) }
+// bindingAt is the version of binding id filed at seq: versions take
+// strictly increasing sequences, so it is found by binary search.
+func (r semRead) bindingAt(id string, seq uint64) (domain.WorkspaceBinding, bool) {
+	latest, ok := r.r.sem.res.wbLatest.peek(id)
+	if !ok {
+		return domain.WorkspaceBinding{}, false
+	}
+	v := uint64(sort.Search(int(latest), func(i int) bool {
+		b, _ := r.r.sem.res.wbindings.peek(wbKey{id, uint64(i) + 1})
+		return b.Seq >= seq
+	})) + 1
+	b, ok := r.r.sem.res.wbindings.get(wbKey{id, v})
+	return b, ok && b.Seq == seq
+}
 
 func (r semRead) WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error) {
 	if err := r.r.check(); err != nil {
@@ -365,14 +379,9 @@ func (r semRead) WorkspaceBindingsByContext(sourceItemID, taskID, conversationID
 	if err != nil {
 		return store.ResultPage[domain.WorkspaceBinding]{}, err
 	}
-	return page(p, r.r.sem.res.wbByContext.after(ctx, cursorRef(p.After)), func(id string) (domain.WorkspaceBinding, bool) {
-		var bid string
-		var version uint64
-		if _, err := fmt.Sscanf(id[len(id)-20:], "%d", &version); err != nil {
-			return domain.WorkspaceBinding{}, false
-		}
-		bid = id[:len(id)-21]
-		return r.r.sem.res.wbindings.get(wbKey{bid, version})
+	// Entries are the documented (Seq, ID) cursor itself (DUR-1.13).
+	return pageRefs(p, r.r.sem.res.wbByContext.after(ctx, cursorRef(p.After)), func(ref seqRef) (domain.WorkspaceBinding, bool) {
+		return r.bindingAt(ref.id, ref.seq)
 	})
 }
 

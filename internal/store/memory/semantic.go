@@ -42,6 +42,7 @@ type receiptKey struct {
 // keyed indexes.
 type semState struct {
 	owners       map[ownerKey]domain.OwnerRegistration
+	ownerIDs     map[string]bool // registration IDs, immutable (DUR-1.13)
 	coverages    map[string]domain.CoverageRecord
 	covMembers   map[string][]domain.CoverageMember // sorted by key (== ID)
 	covBySource  map[covSourceKey][]seqRef
@@ -82,6 +83,7 @@ type semState struct {
 func newSemState() *semState {
 	return &semState{
 		owners:       map[ownerKey]domain.OwnerRegistration{},
+		ownerIDs:     map[string]bool{},
 		coverages:    map[string]domain.CoverageRecord{},
 		covMembers:   map[string][]domain.CoverageMember{},
 		covBySource:  map[covSourceKey][]seqRef{},
@@ -131,6 +133,7 @@ func cloneMembers(ms []domain.CoverageMember) []domain.CoverageMember {
 // semView is semState seen through one transaction.
 type semView struct {
 	owners       table[ownerKey, domain.OwnerRegistration]
+	ownerIDs     table[string, bool]
 	coverages    table[string, domain.CoverageRecord]
 	covMembers   table[string, []domain.CoverageMember]
 	covBySource  orderedIndex[covSourceKey]
@@ -171,6 +174,7 @@ type semView struct {
 func newSemView(st *semState, w bool) semView {
 	return semView{
 		owners:       newTable(st.owners, w, domain.OwnerRegistration.Clone),
+		ownerIDs:     newTable(st.ownerIDs, w, same[bool]),
 		coverages:    newTable(st.coverages, w, domain.CoverageRecord.Clone),
 		covMembers:   newTable(st.covMembers, w, cloneMembers),
 		covBySource:  newOrderedIndex(st.covBySource, w),
@@ -220,6 +224,7 @@ func (v *semView) dirty() bool {
 
 func (v *semView) commit() {
 	v.owners.commit()
+	v.ownerIDs.commit()
 	v.coverages.commit()
 	v.covMembers.commit()
 	v.covBySource.commit()
@@ -324,12 +329,18 @@ func (t *tx) runDeferred() error {
 // whether it is visible to the reader; hidden records are skipped before
 // the limit is applied, so More never reveals them.
 func page[T any](p store.Page, refs iter.Seq[seqRef], load func(id string) (T, bool)) (store.ResultPage[T], error) {
+	return pageRefs(p, refs, func(ref seqRef) (T, bool) { return load(ref.id) })
+}
+
+// pageRefs is page for loaders that need the whole index entry, such as
+// an exact version named by its (Seq, ID) (DUR-1.13).
+func pageRefs[T any](p store.Page, refs iter.Seq[seqRef], load func(ref seqRef) (T, bool)) (store.ResultPage[T], error) {
 	if p.Limit <= 0 {
 		return store.ResultPage[T]{}, invalid("page limit must be positive")
 	}
 	var out store.ResultPage[T]
 	for ref := range refs {
-		rec, visible := load(ref.id)
+		rec, visible := load(ref)
 		if !visible {
 			continue
 		}
