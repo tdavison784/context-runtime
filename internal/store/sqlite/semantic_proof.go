@@ -1,8 +1,11 @@
 package sqlite
 
 import (
+	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"slices"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -54,11 +57,28 @@ func (t *transaction) indexProofDeps(proofID string, live bool) error {
 	} else if err != nil {
 		return err
 	}
-	seen := map[[2]string]bool{}
+	seen, paths, resources := map[[2]string]bool{}, map[[2]string]bool{}, map[string]int{}
 	for _, id := range p.DependencyIDs {
 		var d domain.ProofDependency
 		if err := t.get("proof_dependency", id, 0, &d); err != nil {
 			return integrityIfMissing(err, "proof dependency")
+		}
+		// FIXED_CONTENT never goes stale, so it is in no live index (DUR-3.1).
+		if d.Kind == domain.DependencyFixedContent {
+			continue
+		}
+		resources[d.ResourceID]++ // live dependency rows (DUR-3.1 policy cap)
+		switch d.Kind {
+		case domain.DependencyWorkspace:
+			paths[[2]string{d.ResourceID, liveWorkspaceKey}] = true
+		case domain.DependencyCurrentPath:
+			ancestors, err := store.PathAffectKeys(path.Join(d.Locator.BaseDir, d.Locator.Path))
+			if err != nil {
+				return err
+			}
+			for _, a := range ancestors {
+				paths[[2]string{d.ResourceID, livePathKey(a)}] = true
+			}
 		}
 		k := [2]string{d.ResourceID, ""}
 		if d.Locator != nil {
@@ -76,7 +96,73 @@ func (t *transaction) indexProofDeps(proofID string, live bool) error {
 			return err
 		}
 	}
+	for k := range paths {
+		q := "DELETE FROM lookup_live_proof_path WHERE session_id=? AND resource_id=? AND key=? AND seq=? AND proof_id=?"
+		if live {
+			q = "INSERT INTO lookup_live_proof_path(session_id,resource_id,key,seq,proof_id) VALUES(?,?,?,?,?)"
+		}
+		if _, err := t.conn.ExecContext(t.ctx, q, t.session, k[0], k[1], p.Seq, p.ID); err != nil {
+			return err
+		}
+	}
+	for r, rows := range resources {
+		delta := rows
+		if !live {
+			delta = -rows
+		}
+		if _, err := t.conn.ExecContext(t.ctx, `INSERT INTO lookup_live_dependents(session_id,resource_id,dependents) VALUES(?,?,?)
+ON CONFLICT(session_id,resource_id) DO UPDATE SET dependents = dependents + excluded.dependents`, t.session, r, delta); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// Keys of migration 0045's lookup_live_proof_path.
+const liveWorkspaceKey = "ws"
+
+func livePathKey(p string) string { return "path:" + hex.EncodeToString([]byte(p)) }
+
+// liveProofPathPage is the keyset page read of lookup_live_proof_path.
+const liveProofPathPage = "SELECT seq, proof_id FROM lookup_live_proof_path WHERE session_id=? AND resource_id=? AND key=? AND (seq, proof_id) > (?, ?) ORDER BY seq, proof_id LIMIT ?"
+
+// liveProofPage pages one key of lookup_live_proof_path.
+func (s semRead) liveProofPage(resourceID, key string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	t := s.t
+	var out store.ResultPage[domain.ApplicabilityProof]
+	if p.Limit <= 0 {
+		return out, invalid("page limit must be positive")
+	}
+	rows, err := t.query(liveProofPathPage, t.session, resourceID, key, p.After.Seq, p.After.ID, p.Limit+1)
+	if err != nil {
+		return out, err
+	}
+	var ids []string
+	for rows.Next() {
+		var seq uint64
+		var id string
+		if err := rows.Scan(&seq, &id); err != nil {
+			rows.Close()
+			return out, err
+		}
+		ids = append(ids, id)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+	for _, id := range ids {
+		if len(out.Records) == p.Limit {
+			out.More = true
+			break
+		}
+		pr, err := s.ApplicabilityProof(id)
+		if err != nil {
+			return out, integrityIfMissing(err, "proof")
+		}
+		out.Records = append(out.Records, pr)
+		out.Next = store.Cursor{Seq: pr.Seq, ID: pr.ID}
+	}
+	return out, nil
 }
 
 // --- Declarations (rules as in the memory store) ---
@@ -615,4 +701,33 @@ func (t *transaction) checkProofNotStale(ref domain.ObligationRef, proofID strin
 func (s semRead) ObligationTransition(id string) (domain.ObligationTransition, error) {
 	var tr domain.ObligationTransition
 	return tr, s.t.get("obligation_transition", id, 0, &tr)
+}
+
+// LiveProofsByPath implements store.ProofReader over migration 0045 (DUR-3.1).
+func (s semRead) LiveProofsByPath(resourceID, path string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	if _, err := store.PathAffectKeys(path); err != nil {
+		return store.ResultPage[domain.ApplicabilityProof]{}, err
+	}
+	return s.liveProofPage(resourceID, livePathKey(path), p)
+}
+
+// LiveWorkspaceProofs implements store.ProofReader over migration 0045 (DUR-3.1).
+func (s semRead) LiveWorkspaceProofs(resourceID string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	return s.liveProofPage(resourceID, liveWorkspaceKey, p)
+}
+
+// LiveProofDependents implements store.ProofReader over migration 0045 (DUR-3.1).
+func (s semRead) LiveProofDependents(resourceID string) (uint64, error) {
+	var n int64
+	err := s.t.conn.QueryRowContext(s.t.ctx, "SELECT dependents FROM lookup_live_dependents WHERE session_id=? AND resource_id=?", s.t.session, resourceID).Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("%w: negative live dependent count for %s", domain.ErrIntegrity, resourceID)
+	}
+	return uint64(n), nil
 }

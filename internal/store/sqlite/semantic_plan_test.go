@@ -321,3 +321,17 @@ func TestLiveGrantRangesSkipDeadRows(t *testing.T) {
 		assertUsesIndex(t, s, "lookup_grant_target_liveness (session_id=? AND action=? AND target_key=? AND revoked_seq", q, args...)
 	}
 }
+
+// TestLiveProofPathReadsSeek checks the DUR-3.1 reads: the path/workspace
+// page seeks its (seq, proof_id) keyset inside one key, so a page costs the
+// same however deep the cursor is, and never sorts; the dependent counter
+// is one primary-key read.
+func TestLiveProofPathReadsSeek(t *testing.T) {
+	s, _ := openTemp(t)
+	args := []any{"s", "repo", "ws", 1, "p", 5}
+	assertIndexed(t, s, []string{"session_id", "resource_id", "key"}, liveProofPathPage, args...)
+	assertNoSort(t, s, liveProofPathPage, args...)
+	assertUsesIndex(t, s, "sqlite_autoindex_lookup_live_proof_path_1 (session_id=? AND resource_id=? AND key=? AND (seq,proof_id)>(?,?))", liveProofPathPage, args...)
+	q := "SELECT dependents FROM lookup_live_dependents WHERE session_id=? AND resource_id=?"
+	assertIndexed(t, s, []string{"session_id", "resource_id"}, q, "s", "repo")
+}

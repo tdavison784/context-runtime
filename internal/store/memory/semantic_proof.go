@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	"path"
 	"slices"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -33,6 +34,9 @@ type proofState struct {
 	bound       map[string][]seqRef // subject key -> current bound versions
 	liveDeps    map[depKey][]seqRef // current proofs by exact dependency
 	liveByRes   map[string][]seqRef // current proofs by resource
+	liveByPath  map[depKey][]seqRef // live CURRENT_PATH dependents by (resource, ancestor path) (DUR-3.1)
+	liveWS      map[string][]seqRef // live WORKSPACE dependents by resource (DUR-3.1)
+	dependents  map[string]uint64   // live non-FIXED dependency rows per resource (DUR-3.1)
 }
 
 func newProofState() proofState {
@@ -41,6 +45,7 @@ func newProofState() proofState {
 		deps: map[string]domain.ProofDependency{}, depsByProof: map[string][]seqRef{}, assertions: map[string]domain.AssertionRecord{},
 		details: map[string]domain.TransitionDetail{}, trByVersion: map[obligationKey][]seqRef{}, owners: map[string][]seqRef{},
 		bound: map[string][]seqRef{}, liveDeps: map[depKey][]seqRef{}, liveByRes: map[string][]seqRef{},
+		liveByPath: map[depKey][]seqRef{}, liveWS: map[string][]seqRef{}, dependents: map[string]uint64{},
 	}
 }
 
@@ -57,6 +62,9 @@ type proofView struct {
 	bound       orderedIndex[string]
 	liveDeps    orderedIndex[depKey]
 	liveByRes   orderedIndex[string]
+	liveByPath  orderedIndex[depKey]
+	liveWS      orderedIndex[string]
+	dependents  table[string, uint64]
 }
 
 func newProofView(st *proofState, w bool) proofView {
@@ -66,7 +74,8 @@ func newProofView(st *proofState, w bool) proofView {
 		depsByProof: newOrderedIndex(st.depsByProof, w), assertions: newTable(st.assertions, w, domain.AssertionRecord.Clone),
 		details: newTable(st.details, w, domain.TransitionDetail.Clone), trByVersion: newOrderedIndex(st.trByVersion, w),
 		owners: newOrderedIndex(st.owners, w), bound: newOrderedIndex(st.bound, w), liveDeps: newOrderedIndex(st.liveDeps, w),
-		liveByRes: newOrderedIndex(st.liveByRes, w),
+		liveByRes: newOrderedIndex(st.liveByRes, w), liveByPath: newOrderedIndex(st.liveByPath, w),
+		liveWS: newOrderedIndex(st.liveWS, w), dependents: newTable(st.dependents, w, same[uint64]),
 	}
 }
 
@@ -87,6 +96,9 @@ func (v *proofView) commit() {
 	v.bound.commit()
 	v.liveDeps.commit()
 	v.liveByRes.commit()
+	v.liveByPath.commit()
+	v.liveWS.commit()
+	v.dependents.commit()
 }
 
 func refKey(r domain.ObligationRef) obligationKey { return obligationKey{r.ObligationID, r.Version} }
@@ -139,14 +151,31 @@ func (t *tx) indexProofDeps(proofID string, live bool) {
 		return
 	}
 	ref := seqRef{p.Seq, p.ID}
-	keys, resources := map[depKey]bool{}, map[string]bool{}
+	keys, resources, paths, workspaces := map[depKey]bool{}, map[string]uint64{}, map[depKey]bool{}, map[string]bool{}
 	for _, id := range p.DependencyIDs {
 		d, _ := t.sem.proof.deps.peek(id)
+		// FIXED_CONTENT never goes stale, so it is in no live index (DUR-3.1).
+		if d.Kind == domain.DependencyFixedContent {
+			continue
+		}
 		k := depKey{resource: d.ResourceID}
 		if d.Locator != nil {
 			k.path, _ = d.Locator.Key()
 		}
-		keys[k], resources[d.ResourceID] = true, true
+		keys[k] = true
+		resources[d.ResourceID]++ // live dependency rows (DUR-3.1 policy cap)
+		switch d.Kind {
+		case domain.DependencyWorkspace:
+			workspaces[d.ResourceID] = true
+		case domain.DependencyCurrentPath:
+			ancestors, err := store.PathAffectKeys(path.Join(d.Locator.BaseDir, d.Locator.Path))
+			if err != nil {
+				continue // a validated locator always has a canonical path
+			}
+			for _, a := range ancestors {
+				paths[depKey{d.ResourceID, a}] = true
+			}
+		}
 	}
 	for k := range keys {
 		if live {
@@ -155,11 +184,28 @@ func (t *tx) indexProofDeps(proofID string, live bool) {
 			t.sem.proof.liveDeps.remove(k, ref)
 		}
 	}
-	for r := range resources {
+	for k := range paths {
+		if live {
+			t.sem.proof.liveByPath.add(k, ref)
+		} else {
+			t.sem.proof.liveByPath.remove(k, ref)
+		}
+	}
+	for r := range workspaces {
+		if live {
+			t.sem.proof.liveWS.add(r, ref)
+		} else {
+			t.sem.proof.liveWS.remove(r, ref)
+		}
+	}
+	for r, rows := range resources {
+		n, _ := t.sem.proof.dependents.peek(r)
 		if live {
 			t.sem.proof.liveByRes.add(r, ref)
+			t.sem.proof.dependents.put(r, n+rows)
 		} else {
 			t.sem.proof.liveByRes.remove(r, ref)
+			t.sem.proof.dependents.put(r, n-rows)
 		}
 	}
 }
@@ -744,4 +790,32 @@ func (r semRead) ObligationTransition(id string) (domain.ObligationTransition, e
 		return tr, notFound("obligation transition", id)
 	}
 	return tr, nil
+}
+
+// LiveProofsByPath implements store.ProofReader (DUR-3.1).
+func (r semRead) LiveProofsByPath(resourceID, path string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	if err := r.r.check(); err != nil {
+		return store.ResultPage[domain.ApplicabilityProof]{}, err
+	}
+	if _, err := store.PathAffectKeys(path); err != nil {
+		return store.ResultPage[domain.ApplicabilityProof]{}, err
+	}
+	return page(p, r.r.sem.proof.liveByPath.after(depKey{resourceID, path}, cursorRef(p.After)), loadAll(&r.r.sem.proof.proofs, ident))
+}
+
+// LiveWorkspaceProofs implements store.ProofReader (DUR-3.1).
+func (r semRead) LiveWorkspaceProofs(resourceID string, p store.Page) (store.ResultPage[domain.ApplicabilityProof], error) {
+	if err := r.r.check(); err != nil {
+		return store.ResultPage[domain.ApplicabilityProof]{}, err
+	}
+	return page(p, r.r.sem.proof.liveWS.after(resourceID, cursorRef(p.After)), loadAll(&r.r.sem.proof.proofs, ident))
+}
+
+// LiveProofDependents implements store.ProofReader (DUR-3.1).
+func (r semRead) LiveProofDependents(resourceID string) (uint64, error) {
+	if err := r.r.check(); err != nil {
+		return 0, err
+	}
+	n, _ := r.r.sem.proof.dependents.get(resourceID)
+	return n, nil
 }

@@ -193,3 +193,17 @@ func testRawTransitionCannotSatisfy(t *testing.T, s store.Store) {
 		return err
 	})
 }
+
+// testSemanticStaleProofPublishablePartition checks the obligation's
+// publishable partitions in the commit guard (H1, SPEC-3.7): a
+// workflow-scoped proof is outranked by a newer complete FAIL in the
+// task-wide partition, which covers the obligation although it is not the
+// run's own partition.
+func testSemanticStaleProofPublishablePartition(t *testing.T, s store.Store) {
+	scoped := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sessA, TaskID: "task", WorkflowID: "wf"}
+	o := proofWorldIn(t, s, scoped)
+	newerFail(t, s, domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: sessA, TaskID: "task"}, fpA)
+	if err := s.Update(ctx, sessA, satisfyO1(t, o)); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("workflow-scoped PASS after a newer task-wide FAIL: error = %v, want ErrInvalidTransition", err)
+	}
+}

@@ -152,6 +152,8 @@ var suite = []testCase{
 	{"SemanticStaleProof", testSemanticStaleProof},
 	{"SemanticStaleProofWithoutState", testSemanticStaleProofWithoutState},
 	{"SemanticStaleProofPrivateFail", testSemanticStaleProofPrivateFail},
+	{"SemanticStaleProofPublishablePartition", testSemanticStaleProofPublishablePartition},
+	{"SemanticLiveProofsByPath", testSemanticLiveProofsByPath},
 	{"RawTransitionCannotSatisfy", testRawTransitionCannotSatisfy},
 
 	// Ingestion records.
