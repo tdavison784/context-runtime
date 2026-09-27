@@ -113,3 +113,27 @@ func TestGCProducers_DisabledOrMissing_SPEC16(t *testing.T) {
 		}
 	})
 }
+
+// TestGCProducers_WorkingSnapshot_SPEC16: a filed Working snapshot that
+// retires earlier members enqueues exactly one SUPERSESSION request,
+// however many members it retires; a first snapshot or an identical
+// restatement retires nothing and enqueues nothing.
+func TestGCProducers_WorkingSnapshot_SPEC16(t *testing.T) {
+	semanticStores(t, func(t *testing.T, f *fixture) {
+		f.withGCTriggers()
+		sys := principal(domain.AuthoritySystem)
+		f.mustIngest(sys, sysEvent("w1", "## Working\n- step one\n- step two\n"))
+		f.mustIngest(sys, sysEvent("w1-dup", "Again.\n## Working\n- step one\n- step two\n"))
+		if n := len(f.gcRequests()[domain.GCSupersession]); n != 0 {
+			t.Fatalf("a first or identical snapshot enqueued %d requests", n)
+		}
+		r := f.mustIngest(sys, sysEvent("w2", "## Working\n- step three\n"))
+		if len(r.Replacements) != 2 {
+			t.Fatalf("snapshot retired %d members, want 2", len(r.Replacements))
+		}
+		sup := f.gcRequests()[domain.GCSupersession]
+		if len(sup) != 1 || sup[0].TaskID != "T" || sup[0].Origin != sys {
+			t.Fatalf("snapshot supersession requests = %+v", sup)
+		}
+	})
+}
