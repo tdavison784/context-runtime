@@ -86,8 +86,9 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 		}
 	case VerdictFail:
 		// A newer complete applicable FAIL rejects this subject's current
-		// matcher proof through the restricted path (P3-16).
-		if o.Status == domain.ObligationSatisfied && cur != nil && cur.Matcher != nil && run.Ordinal > curOrdinal {
+		// matcher or resource-bound satisfaction through the restricted path
+		// (P3-16, SPEC-1.10). Attestations carry no proof and are untouched.
+		if o.Status == domain.ObligationSatisfied && cur != nil && run.Ordinal > curOrdinal {
 			inv := invalidation{cause: domain.CauseProofRejected, causeRecord: obs.ID, requestID: obs.ID, reason: domain.ReasonProofRejected, rule: ProofRejectionRule}
 			seq := tx.NextSeq()
 			if err := s.invalidateProof(tx, sem, actor, seq, *cur, inv); err != nil {
@@ -150,8 +151,8 @@ func uniq(a, b string) []string {
 }
 
 // currentMatcherProof returns the version's current proof (nil for none or
-// an attestation) and the run ordinal of the observation behind it (0 for
-// a resource-bound assertion).
+// an attestation) and its ordinal: the run ordinal of the observation behind
+// a matcher proof, or the sequence of a resource-bound assertion's proof.
 func (s *Service) currentMatcherProof(r store.SemanticReader, o domain.ObligationVersion) (*domain.ApplicabilityProof, uint64, error) {
 	if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
 		return nil, 0, nil
@@ -161,7 +162,10 @@ func (s *Service) currentMatcherProof(r store.SemanticReader, o domain.Obligatio
 		return nil, 0, err
 	}
 	if p.ObservationID == "" {
-		return &p, 0, nil
+		// A resource-bound assertion is ordered by its own sequence, which is
+		// comparable with pre-execution run ordinals (both session sequences):
+		// only runs registered after it are newer.
+		return &p, p.Seq, nil
 	}
 	prev, err := r.Observation(p.ObservationID)
 	if err != nil {
