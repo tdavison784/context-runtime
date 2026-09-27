@@ -55,7 +55,7 @@ func reportUnknown(t *testing.T, s store.Store, id string, from uint64) domain.R
 	update(t, s, sessA, func(tx store.Tx) error {
 		sem := semantic(t, tx)
 		u = NewResourceUpdate(sessA, id, "repo", tx.NextSeq(), from, fpA)
-		u.Freshness, u.AllPaths, u.ChangedPaths = domain.ResourceUnknown, true, nil
+		u.Freshness, u.AllPaths, u.ChangedPaths, u.WorkspaceFingerprint = domain.ResourceUnknown, true, nil, ""
 		noErr(t, sem.InsertResourceUpdate(u))
 		_, err := sem.PutResourceState(StateAfter(u, tx.NextSeq()), from)
 		noErr(t, err)
@@ -144,11 +144,13 @@ func testSemanticK1Pointers(t *testing.T, s store.Store) {
 	if got := affect(""); got != 5 {
 		t.Errorf("after u5: affecting(ALL) = %d, want 5", got)
 	}
-	// u6 resynchronizes with every path: the ALL key rises again.
+	// u6 resynchronizes with every path: the ALL key rises again, and so
+	// does divergence — the UNKNOWN report left no fingerprint, so a KNOWN
+	// one is a change.
 	report(t, s, "u6", 5, fpA, nil, nil) // no paths means AllPaths
 	div, affect = k1Reads(t, s)
-	if div != 5 {
-		t.Errorf("after u6: divergence = %d, want 5 (fingerprint fpA vs prior UNKNOWN is not a change)", div)
+	if div != 6 {
+		t.Errorf("after u6: divergence = %d, want 6", div)
 	}
 	if got := affect(""); got != 6 {
 		t.Errorf("after u6: affecting(ALL) = %d, want 6", got)
@@ -171,8 +173,8 @@ func testSemanticK1Pointers(t *testing.T, s store.Store) {
 		if u.ID != "u6" {
 			t.Errorf("FirstAffectingUpdateAfter(repo, ALL, 5) = %s, want u6", u.ID)
 		}
-		if _, err := r.FirstWorkspaceDivergenceAfter("repo", 5); !errorsIs(err, domain.ErrNotFound) {
-			t.Errorf("FirstWorkspaceDivergenceAfter(repo, 5) error = %v, want ErrNotFound", err)
+		if _, err := r.FirstWorkspaceDivergenceAfter("repo", 6); !errorsIs(err, domain.ErrNotFound) {
+			t.Errorf("FirstWorkspaceDivergenceAfter(repo, 6) error = %v, want ErrNotFound", err)
 		}
 		// A never-raised resource reads 0 without error.
 		n, err := r.LastWorkspaceDivergenceRev("other")
