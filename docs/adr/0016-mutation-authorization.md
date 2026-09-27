@@ -209,11 +209,15 @@ both forms share.
   nothing per H4 (`internal/gcqueue`, W4b). Tests:
   `TestObservationStateSupersessionEnqueuesGC_SPEC23`. **Both SPEC-2.3
   paths are now landed.** Agent keyed writes (`internal/tools/keyed.go`,
-  via `graph.ReplaceDirective`) and task-less directive replacement
-  (`internal/lifecycle/replace.go`) also enqueue through `gcqueue.Enqueue`
-  now, closing the round-1/round-2 gap where a keyed replacement or a
-  session-scoped directive replacement produced no `GCRequest`, or failed
-  outright, despite SUPERSESSION being enabled by default. Producers and
+  via `graph.ReplaceDirective`) and directive replacement
+  (`internal/lifecycle/replace.go`) now call `gcqueue.Enqueue` for every
+  SUPERSESSION they raise, closing the round-1/round-2 gap where that call
+  site was simply absent, so the trigger never fired at all for either
+  path despite SUPERSESSION being enabled by default. **This is not a
+  claim that a task-less write now produces a `GCRequest` (SPEC-4.3):**
+  `Enqueue` itself still returns `"", nil` for an empty `TaskID` per H4
+  above, so a session-scoped keyed write or directive replacement
+  persists nothing, exactly as H4 requires. Producers and
   the executor must share a Phase 3 policy version: since SPEC-2.11, a
   request carries its producer's recorded policy version, so a version
   mismatch affects every attempt from the first pass, not an occasional
@@ -236,6 +240,18 @@ both forms share.
   item-count limit, and attempts for the next candidate. Later insertions
   cannot extend the request. Continuations require the first batch's
   collector principal, preserving its access boundary.
+  **Known regression, not yet fixed as of this pass (SEC-4.2/SPEC-4.2,
+  round 4, introduced by `920e9e8`; assigned to W3c): freezing the
+  candidate set at `SnapshotSeq` does not also freeze protection
+  decisions.** `gc_snapshot.go` evaluates lease liveness against the
+  frozen `SnapshotSeq` rather than the current sequence, so a lease taken
+  on an item after batch 1 is invisible to a later batch and that item is
+  archived despite P3-38's "active lease contents" protection; every other
+  protection (open exchange, obligations, currentness, task) is already
+  read from current state and is unaffected. J2 freezes the candidate
+  *set*, not the protection decisions made about it — this ADR will need
+  a further correction once the fix (evaluating lease liveness at each
+  batch's own sequence) lands.
   Shared transaction-budget exhaustion commits only the completed prefix
   and halves the item-count limit (floor one). Receipt sizing includes
   the complete enclosing mutation receipt, archive results, request link,
@@ -264,7 +280,11 @@ both forms share.
   SQLite migrations 0041–0044 add `SnapshotSeq`, `BatchSize`,
   `ItemAttempts`, and `ItemAttemptID` to GC progress. Existing progress without a snapshot
   recovers its ceiling from its first committed collect receipt. No
-  candidate-history or pending-index schema change is needed.
+  candidate-history schema change was needed for J1–J7 themselves; the
+  pending-index schema change DUR-3.2 needs lands separately, in
+  migration 0047 below (SPEC-4.3: the original text here overclaimed "no
+  ... pending-index schema change is needed" as if this covered DUR-3.2
+  too).
   Regression tests: `TestJ1BudgetBoundaryCollectsEveryCandidate`,
   `TestJ2SnapshotAndCursorStayFrozen`,
   `TestJ3CompleteReceiptFitsAndBatchAdapts`,
@@ -273,41 +293,56 @@ both forms share.
   `TestJ5ConfigurationErrorsLeaveRequestsPending`,
   `TestJ6QueuePrefixCannotHideRunnableTail`, and
   `TestJ7ManualSessionCollectionResumesAndReplays` run on both stores.
-  **DUR round 3 strengthens three of these rulings; confirmed by W3, not
-  yet merged into this reconciliation (DUR-3.2/3.3/3.4).** J6's queue
-  continuation must be durable (a persisted cursor plus a per-trigger
-  pending index), never reset by a new service instance or a restart — the
-  code above still keeps `gcQueueCursors` as an in-process `sync.Map` on
-  `*Service` (DUR-3.2, waiting on W1/W2, commit pending). J5's
-  configuration-error path must never quarantine even for a collector-side
+  **DUR round 3 strengthens three of these rulings, all now landed
+  (DUR-3.2/3.3/3.4, PR #6 round 3, reconciled at head `4ff6ca1`; SPEC-4.3
+  corrects the prior "not yet merged" text).** J6's queue continuation is
+  durable: `gc_queue_cursor` (migration 0047) is a CAS-written, per-session
+  cursor position, and `lookup_pending_gc_trigger` (migration 0047,
+  backfilled from `lookup_pending_gc`) indexes pending requests by trigger
+  so a collector reads only its enabled triggers — the earlier in-process
+  `gcQueueCursors` `sync.Map` on `*Service` no longer exists (DUR-3.2). J5's
+  configuration-error path never quarantines even for a collector-side
   fault: a bad collector principal/header or a cross-session collector is
   the closed `ErrGCConfiguration`, not charged, request stays pending; a
   `FAILED` request becomes re-armable only through SYSTEM/HARNESS calling
-  `lifecycle.RearmGCRequest`, which creates a new deterministic request
-  identity (`"rearm/" + failed request ID`) and leaves the original
-  `FAILED` record immutable (DUR-3.3, committing on W3's branch as of this
-  pass). J4's attempt counter must reset whenever a batch makes any
-  progress, not only on full success (DUR-3.4, not yet landed). This ADR
-  will need a further correction once these land.
+  `lifecycle.Service.RearmGCRequest` (`internal/lifecycle/gc_requests.go`),
+  which derives a new deterministic request identity from the failed
+  request's own scope/task/trigger (`gcqueue.Enqueue(..., "rearm/"+req.ID)`)
+  and leaves the original `FAILED` record immutable (DUR-3.3). J4's attempt
+  counter resets whenever a batch makes any progress, not only on full
+  success: every successful batch write carries `Attempts: 0`
+  (`internal/lifecycle/collect.go`, DUR-3.4). Tests:
+  `TestGCQueueContinuesDurablyPastSkippedPrefix`,
+  `TestJ5ConfigurationErrorsLeaveRequestsPending`,
+  `TestFailedGCRequestCanBeRearmed`, `TestAttemptsResetWhenABatchProgresses`.
+  **Round 4 review (SEC-4.4/4.5/4.6) found further gaps in this landed
+  re-arm/continuation code — cross-task re-arm, an actor-dependent re-arm
+  identity, and a re-arm that cannot target a MANUAL request — assigned to
+  W3c and not yet fixed as of this pass; this ADR will need a further
+  correction once they land.**
   **Grant issuance room is tiered by authority, not a flat quarter-share
-  (SEC-2.7, superseded by SEC-3.8/DUR-3.6; confirmed by W3, commit
-  `4a00b06` on `p3fix3/w3`, not yet merged here).** `liveGrantRoom`
-  (`internal/lifecycle/grants.go`) **as landed in this reconciliation**
-  still limits any one issuer to at most a quarter of the policy's
-  live-grant cap per `(action, target)`, with the last quarter reserved
-  for SYSTEM (test: `TestLiveGrantCapIsSharedFairly`). The tiered
-  replacement: USER issuers together hold at most half of `MaxTargets`
-  live grants per `(action, target)`; USER+HARNESS together at most three
-  quarters; SYSTEM may use all of it; no reserve applies when
-  `MaxTargets < 4`. This ADR will need updating to the tiered rule and its
-  own tests once `4a00b06` is merged.
+  (SEC-2.7, superseded by SEC-3.8/DUR-3.6, landed at `4a00b06`; SPEC-4.3
+  corrects the prior "not yet merged" text).** `liveGrantRoom`
+  (`internal/lifecycle/grants.go`) limits any one issuer's authority class:
+  USER issuers together hold at most half of `MaxTargets` live grants per
+  `(action, target)`; USER+HARNESS together at most three quarters; SYSTEM
+  may use all of it; no reserve applies when `MaxTargets < 4`, so a valid
+  small cap never makes issuance impossible. Tests:
+  `TestGrantRoomIsTieredByAuthority`, `TestSmallGrantRoomHasNoReserves`
+  (`internal/lifecycle/grants_test.go`) — `TestLiveGrantCapIsSharedFairly`,
+  the flat-quarter-share test this text previously cited, no longer exists.
+  **Round 4 review (SEC-4.6) found the tiered rule still lets one
+  authenticated identity take its whole tier — no per-issuer sub-share
+  within a tier — assigned to W3c and not yet fixed as of this pass.**
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
   idempotently after producer commit, never inline with it. Tests:
   `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,
   `TestCollectDecisionSafetyProperties` (`internal/policy`);
   `TestGCProtectsOnlyTheNewestRelevantCheckpoint`,
-  `TestGCCheckpointWithoutCompanionAbortsOnRealGraph`,
-  `TestGCTriggerSetIsEnforced`,
+  `TestGCCheckpointWithoutCompanionRecordsItemSkip` (SPEC-4.3: renamed from
+  `TestGCCheckpointWithoutCompanionAbortsOnRealGraph`, which no longer
+  exists — J4 makes a missing checkpoint companion an item-level skip, not
+  an abort), `TestGCTriggerSetIsEnforced`,
   `TestEnqueueGCDeduplicatesTriggerIdentity`,
   `TestCompletionGCRequestExecutesOnceAfterProducerCommit`,
   `TestCollectPendingExecutesDurableRequestsOnRealStore`,

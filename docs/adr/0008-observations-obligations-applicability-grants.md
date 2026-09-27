@@ -1,13 +1,22 @@
 # 8. Observation identities, obligation matcher/claim versions, applicability fingerprints, mutation grants, and invalidation rules
 
-Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through PR #6 review
-round 2 with W1/W2/W3/W4/W7's round-2 fixes fully merged (`phase-3-semantic-state`
-head `75f5c45`, all integrated). `go test -race -count=1 ./...` passes with
-no exceptions; every decision below cites real, `grep`-verified code and
-tests, not a proposed contract. **P3-42's required-test mapping is still
-incomplete** (see "Outstanding required tests" below — SPEC-1.23/SPEC-2.14): this ADR remains Proposed for
-that reason, not merely pending a formality. G1's applicability rule (§6/§12)
-is now fully landed, matcher and store sides both.)
+Status: Proposed (2026-09-26, drafted for Phase 3; reconciled through PR #6
+round 4 (head `4ff6ca1`; SPEC-4.4/DUR-4.10 correct the prior "reconciled
+through ... round 2" header), with W1-W7's round-3 fixes — including
+DUR-3.1's derive-at-read subject applicability and per-resource
+live-proof-dependents cap — fully merged. `go test -race -count=1
+-timeout 45m ./...` passes with no exceptions; every decision below cites
+real, `grep`-verified code and tests, not a proposed contract. **P3-42's
+required-test mapping is still incomplete** (see "Outstanding required
+tests" below — SPEC-1.23/SPEC-2.14/SPEC-3.9/SPEC-4.9): this ADR remains
+Proposed for that reason, not merely pending a formality. G1's
+applicability rule (§6/§12) is fully landed, matcher and store sides both.
+**The commander's FROZEN K1 ruling (`.worktrees/_commander/K1-final.md`)
+retires this round's live-proof-dependents cap (DUR-3.1 (C)) for a
+derive-at-read validity design with no cap at all; K1's own implementation
+has not yet landed as of this pass (round 4, `round4-p6-fixes.md`, W4b
+lead) — see the K1 subsection below, recorded here as decided but not yet
+built, the same way DUR-3.1 itself was recorded one round earlier.**)
 Date: 2026-09-26
 
 ## Context
@@ -491,25 +500,151 @@ produces, so its release step carries the evaluating actor's own
 section's restricted invalidation path, even though both share the
 SATISFIED→UNRESOLVED direction.
 
-**Subject-state applicability moves from recorded to derived at read time
+**Subject-state applicability is derived at read time, landed
 (PR #6 round 3 commander ruling, DUR-3.1; High; amends P3-22/P3-23's
-"recorded ... marked in the same transaction" text; assigned W4b, not yet
-landed).** A file subject state's `Applicability` (§12) is currently
-written once, at state-derivation time (`ApplicabilityCurrent`,
-`internal/obligation/subject_state.go`) — matching P3-22/P3-23's original
-"marked in the same transaction" design. DUR-3.1 replaces this: file
-applicability is instead **derived at read time** from the authoritative
-resource state, never stored as a static flag that a later resource
-change would otherwise have to walk out and update by hand. Proof
-invalidation stays atomic (§13's transaction, unchanged), but is now
-bounded by a **per-resource live-dependents cap** validated against
-`s.policy.MaxTransactionWork`, failing closed with `ErrResourceLimit`
-rather than an unbounded scan. A non-`ALL` KNOWN resource report reads
-only its *actually affected* dependents through an ancestor-key index
-(the same directory-intersects-files rule §13 already requires, now as an
-index rather than a linear scan). This changes §12's "recorded" framing
-for the file-content case specifically; the OBSERVATION-derived
-`task_state` item itself (§11/§12, TOOL authority, C-6) is unaffected.
+"recorded ... marked in the same transaction" text; landed at head
+`4ff6ca1` — SPEC-4.4/DUR-4.10 correct the prior "assigned W4b, not yet
+landed" text).** All three parts are implemented:
+
+- **(A) Reports read only what they can affect.**
+  `lookup_live_proof_path` (migration 0045, frozen step
+  `0045/proofs/reconcile-live-proof-paths-v1`) files each live proof's
+  `CURRENT_PATH` dependency under its exact path plus the hex of every
+  ancestor directory, and each `WORKSPACE` dependency under `"ws"`;
+  `affectedProofs` (`internal/obligation/invalidate.go`) reads only the
+  resource's live proofs an accepted report actually touches through
+  that index — a non-`ALL` KNOWN report reads its exact
+  path/ancestor/workspace keys, never the resource's whole live set, and
+  `FIXED_CONTENT` dependencies are excluded from the index and are never
+  affected. This is the same directory-intersects-files rule §13 already
+  requires, now an index rather than a linear scan. Tests:
+  `TestDUR31ReportsReadOnlyAffectedProofs`,
+  `TestDUR31ReportsIgnoreUntouchedLiveState`.
+- **(B) Applicability is derived, not recorded, for planning.**
+  `obligation.Service.SubjectApplicability(tx, st)`
+  (`internal/obligation/read.go`) re-derives a file subject state's
+  applicability from the authoritative resource state at read time,
+  never stored as a static flag a later resource change would otherwise
+  have to walk out and update by hand; the stored
+  `SubjectState.Applicability` (`subject_state.go`) is written once, at
+  filing, and is filing-time-only metadata. Test:
+  `TestDUR31SubjectApplicabilityIsDerived`. **Residual gap, not yet fixed
+  as of this pass (DUR-4.7/SEC-4.11/SPEC-4.10; recorded here as an
+  explicit Phase 4 deferral, not a Phase 3 defect):** `PutSubjectState`
+  only ever writes `ApplicabilityCurrent`, so SQLite's 0032 partial index
+  and `SubjectStatesByResource` ("only CURRENT states") both still
+  describe a set that includes states `SubjectApplicability` would
+  derive STALE — and `SubjectApplicability` itself has no production
+  caller today: nothing populates `policy.EligibilitySnapshot
+  .Applicability` (`internal/policy/eligibility.go`), and
+  `retrieve.readGet`'s `ItemHistorical`/`ItemCurrent` labeling is a
+  directive/agent-key-namespace currentness check (`graph.IsCurrent`),
+  an unrelated dimension from this OBSERVATION-namespace one. A future
+  `EligibilitySnapshot` builder must fill `Applicability` from
+  `SubjectApplicability`; only then should 0032's index and
+  `SubjectStatesByResource`'s filter be removed or redocumented as
+  "every filed state" — neither is Phase 3 scope.
+- **(C) A per-resource live-dependents cap, landed but with known gaps
+  (DUR-4.2/DUR-4.3, SEC-4.1/SPEC-4.1, unfixed as of this pass; retired
+  outright by the commander's FROZEN K1 ruling once K1 itself lands — see
+  below).** `domain.Phase3Policy.MaxLiveProofDependents` (default 256,
+  `internal/policy/phase3.go`) bounds a resource's live
+  non-`FIXED_CONTENT` proof-dependency rows so invalidating all of them
+  fits half of `MaxTransactionWork` at 5 work units per row
+  (`domain/semantic.go`). At the cap, a new proof is refused before any
+  write (`dependentRoom`, `internal/obligation/evaluate.go`); a matcher
+  satisfaction is silently left as evidence only, and an explicit
+  resource-bound assertion fails `ErrResourceLimit`
+  (`internal/obligation/transition.go`) — this is refusal to record a
+  *new* proof, never "invalidation failing closed" on an existing one.
+  Tests: `TestDUR31AssertionRespectsDependentCap`,
+  `TestDUR31MatcherRespectsDependentCap`. **Round 4 review found the cap
+  does not actually bound what an ALL/UNKNOWN/resync report costs:**
+  `proofAffected` (`internal/obligation/invalidate.go`) pages *every*
+  dependency of each live proof, including rows on other resources and
+  `FIXED_CONTENT` rows the cap never counted, so a handful of
+  multi-resource proofs exhaust the cap while leaving the resource far
+  from actually bounded, and the wedge (C) exists to prevent — every
+  report on that resource refused, its SATISFIED proofs stuck stale — is
+  still reachable (SEC-4.1/SPEC-4.1, High). Nothing but an ALL/UNKNOWN
+  report or task completion releases cap room, so long-lived path-stable
+  proofs can hold it indefinitely and silently starve a later, unrelated
+  satisfaction (DUR-4.3). This is P3-23/P3-19 failing open exactly as (C)
+  exists to prevent, not an accepted residual risk.
+
+This changes §12's "recorded" framing for the file-content case
+specifically; the OBSERVATION-derived `task_state` item itself (§11/§12,
+TOOL authority, C-6) is unaffected.
+
+**K1 — the FROZEN commander ruling that replaces (C) (round 4;
+`.worktrees/_commander/K1-final.md`, background `proposal-K1.md`/
+`K1-sec.md`/`K1-spec.md`; not yet landed as of this pass, W4b lead with
+W2c/W3c/W7b/W1).** In place of a write-time cap, K1 makes proof validity
+**derived at read**, exactly as (B) already does for subject-state
+applicability, and removes the cap and its refusal path entirely (K1a,
+K1d):
+
+- **A1 — monotone, write-time-pointer validity.** A proof is valid iff
+  its resource is KNOWN and, for every recorded non-`FIXED_CONTENT`
+  dependency, no accepted update with a later revision *affects* it under
+  today's `change.affects` rule (a `WORKSPACE` dependency only on a
+  fingerprint change or lost freshness; a `CURRENT_PATH` dependency only
+  on a touch to its path, an ancestor directory, `ALL`, or `UNKNOWN`,
+  never on a same-content path report; `FIXED_CONTENT` never). This is
+  decided from two write-time pointers maintained in the report's own
+  O(1) transaction — per resource, `LastWorkspaceDivergenceRev`; per
+  `(resource, key)` for the exact path/each ancestor directory/`ALL`,
+  `LastAffectingRev` — so a dependency is invalid iff a relevant pointer
+  exceeds its recorded `ResourceRevision`. Validity is monotone: once a
+  proof is derived invalid it is never valid again, so a W1→W2→W1 revert
+  cannot resurrect it.
+- **A2 — one effective-status helper, everywhere status is selected.**
+  Every status-selected query — `CompleteTask`/X8, GC protection
+  (including `gc_snapshot`'s `OpenObligationSource`), the FR-DOM-007
+  mandatory set, eligibility, the `SATISFIES` view, and inspection — also
+  selects stored-SATISFIED resource-bound versions and applies the
+  helper; a test fails on any other `domain.ObligationSatisfied`/
+  resource-bound `.Status` comparison outside the helper, the transition
+  table, and the store guards.
+- **A3/A4 — inline settle plus an async audit worker.** Before any
+  transition on a version whose effective status differs from its stored
+  status, the same transaction first writes the restricted
+  `RESOURCE_INVALIDATION` transition (cause: the earliest affecting
+  update, exact key `(proofID, causingUpdate)`, `OriginAuthorizationRef`
+  per C-10), then applies the requested transition from the effective
+  state — closing the gap where a fresh PASS over a stale proof would
+  otherwise take the ordinary `PROOF_REFRESH` path and the record would
+  never show the intervening invalidation. A durable, resumable async
+  audit worker (the GC-queue-cursor pattern) writes the same
+  exact-keyed settlement afterward, idempotent with the inline write, as
+  SYSTEM, under CAS on the obligation revision, recording the causing
+  update's actual reporter and `OriginAuthorizationRef` separately; it
+  never blocks a report and correctness never depends on it having run.
+- **A5 — INV-16 and the commit guard.** INV-16 becomes "SATISFIED
+  (effective) is backed by an assertion or proof that is valid at read";
+  the commit guard refuses a SATISFIED write whose proof is derived
+  invalid at commit, and the generated-history property is amended to
+  "stored SATISFIED ⇒ effective SATISFIED, or pending settlement whose
+  causing update is committed."
+- **A6 — the cap is retired, not narrowed.** Migration 0046's column and
+  the recorded `MaxLiveProofDependents` field stay (P3-40 request hashes
+  already include them, and committed migrations are never edited), but
+  K1 stops validating and using the field entirely — a historical policy
+  therefore keeps validating under its own recorded rule. Migration
+  0045's ancestor-key index is reused for A1's write-time pointers rather
+  than dropped.
+- **A7 — disclosure and a bounded fail-closed rule.** Pending settlement
+  is visible only through access-filtered obligation reads, as a fixed
+  code with no update, path, or ID; an unreadable pointer or dependency
+  makes the effective status UNRESOLVED (fail closed); dependencies per
+  proof are bounded at creation (the existing claim bound) so derivation
+  always fits the transaction's work budget regardless of a resource's
+  live-proof count.
+
+K1e's SDD amendment is recorded below, applied now per the commander's
+FROZEN ruling, independent of K1's own implementation landing — the same
+precedent SDD v0.9/v0.10's freeze-time amendments already set for this
+repository (ADR 19).
 
 **A changed directory intersects files under it (PR #6 round 1, SPEC-1.18).**
 `change.affects` (`internal/obligation/invalidate.go:39,50`) originally
@@ -698,6 +833,47 @@ FROZEN "Required normative amendments at freeze" table approved them
   resource-bound proof. Newer applicable rejected proof and proof refresh use
   the defined audited transitions."
 
+## SDD amendment (K1e, applied in v0.11 ahead of K1's own implementation)
+
+These sentences are applied to SDD.md as v0.11, per the commander's FROZEN
+K1 ruling (`.worktrees/_commander/K1-final.md`, adopting `proposal-K1.md`
+K1a/K1d/K1e as amended by `K1-spec.md` A1-A7) — the same precedent SDD
+v0.9/v0.10's freeze-time amendments already set (ADR 19): the normative
+text is applied on the ruling's freeze, independent of whether K1's own
+code has landed. This ADR does not itself edit SDD.md.
+
+- **FR-OBL-005.** Add: "A resource-bound obligation's SATISFIED status is
+  its effective status: derived at read from whether the current proof's
+  recorded dependencies still match the authoritative resource state,
+  never read from a stored status flag as authoritative. A resource
+  change that makes a stored-SATISFIED proof's effective status no
+  longer SATISFIED is recorded atomically by the next transition that
+  observes it, and independently by a bounded, resumable asynchronous
+  audit worker; the effective status is correct whether or not that
+  worker has run." This replaces this ADR's DUR-3.1 (C) live-proof-
+  dependents cap — a write-time refusal that round 4 review
+  (SEC-4.1/SPEC-4.1) found does not actually bound invalidation work —
+  with the derive-at-read design the "Subject-state applicability"
+  section above already uses for planning; K1 extends the same technique
+  to SATISFIED status itself.
+- **INV-16.** Replace "A current obligation can be SATISFIED only by proof
+  applicable to the declared current resource state or an explicit
+  authorized assertion." with: "A current obligation's effective
+  SATISFIED status (FR-OBL-005) is backed by an assertion or proof that is
+  valid at read, applicable to the declared current resource state; a
+  stored SATISFIED status whose proof has since become invalid is never
+  presented as current, whether or not its audit transition has yet been
+  recorded."
+
+**Not yet reflected in either amendment, because it depends on K1's own
+implementation landing:** the exact monotone validity rule (K1-spec.md
+A1), the "one effective-status helper" enforcement test (A2), the inline
+settle plus async audit worker (A3/A4), the commit guard and property-test
+wording (A5), and A6/A7's disclosure and bounded-dependency rules. Those
+remain this ADR's own Decision-section text once implemented, not SDD
+normative prose — the K1 subsection above records them as decided,
+pending code.
+
 ## Consequences / compatibility impact
 
 - `internal/obligation` is the sole owner of P3-12 through P3-23, 20 source
@@ -758,14 +934,322 @@ gate checklist (`phase3-decisions.md`):
 Serialized U delta/rebase, actual inherited-request removal, and rebase
 omission/order are explicitly Phase 5 and are not part of this gate.
 
-## Outstanding required tests (SPEC-1.23, SPEC-2.14)
+## P3-42 required-test bullet coverage table (SPEC-4.9)
+
+The commander asked for every P3-1 through P3-42 required-test bullet
+(`.worktrees/_commander/phase3-decisions.md`'s own per-decision
+`**Tests.**` sentence, split into its individual clauses) mapped to a
+real, `grep`-verified test, or marked MISSING — a finer-grained pass than
+the "Outstanding required tests" section below, which only ever tracked
+the specific bullets a prior review round had already flagged. Built by
+listing every `func Test*` in the packages phase3-decisions.md's own
+work-split table assigns each decision to (~1,000 functions across
+`internal/{domain,store,graph,lifecycle,obligation,ingest,tools,retrieve,
+policy,invocation,gcqueue}`), then matching each clause against that real
+list; a clause with no reasonably confident match is MISSING rather than
+forced onto an unrelated test. Package/file are given once per test the
+first time it appears in a row when not already obvious from context.
+
+| P3 | Clause | Test |
+|---|---|---|
+| P3-1 | failure injection after each constituent write | `TestFailureInjectionAtomicity` (`internal/obligation/failure_test.go`) |
+| P3-1 | ignored-error poisoning | `TestTransitionIgnoredErrorPoisons` (`internal/obligation/transition_test.go`) |
+| P3-1 | inclusive expiry/revocation during a multi-command event | `TestGateT06_GrantExpiryAtActualSequence` (`internal/ingest`) |
+| P3-1 | retirement at a later sequence | `TestReplaceDirective_ObligationFanOut` (`internal/graph/fanout_test.go`) |
+| P3-1 | Prepare/MarkSent stale after every new semantic record family | **MISSING** |
+| P3-1 | TargetCall sequence reuse rejected | `TestConformance/SemanticLedgerSeqIsolation` (storetest); `TestPhase3RowsCarrySemanticSeq` (sqlite) — **Resolved** |
+| P3-2 | retry after lifecycle changes and restart | `TestCommandReplayUsesOriginalGrantAndFrozenResult` (`internal/lifecycle`); `TestCompletionReplaysAcrossSQLiteRestart` |
+| P3-2 | changed method/principal | `TestReplayUsesRecordedArgumentBoundAndPrincipal` (`internal/lifecycle`) |
+| P3-2 | failed attempt then valid retry (Phase 3 service level) | **MISSING** |
+| P3-2 | archive→unarchive→old Collect retry | **MISSING** |
+| P3-2 | completed task retry | `TestCompleteTaskResolvesOwnedGoalsAndReplaysFrozenReceipt` (`internal/lifecycle/complete_test.go`) |
+| P3-2 | expired retrieval receipt replay | `TestRetrievalReceiptReplayPrecedesCurrentState` (`internal/retrieve`) |
+| P3-2 | concurrent identical requests produce one effect/result | `TestConcurrentIdenticalInvocationsProduceOneEffect`; `TestConcurrentCompletionExecutesOnce` (`internal/lifecycle`) |
+| P3-3 | same textual key in all three namespaces | **MISSING** (OBSERVATION missing from the DIRECTIVE/AGENT_KEY case) |
+| P3-3 | literal lifecycle IDs never resolve agent/observation records | `TestR6_LifecycleResolvesOnlyDirectiveNamespace` (`internal/graph/namespace_test.go`) |
+| P3-3 | two agents cannot overwrite each other | `TestAuthorizeSupersession_AgentDifferentKeyFails` (`internal/domain/authz_test.go`) |
+| P3-3 | authority/boundary mismatch | `TestAuthorizeSupersession_DifferentAccessBoundariesFail` |
+| P3-3 | namespace round-trip and old-key migration | `TestAgentUpdatesOwnPreUpgradeKey` (`internal/graph`); `TestUpgradeAgentOwnOldKey_G5` (`internal/ingest`) — **Resolved** |
+| P3-3 | duplicate occurrence never becomes current | `TestD10_DuplicateDirectiveNeverCurrent`, `TestD10_MappedDuplicateNeverCurrent` (`internal/graph/current_test.go`) |
+| P3-4 | identical restatement after Resolve/Unpin/Archive | `TestLinkDuplicate_RestatementAfterResolveStaysResolved`; `TestP336_UnpinnedRestatementStaysUnpinned`; `TestP336_ResolvedRestatementStaysResolved` (`internal/ingest`) |
+| P3-4 | changed accepted versus ignored attributes | `TestDeclareCreationUsesStoredDefaultsAndCopiesAcceptedInputs` (`internal/graph`) |
+| P3-4 | changed claim | `TestLinkDuplicate_ComparesObligationClaim` (`internal/graph/duplicate_test.go`) |
+| P3-4 | policy bump | `TestDeclarationDedupSurvivesLifecycleAndPolicyChanges` |
+| P3-4 | new turn/TTL origin | `TestLinkDuplicate_RestatedAcrossTurns` |
+| P3-4 | unchanged Working snapshot after lifecycle updates | `TestWorkingSnapshotDeclarationPreservesWholeOrderedIdentity` |
+| P3-4 | duplicate raw text not an active requirement | `TestNonDirectiveDuplicates_D10` |
+| P3-4 | legacy unknown declaration fails closed | `TestIdenticalRestatementOfUnknownIdentityFailsClosed` (`internal/graph`); `TestUnknownIdentityRestatementIsALineDiagnostic` (`internal/ingest`) — **Resolved** |
+| P3-4 | same-content explicit replacement (C-1) | `TestReplaceDirectiveReopensWithIdenticalContentAndRetiresObligations` (`internal/lifecycle`) |
+| P3-5 | v1 grant cannot authorize v2 | `TestTypedGrantNeverFollowsLatestVersion` (`internal/domain/grant_target_test.go`) |
+| P3-5 | revision changes do not invalidate a still-live version grant | **MISSING** (not confidently matched — `TestGrantTargetCanonicalIsolation` is adjacent but doesn't test a Revision bump specifically) |
+| P3-5 | item/key-string collision | `TestGrantTargetCanonicalIsolation` |
+| P3-5 | exact target-set validation | `TestAuthorizeGrantIssuance` (`internal/domain/authz_test.go`) |
+| P3-5 | legacy grant inertness | `TestLegacyObligationCannotAcquireExecutableTarget` (`internal/domain/obligation_target_test.go`) |
+| P3-5 | revocation after retirement | **MISSING** (not confidently matched — `TestRevokeGrantNeedsDirectAuthorityAndEndsAuthorization` covers ordinary revocation, not a retired target specifically) |
+| P3-5 | expiry at each indirect write | `TestGateT06_GrantExpiryAtActualSequence` |
+| P3-6 | N sources produce O(N) members/edges | `TestDerivedCoverageWritesOneSetAndLinearEdges` (`internal/graph/coverage_link_test.go`) |
+| P3-6 | no union copied N times | `TestCoverageIdentityAndClone` (`internal/domain/coverage_test.go`) |
+| P3-6 | complete reconstruction after restart | **MISSING** |
+| P3-6 | missing source or nested expired lease fails admission | `TestApplyRejectsProjectionSourceWithoutInheritedCoverage`; `TestProjectionRequiresOriginalLiveLease` (`internal/retrieve`) |
+| P3-6 | semantic support excludes transcript-only provenance | `TestToolAcknowledgmentIsNeverEvidenceSupport` (`internal/tools/ack_evidence_test.go`) |
+| P3-6 | bounded limits reject without partial coverage | `TestProjectionRejectsCyclicAndOverBudgetCoverage`; `TestCoveragePlanIsCompleteBoundedAndPurposeSpecific` (`internal/graph/coverage_plan_test.go`) |
+| P3-7 | B's task-visible transcript is not A's membership | **MISSING** |
+| P3-7 | X1/X3 without X2 cannot form a prefix | `TestMembershipPrefixRejectsGapsAndFalseClosure` (`internal/graph/membership_prefix_test.go`) |
+| P3-7 | all calls/results stay grouped | `TestMembershipToolCallsRequireExactOutputAndResultsStayGrouped` (`internal/graph/membership_association_test.go`) |
+| P3-7 | checkpoint issuing round remains uncovered | `TestMembershipPrefixExcludesIssuingRound` |
+| P3-7 | closure needs successful recorded acknowledgment | `TestMembershipAcknowledgmentRequiresCompleteRoundAndLaterInference` (`internal/graph/membership_acknowledge_test.go`) |
+| P3-7 | restart and explicit legacy reconstruction | **MISSING** |
+| P3-8 | Resolve→archive→retrieve stays RESOLVED | `TestGateT05_ResolvedGoalStaysResolved` (`internal/ingest`) |
+| P3-8 | Unpin preserves unresolved/blocked obligations and SYSTEM instruction status | `TestPromotedUnkeyedPinCanBeUnpinned` (`internal/lifecycle`) (partial — the obligation-preservation half is not independently confirmed) |
+| P3-8 | lower-authority denial | `TestD1_AuthorizeLifecycleCommand_SourceActor` (`internal/graph/lifecycle_test.go`) |
+| P3-8 | explicit grant success | `TestD1_AuthorizeLifecycleCommand_Grant` |
+| P3-8 | repeated request versus distinct wrong-state request | `TestLifecycle_ExecutesInOrder_P335` (`internal/ingest/working_test.go`) |
+| P3-8 | all-or-nothing command sequence | `TestLifecycle_SourceActor_R7` (`internal/ingest/working_test.go`) |
+| P3-9 | hidden OPEN goal | `TestCompleteTaskRejectsForeignWorkflowBeforeOwnerQueries` (`internal/lifecycle/complete_test.go`) |
+| P3-9 | broad-scope source with originating T | **MISSING** |
+| P3-9 | unresolved obligation after Unpin/materialization disable | `TestCompletionRejectsAllOwnerBlockersBeforeLedger` (`internal/lifecycle/completion_blockers_test.go`) |
+| P3-9 | empty goal set | `TestCompleteTaskWithoutGoalsStillRecordsReceiptAndGC` |
+| P3-9 | wrong workflow | `TestCompleteTaskRejectsForeignWorkflowBeforeOwnerQueries` |
+| P3-9 | in-flight operation/open round | `TestCompletionX8RejectsEveryReservationAndOpenExchange`; `TestCompletionRejectsInFlightWorkOnRealStores` |
+| P3-9 | grant expires between goals | `TestCompletionGrantExpiringBetweenGoalsFailsWhole` |
+| P3-9 | crash at each goal/task/GC write | `TestCompletionGCFailureRollsBackGoalsAndTask` |
+| P3-9 | completed retry versus new request | `TestCompleteTaskResolvesOwnedGoalsAndReplaysFrozenReceipt` |
+| P3-10 | each allowed/forbidden pair | `TestGenerationPairsFollowClosedPolicy` (`internal/lifecycle`) |
+| P3-10 | authority/grant/access | `TestGenerationExcludesObligationSourceAndNeedsAuthority` |
+| P3-10 | retention derivation | `TestGenerationPairsFollowClosedPolicy` (same test, retention assertions) |
+| P3-10 | excluded roles/source types | `TestGenerationExcludesObligationSourceAndNeedsAuthority` |
+| P3-10 | expired origin unchanged | **MISSING** |
+| P3-10 | replay and CAS conflict | **MISSING** |
+| P3-11 | forged SYSTEM issuer rejected | `TestIssueGrantFailsClosed` (`internal/lifecycle/grants_test.go`) |
+| P3-11 | new source then version grant succeeds | `TestIssueGrantDerivesIssuerAndAuthorizesGrantee` |
+| P3-11 | grant before nonexistent source fails | **MISSING** (not confidently matched — no test found naming a forward alias to a not-yet-created target specifically, distinct from `internal/lifecycle`'s `grantTargets` doc comment) |
+| P3-11 | revoked/expired grant cannot satisfy | `TestAuthorizeMutation_GrantExpiry`; `TestInvalidationCannotReuseHistoricalGrantToSatisfy` |
+| P3-11 | lower-authority grant/revoke denial | `TestRevokeGrantNeedsDirectAuthorityAndEndsAuthorization` |
+| P3-11 | no implicit grant from text | **MISSING** |
+| P3-11 | changed grant payload conflicts on retry | **MISSING** |
+| P3-12 | SDD punctuation examples | `TestDeclarePinnedCases` (`internal/obligation/declare_test.go`) |
+| P3-12 | ASCII anchoring and fuzz | `FuzzMatchClaim` (`internal/obligation`) |
+| P3-12 | explicit precedence | `TestDeclarePinnedBound` |
+| P3-12 | unknown/missing workspace | `TestDeclarePinnedRejects` |
+| P3-12 | wrong suite/repository/environment/subset | `TestSubjectIdentityTracksDeclaredSuite` |
+| P3-12 | fixed/current file mode | `TestSPEC111FixedHashTarget`; `TestSPEC111ClaimsMustCoverTarget` (`internal/obligation/round1_test.go`) |
+| P3-12 | duplicates do not create obligations | `TestD13_DuplicateLeavesObligations` (`internal/graph`) |
+| P3-12 | legacy claims remain unbound | **MISSING** |
+| P3-13 | full status matrix | `TestValidObligationTransitionMatrix` (`internal/domain/obligation_test.go`) |
+| P3-13 | forged persisted-row fields | **MISSING** |
+| P3-13 | retired/WAIVED versions | `TestValidObligationTransition_WaivedIsTerminal` |
+| P3-13 | ABA revision race | `TestConformance/ObligationTransitions` (storetest) |
+| P3-13 | absent/future/private evidence | `TestObservationIntentEvidenceReferenceIsExclusive` (partial) |
+| P3-13 | matcher name without grant | `TestAuthorizeMutation_T06_HarnessCannotAssertWithoutGrant` |
+| P3-13 | nonempty bogus fingerprint ID | `TestObservationCannotFabricateEvidenceOrPass` |
+| P3-13 | status/history/cache rollback parity | `TestTransitionCASAndReplay` |
+| P3-14 | task-wide obligation with agent-private PASS rejected | `TestPrivateFailNeverRejectsTaskProof_SEC29` (rejection direction); satisfaction direction **MISSING** |
+| P3-14 | private evidence never leaks via receipt/cache/view | `TestRetrievalDeniedAuditCannotPublishSource` (adjacent; obligation-proof-specific case not confirmed — **MISSING** for this exact clause) |
+| P3-14 | historical/current views after invalidate/waive/retire | `TestObservationStateChain` |
+| P3-14 | bare attestation creates no edge | `TestSatisfiesNoEdgeForAttestation` (`internal/obligation/read_test.go`) |
+| P3-14 | dangling proof rejected by both stores | `TestProofRequiresBackedDependencyIdentity` |
+| P3-15 | bare attestation | `TestAssertionModeIsExplicit` (`internal/obligation`) |
+| P3-15 | attestation with citations | `TestAssertionModeIsExplicit` (same test, citation subtests) |
+| P3-15 | resource-bound assertion invalidated | `TestSPEC110FailRejectsResourceBoundAssertion` |
+| P3-15 | unauthorized assertion | `TestAuthorizeMutation_T06_HarnessCannotAssertWithoutGrant` |
+| P3-15 | mode-conflicting retry | **MISSING** |
+| P3-15 | explicit revalidation | `TestReevaluateAfterGrant` |
+| P3-15 | migration without invented exemption/proof | **MISSING** |
+| P3-16 | PASS→FAIL on same fingerprint | `TestH1NewerFailAtOtherFingerprintRejects` |
+| P3-16 | reversed run arrival | `TestH1StalePassAfterRevert` |
+| P3-16 | partial failure does not invalidate unrelated valid proof | `TestH1StalePassAfterInapplicableFail` |
+| P3-16 | refresh with expired grant | `TestProofRefresh` |
+| P3-16 | crash between pair writes leaves neither partial effect | `TestFailureInjectionAtomicity` |
+| P3-16 | blocked/waived behavior | `TestProofRejection` |
+| P3-17 | forged USER proof path | `TestObservationCannotFabricateEvidenceOrPass` |
+| P3-17 | observation before grant | `TestSEC19ReevaluateIgnoresHiddenObservation` (adjacent) |
+| P3-17 | unblock then reevaluate | `TestReevaluateAfterGrant` |
+| P3-17 | replacement revalidation without inherited grant | `TestDeclareForReplacementFailsClosed` |
+| P3-17 | unavailable matcher version stays unresolved | **MISSING** |
+| P3-17 | deterministic selection and retry | `TestCanonicalRunSubject` |
+| P3-18 | HARNESS declaration | `TestDeclareHarness` (`internal/obligation`) |
+| P3-18 | SYSTEM source without authority/grant denied | `TestDeclareHarness` (same test, denial subtests) |
+| P3-18 | stable slots and source replacement | `TestDeclarePinnedReplacementVersions` |
+| P3-18 | exception with unresolved/blocked obligation still prevents completion | `TestUnfinishedTaskObligations` |
+| P3-18 | unauthorized exception | `TestSetMaterialization` |
+| P3-18 | audit/CAS/rollback | `TestFailureInjectionAtomicity` |
+| P3-18 | no tool-created obligation | `TestToolAcknowledgmentIsNeverEvidenceSupport` (adjacent) |
+| P3-19 | initial delayed W1 PASS cannot establish baseline | **MISSING** |
+| P3-19 | W2 update then delayed W1 update | `TestGateT07_Repeats` (`internal/ingest`, out-of-order-runs subtest) |
+| P3-19 | gap→UNKNOWN | `TestGateT07_Repeats` (revision-gap subtest) |
+| P3-19 | authoritative resync | `TestGateT07_Repeats` (resync subtest) |
+| P3-19 | wrong reporter/resource | `TestResourceBaselineAndOrdering` |
+| P3-19 | same-content state at a new revision | `TestGateT07_Repeats` (same-fingerprint subtest) |
+| P3-19 | current/fixed file mode | `TestSPEC111FixedHashTarget` |
+| P3-19 | restart and request replay | `TestRunAndObservationReceipts` |
+| P3-20 | `./a.go`, `a.go`, `src/../a.go` equivalence within one base/resource | `TestFrozenLocatorKeyMatchesLiveRuleV1`; `TestResourceLocatorIsScopedAndLexical` |
+| P3-20 | different bases/worktrees stay distinct | `TestResourceLocatorIsScopedAndLexical` (same test) |
+| P3-20 | uncertain aliases invalidate conservatively | **MISSING** |
+| P3-20 | T1 binding unaffected by T2 declaration | `TestH2BindingVersionsDoNotWedgeDeclaration` |
+| P3-20 | completed-task resource report | **MISSING** |
+| P3-20 | no filesystem/network reads during replay | `TestPackageBoundaries`/`imports_test.go` (weaker guarantee than a direct assertion — carried over as a known-weak citation, not resolved) |
+| P3-21 | forged PASS in TOOL/USER/AGENT/retrieved text inert | `TestObservationCannotFabricateEvidenceOrPass` |
+| P3-21 | wrong/missing span | `TestObservationIntentEvidenceReferenceIsExclusive` |
+| P3-21 | changed typed field conflicts on retry | `TestV3HashBindsResourcePathContents` |
+| P3-21 | raw environment values rejected | **MISSING** |
+| P3-21 | immutable envelope restart | `TestRunAndObservationReceipts` |
+| P3-21 | malformed counts/completeness | `TestResourceObservationRecordResults` |
+| P3-21 | evidence boundary/session/execution mismatch | `TestConformance/SemanticObservationEvidenceExecution` (storetest) |
+| P3-22 | 29→7→1→PASS across fingerprints forms one chain | `TestG1OneTerminalObservationPerRun` (adjacent — the exact chain scenario is in the SDD's own worked example, not a dedicated unit test — **MISSING** for this specific clause) |
+| P3-22 | distinct repository/directory/environment/coverage subjects never replace | `TestSubjectIdentity`; `TestFileSubjectIgnoresMode` |
+| P3-22 | PARTIAL+PASS rejected for replacement | `TestObservationStateGating` |
+| P3-22 | run2 before run1, including identical fingerprints | `TestGateT07_Repeats` (out-of-order subtest) |
+| P3-22 | matcher upgrade does not split identity | **MISSING** |
+| P3-22 | state authority/boundary checks | `TestObservationSupersessionRequiresTrustedRuleActor` |
+| P3-22 | stale current-state applicability after edit | `TestDUR31SubjectApplicabilityIsDerived` |
+| P3-23 | cross-task/private-proof fan-out | `TestConcurrency_InvalidationVsObservation` |
+| P3-23 | revoked grant still invalidates without forging live authorization | `TestInvalidationCannotReuseHistoricalGrantToSatisfy` |
+| P3-23 | path aliases/unknown paths | `TestSEC17PathCurrencyIgnoresEarlierHistory`; `TestH2PathCurrencyIgnoresLaterUnrelatedEdits` |
+| P3-23 | >one page of proofs | `TestResourceInvalidationPagingAndLimit` |
+| P3-23 | limit/crash at final page rolls back state and every status | `TestFailureInjectionAtomicity` |
+| P3-23 | unrelated resource unaffected | `TestSEC18DeadSubjectStatesDoNotWedgeReports` |
+| P3-23 | reporter receives no hidden IDs/counts | `TestXREV11StalePathClaim` (adjacent) |
+| P3-23 | UNKNOWN cannot retain resource-derived satisfaction | `TestObservationStateGating` |
+| P3-24 | same `call_1` spelling in different outputs | `TestToolCallSpellingIsScopedToOutput` (`internal/tools`) |
+| P3-24 | same invocation with different tool/principal/args conflicts | **MISSING** |
+| P3-24 | no execution from partial assistant output | `TestExecuteDistinguishesToolCallsOfOneOutput` |
+| P3-24 | concurrent retry | `TestConcurrentIdenticalInvocationsProduceOneEffect` |
+| P3-24 | ignored partial error rollback | `TestExecutorFailureReturnsNoReceiptAndPoisonsEvent` |
+| P3-24 | byte-identical missing/private citation error | `TestKeyedWriteCitationFailuresAreUniformAndAtomic` |
+| P3-25 | A/B same key isolation | `TestKeyedWritesDeduplicateReplaceAndStayPerAgent` |
+| P3-25 | narrower accessible citation does not change key boundary | **MISSING** |
+| P3-25 | cross-session evidence atomic rejection | `TestKeyedWriteCitationFailuresAreUniformAndAtomic` |
+| P3-25 | exact duplicate versus support change | `TestGetUnkeyedDuplicateIsNotCurrent` |
+| P3-25 | unsupported despite request-transcript edge | `TestCreationDeclarationSupportQualifiesOnlyToolResultTranscripts` |
+| P3-25 | allowlist/key fuzz | **MISSING** |
+| P3-25 | fresh immutable IDs and one current version | `TestAgentKeyAuthorityUsesNamespaceAndExactOwner` |
+| P3-26 | OPEN/resolved/historical goals | `TestCompletionClaimReportsActualStatusAndMutatesNothing` (`internal/tools`) |
+| P3-26 | no-goal error | `TestCompletionClaimReportsActualStatusAndMutatesNothing` (same test, error subtest) |
+| P3-26 | private evidence error | `TestKeyedWriteCitationFailuresAreUniformAndAtomic` (adjacent path) |
+| P3-26 | all semantic target fields unchanged | `TestCompletionClaimReferenceDoesNotChangeGoal` |
+| P3-26 | retry writes one claim | **MISSING** |
+| P3-26 | REFERENCES never supplies mandatory/completion status | `TestCompletionClaimReferenceDoesNotChangeGoal` |
+| P3-27 | T16 X1–X12 with F1/F2 | `TestT16CheckpointCoversTwelveClosedExchanges`; `TestGateT16_CheckpointFrontier` |
+| P3-27 | plain summary never checkpoint | `TestGCCheckpointWithoutCompanionRecordsItemSkip` (adjacent) |
+| P3-27 | open-round exclusion | `TestClosedPrefixCoverageNamesEveryClosedExchangeOnly` |
+| P3-27 | missing middle group rejected | `TestCheckpointRejectsOpenPrefixOversizeAndForeignManifests` |
+| P3-27 | unseen accessible transcript rejected | `TestCheckpointLookupIgnoresPrivateMembershipsBeforeLimits` |
+| P3-27 | requirement provenance retained but not retired | **MISSING** |
+| P3-27 | cross-turn semantic summary versus raw leased copy | **MISSING** |
+| P3-27 | HARNESS form | `TestHarnessCheckpointKeepsHarnessAuthorityAndReplays` |
+| P3-27 | oversize/content/coverage limits | `TestCheckpointRejectsOpenPrefixOversizeAndForeignManifests` (same test, size subtests) |
+| P3-27 | checkpoint chain restart | `TestCheckpointChainCarriesOnlyTheValidatedPrior`; `TestToolReceiptsAndCheckpointSurviveSQLiteReopen` |
+| P3-28 | historical resolved/expired/archived reads unchanged | `TestGetHistoricalGoalIsReadOnly` (`internal/retrieve`) |
+| P3-28 | wrong session/agent exact ErrNotFound | `TestGetPrivateAndMissingAreIndistinguishable` |
+| P3-28 | completed requester denied | `TestGetCompletedOriginRemainsHistoricalRead` (partial — requester side not independently confirmed) |
+| P3-28 | completed origin accessible only where boundary allows | `TestGetCompletedOriginRemainsHistoricalRead` |
+| P3-28 | context_get cannot bypass lease creation | `TestGateT05_ModelPathGet` |
+| P3-29 | exact boundary and authority | `TestLeaseRequiresExactHolderAndFiniteAllowance` |
+| P3-29 | end-of-turn and exact call limit | `TestLeaseLiveCompletedInferenceBoundary` |
+| P3-29 | failures/compaction do not consume | `TestLeaseLiveRejectsMissingOrMismatchedState` (adjacent) |
+| P3-29 | source usage update does not expire | **MISSING** |
+| P3-29 | supersession does not transfer lease | `TestFindActiveLeaseNeverTransfersAcrossOccurrenceOrAuthority` |
+| P3-29 | retry expired result versus new request | `TestApplyPersistsLeaseAndReplaysWithoutRenewal` |
+| P3-29 | concurrent coalescing | `TestConcurrentRetrievalCoalescesOneLease` |
+| P3-29 | restart with identical call indexes | `TestSQLiteLeaseSurvivesRestartWithIdenticalCallIndexes` |
+| P3-30 | A-private result never TASK-wide | `TestRetrievalDeniedAuditCannotPublishSource` |
+| P3-30 | nested old-lease dependency stays expired despite new lease | `TestNestedOldLeaseCannotBeRenewedByNewRootLease` |
+| P3-30 | copied provider representation cannot drop dependency | `TestDerivedRepresentationRetainsProjectionLeaseAndNestedCoverage` |
+| P3-30 | audit denial redaction | `TestRetrievalDeniedAuditCannotPublishSource` (same test) |
+| P3-30 | oversize with/without registered projection | **MISSING** |
+| P3-30 | event/result/lease/receipt rollback as one unit | `TestBuildRetrievalRecordsPreservesSourceAndExactLease` |
+| P3-31 | matrix across every scope/currentness/residency/status/lease combination | `TestEligibilitySeparatesAccessLifetimeAndSelection` |
+| P3-31 | leased current OPEN goal still independently a requirement | `TestCurrentGoalAndLeaseHaveIndependentEligibility` |
+| P3-31 | expired historical goal admitted only as evidence | `TestObservationApplicabilityCannotBecomeCurrentThroughLease` (adjacent) |
+| P3-31 | missing snapshot data | `TestEligibilityMissingSnapshotFailsClosed` |
+| P3-31 | counter/wall-clock independence | **MISSING** |
+| P3-31 | stable reasons | `TestOrdinaryLifetimeTTLEdges` |
+| P3-32 | WORKFLOW OPEN goal survives T1 completion before T2 creation | `TestRegisteredBroadOwnersOutliveTheirTask` |
+| P3-32 | same for AGENT pin | `TestRegisteredBroadOwnersOutliveTheirTask` (same test, AGENT subtest) |
+| P3-32 | unrelated owner cannot read | **MISSING** |
+| P3-32 | unknown legacy owner | `TestDeclarationIgnoresTurnWithoutTemporalEligibility` (adjacent) |
+| P3-32 | restart reconstruction | `TestOwnerRegistrationSurvivesSQLiteRestart` (`internal/lifecycle/owner_test.go`) |
+| P3-32 | ending task does not archive broad-scope protected source | **MISSING** |
+| P3-33 | TTL boundary/overflow/zero origin/cross-task/completed origin | `TestOrdinaryLifetimeTTLEdges`; `TestTurnOwnershipAndTTL` |
+| P3-33 | new TURN with TTL cannot extend old turn | `TestOrdinaryLifetimeNeverBorrowsAnotherTurnSource` |
+| P3-33 | semantic knowledge versus raw projection | `TestDerivedRepresentationRetainsProjectionLeaseAndNestedCoverage` |
+| P3-33 | Unpin with unresolved obligation | **MISSING** |
+| P3-33 | archive does not alter status/proof | `TestUnarchiveRestoresResidencyOnlyAndReplays` |
+| P3-34 | create→grant→observe versus invalid forward reference | `TestOps_AliasRejections` (`internal/ingest`) |
+| P3-34 | source command sees preceding in-transaction changes | `TestOps_OrderSequenceAndAliases` |
+| P3-34 | grant/revoke order | `TestCommandsV2_ExecuteInSourceOrder` |
+| P3-34 | malformed operation rollback includes turns | **MISSING** |
+| P3-34 | resource-only control cannot open task/turn | `TestOps_ControlEventOpensNothing` |
+| P3-34 | mixed-authority deputy attack | `TestOps_SourceSpanActor` |
+| P3-34 | old-turn response never relabeled | `TestOutcome_KeepsOriginatingTurn` |
+| P3-34 | no completed-task reactivation | `TestCompletedTaskNeverReactivated` |
+| P3-34 | semantic writes invalidate unsent previews | **MISSING** |
+| P3-35 | new execution order | `TestLifecycle_ExecutesInOrder_P335` |
+| P3-35 | old receipt replay no seq/turn/status change | `TestPhase2FixtureReplay` |
+| P3-35 | hidden successful versus nonexistent command indistinguishable to another source viewer | `TestRecordsNeverRevealHiddenVersions_SEC22` |
+| P3-35 | mismatch/ambiguity cause boundaries | **MISSING** |
+| P3-35 | source actor grant at actual sequence | `TestD1_AuthorizeLifecycleCommand_Grant` |
+| P3-35 | unauthorized command rolls back earlier event writes | `TestLifecycle_SourceActor_R7` |
+| P3-36 | Resolve→identical raw Goal restatement remains resolved | `TestP336_ResolvedRestatementStaysResolved` |
+| P3-36 | Unpin restatement stays unpinned | `TestP336_UnpinnedRestatementStaysUnpinned` |
+| P3-36 | replacement/invalidation old/new authority reconstructible after further mutations/restart | **MISSING** (`TestP336_ReplacementHistoryReconstructible` exists but never reopens the store) |
+| P3-36 | checkpoint never retires a requirement by source coverage | **MISSING** (`gate_t16_test.go` checks facts only, not a requirement) |
+| P3-37 | HARNESS cannot archive SYSTEM target without authority/grant | `TestArchiveRequiresTargetAuthorityOrExactGrant` |
+| P3-37 | explicit protected archival audit | `TestArchiveDisclosesExplicitProtectedRemoval` |
+| P3-37 | unarchive leaves RESOLVED/superseded/expired status | `TestUnarchiveRestoresResidencyOnlyAndReplays` |
+| P3-37 | stale revision | `TestArchiveRequiresTargetAuthorityOrExactGrant` (same test, CAS subtest) |
+| P3-37 | replay | `TestUnarchiveRestoresResidencyOnlyAndReplays` (same test) |
+| P3-37 | no content deletion | **MISSING** (asserted only by absence of a delete path, not a dedicated test) |
+| P3-38 | mid-turn pending result survives | `TestJ1BudgetBoundaryCollectsEveryCandidate` (adjacent) |
+| P3-38 | open exchange and leased historical content survive | `TestLiveItemsDoNotExhaustCollectionBudget` (adjacent — the lease half is SEC-4.2/SPEC-4.2's known regression, ADR 16) |
+| P3-38 | newest eligible checkpoint preserved | `TestGCProtectsOnlyTheNewestRelevantCheckpoint` |
+| P3-38 | expired lease releases only lease protection | **MISSING** |
+| P3-38 | superseded SYSTEM instruction collectible with proper actor | **MISSING** |
+| P3-38 | scope completion | `TestCollectDecisionMatrix` |
+| P3-38 | archive→unarchive→old request replay | **MISSING** |
+| P3-38 | inaccessible candidate not exposed | `TestCollectArchivesOnlyAuthorizedUnprotectedCandidates` |
+| P3-38 | no LastUsedCall=0 heuristic | **MISSING** |
+| P3-39 | completion committed then crash before Collect | `TestCompletionGCFailureRollsBackGoalsAndTask` |
+| P3-39 | retry request executes once | `TestCompletionGCRequestExecutesOnceAfterProducerCommit` |
+| P3-39 | failure leaves request pending | `TestFailingGCRequestsAreQuarantined` (adjacent — J5's non-quarantine refinement is `TestJ5ConfigurationErrorsLeaveRequestsPending`, ADR 16) |
+| P3-39 | page boundary required target not missed | `TestJ6QueuePrefixCannotHideRunnableTail` |
+| P3-39 | limit rollback | `TestJ3CompleteReceiptFitsAndBatchAdapts` |
+| P3-39 | SQLite EXPLAIN searches full filter/order keys | `TestHotReadsUseTheirBuilders` (sqlite) |
+| P3-39 | memory work instrumentation excludes whole-session scans | `TestKeyedReadsDoNotScan` (memory) |
+| P3-39 | stable results independent of wall clock/counter | **MISSING** |
+| P3-40 | old-binary database with parsed Resolve and unbound claim→upgrade→close/reopen→retry identical | `TestPhase2FixtureUpgrade`; `TestPhase2FixtureReplay` |
+| P3-40 | zero extra turn/seq/transition | `TestPhase2FixtureReplay` (same test) |
+| P3-40 | added/changed v3 field under old ID conflicts | `TestV3HashOrdersOperationsAndConflictsWithV2Identity` |
+| P3-40 | old envelope integrity | `TestUpgradeLosslessParts` |
+| P3-40 | tighter new limits exact retry | `TestRetryAfterLimitsChange_F3` |
+| P3-40 | principal/shape oversize attack stays bounded | `TestKnownEventIDCannotSmuggleOversizePayload_SEC31` |
+| P3-40 | invalid UTF-8/nil/empty round-trip | `TestUpgradeLosslessStringLists` |
+| P3-41 | old-schema fixtures plus new-schema restart on both stores | `TestUpgradeCommandDetailAndLookupItemIndexes` (representative; each migration's own `TestUpgrade*` covers the rest) |
+| P3-41 | SQLite interrupted migration/checksum/Go-step pinning | `TestInterruptedMigrationReplays`; `TestCommittedMigrationsUnchanged`; `TestMigrationChecksumCoversStep` |
+| P3-41 | schema↔Go field parity and guard coverage | `TestMigratedSchemaMatchesTypes` |
+| P3-41 | dangling/wrong-session/version/proof/coverage refs | `TestProofRequiresBackedDependencyIdentity` |
+| P3-41 | no default-generated grants/leases/membership | **MISSING** |
+| P3-41 | restored status cache agrees with history | `TestUpgradeSubjectHighWater` |
+| P3-41 | upgrade reconciliation preserves old evidence and cannot claim a new positive proof | `TestUpgradeReconcilesLegacyMatcherSatisfaction`; `TestInterruptedReconciliationRollsBack` |
+| P3-42 | every P3 decision maps to named tests / gate evidence | this table |
+| P3-42 | amendments name actual final implemented semantics | ADR 8's own "SDD amendment" sections |
+| P3-42 | trace assertions distinguish state from transmitted requests | `TestGateT02_ReplacementRetiresOldRequirement` et al. (Gate evidence table, T02/T06/T07 rows) |
+| P3-42 | no unresolved C or missing schema field is labeled Accepted | this ADR's own Status line |
+
+**Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; they are not MISSING, but a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. This table does not itself change any test's status from previous rounds — the 21 bullets SPEC-1.23/2.14/3.9/4.9 already tracked (below) are the same 21 rows marked **MISSING** above that fall under those specific bullets; this table adds roughly 20 further MISSING rows those narrower reviews never enumerated, because they were scoped to the bullets a prior round had already flagged, not every clause in phase3-decisions.md.
+
+## Outstanding required tests (SPEC-1.23, SPEC-2.14, SPEC-3.9, SPEC-4.9)
 
 P3-42 requires every decision above to map to its named required tests.
 PR #6 review round 1 (`r6-spec1.md`, SPEC-1.23) searched every package and
 found no real counterpart for the required-test bullets below. Round 2
 (`r6-spec2.md`, SPEC-2.14) reconfirmed the gap is still open, noting that
 exactly three bullets have since gained a real test as a side effect of
-their round-1 code fix landing:
+their round-1 code fix landing. Rounds 3 and 4 (`r6-spec3.md` SPEC-3.9,
+`r6-spec4.md` SPEC-4.9) reconfirmed the list below unchanged again — no
+further bullet has gained a test, and no commander deferral ruling has
+been recorded for any of them, so the gate item stays open and this ADR
+correctly stays Proposed on this ground alone, independent of K1:
 
 - **Resolved.** **P3-1** "TargetCall sequence reuse rejected" for Phase 3
   record families — `internal/store/storetest`'s

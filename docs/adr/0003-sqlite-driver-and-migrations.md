@@ -5,11 +5,13 @@ Date: 2026-09-25
 
 ## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
 
-Phase 3 (worker W2, `internal/store`) adds twenty-seven forward migrations,
-0018 through 0044 (0018-0028 from the initial Phase 3 merge; 0029-0034
+Phase 3 (worker W2, `internal/store`) adds thirty forward migrations,
+0018 through 0047 (SPEC-4.4/DUR-4.10 correct the prior "twenty-seven ...
+0018 through 0044": 0018-0028 from the initial Phase 3 merge; 0029-0034
 fixing PR #6 round-1 review findings; 0035-0040 fixing round-2 findings;
-0041-0044 fixing round-3 findings), after this ADR's Phase 2 migrations
-(0001 unchanged, per this ADR's own rule). The full record/column/index
+0041-0044 fixing round-3 J1-J7 findings; 0045-0047 fixing round-3
+DUR-3.1/DUR-3.2 findings), after this ADR's Phase 2 migrations (0001
+unchanged, per this ADR's own rule). The full record/column/index
 manifest is
 `docs/phase3-schema-manifest.md` (P3-41); this section records the
 migration list itself and its upgrade-parity tests, matching how this ADR
@@ -126,10 +128,19 @@ excluded by it).
   `RevokeGrant`, so a live-grant read serves the unrevoked range without
   visiting revoked or expired history.
 - `0032_subject_state_live_index.sql` (PR #6 round 1, G2/SEC-1.8/DUR-1.2) —
-  a partial index holding exactly the CURRENT subject states in
-  first-filing order, so a resource report's invalidation work never costs
-  STALE/UNKNOWN history; a state enters and leaves the index as its
-  applicability changes.
+  a partial index in first-filing order, originally meant to hold exactly
+  the CURRENT subject states so a resource report's invalidation work
+  never costs STALE/UNKNOWN history. **Stale since DUR-3.1 (B), corrected
+  here (DUR-4.7): `PutSubjectState` now only ever writes
+  `ApplicabilityCurrent` (`internal/obligation/subject_state.go`), so this
+  index holds every filed state, not exactly the current ones — "a state
+  enters and leaves the index as its applicability changes" no longer
+  happens.** Current applicability is instead read through
+  `obligation.Service.SubjectApplicability` (ADR 8's DUR-3.1 (B)), derived
+  at read time from the authoritative resource state; neither this index
+  nor `store.SubjectStatesByResource`'s equivalent "only CURRENT states"
+  filter has a production caller today (SEC-4.11/SPEC-4.10/DUR-4.7) — both
+  are recorded as an explicit Phase 4 deferral in ADR 8, not removed here.
 - `0033_resource_update_paths.sql` (PR #6 round 1, G2/SEC-1.7/DUR-1.2) — an
   index of resource updates by the paths they may affect (a path or one of
   its ancestor directories, plus every ALL-paths/UNKNOWN update), so a
@@ -197,6 +208,35 @@ excluded by it).
   gains `ItemAttemptID`, so a retry's attempt count is tied to the exact
   candidate even if another operation archives the previously failing one
   between batches.
+- `0045_live_proof_paths.sql` (PR #6 round 3, DUR-3.1; SPEC-4.4/DUR-4.10:
+  previously missing from this list) — `lookup_live_proof_path` files each
+  live proof's `CURRENT_PATH` dependency under its exact path plus the hex
+  of every ancestor directory, and each `WORKSPACE` dependency under
+  `"ws"`, so a resource report reads only the proofs it can actually
+  affect (ADR 8's DUR-3.1 (A)); `lookup_live_dependents` counts live
+  non-`FIXED_CONTENT` dependency rows per resource, the policy cap ADR 8's
+  DUR-3.1 (C) validates against (superseded by the commander's FROZEN K1
+  ruling, ADR 8 K1e, once K1 lands). The frozen Go step
+  `reconcileLiveProofPathsV1` (`steps_0045.go`, registered as
+  `"0045/proofs/reconcile-live-proof-paths-v1"` in `steps.go`) rebuilds
+  `lookup_live_dependency` and fills both new tables from the live proofs.
+- `0046_policy_max_live_proof_dependents.sql` (PR #6 round 3, DUR-3.1;
+  SPEC-4.4/DUR-4.10) — adds `Phase3Policy.MaxLiveProofDependents` to
+  `rec_envelope`/`rec_receipt`, backfilled with the largest value each
+  recorded policy's own work budget allows, capped at the default 256, so
+  historical envelopes and receipts still validate and replay verbatim
+  (P3-38). **DUR-4.6 (round 4, unfixed as of this pass): a recorded policy
+  with `MaxTransactionWork < 10` backfills to 0, which `Validate` then
+  rejects, so an exact retry of that policy's receipt fails instead of
+  replaying — a regression of P3-40's "an exact admitted historical retry
+  is never reinterpreted."**
+- `0047_gc_queue.sql` (PR #6 round 3, DUR-3.2; SPEC-4.4/DUR-4.10) —
+  `lookup_pending_gc_trigger` indexes pending GC requests by trigger,
+  backfilled from `lookup_pending_gc`, so a collector reading its enabled
+  triggers never pages a disabled trigger's requests; `gc_queue_cursor` is
+  each session's CAS-written, durable scan position, replacing the
+  in-process `gcQueueCursors` `sync.Map` a new service instance or a
+  restart used to reset.
 
 **Tests that lock this list (all in `internal/store/sqlite`, extending this
 ADR's existing migration-checksum/upgrade discipline):**
@@ -207,7 +247,13 @@ ADR's existing migration-checksum/upgrade discipline):**
 `TestUpgradeSubjectHighWater`, `TestUpgradeCurrentWorkspaceBindings`,
 `TestUpgradeGCResultOutcome`, `TestH2LatestReadsAreKeyed`, and
 `TestLiveGrantRangesSkipDeadRows` (PR #6 round 3, DUR-3.10: these six were
-missing from this list). `internal/obligation`'s own SQLite suite
+missing from this list). **`TestUpgradeLiveProofPaths`,
+`TestUpgradePolicyMaxLiveProofDependents`, and
+`TestUpgradePendingGCByTrigger` (0045-0047's own upgrade-parity fixtures),
+plus `TestCursorPagesSeekRange` and `TestLiveProofPathReadsSeek`
+(keyset-cursor seeks over the new indexes) and
+`TestLatestBindingVersionIsKeyed` (DUR-3.7) were also missing from this
+list (DUR-4.10).** `internal/obligation`'s own SQLite suite
 (50/50 subtests, 8/8 failure-injection scenarios, ADR 8) runs against these
 migrations through W2's `sqlitetest` template.
 
@@ -697,10 +743,13 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all forty-four migrations replay on a fresh database (PR #6
-    round 3, SPEC-3.8/DUR-3.10: corrected from a stale "seventeen," which
-    was Phase 2's own count before Phase 3's 0018-0044 landed; SPEC-4.5
-    had corrected that "seventeen" from a stale "fifteen" once 0016 and
+    after all forty-seven migrations replay on a fresh database (PR #6
+    round 4, SPEC-4.4/DUR-4.10: corrected from a stale "forty-four," which
+    was this ADR's own count before 0045-0047 landed; PR #6 round 3,
+    SPEC-3.8/DUR-3.10 had corrected a stale "seventeen," which
+    was Phase 2's own count before Phase 3's 0018-0044 landed; PR #5
+    round 4's own SPEC-4.5 (a different PR's numbering, not to be confused
+    with PR #6's) had corrected that "seventeen" from a stale "fifteen" once 0016 and
     0017 landed; SPEC-3.6 had already corrected that from a stale
     "fourteen" once 0015 landed, itself correcting an earlier stale
     "eleven", itself

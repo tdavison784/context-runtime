@@ -2,9 +2,9 @@
 
 Status: proposed
 
-Version: 0.10
+Version: 0.11
 
-Date: 2026-09-26
+Date: 2026-09-27
 
 ## 1. Purpose
 
@@ -232,7 +232,7 @@ The runtime provides provider-neutral tool definitions and handlers that the har
   AGENT, TOOL, and RETRIEVED_CONTENT cannot change obligation status. Other transitions fail with ErrInvalidTransition.
 - FR-OBL-003: Current unresolved and blocked obligations are mandatory task state unless their source or an equal/higher-authority policy explicitly disables materialization. That exception is recorded and does not satisfy, waive, or permit completion of the obligation.
 - FR-OBL-004: Tool evidence satisfies an obligation only through its deterministic matcher or an authorized harness assertion. Matchers and their claim patterns are registered by name and versioned with the policy.
-- FR-OBL-005: Each matcher declares evidence applicability and invalidation dependencies. tests_pass requires a successful complete run of the declared suite at the current workspace fingerprint, including relevant uncommitted changes, configuration, and dependencies. A harness resource-change event invalidates affected satisfaction before the next plan, even without another test run. If freshness cannot be established, status is UNRESOLVED. file_read binds to the path and content version required by the obligation. Historical evidence remains linked after invalidation; a newer valid proof replaces the current proof through an audited transition. Harnesses must report relevant resource changes; correctness of unreported external changes is outside the runtime's guarantee. The current resource state is established by authenticated ordered resource reporting, not by receipt of an observation. Assertions explicitly distinguish authority attestation from resource-bound proof. Newer applicable rejected proof and proof refresh use the defined audited transitions.
+- FR-OBL-005: Each matcher declares evidence applicability and invalidation dependencies. tests_pass requires a successful complete run of the declared suite at the current workspace fingerprint, including relevant uncommitted changes, configuration, and dependencies. A harness resource-change event invalidates affected satisfaction before the next plan, even without another test run. If freshness cannot be established, status is UNRESOLVED. file_read binds to the path and content version required by the obligation. Historical evidence remains linked after invalidation; a newer valid proof replaces the current proof through an audited transition. Harnesses must report relevant resource changes; correctness of unreported external changes is outside the runtime's guarantee. The current resource state is established by authenticated ordered resource reporting, not by receipt of an observation. Assertions explicitly distinguish authority attestation from resource-bound proof. Newer applicable rejected proof and proof refresh use the defined audited transitions. A resource-bound obligation's SATISFIED status is its effective status: derived at read from whether the current proof's recorded dependencies still match the authoritative resource state, never read from a stored status flag as authoritative. A resource change that makes a stored-SATISFIED proof's effective status no longer SATISFIED is recorded atomically by the next transition that observes it, and independently by a bounded, resumable asynchronous audit worker; the effective status is correct whether or not that worker has run.
 - FR-OBL-006: Replacing a directive retires its associated obligation version from the current mandatory set. A replacement obligation gets a new version and starts UNRESOLVED; prior proof carries over only after its matcher explicitly revalidates applicability. The old status and proof remain auditable. Unpin alone does not retire or waive an obligation, and reading historical proof does not alter status.
 
 ### Assembly
@@ -371,7 +371,7 @@ Before measuring the Phase 5 vertical slice, ADR 10 fixes a reproducible perform
 - INV-13: No request replays reasoning items outside the epoch that produced them, no strategy performs a REJECTED edit, and no strategy requests a native operation the target does not declare.
 - INV-14: Every materialized requirement retains its source authority; mandatory inclusion and compaction never promote a USER item into privileged content.
 - INV-15: Epochs advance only on an atomic recorded completion. An unknown transport outcome cannot cause an implicit resend, conversation fork, or replayed tool effect.
-- INV-16: A current obligation can be SATISFIED only by proof applicable to the declared current resource state or an explicit authorized assertion.
+- INV-16: A current obligation's effective SATISFIED status (FR-OBL-005) is backed by an assertion or proof that is valid at read, applicable to the declared current resource state; a stored SATISFIED status whose proof has since become invalid is never presented as current, whether or not its audit transition has yet been recorded.
 
 ## 6. Proposed Go package boundaries
 

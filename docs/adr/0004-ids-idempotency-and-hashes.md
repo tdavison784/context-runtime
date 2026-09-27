@@ -526,13 +526,27 @@ the receipt owner (the lowered source actor or the dispatcher), the
 occurrence, the event's own sequence and the ordinals. `tag`
 (`operation-request-binding/v2`) binds `eventSeq` and `inner` to the owner.
 
-`MutationReceiptID(tx, owner, family, requestID)` runs before any receipt
-lookup. It accepts a `req_` ID only if it was derived for `owner` and its
-`eventSeq` was allocated in `tx`. No secret is needed. Another principal,
-a caller predicting a future event, and anyone replaying a past event
-cannot name a runtime request, even a principal whose fields equal the
-lowered actor's. They are refused identically whether or not the owner's
-receipt exists, so there is neither an oracle nor a squat.
+**Corrected check order (SPEC-4.5, round 4): `MutationReceiptID` does not
+run before any receipt lookup — `domain.CheckRequestBeforeLookup` does,
+and `MutationReceiptID` runs last, only for a genuinely new request.**
+At a standalone lifecycle entry point, `lifecycle.Service.begin`
+(`internal/lifecycle/receipt.go`) runs, in order: (1)
+`CheckRequestBeforeLookup(tx, p, requestID)`, which refuses a
+current-format `req_` ID unless it was allocated in this transaction,
+before any lookup (SEC-3.6); (2) the exact-replay lookup
+(`sem.MutationReceipt`), applying `RuntimeRequestOwnedBy` only to a
+foreign receipt (no existence oracle, SEC-2.8); (3)
+`ValidateNewRequestID(tx, p, requestID)` on a genuinely new request
+(skipped for the collection family, whose only caller already
+validated); then (4) `MutationReceiptID(tx, owner, family, requestID)`,
+computed only once (1)-(3) pass, to name the receipt a new request will
+be stored under. It accepts a `req_` ID only if it was derived for
+`owner` and its `eventSeq` was allocated in `tx`. No secret is needed.
+Another principal, a caller predicting a future event, and anyone
+replaying a past event cannot name a runtime request, even a principal
+whose fields equal the lowered actor's. They are refused identically
+whether or not the owner's receipt exists, so there is neither an oracle
+nor a squat.
 
 `req_`, `gc_`, `gcq_`, and `outcome-` (`domain.OutcomeEventID`/
 `ToolOutcomeEventID`, above) are reserved prefixes: no caller EventID can
@@ -544,8 +558,16 @@ would refuse to replay a Phase 2 event whose caller EventID happens to
 collide with a namespace reserved only starting at Phase 3; both `ingest`'s
 `lookupReceipt` and `lifecycle`'s `begin` (ADR 19's Phase 3 amendment) look
 up an exact match first and apply the reserved-namespace/ownership check
-only once no receipt is found. Standalone requests (`*Standalone`, manual
-`Collect`) must pass `ValidateCallerRequestID`. Stores derive keys with
+only once no receipt is found. **`ValidateCallerRequestID` (SEC-3.7,
+round 4: this sentence previously named only the two entry points below)
+guards every caller-request-ID entry point, not only standalone
+lifecycle requests (`*Standalone`, manual `Collect`):** it also runs at
+the semantic-tool handlers (`internal/tools`), retrieval
+(`internal/retrieve`), graph membership (`internal/graph`), obligation
+mutations (`internal/obligation`), and the harness checkpoint path.
+Tests: `*RefuseReservedRequestIDs_SEC37` in `internal/tools`,
+`internal/graph`, `internal/obligation`, `internal/retrieve`, and
+`internal/ingest`. Stores derive keys with
 `MutationReceiptKey(session, family, requestID)` and check ownership with
 `RuntimeRequestOwnedBy`. Receipt ID values stay a hash of (session, family,
 requestID). `operation-request-id/v1..v2` and `operation-request-binding/v1`
