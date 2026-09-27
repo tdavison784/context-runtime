@@ -21,7 +21,16 @@ var ErrGCTriggerDisabled = fmt.Errorf("lifecycle: GC trigger disabled by policy:
 // supersession/TTL/policy trigger outside the enabled set persists nothing and
 // returns an empty ID; task completion always persists its request (P3-39),
 // which then waits, pending, until its trigger is enabled.
-func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain.GCTrigger, scope domain.CollectScope, taskID, triggerID string) (string, error) {
+func (s *Service) EnqueueGC(tx store.Tx, origin domain.Principal, trigger domain.GCTrigger, scope domain.CollectScope, taskID, triggerID string) (id string, err error) {
+	// Like every lifecycle entry point, a failure poisons the producer's
+	// transaction, so its write never commits without the durable trigger
+	// (DUR-1.11, P3-1/39). A disabled trigger's "", nil is not a failure.
+	defer func() {
+		if err != nil {
+			tx.Poison(err)
+			id = ""
+		}
+	}()
 	sem, err := store.Semantic(tx)
 	if err != nil {
 		return "", err
