@@ -51,7 +51,14 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 	if err != nil {
 		return nil, err
 	}
-	in := EvalInput{Target: *o.TargetSpec, SubjectKey: o.TargetSubjectKey, Observation: obs, Ordinal: run.Ordinal, Watermark: curOrdinal}
+	// The watermark is the subject's accepted high-water mark, not just the
+	// current proof's run: an older run is stale whatever the obligation's
+	// status (G1: SEC-1.1/SPEC-1.1/DUR-1.1, P3-16/22).
+	watermark, err := s.subjectWatermark(sem, work, run, o)
+	if err != nil {
+		return nil, err
+	}
+	in := EvalInput{Target: *o.TargetSpec, SubjectKey: o.TargetSubjectKey, Observation: obs, Ordinal: run.Ordinal, Watermark: max(curOrdinal, watermark)}
 	resource := targetResource(*o.TargetSpec)
 	if rs, err := sem.ResourceState(resource); err == nil {
 		in.Resource = &rs
@@ -89,6 +96,56 @@ func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Pr
 		}
 	}
 	return nil, nil
+}
+
+// subjectWatermark is the highest accepted ordinal among subject states that
+// still describe the current resource state (Applicability CURRENT) in the
+// run's own partition and in every partition whose evidence could back the
+// obligation. Each is one indexed lookup, independent of run history.
+func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run domain.ObservationRun, o domain.ObligationVersion) (uint64, error) {
+	var high uint64
+	for _, p := range candidatePartitions(run, o) {
+		if err := work.spend(1); err != nil {
+			return 0, err
+		}
+		st, err := r.SubjectState(run.SubjectKey, p.TaskID, p)
+		if errors.Is(err, domain.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if st.Applicability == domain.ApplicabilityCurrent && st.AcceptedOrdinal > high {
+			high = st.AcceptedOrdinal
+		}
+	}
+	return high, nil
+}
+
+// candidatePartitions lists the run's own partition and the TASK partitions
+// of the obligation's task whose owners are a subset of the obligation's
+// (evidence there is publishable at the obligation's boundary), deduplicated.
+func candidatePartitions(run domain.ObservationRun, o domain.ObligationVersion) []domain.AccessBoundary {
+	out := []domain.AccessBoundary{run.Access}
+	if o.TaskID == "" {
+		return out
+	}
+	for _, wf := range uniq("", o.Access.WorkflowID) {
+		for _, ag := range uniq("", o.Access.AgentID) {
+			b := domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: o.SessionID, TaskID: o.TaskID, WorkflowID: wf, AgentID: ag}
+			if b != run.Access {
+				out = append(out, b)
+			}
+		}
+	}
+	return out
+}
+
+func uniq(a, b string) []string {
+	if a == b {
+		return []string{a}
+	}
+	return []string{a, b}
 }
 
 // currentMatcherProof returns the version's current proof (nil for none or

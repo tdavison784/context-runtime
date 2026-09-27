@@ -157,6 +157,16 @@ func (s *Service) reportObservation(tx store.Tx, sem store.SemanticTx, actor dom
 	if err != nil || !evidenceInRun(ev, run) {
 		return domain.ObservationRecord{}, domain.ErrInvalidRecord
 	}
+	// A run has one closing outcome (DUR-1.1): once it has reported a
+	// complete PASS/FAIL or an ERROR/TIMEOUT/CANCELLED, a further
+	// (possibly contradictory) observation is rejected.
+	closed, err := s.runClosed(sem, run.ID)
+	if err != nil {
+		return domain.ObservationRecord{}, err
+	}
+	if closed {
+		return domain.ObservationRecord{}, domain.ErrInvalidTransition
+	}
 	m, ok := s.reg.ForClaim(string(run.Subject.Family))
 	if !ok {
 		return domain.ObservationRecord{}, domain.ErrUnsupportedSchema
@@ -210,4 +220,27 @@ func evidenceInRun(ev domain.ContextItem, run domain.ObservationRun) bool {
 	owners := ev.Access
 	owners.Scope = run.Access.Scope
 	return owners == run.Access
+}
+
+// closing reports whether an observation ends its run.
+func closing(o domain.ObservationRecord) bool {
+	return o.TerminalComplete() || o.Outcome == domain.OutcomeError || o.Outcome == domain.OutcomeTimeout || o.Outcome == domain.OutcomeCancelled
+}
+
+// runClosed reports whether the run already has a closing observation.
+func (s *Service) runClosed(r store.SemanticReader, runID string) (bool, error) {
+	closed := false
+	err := s.eachPage(s.newBudget(), func(p store.Page) (int, store.Cursor, bool, error) {
+		pg, err := r.ObservationsByRun(runID, p)
+		if err != nil {
+			return 0, store.Cursor{}, false, err
+		}
+		for _, o := range pg.Records {
+			if closing(o) {
+				closed = true
+			}
+		}
+		return len(pg.Records), pg.Next, pg.More, nil
+	})
+	return closed, err
 }
