@@ -35,6 +35,11 @@ func (t *applyTx) Item(id string) (domain.ContextItem, error) {
 	if item, ok := t.extra[id]; ok {
 		return item.Clone(), nil
 	}
+	for _, item := range t.items {
+		if item.ID == id {
+			return item.Clone(), nil
+		}
+	}
 	if id != t.source.ID {
 		return domain.ContextItem{}, domain.ErrNotFound
 	}
@@ -94,6 +99,11 @@ func (s *applySemantic) ProjectionByItem(id string) (domain.ProjectionRecord, er
 	if p, ok := s.oldProjections[id]; ok {
 		return p, nil
 	}
+	for _, p := range s.projections {
+		if p.ItemID == id {
+			return p, nil
+		}
+	}
 	return domain.ProjectionRecord{}, domain.ErrNotFound
 }
 func (s *applySemantic) Coverage(id string) (domain.CoverageRecord, error) {
@@ -112,8 +122,12 @@ func (s *applySemantic) InsertRetrievalLease(v domain.RetrievalLease) error {
 	s.leases = append(s.leases, v)
 	return nil
 }
-func (s *applySemantic) InsertCoverage(v domain.CoverageRecord, _ []domain.CoverageMember) error {
+func (s *applySemantic) InsertCoverage(v domain.CoverageRecord, members []domain.CoverageMember) error {
 	s.coverages = append(s.coverages, v)
+	if s.oldCoverages == nil {
+		s.oldCoverages, s.oldMembers = map[string]domain.CoverageRecord{}, map[string][]domain.CoverageMember{}
+	}
+	s.oldCoverages[v.ID], s.oldMembers[v.ID] = v, members
 	return nil
 }
 func (s *applySemantic) InsertProjection(v domain.ProjectionRecord) error {

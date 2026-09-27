@@ -85,6 +85,7 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 		return out, err
 	}
 	var inherited *domain.ProjectionRecord
+	var inheritedMembers []domain.CoverageMember
 	if got.Item.Role == domain.RoleProjection {
 		old, err := sem.ProjectionByItem(got.Item.ID)
 		if errors.Is(err, domain.ErrNotFound) {
@@ -97,6 +98,9 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 			return out, err
 		}
 		inherited = &old
+		if inheritedMembers, err = coverageMembers(sem, old.DependencyCoverageID, execution.MaxPageSize, execution.MaxCoverageMembers); err != nil {
+			return out, err
+		}
 	}
 	source := got.Observed.Source
 	lease, found, err := findActiveLease(sem, actor, source, task, conv, tx.LastSeq(), execution.MaxPageSize, execution.MaxTransactionWork)
@@ -126,7 +130,7 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	seqs.Event = tx.NextSeq()
 	seqs.Receipt = tx.NextSeq()
 	input := recordInput{Source: got.Item, Observed: got.Observed, Task: task, Conversation: conv, Actor: actor,
-		Intent: intent, Policy: execution, Arguments: args, Allowance: allowance, AllowStub: allowStub, Inherited: inherited, Seqs: seqs}
+		Intent: intent, Policy: execution, Arguments: args, Allowance: allowance, AllowStub: allowStub, Inherited: inherited, InheritedMembers: inheritedMembers, Seqs: seqs}
 	if found {
 		input.Existing = &lease
 	}
@@ -157,5 +161,42 @@ func Apply(tx store.Tx, actor domain.Principal, intent AdmissionIntent, executio
 	if err = sem.InsertMutationReceipt(records.Receipt); err != nil {
 		return out, err
 	}
+	// Never commit a projection its own dispatch checker would reject; the
+	// caller receives a fixed error instead (SEC-1.14).
+	if err = CheckStoredProjectionDependencies(tx, sem, records.Projection, actor, task, conv, execution.MaxPageSize, execution.MaxTransactionWork); err != nil {
+		return out, err
+	}
 	return records.Result.Clone(), nil
+}
+
+// coverageMembers reads one coverage's complete member list within limit;
+// a list that does not fit is a resource-limit rejection, never truncated.
+func coverageMembers(r store.SemanticReader, id string, pageSize, limit int) ([]domain.CoverageMember, error) {
+	if pageSize <= 0 || limit <= 0 {
+		return nil, domain.ErrResourceLimit
+	}
+	var out []domain.CoverageMember
+	after := store.Cursor{}
+	for {
+		n := min(pageSize, limit-len(out))
+		if n <= 0 {
+			return nil, domain.ErrResourceLimit
+		}
+		page, err := r.CoverageMembers(id, store.Page{After: after, Limit: n})
+		if err != nil {
+			return nil, err
+		}
+		if len(page.Records) > n || page.More && len(page.Records) == 0 {
+			return nil, domain.ErrIntegrity
+		}
+		out = append(out, page.Records...)
+		if !page.More {
+			return out, nil
+		}
+		last := page.Records[len(page.Records)-1]
+		if page.Next != (store.Cursor{Seq: last.Seq, ID: last.ID}) || page.Next.Seq < after.Seq || page.Next.Seq == after.Seq && page.Next.ID <= after.ID {
+			return nil, domain.ErrIntegrity
+		}
+		after = page.Next
+	}
 }

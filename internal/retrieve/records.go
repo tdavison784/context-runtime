@@ -23,7 +23,10 @@ type recordInput struct {
 	AllowStub    bool
 	Existing     *domain.RetrievalLease
 	Inherited    *domain.ProjectionRecord
-	Seqs         recordSeqs
+	// InheritedMembers is the complete member list of Inherited's
+	// dependency coverage; its closure is carried forward (SEC-1.14).
+	InheritedMembers []domain.CoverageMember
+	Seqs             recordSeqs
 }
 
 type retrievalRecords struct {
@@ -107,13 +110,38 @@ func buildRetrievalRecords(in recordInput) (retrievalRecords, error) {
 				CoverageID: out.Coverage.ID, Source: &oldSource, LeaseID: in.Inherited.LeaseID},
 			domain.CoverageMember{SemanticMeta: memberMeta,
 				CoverageID: out.Coverage.ID, NestedCoverageID: in.Inherited.DependencyCoverageID})
+		// Every projection named anywhere in this coverage needs its own
+		// exact source+lease pair and nested coverage beside it, so the
+		// inherited coverage's already-closed members are copied (SEC-1.14).
+		if len(in.InheritedMembers) == 0 {
+			return out, domain.ErrIncompleteCoverage
+		}
+		for _, m := range in.InheritedMembers {
+			if m.CoverageID != in.Inherited.DependencyCoverageID || m.SessionID != session || m.ExchangeID != "" ||
+				(m.Source == nil) == (m.NestedCoverageID == "") {
+				return out, domain.ErrIncompleteCoverage
+			}
+			copied := m.Clone()
+			copied.SemanticMeta, copied.CoverageID = memberMeta, out.Coverage.ID
+			out.Members = append(out.Members, copied)
+		}
 	}
-	for n := range out.Members {
-		key, err := out.Members[n].Key()
+	seen := make(map[string]bool, len(out.Members))
+	unique := out.Members[:0]
+	for _, m := range out.Members {
+		key, err := m.Key()
 		if err != nil {
 			return retrievalRecords{}, err
 		}
-		out.Members[n].ID = key
+		if !seen[key] {
+			seen[key] = true
+			m.ID = key
+			unique = append(unique, m)
+		}
+	}
+	out.Members = unique
+	if len(out.Members) > in.Policy.MaxCoverageMembers {
+		return retrievalRecords{}, domain.ErrResourceLimit
 	}
 	out.Member = out.Members[0]
 	slices.SortFunc(out.Members, func(a, b domain.CoverageMember) int {

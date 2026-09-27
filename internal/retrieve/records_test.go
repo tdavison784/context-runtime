@@ -1,6 +1,7 @@
 package retrieve
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -63,9 +64,22 @@ func TestBuildRetrievalRecordsInheritsOldProjectionLease(t *testing.T) {
 		Currentness: domain.ItemUnkeyed, Generation: source.Generation, Residency: source.Residency, Authority: source.Authority, Expiry: domain.ExpiryLive}
 	i := AdmissionIntent{Rehydrate: domain.RehydrateIntent{RequestID: "new", ItemID: source.ID}, Origin: origin, Method: "rehydrate"}
 	args, _ := retrievalArguments(i, leasePolicy())
-	r, err := buildRetrievalRecords(recordInput{Source: source, Observed: observed, Task: task, Conversation: conv, Actor: p,
+	oldMember := domain.CoverageMember{SemanticMeta: domain.SemanticMeta{ID: "old-member", SessionID: "s", Seq: 1, SchemaVersion: domain.SemanticSchemaV1},
+		CoverageID: old.DependencyCoverageID, Source: &old.Source, LeaseID: old.LeaseID}
+	in := recordInput{Source: source, Observed: observed, Task: task, Conversation: conv, Actor: p,
 		Intent: i, Policy: leasePolicy(), Arguments: args, Allowance: 2, Inherited: &old,
-		Seqs: recordSeqs{Lease: 2, Coverage: 3, Item: 4, Projection: 5, Result: 6, Event: 7, Receipt: 8}})
+		Seqs: recordSeqs{Lease: 2, Coverage: 3, Item: 4, Projection: 5, Result: 6, Event: 7, Receipt: 8}}
+	for name, members := range map[string][]domain.CoverageMember{
+		"missing closure": nil,
+		"foreign member":  {func() domain.CoverageMember { m := oldMember; m.CoverageID = "other"; return m }()},
+	} {
+		in.InheritedMembers = members
+		if _, err := buildRetrievalRecords(in); !errors.Is(err, domain.ErrIncompleteCoverage) {
+			t.Fatalf("%s accepted: %v", name, err)
+		}
+	}
+	in.InheritedMembers = []domain.CoverageMember{oldMember}
+	r, err := buildRetrievalRecords(in)
 	if err != nil || r.Coverage.MemberCount != 3 || len(r.Members) != 3 {
 		t.Fatalf("inherited coverage = %+v, %v", r.Coverage, err)
 	}
