@@ -82,9 +82,12 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 			return out, err
 		}
 	}
-	// Every new caller collection has the same durable continuation as a trigger.
+	// Every new caller collection derives its durable request in the manual
+	// encoder domain (SEC-4.8): the collector and the caller-named request
+	// alone, so a manual Collect can neither precompute a runtime trigger
+	// record nor be wedged by one.
 	if link == nil {
-		runtimeID, e := domain.GCTriggerRequestID(p, i.Trigger, i.RequestID)
+		runtimeID, e := domain.GCManualRequestID(p, i.RequestID)
 		if e != nil {
 			return out, e
 		}

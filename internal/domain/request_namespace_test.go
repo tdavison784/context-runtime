@@ -173,3 +173,59 @@ func TestGCRearmRequestIDIsActorFreeAndDomainSeparated(t *testing.T) {
 		t.Error("re-arm of an empty failed request accepted")
 	}
 }
+
+// SEC-4.8: explicit (manual) collections derive in their own encoder domain.
+// The same principal, trigger value and caller-named request a runtime
+// producer hashes must not precompute the manual record (the wedge), and a
+// manual request's batch continuations must not alias the runtime request's
+// batch receipts.
+func TestGCManualRequestIDIsDomainSeparated(t *testing.T) {
+	p := Principal{SessionID: "s", WorkflowID: "w", TaskID: "t", Authority: AuthoritySystem}
+	id, err := GCManualRequestID(p, "root-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := GCManualRequestID(p, "root-1"); again != id {
+		t.Fatal("manual identity is not deterministic")
+	}
+	if other, _ := GCManualRequestID(p, "root-2"); other == id {
+		t.Fatal("manual identity ignores the caller request")
+	}
+	mate := p
+	mate.AgentID = "agent-2"
+	if other, _ := GCManualRequestID(mate, "root-1"); other == id {
+		t.Fatal("manual identity ignores the collector")
+	}
+	for _, trigger := range []GCTrigger{GCTaskCompletion, GCManual, GCSupersession} {
+		if runtime, _ := GCTriggerRequestID(p, trigger, "root-1"); runtime == id {
+			t.Fatalf("manual identity aliases a %s derivation", trigger)
+		}
+	}
+	if rearm, _ := GCRearmRequestID(id); rearm == id {
+		t.Fatal("manual identity aliases the re-arm domain")
+	}
+	// Batch continuations of a caller-named manual request re-root into the
+	// manual domain, never the runtime derivation whose batches they would
+	// otherwise collide with.
+	manual := GCRequest{CollectIntent: CollectIntent{RequestID: "root-1", Scope: CollectTask, TaskID: "t", Trigger: GCTaskCompletion}, Origin: p}
+	mine, err := manual.BatchRequestID(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, _ := GCTriggerRequestID(p, GCTaskCompletion, "root-1")
+	theirs, _ := GCBatchRequestID(runtime, 2)
+	if mine == theirs {
+		t.Fatal("manual batch continuation aliases a runtime batch receipt")
+	}
+	for _, reserved := range []string{id, mine} {
+		if !ReservedIDPrefix(reserved) || ValidateCallerRequestID(reserved) == nil {
+			t.Errorf("%q is callable by a caller", reserved)
+		}
+	}
+	if _, err := GCManualRequestID(Principal{}, "root-1"); err == nil {
+		t.Error("manual identity of an unauthenticated principal accepted")
+	}
+	if _, err := GCManualRequestID(p, ""); err == nil {
+		t.Error("manual identity of an empty caller request accepted")
+	}
+}

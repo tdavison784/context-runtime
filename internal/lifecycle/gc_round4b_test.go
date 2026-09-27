@@ -155,6 +155,44 @@ func TestRearmSupportsManualAndReportsDisabledTriggers_SEC44(t *testing.T) {
 	})
 }
 
+// SEC-4.8: a caller-named manual Collect derives its durable request in the
+// manual encoder domain. Under the runtime trigger domain, a SYSTEM
+// collector's manual Collect naming the task's own ID precomputes the
+// task-completion record: the completion then fails ErrEventIDConflict and
+// its GC never runs.
+func TestManualCollectDoesNotWedgeTaskCompletion_SEC48(t *testing.T) {
+	ctx := context.Background()
+	eachStore(t, func(t *testing.T, db store.Store) {
+		s, _ := New(db, testPolicy())
+		seedCompletion(t, db, nil, "", false)
+		p := storetest.NewPrincipal("s", domain.AuthoritySystem)
+		var manualID string
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			out, err := s.Collect(tx, p, domain.CollectIntent{RequestID: "task", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCTaskCompletion}, tx.NextSeq())
+			if err == nil {
+				manualID = out.Result.Collect.GCRequestID
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		done, err := s.CompleteTaskStandalone(ctx, p, domain.CompleteTaskIntent{RequestID: "r", TaskID: "task"})
+		if err != nil || done.GCRequestID == "" {
+			t.Fatalf("manual Collect wedged task completion: %v", err)
+		}
+		if manualID == done.GCRequestID {
+			t.Fatalf("manual and completion requests share identity %q", manualID)
+		}
+		runGC(t, db, s, done.GCRequestID, 8)
+		if res, ok := gcResult(t, db, done.GCRequestID); !ok || res.Outcome != domain.GCCollected {
+			t.Fatalf("completion request not collected: %+v %v", res, ok)
+		}
+		if res, ok := gcResult(t, db, manualID); !ok || res.Outcome != domain.GCCollected {
+			t.Fatalf("manual request not collected: %+v %v", res, ok)
+		}
+	})
+}
+
 // SEC-4.5 (J5 wedge): a pending request's continuation binds to authority
 // class and task, not the exact principal that ran batch 1. A same-task
 // HARNESS with another AgentID finishes the request; binding to the first
