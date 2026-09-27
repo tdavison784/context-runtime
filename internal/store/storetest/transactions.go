@@ -75,7 +75,7 @@ func populate(tx store.Tx, sess string) error {
 		func() error {
 			return tx.InsertRelationship(NewRelationship(sess, "r1", domain.RelSupersedes, "i2", "i1", s[3]))
 		},
-		func() error { return tx.SetCurrentVersion("i2") },
+		func() error { return UncheckedSetCurrentVersion(tx, "i2") },
 		func() error { return tx.InsertBlob(NewBlob(sess, []byte("blob"))) },
 		func() error { return tx.InsertObligationVersion(NewObligation(sess, "o1", 1, s[4], "i2")) },
 		func() error {
@@ -452,7 +452,7 @@ func testSessionIsolation(t *testing.T, s store.Store) {
 		wantErr(t, tx.InsertRelationship(NewRelationship(sessB, "r1", domain.RelDerivedFrom, "i1", "i2", seq)),
 			domain.ErrDanglingRelationship)
 		// Directive targets must be items in this session.
-		wantErr(t, tx.SetCurrentVersion("i2"), domain.ErrNotFound)
+		wantErr(t, UncheckedSetCurrentVersion(tx, "i2"), domain.ErrNotFound)
 		// Obligation transitions and call attempts need records in this session.
 		wantErr(t, errOf(tx.AppendObligationTransition(NewTransition(sessB, "t1", "o1", 1, seq,
 			domain.ObligationUnresolved, domain.ObligationBlocked), 1)), domain.ErrNotFound)

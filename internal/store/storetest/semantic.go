@@ -662,7 +662,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		p1 = NewDirective(sessA, "p1", "dep", tx.NextSeq(), "Use dependency v2.")
 		noErr(t, tx.InsertItem(p1))
-		noErr(t, tx.SetCurrentVersion("p1"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "p1"))
 		noErr(t, tx.InsertObligationVersion(NewObligation(sessA, "obl", 1, p1.Seq, "p1")))
 		return nil
 	})
@@ -671,7 +671,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		p2 = NewDirective(sessA, "p2", "dep", seq, "Use dependency v3.")
 		noErr(t, tx.InsertItem(p2))
 		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "p2-p1", domain.RelSupersedes, "p2", "p1", seq)))
-		noErr(t, tx.SetCurrentVersion("p2"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "p2"))
 		old, err := tx.Obligation("obl")
 		noErr(t, err)
 		old.Current, old.RetiredSeq = false, seq
@@ -707,11 +707,11 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		}
 		return nil
 	})
-	rejected(t, s, sessA, domain.ErrNotFound, func(tx store.Tx) error { return tx.SetCurrentVersion("missing") })
+	rejected(t, s, sessA, domain.ErrNotFound, func(tx store.Tx) error { return UncheckedSetCurrentVersion(tx, "missing") })
 	update(t, s, sessA, func(tx store.Tx) error {
 		return tx.InsertItem(NewItem(sessA, "plain", tx.NextSeq(), "no directive"))
 	})
-	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error { return tx.SetCurrentVersion("plain") })
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error { return UncheckedSetCurrentVersion(tx, "plain") })
 	err := s.Update(ctx, sessA, func(tx store.Tx) error {
 		// The key comes from the item, so an item is only ever current
 		// under its own task, directive ID, and boundary.
@@ -723,7 +723,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		wantErr(t, err, domain.ErrNotFound)
 		// Moving the pointer back is permitted; the store does not judge
 		// which version is current.
-		noErr(t, tx.SetCurrentVersion("p1"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "p1"))
 		cur, err := currentDirective(tx, "task", "dep", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "p1" {
@@ -818,10 +818,10 @@ func testDirectiveBoundaries(t *testing.T, s store.Store) {
 		if err != nil || len(ids) != 0 {
 			t.Errorf("CurrentVersions(DIRECTIVE) before any is set = %v, %v; want empty and nil", ids, err)
 		}
-		noErr(t, tx.SetCurrentVersion("shared"))
-		noErr(t, tx.SetCurrentVersion("private"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "shared"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "private"))
 		// Replacing the agent-only version leaves the task-wide one alone.
-		noErr(t, tx.SetCurrentVersion("private2"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "private2"))
 		ids, err = currentDirectives(tx, "task", "dir")
 		noErr(t, err)
 		if want := []string{"private2", "shared"}; !slices.Equal(ids, want) {
@@ -888,7 +888,7 @@ func testCurrentDirectivesOrder(t *testing.T, s store.Store) {
 			it.AgentID = fmt.Sprintf("agent-%d", i)
 			it.Access.AgentID = it.AgentID
 			noErr(t, tx.InsertItem(it))
-			noErr(t, tx.SetCurrentVersion(it.ID))
+			noErr(t, UncheckedSetCurrentVersion(tx, it.ID))
 		}
 		for i := range n {
 			want = append(want, fmt.Sprintf("v%d", i))

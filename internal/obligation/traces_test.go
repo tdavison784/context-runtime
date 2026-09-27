@@ -2,6 +2,7 @@ package obligation
 
 import (
 	"fmt"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 	"sync"
 	"testing"
 
@@ -308,7 +309,7 @@ func TestTraceT07PublicAPI(t *testing.T) {
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		if err := tx.SetCurrentVersion(it.ID); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 			return err
 		}
 		var err error

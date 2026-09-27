@@ -42,7 +42,7 @@ func seedClaimPin(t *testing.T, mem store.Store) {
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		if err := tx.SetCurrentVersion(it.ID); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 			return err
 		}
 		_, err := graph.DeclareCreation(tx, it, graph.CreationAcceptance{PolicyVersion: "policy/v1", AcceptedAttributes: []string{"obligation=tests_pass"}})

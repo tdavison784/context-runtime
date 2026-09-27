@@ -28,7 +28,7 @@ func seedDirective(t *testing.T, mem store.Store, authority domain.Authority, le
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		if err := tx.SetCurrentVersion(it.ID); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 			return err
 		}
 		if !legacy {

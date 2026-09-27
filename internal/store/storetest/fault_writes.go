@@ -50,13 +50,6 @@ func (f *faultTx) InsertRelationship(a0 domain.Relationship) error {
 	return f.Tx.InsertRelationship(a0)
 }
 
-func (f *faultTx) SetCurrentVersion(a0 string) error {
-	if err := f.hit("SetCurrentVersion"); err != nil {
-		return err
-	}
-	return f.Tx.SetCurrentVersion(a0)
-}
-
 func (f *faultTx) InsertBlob(a0 domain.Blob) error {
 	if err := f.hit("InsertBlob"); err != nil {
 		return err

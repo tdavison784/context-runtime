@@ -313,7 +313,7 @@ func TestD10_MappedDuplicateNeverCurrent(t *testing.T) {
 			mustCreate(t, tx, dup)
 			rawDuplicateOf(t, tx, dup.ID, canonical.ID)
 			// Bypass ReplaceDirective: point the map at the duplicate.
-			if err := tx.SetCurrentVersion(dup.ID); err != nil {
+			if err := storetest.UncheckedSetCurrentVersion(tx, dup.ID); err != nil {
 				t.Fatalf("SetCurrentVersion: %v", err)
 			}
 			return nil

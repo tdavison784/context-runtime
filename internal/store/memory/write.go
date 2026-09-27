@@ -251,7 +251,12 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	return nil
 }
 
-func (t *tx) SetCurrentVersion(itemID string) error {
+// UncheckedSetCurrentVersion points the item's current-version key at it
+// with no expected-prior, duplicate, superseded or namespace check. It is
+// not part of store.Tx (SPEC-1.21): production writes use the semantic
+// facet's CAS. Only storetest fixtures reach it, to model legacy or
+// corrupted pointer states.
+func (t *tx) UncheckedSetCurrentVersion(itemID string) error {
 	if err := t.check(); err != nil {
 		return err
 	}

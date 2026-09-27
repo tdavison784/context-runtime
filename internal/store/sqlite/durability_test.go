@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 	"io/fs"
 	"maps"
 	"os"
@@ -61,7 +62,7 @@ func TestRestartPreservesRecords(t *testing.T) {
 		}
 		expected["items"] = []domain.ContextItem{item, second}
 		expected["blob"] = blob
-		if err := tx.SetCurrentVersion("i1"); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, "i1"); err != nil {
 			return err
 		}
 		expected["directive"] = "i1"

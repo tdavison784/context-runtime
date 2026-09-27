@@ -72,8 +72,8 @@ func testPhase2StateAcrossRestart(t *testing.T, open Opener) {
 		pin.SourceRanges = []domain.SourceRange{{TranscriptID: "tr", Range: domain.ByteRange{Start: 10, End: 13}, Slices: []domain.ByteRange{{Start: 12, End: 13}}}}
 		noErr(t, tx.InsertItem(pin))
 		noErr(t, tx.InsertItem(NewAgentKeyItem(sessA, "key", "agent.status", tx.NextSeq(), "state")))
-		noErr(t, tx.SetCurrentVersion("pin"))
-		noErr(t, tx.SetCurrentVersion("key"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "pin"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "key"))
 		o := NewObligation(sessA, "o", 1, tx.NextSeq(), "pin")
 		o.Claim, o.Matcher = "tests_pass", nil
 		noErr(t, tx.InsertObligationVersion(o))

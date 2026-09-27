@@ -2,6 +2,7 @@ package obligation
 
 import (
 	"errors"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -46,7 +47,7 @@ func observationNamespaceSupported(t *testing.T, st store.Store) bool {
 		if err := tx.InsertItem(it); err != nil {
 			return err
 		}
-		if err := tx.SetCurrentVersion(it.ID); err != nil {
+		if err := storetest.UncheckedSetCurrentVersion(tx, it.ID); err != nil {
 			return err
 		}
 		return errProbeRollback
