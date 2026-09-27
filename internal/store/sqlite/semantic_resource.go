@@ -230,7 +230,7 @@ func (s semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 		return err
 	}
 	var last, lastSeq uint64
-	if err := t.conn.QueryRowContext(t.ctx, "SELECT COALESCE(MAX(subkey),0), COALESCE(MAX(f_seq),0) FROM rec_workspace_binding WHERE session_id=? AND id=?", t.session, b.ID).Scan(&last, &lastSeq); err != nil {
+	if err := t.conn.QueryRowContext(t.ctx, latestBindingVersion, t.session, b.ID).Scan(&last, &lastSeq); err != nil {
 		return err
 	}
 	if b.Version != last+1 || last > 0 && b.Seq <= lastSeq {
@@ -601,6 +601,9 @@ func (s semRead) SubjectHighWater(subjectKey, taskID string, access domain.Acces
 	}
 	return hw, err
 }
+
+// latestBindingVersion is a binding's latest version and sequence.
+const latestBindingVersion = "SELECT COALESCE(MAX(subkey),0), COALESCE(MAX(f_seq),0) FROM rec_workspace_binding WHERE session_id=? AND id=?"
 
 // currentBindingPage is the keyed page read of migration 0038's pointers.
 const currentBindingPage = "SELECT seq, binding_id, version FROM lookup_current_workspace_binding WHERE session_id=? AND context_kind=? AND context_id=? AND (seq, binding_id) > (?, ?) ORDER BY seq, binding_id LIMIT ?"

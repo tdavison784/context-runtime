@@ -430,3 +430,11 @@ func explain(t *testing.T, s *Store, q string, args ...any) string {
 	}
 	return strings.Join(plan, "\n")
 }
+
+// TestLatestBindingVersionIsKeyed checks DUR-3.7: a rebind reads the
+// binding's latest version and sequence with one keyed lookup of 0038's
+// current pointer, never an aggregate over every version.
+func TestLatestBindingVersionIsKeyed(t *testing.T) {
+	s, _ := openTemp(t)
+	assertUsesIndex(t, s, "current_workspace_binding_id (session_id=? AND binding_id=?)", latestBindingVersion, "s", "wb")
+}
