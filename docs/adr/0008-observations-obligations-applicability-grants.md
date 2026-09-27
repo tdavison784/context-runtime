@@ -144,6 +144,20 @@ applicability proof current as of commit (§4), applied under
 closed (`domain.ObligationReasonCode`); rationale text is bounded and
 access-filtered.
 
+**The raw Phase 2 `store.Tx.AppendObligationTransition` path now refuses
+SATISFIED, closing an INV-16 gap this ADR's own transaction never had
+(PR #6 round 2, DUR-2.12).** ADR 16's original, still-legal raw method
+(unchanged there — it remains Phase 2's own legacy entry point) carries no
+proof or assertion record and predates this ADR's Phase 3 backing
+requirement entirely; before this fix it could still commit an
+undeclared/legacy version straight from UNRESOLVED to SATISFIED with
+nothing behind it. Both backends now reject `To == ObligationSatisfied` on
+that path outright — satisfaction is exclusively
+`AppendSemanticObligationTransition`'s (this section's path), which always
+carries a `TransitionDetail`. There is no production caller of the raw
+path that could have hit this (`storetest` exercised it directly), so this
+closes a latent gap, not an active one.
+
 ### 4. Proof visibility and the derived SATISFIES view (§P3-14)
 
 `domain.ApplicabilityProof` names the exact obligation version, `TargetSpec`,
@@ -382,10 +396,14 @@ now additionally requires the evidence's own `Source.ToolCallID` to equal
 reporting an observation must set `ExecutionID` to the producing tool
 call's ID**, so the evidence occurrence a run cites is provably the one that
 tool call actually produced, not an unrelated TOOL item reused across runs.
-**Residual (SPEC-2.8, assigned W2, still open):** this check exists only at
-the service layer; `InsertObservation` in both store backends does not
-independently verify `ev.Source.ToolCallID == run.ExecutionID`, so P3-21's
-"validated by service and store" is only half true as of this pass.
+**Resolved (SPEC-2.8, PR #6 round 2, W2).** `store.ProducedBy(ev, execution)`
+(`internal/store/semantic_resource.go`) is the shared predicate both
+backends' `InsertObservation` now call independently: `ev.Source != nil &&
+ev.Source.ToolCallID != "" && ev.Source.ToolCallID == execution`. P3-21's
+"validated by service and store" now holds in full — the service-level
+check above and this store-level check are two independent enforcement
+layers, not one masquerading as two. Tests:
+`internal/store/storetest`'s `TestConformance/SemanticObservationEvidenceExecution`.
 
 **T07 evidence ruling (§W4-22, commander-approved beyond the frozen text).**
 TOOL evidence may be TURN- or TASK-scoped **if it has exactly the run's own
@@ -524,6 +542,17 @@ no single §-decision above covers them. Each cites its real code and test.
   `obs-state/1`, and keeps its own clone (including W1's `GCTriggers` slice)
   so a caller cannot alias and mutate it after construction.
   `TestNewPinsRuleVersions`, `TestServiceRequiresFiniteKnownPolicy`.
+- **Runtime discipline — deferred sequence allocation (PR #6 round 2,
+  DUR-2.14, commit `1ecbbf8`).** `begin` (`internal/obligation/service.go`)
+  now accepts `seq == 0` and defers allocation until after the replay check
+  (`allocate`, called post-replay), matching the same "replay before
+  `NextSeq`" discipline `graph.operationSeq` and `lifecycle.collect` already
+  use elsewhere — an exact retry of a W4 mutation consumes no sequence.
+  **Except pinned declarations:** `beginAt` (used only for a declaration
+  that must ride another write's own transaction — a Pinned source's
+  creation or replacement) still requires a nonzero `seq`, because that
+  sequence must be the *other* write's exact sequence, never independently
+  deferred or allocated. `TestDeferredSeqAllocatedAfterReplay_DUR214`.
 - **Replacement declarations (§W4-29, ties to §P3-4/C-1 below).**
   `obligation.DeclareForReplacementTx(tx, actor, newSourceItemID, seq)`
   (`internal/obligation/declare.go`) reads a replacement's explicit
