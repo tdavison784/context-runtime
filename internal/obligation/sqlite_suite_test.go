@@ -116,6 +116,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"SPEC110FailRejectsResourceBoundAssertion", TestSPEC110FailRejectsResourceBoundAssertion, true},
 		{"SPEC111ClaimsMustCoverTarget", TestSPEC111ClaimsMustCoverTarget, false},
 		{"SPEC111FixedHashTarget", TestSPEC111FixedHashTarget, false},
+		{"SPEC118DirectoryChangeIntersectsFiles", TestSPEC118DirectoryChangeIntersectsFiles, false},
 		{"ObservationStateChain", TestObservationStateChain, true},
 		{"ObservationStateGating", TestObservationStateGating, true},
 		{"MatcherGrantT06", TestMatcherGrantT06, true},

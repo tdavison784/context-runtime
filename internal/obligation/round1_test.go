@@ -265,3 +265,33 @@ func TestSPEC111FixedHashTarget(t *testing.T) {
 		t.Errorf("fixed-content claim of the required hash: %v", err)
 	}
 }
+
+// SPEC-1.18 (P3-23): a changed directory conservatively intersects every
+// file under it, for proof invalidation and for path-content currency.
+func TestSPEC118DirectoryChangeIntersectsFiles(t *testing.T) {
+	f := newEvalFixture(t)
+	ref := f.fileObligation(t, "11")
+	f.resourceReport(t, "W1e", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	rev := f.r.auth
+	if err := f.assertPath(t, ref, rev, "H1"); err != nil {
+		t.Fatal(err)
+	}
+	f.resourceReport(t, "W2e", false, false, []string{"docs"})
+	if o := f.status(t, ref); o.Status != domain.ObligationUnresolved {
+		t.Fatalf("directory change kept a proof on a file under it: %+v", o)
+	}
+	if err := f.assertPath(t, ref, rev, "H1"); !errors.Is(err, domain.ErrUnknownApplicability) {
+		t.Errorf("path content under a changed directory still current: %v", err)
+	}
+	// A sibling-prefix name is not under the directory.
+	g := newEvalFixture(t)
+	ref2 := g.fileObligation(t, "11")
+	g.resourceReport(t, "W1e", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	if err := g.assertPath(t, ref2, g.r.auth, "H1"); err != nil {
+		t.Fatal(err)
+	}
+	g.resourceReport(t, "W2e", false, false, []string{"doc"})
+	if o := g.status(t, ref2); o.Status != domain.ObligationSatisfied {
+		t.Errorf("sibling-prefix change invalidated: %+v", o)
+	}
+}
