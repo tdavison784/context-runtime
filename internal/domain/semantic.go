@@ -85,6 +85,22 @@ type Phase3Policy struct {
 	GCTriggers []GCTrigger
 }
 
+// MaxObligationsPerSource is the hard cap on obligation versions bound to one
+// source item: the bound every by-source consumer reads with (graph
+// retirement, lifecycle demote/archive/GC snapshots). A producer may never
+// bind more than its consumers can read, or the source becomes permanently
+// unreplaceable (DUR-1.5, G2).
+const MaxObligationsPerSource = 256
+
+// ObligationDeclarationLimit is the most obligation versions a declaration
+// may leave bound to one source under this policy: the smaller of the
+// policy's MaxTargets (the lifecycle consumers' by-source read) and
+// MaxObligationsPerSource (graph retirement). Declaring one more must be
+// refused before anything is written (DUR-1.5).
+func (p Phase3Policy) ObligationDeclarationLimit() int {
+	return min(p.MaxTargets, MaxObligationsPerSource)
+}
+
 // DefaultGCTriggers returns a fresh canonical set of every registered trigger.
 func DefaultGCTriggers() []GCTrigger {
 	return []GCTrigger{GCManual, GCPolicy, GCSupersession, GCTaskCompletion, GCTTL}
