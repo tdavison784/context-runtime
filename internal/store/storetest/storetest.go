@@ -119,6 +119,7 @@ var suite = []testCase{
 	{"SemanticObservations", testSemanticObservations},
 	{"SemanticRunOrdinalUnique", testSemanticRunOrdinalUnique},
 	{"SemanticRunClosesOnce", testSemanticRunClosesOnce},
+	{"SemanticLiveSubjectStates", testSemanticLiveSubjectStates},
 	{"SemanticObligationDeclarations", testSemanticObligationDeclarations},
 	{"SemanticMatcherProof", testSemanticMatcherProof},
 	{"SemanticProofReferences", testSemanticProofReferences},

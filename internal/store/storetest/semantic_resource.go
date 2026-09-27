@@ -510,3 +510,91 @@ func testSemanticRunClosesOnce(t *testing.T, s store.Store) {
 		}
 	}
 }
+
+// testSemanticLiveSubjectStates checks the live-only by-resource read (G2,
+// SEC-1.8, DUR-1.2): SubjectStatesByResource returns only CURRENT states,
+// so STALE/UNKNOWN history never counts toward a page or a work bound; a
+// state that becomes CURRENT again returns at its first-filing position.
+func testSemanticLiveSubjectStates(t *testing.T, s store.Store) {
+	subject := func(suite string) domain.ObservationSubject {
+		sub := TestsSubject("repo")
+		sub.Target.Tests.SuiteSpec = suite
+		return sub
+	}
+	run := func(t *testing.T, id string, sub domain.ObservationSubject, seq uint64) domain.ObservationRun {
+		r := NewObservationRun(t, sessA, id, "repo", "wb", seq)
+		key, err := sub.Key()
+		noErr(t, err)
+		r.Subject, r.SubjectKey = sub, key
+		return r
+	}
+	state := func(r domain.ObservationRun, id, obs string, seq uint64, a domain.ApplicabilityState) domain.SubjectState {
+		return domain.SubjectState{SemanticMeta: Meta(sessA, id, seq), SubjectKey: r.SubjectKey, TaskID: "task", CurrentItemID: "ev-" + obs,
+			ObservationID: obs, Access: r.Access, AcceptedOrdinal: r.Ordinal, Revision: 1, Applicability: a}
+	}
+	observe := func(tx store.Tx, r domain.ObservationRun, obs string) {
+		noErr(t, tx.InsertItem(ToolEvidence(sessA, "ev-"+obs, tx.NextSeq())))
+		noErr(t, semantic(t, tx).InsertObservation(NewObservation(r, obs, "ev-"+obs, tx.NextSeq(), fpA)))
+	}
+	var ra domain.ObservationRun
+	update(t, s, sessA, func(tx store.Tx) error {
+		sem := semantic(t, tx)
+		putTask(t, tx)
+		noErr(t, sem.InsertResourceBinding(NewResourceBinding(sessA, "repo", tx.NextSeq())))
+		noErr(t, sem.InsertWorkspaceBinding(NewWorkspaceBinding(sessA, "wb", "repo", 1, tx.NextSeq())))
+		ra = run(t, "run-a", subject("suite-a"), tx.NextSeq())
+		rb := run(t, "run-b", subject("suite-b"), tx.NextSeq())
+		noErr(t, sem.InsertObservationRun(ra))
+		noErr(t, sem.InsertObservationRun(rb))
+		observe(tx, ra, "obs-a")
+		observe(tx, rb, "obs-b")
+		_, err := sem.PutSubjectState(state(ra, "ss-a", "obs-a", tx.NextSeq(), domain.ApplicabilityCurrent), 0, "obs-a")
+		noErr(t, err)
+		_, err = sem.PutSubjectState(state(rb, "ss-b", "obs-b", tx.NextSeq(), domain.ApplicabilityCurrent), 0, "obs-b")
+		noErr(t, err)
+		// ss-a goes STALE: dead history.
+		_, err = sem.PutSubjectState(state(ra, "ss-a", "obs-a", tx.NextSeq(), domain.ApplicabilityStale), 1, "obs-a")
+		return err
+	})
+	byResource := func(limit int) ([]string, bool) {
+		var ids []string
+		var more bool
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			pg, err := readSemantic(t, tx).SubjectStatesByResource("repo", store.Page{Limit: limit})
+			noErr(t, err)
+			for _, st := range pg.Records {
+				ids = append(ids, st.ID)
+			}
+			more = pg.More
+			return nil
+		})
+		return ids, more
+	}
+	ids, more := byResource(1)
+	if !slicesEqual(ids, []string{"ss-b"}) || more {
+		t.Errorf("SubjectStatesByResource(limit 1) = %v more=%v, want only the CURRENT ss-b", ids, more)
+	}
+	// A newer run makes ss-a CURRENT again.
+	update(t, s, sessA, func(tx store.Tx) error {
+		ra2 := run(t, "run-a2", subject("suite-a"), tx.NextSeq())
+		noErr(t, semantic(t, tx).InsertObservationRun(ra2))
+		observe(tx, ra2, "obs-a2")
+		_, err := semantic(t, tx).PutSubjectState(state(ra2, "ss-a", "obs-a2", tx.NextSeq(), domain.ApplicabilityCurrent), 2, "obs-a2")
+		return err
+	})
+	if ids, _ := byResource(5); !slicesEqual(ids, []string{"ss-a", "ss-b"}) {
+		t.Errorf("SubjectStatesByResource after ss-a is CURRENT again = %v, want [ss-a ss-b]", ids)
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
