@@ -27,6 +27,11 @@ type ResourceReader interface {
 	ResourcePathState(locator domain.ResourceLocator) (domain.ResourcePathState, error)
 	WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error)
 	WorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
+	// CurrentWorkspaceBindingsByContext lists each binding ID once, at its
+	// latest version, while that version is in the context, in (Seq, ID)
+	// order of that version: a write-time pointer, so pages count live
+	// bindings, not versions (H2).
+	CurrentWorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
 	Observation(id string) (domain.ObservationRecord, error)
 	ObservationRun(id string) (domain.ObservationRun, error)
 	// Run ordinal is the allocated registration Seq (W4 Q-5), so Page's

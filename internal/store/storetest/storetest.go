@@ -128,6 +128,7 @@ var suite = []testCase{
 	{"SemanticEarliestExchangeWithItem", testSemanticEarliestExchangeWithItem},
 	{"SemanticLiveGrantsMatchGrantLiveAt", testSemanticLiveGrantsMatchGrantLiveAt},
 	{"SemanticSubjectHighWater", testSemanticSubjectHighWater},
+	{"SemanticCurrentWorkspaceBindings", testSemanticCurrentWorkspaceBindings},
 	{"SemanticIndexedVersions", testSemanticIndexedVersions},
 	{"SemanticWorkspaceBindingCursor", testSemanticWorkspaceBindingCursor},
 	{"SemanticOwnerIDReuse", testSemanticOwnerIDReuse},

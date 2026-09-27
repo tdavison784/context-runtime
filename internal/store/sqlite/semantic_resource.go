@@ -586,3 +586,8 @@ func (s semRead) SubjectHighWater(subjectKey, taskID string, access domain.Acces
 	}
 	return hw, err
 }
+
+// CurrentWorkspaceBindingsByContext implements store.ResourceReader.
+func (s semRead) CurrentWorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, p store.Page) (store.ResultPage[domain.WorkspaceBinding], error) {
+	return store.ResultPage[domain.WorkspaceBinding]{}, domain.ErrUnsupportedSchema
+}
