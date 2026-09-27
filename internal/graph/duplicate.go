@@ -56,11 +56,41 @@ func SameDirective(tx store.ReadTx, it domain.ContextItem, _ string, canonical d
 		return false, err
 	}
 	prior, err := knownDeclaration(r, canonical)
+	if errors.Is(err, ErrUnknownDeclaration) && attributeFreeIdentity(it) && attributeFreeIdentity(canonical) {
+		// G5 residual (SPEC-2.9/2.10): an attribute-free class cannot have
+		// carried accepted attributes, an obligation or support its row does
+		// not show, so a row-identical restatement that adds none of those is
+		// a duplicate of the unknown pre-upgrade version.
+		return plainDeclaration(fresh), nil
+	}
 	if err != nil {
 		return false, err
 	}
 	hash, err := fresh.AcceptedSemantics.Signature(prior.PolicyVersion)
 	return hash == prior.Signature, err
+}
+
+// attributeFreeIdentity reports whether it belongs to a class whose creation
+// identity is fully shown by its row: a Working snapshot member or a
+// tool-written agent key. Directive lines can carry attributes and
+// obligation declarations, so their unknown identity never matches.
+func attributeFreeIdentity(it domain.ContextItem) bool {
+	ns, ok := it.DirectiveNamespace()
+	switch {
+	case !ok:
+		return false
+	case ns == domain.NamespaceDirective:
+		return it.Section == domain.SectionWorking
+	case ns == domain.NamespaceAgentKey:
+		return it.Authority == domain.AuthorityAgent && it.Section == domain.SectionNone
+	}
+	return false
+}
+
+// plainDeclaration reports whether d declares nothing beyond the item row.
+func plainDeclaration(d domain.CreationDeclaration) bool {
+	s := d.AcceptedSemantics
+	return len(s.AcceptedAttributes) == 0 && len(s.SupportIDs) == 0 && s.ObligationDeclarationHash == ""
 }
 
 // knownDeclaration returns item's verified creation declaration, or
