@@ -16,8 +16,13 @@ func semanticShaped(e domain.Event) bool {
 
 // validateRequest checks e's structure and authority for p under limits
 // and, for a v3 request, policy pol. A typed stream without a recorded
-// policy fails closed.
+// policy fails closed. An empty, non-nil stream is malformed (G4): an event
+// either has nil Operations, and its spans are ingested in order, or names
+// every span explicitly.
 func validateRequest(e domain.Event, p domain.Principal, limits domain.Limits, pol *domain.Phase3Policy) error {
+	if e.Operations != nil && len(e.Operations) == 0 {
+		return domain.ErrInvalidRecord
+	}
 	if !semanticShaped(e) && pol == nil {
 		return e.ValidateFor(p, limits)
 	}

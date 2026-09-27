@@ -91,7 +91,7 @@ func (r *run) apply() (domain.IngestReceipt, error) {
 			return domain.IngestReceipt{}, err
 		}
 	}
-	if r.e.Operations == nil {
+	if len(r.e.Operations) == 0 {
 		for si := range r.e.Spans {
 			r.unitOp = uint64(si)
 			if err := r.ingestSpan(si); err != nil {
