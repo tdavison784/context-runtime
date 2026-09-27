@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -16,6 +17,10 @@ type obligationDeclarationRow struct {
 	Version      int
 	Declaration  domain.ObligationDeclaration
 }
+
+// SemanticSeq places the row's sequence in the TargetCall sharing check
+// (P3-1, SPEC-1.4).
+func (r obligationDeclarationRow) SemanticSeq() uint64 { return r.Declaration.Seq }
 
 // noteLiveProof keeps lookup_live_dependency in step with a version write:
 // the dependencies of a version's current proof are live exactly while the
@@ -483,6 +488,9 @@ func (s semTx) AppendSemanticObligationTransition(tr domain.ObligationTransition
 			return domain.ObligationVersion{}, errors.Join(err, invalidIf(!ok, "transition %s: detail names an unstored cause", tr.ID))
 		}
 	}
+	if err := store.ValidateSatisfactionBacking(tr, d); err != nil {
+		return domain.ObligationVersion{}, err
+	}
 	next.CurrentProofID, next.CurrentAssertionID = "", ""
 	if tr.To == domain.ObligationSatisfied {
 		next.CurrentProofID, next.CurrentAssertionID = tr.ProofID, d.AssertionID
@@ -508,11 +516,11 @@ func (s semTx) AppendSemanticObligationTransition(tr domain.ObligationTransition
 		}
 		if d.AssertionID != "" {
 			var a domain.AssertionRecord
-			if err := t.get("assertion", d.AssertionID, 0, &a); err != nil || a.TransitionID != tr.ID {
+			if err := t.get("assertion", d.AssertionID, 0, &a); err != nil || a.TransitionID != tr.ID || a.Target != ref || a.Mode != tr.AssertionMode || a.ProofID != tr.ProofID {
 				return notStored(errors.Join(err, domain.ErrNotFound), "transition %s: assertion %s is not stored for it", tr.ID, d.AssertionID)
 			}
 		}
-		return nil
+		return t.checkProofNotStale(ref, tr.ProofID)
 	})
 	return next.Clone(), nil
 }
@@ -554,4 +562,46 @@ func (s semTx) SetObligationMaterialization(target domain.ObligationRef, disable
 		return t.AppendLifecycleEvent(event)
 	})
 	return next.Clone(), err
+}
+
+// checkProofNotStale is the commit-time half of G1 (INV-16, P3-16/22): if
+// the version still rests on proofID at commit and that proof rests on an
+// observation, no CURRENT subject state of the run's own partition may
+// have accepted a newer run.
+func (t *transaction) checkProofNotStale(ref domain.ObligationRef, proofID string) error {
+	if proofID == "" {
+		return nil
+	}
+	var o domain.ObligationVersion
+	if err := t.get("obligation", ref.ObligationID, int(ref.Version), &o); err != nil {
+		return err
+	}
+	if o.Status != domain.ObligationSatisfied || o.CurrentProofID != proofID {
+		return nil
+	}
+	var p domain.ApplicabilityProof
+	if err := t.get("proof", proofID, 0, &p); err != nil || p.ObservationID == "" {
+		return err
+	}
+	var obs domain.ObservationRecord
+	if err := t.get("observation", p.ObservationID, 0, &obs); err != nil {
+		return notStored(err, "proof %s: observation %s is not stored", proofID, p.ObservationID)
+	}
+	var run domain.ObservationRun
+	if err := t.get("observation_run", obs.RunID, 0, &run); err != nil {
+		return notStored(err, "proof %s: run %s is not stored", proofID, obs.RunID)
+	}
+	var row subjectStateRow
+	err := t.get("subject_state", subjectPartitionKey(run.SubjectKey, run.TaskID, run.Access), 0, &row)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if st := row.State; st.Applicability == domain.ApplicabilityCurrent && st.AcceptedOrdinal > run.Ordinal {
+		return fmt.Errorf("proof %s: run ordinal %d is older than the subject's accepted ordinal %d: %w",
+			proofID, run.Ordinal, st.AcceptedOrdinal, domain.ErrInvalidTransition)
+	}
+	return nil
 }

@@ -122,7 +122,7 @@ CREATE TABLE lookup_grant_target (
   PRIMARY KEY (session_id,action,target_key,issued_seq,grant_id)
 );
 INSERT INTO lookup_grant_target(session_id,action,target_key,issued_seq,grant_id)
-SELECT g.session_id, g.f_action, 'legacy-item:' || j.value, g.f_issued_seq, g.id
+SELECT DISTINCT g.session_id, g.f_action, 'legacy-item:' || j.value, g.f_issued_seq, g.id
 FROM rec_grant AS g, json_each(g.f_target_ids) AS j
 WHERE g.f_target_ids IS NOT NULL AND g.f_target_ids != 'null';
 INSERT INTO lookup_grant_target(session_id,action,target_key,issued_seq,grant_id)

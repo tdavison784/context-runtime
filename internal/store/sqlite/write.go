@@ -430,6 +430,9 @@ func (t *transaction) InsertGrant(v domain.MutationGrant) error {
 	if err := v.Validate(); err != nil {
 		return err
 	}
+	if err := store.DistinctGrantTargets(v); err != nil {
+		return err
+	}
 	if err := t.checkSession(v.SessionID); err != nil {
 		return err
 	}
@@ -472,6 +475,9 @@ func (t *transaction) RevokeGrant(id string, event domain.LifecycleEvent) (domai
 	}
 	err = t.atomic(func() error {
 		if err := t.put("grant", id, 0, v, true); err != nil {
+			return err
+		}
+		if err := t.reindexRevokedGrant(v); err != nil {
 			return err
 		}
 		return t.AppendLifecycleEvent(event)

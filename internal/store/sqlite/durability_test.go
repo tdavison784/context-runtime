@@ -283,7 +283,7 @@ var committedMigrations = map[string]string{
 	"0018_phase3_row_fields.sql":                     "5a3fa32221c30d3a6f0f250ac57d4d017049ccd9d5176ff68dda72310e827817",
 	"0019_command_execution_result.sql":              "1acd85fe8876b64c211fc842a7bb3af8c841773685b4471a9e0359ad4679d96d",
 	"0020_phase3_membership.sql":                     "58d3ea7d924fdc784d8b1cc5ee0feb9b4b9a9f149b9f4159ada8d368266d6d83",
-	"0021_phase3_declarations.sql":                   "2e1b287ab04010fd28fa38494d0f5ce6d3f51e858979da59fc8e2b55bd89e0d7",
+	"0021_phase3_declarations.sql":                   "d11c610cb8550b65430aba1d4c9f831cd451219804bbfa0455b0f45a78f36eee",
 	"0022_phase3_resources.sql":                      "25c4e4c659dd885d34c0a59e1002ed715118ae1697c028b18ddc80d10c7d63b3",
 	"0023_phase3_proofs.sql":                         "68b0b1b69d0c7fd4577156000f806b95fd2061a242d18a714befe0321c4461fe",
 	"0024_phase3_retrieval.sql":                      "e3ba996a790c1c5bdb80238b2f73c75da1b92635832d2e7e0ece3cd2dadc3d5f",
@@ -291,6 +291,12 @@ var committedMigrations = map[string]string{
 	"0026_reconcile_legacy_matcher_satisfaction.sql": "45ebb8523aca1e6c22b50a51f147f11ac2bdadff6105cbe59542819fcc69ad33",
 	"0027_current_version_observation_namespace.sql": "176b2865137387c2e7a61b980c2f67e20c54d08c4938b491142ada52d683ba9f",
 	"0028_phase3_policy_gc_triggers.sql":             "0476259165c644e6924484e2aa1e73a80cd4e1549cb3eecfd294011720db8d48",
+	"0029_observation_run_ordinal.sql":               "6c9b034d6560ad9549855b0dd1d08addf9338c08830b68a0dd93e8e28d778e12",
+	"0030_observation_run_closes_once.sql":           "9362368021c586effd953f6af59f6856f3fdfd7d253d98b831023673dc4200cc",
+	"0031_grant_target_liveness.sql":                 "0e35f0a5f3003701c944ea500e8190546c6baf51057295bd675c61c1436d4f9b",
+	"0032_subject_state_live_index.sql":              "21e7d3eabf989a4e00d19d8dfaa560e69add426f7483e1fe1aa2684ce29dbad8",
+	"0033_resource_update_paths.sql":                 "bd6550d5ef957746a3feffeab0bfe60b86312e5962905ecf1a2ca432458960e3",
+	"0034_reconcile_legacy_creation.sql":             "974c7bd0874406c567d556732a8de88a47d0b42e72b1dfde4a3b711ff20a2596",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {

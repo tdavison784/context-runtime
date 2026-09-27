@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -30,11 +31,19 @@ type subjectKey struct {
 
 type resRequest struct{ resource, request string }
 
+// resPath keys the path-change index: a ChangedPaths entry of a resource,
+// or allPathsKey for an ALL-paths update (G2).
+type resPath struct{ resource, path string }
+
+// allPathsKey is never a canonical path.
+const allPathsKey = "\x00all"
+
 type resState struct {
 	bindings     map[string]domain.ResourceBinding // by resource
 	bindingIDs   map[string]string
 	updates      map[string]domain.ResourceUpdate
 	updByRes     map[string][]seqRef
+	updByPath    map[resPath][]seqRef
 	updRequests  map[resRequest]string
 	states       map[string]domain.ResourceState     // by resource
 	paths        map[string]domain.ResourcePathState // by locator key
@@ -53,7 +62,7 @@ type resState struct {
 func newResState() resState {
 	return resState{
 		bindings: map[string]domain.ResourceBinding{}, bindingIDs: map[string]string{}, updates: map[string]domain.ResourceUpdate{},
-		updByRes: map[string][]seqRef{}, updRequests: map[resRequest]string{}, states: map[string]domain.ResourceState{},
+		updByRes: map[string][]seqRef{}, updByPath: map[resPath][]seqRef{}, updRequests: map[resRequest]string{}, states: map[string]domain.ResourceState{},
 		paths: map[string]domain.ResourcePathState{}, wbindings: map[wbKey]domain.WorkspaceBinding{}, wbLatest: map[string]uint64{},
 		wbByContext: map[wsContext][]seqRef{}, runs: map[string]domain.ObservationRun{}, runsBySubj: map[string][]seqRef{},
 		observations: map[string]domain.ObservationRecord{}, obsByRun: map[string][]seqRef{}, subjects: map[subjectKey]domain.SubjectState{},
@@ -66,6 +75,7 @@ type resView struct {
 	bindingIDs   table[string, string]
 	updates      table[string, domain.ResourceUpdate]
 	updByRes     orderedIndex[string]
+	updByPath    orderedIndex[resPath]
 	updRequests  table[resRequest, string]
 	states       table[string, domain.ResourceState]
 	paths        table[string, domain.ResourcePathState]
@@ -85,6 +95,7 @@ func newResView(st *resState, w bool) resView {
 	return resView{
 		bindings: newTable(st.bindings, w, domain.ResourceBinding.Clone), bindingIDs: newTable(st.bindingIDs, w, same[string]),
 		updates: newTable(st.updates, w, domain.ResourceUpdate.Clone), updByRes: newOrderedIndex(st.updByRes, w),
+		updByPath:   newOrderedIndex(st.updByPath, w),
 		updRequests: newTable(st.updRequests, w, same[string]), states: newTable(st.states, w, domain.ResourceState.Clone),
 		paths: newTable(st.paths, w, domain.ResourcePathState.Clone), wbindings: newTable(st.wbindings, w, domain.WorkspaceBinding.Clone),
 		wbLatest: newTable(st.wbLatest, w, same[uint64]), wbByContext: newOrderedIndex(st.wbByContext, w),
@@ -105,6 +116,7 @@ func (v *resView) commit() {
 	v.bindingIDs.commit()
 	v.updates.commit()
 	v.updByRes.commit()
+	v.updByPath.commit()
 	v.updRequests.commit()
 	v.states.commit()
 	v.paths.commit()
@@ -181,6 +193,12 @@ func (t *semTx) InsertResourceUpdate(u domain.ResourceUpdate) error {
 	t.r.sem.res.updates.put(u.ID, u)
 	t.r.sem.res.updRequests.put(resRequest{u.ResourceID, u.RequestID}, u.ID)
 	t.r.sem.res.updByRes.add(u.ResourceID, seqRef{u.Seq, u.ID})
+	if u.AllPaths {
+		t.r.sem.res.updByPath.add(resPath{u.ResourceID, allPathsKey}, seqRef{u.Seq, u.ID})
+	}
+	for _, p := range u.ChangedPaths {
+		t.r.sem.res.updByPath.add(resPath{u.ResourceID, p}, seqRef{u.Seq, u.ID})
+	}
 	t.t.sequencedWrite(u.Seq)
 	return nil
 }
@@ -319,13 +337,26 @@ func (t *semTx) InsertWorkspaceBinding(b domain.WorkspaceBinding) error {
 	}
 	t.r.sem.res.wbindings.put(wbKey{b.ID, b.Version}, b)
 	t.r.sem.res.wbLatest.put(b.ID, b.Version)
-	t.r.sem.res.wbByContext.add(wsContext{b.Context.Kind, b.Context.ID}, seqRef{b.Seq, wbRefID(b.ID, b.Version)})
+	t.r.sem.res.wbByContext.add(wsContext{b.Context.Kind, b.Context.ID}, seqRef{b.Seq, b.ID})
 	t.t.sequencedWrite(b.Seq)
 	return nil
 }
 
 // wbRefID is a binding version's index entry ID.
-func wbRefID(id string, version uint64) string { return fmt.Sprintf("%s\x00%020d", id, version) }
+// bindingAt is the version of binding id filed at seq: versions take
+// strictly increasing sequences, so it is found by binary search.
+func (r semRead) bindingAt(id string, seq uint64) (domain.WorkspaceBinding, bool) {
+	latest, ok := r.r.sem.res.wbLatest.peek(id)
+	if !ok {
+		return domain.WorkspaceBinding{}, false
+	}
+	v := uint64(sort.Search(int(latest), func(i int) bool {
+		b, _ := r.r.sem.res.wbindings.peek(wbKey{id, uint64(i) + 1})
+		return b.Seq >= seq
+	})) + 1
+	b, ok := r.r.sem.res.wbindings.get(wbKey{id, v})
+	return b, ok && b.Seq == seq
+}
 
 func (r semRead) WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error) {
 	if err := r.r.check(); err != nil {
@@ -348,14 +379,9 @@ func (r semRead) WorkspaceBindingsByContext(sourceItemID, taskID, conversationID
 	if err != nil {
 		return store.ResultPage[domain.WorkspaceBinding]{}, err
 	}
-	return page(p, r.r.sem.res.wbByContext.after(ctx, cursorRef(p.After)), func(id string) (domain.WorkspaceBinding, bool) {
-		var bid string
-		var version uint64
-		if _, err := fmt.Sscanf(id[len(id)-20:], "%d", &version); err != nil {
-			return domain.WorkspaceBinding{}, false
-		}
-		bid = id[:len(id)-21]
-		return r.r.sem.res.wbindings.get(wbKey{bid, version})
+	// Entries are the documented (Seq, ID) cursor itself (DUR-1.13).
+	return pageRefs(p, r.r.sem.res.wbByContext.after(ctx, cursorRef(p.After)), func(ref seqRef) (domain.WorkspaceBinding, bool) {
+		return r.bindingAt(ref.id, ref.seq)
 	})
 }
 
@@ -383,6 +409,15 @@ func (t *semTx) InsertObservationRun(run domain.ObservationRun) error {
 	}
 	if t.r.sem.res.runs.has(run.ID) {
 		return immutable("observation run", run.ID)
+	}
+	// (subject, Ordinal) is the run's second key (SEC-1.13); IDs are never
+	// empty, so the first entry after (Ordinal, "") shares the ordinal if
+	// any does.
+	for r := range t.r.sem.res.runsBySubj.after(run.SubjectKey, seqRef{seq: run.Ordinal}) {
+		if r.seq == run.Ordinal {
+			return invalid("observation run %s: subject ordinal %d is already run %s", run.ID, run.Ordinal, r.id)
+		}
+		break
 	}
 	if !t.r.tasks.has(run.TaskID) {
 		return invalid("observation run %s: task %s is not stored", run.ID, run.TaskID)
@@ -415,6 +450,12 @@ func (t *semTx) InsertObservation(o domain.ObservationRecord) error {
 	ev, ok := t.r.items.peek(o.EvidenceItemID)
 	if !ok || ev.Authority != domain.AuthorityTool || ev.Access != o.Access {
 		return invalid("observation %s: evidence is not a stored TOOL item in its boundary", o.ID)
+	}
+	// A run closes once (DUR-1.1, G1).
+	for r := range t.r.sem.res.obsByRun.after(o.RunID, seqRef{}) {
+		if prior, _ := t.r.sem.res.observations.peek(r.id); store.ClosesRun(prior) {
+			return fmt.Errorf("observation %s: run %s already closed with %s: %w", o.ID, o.RunID, prior.ID, domain.ErrInvalidTransition)
+		}
 	}
 	t.r.sem.res.observations.put(o.ID, o)
 	t.r.sem.res.obsByRun.add(o.RunID, seqRef{o.Seq, o.ID})
@@ -522,6 +563,27 @@ func (r semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 		if !ok {
 			return domain.SubjectState{}, false
 		}
-		return r.r.sem.res.subjects.get(key)
+		st, ok := r.r.sem.res.subjects.get(key)
+		// Only CURRENT states are live dependents (G2); dead ones are
+		// skipped without counting toward the page.
+		return st, ok && st.Applicability == domain.ApplicabilityCurrent
 	})
+}
+
+// ResourceUpdatesAffectingPath implements store.ResourceReader over the
+// path-change index: ALL-paths updates, and updates naming path or an
+// ancestor directory, merged in (Seq, ID) order.
+func (r semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.Page) (store.ResultPage[domain.ResourceUpdate], error) {
+	if err := r.r.check(); err != nil {
+		return store.ResultPage[domain.ResourceUpdate]{}, err
+	}
+	affect, err := store.PathAffectKeys(path)
+	if err != nil {
+		return store.ResultPage[domain.ResourceUpdate]{}, err
+	}
+	keys := []resPath{{resourceID, allPathsKey}}
+	for _, k := range affect {
+		keys = append(keys, resPath{resourceID, k})
+	}
+	return page(p, dedup(mergeAfter(&r.r.sem.res.updByPath, keys, cursorRef(p.After))), loadAll(&r.r.sem.res.updates, ident))
 }

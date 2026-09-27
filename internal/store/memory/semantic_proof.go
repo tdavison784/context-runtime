@@ -445,7 +445,10 @@ func (r semRead) CurrentBoundObligationsBySubject(subjectKey string, p store.Pag
 	if err := r.r.check(); err != nil {
 		return store.ResultPage[domain.ObligationVersion]{}, err
 	}
-	return page(p, r.r.sem.proof.bound.after(subjectKey, cursorRef(p.After)), r.currentVersion)
+	return pageRefs(p, r.r.sem.proof.bound.after(subjectKey, cursorRef(p.After)), func(ref seqRef) (domain.ObligationVersion, bool) {
+		o, ok := r.indexedVersion(ref)
+		return o, ok && o.BindingState == domain.BindingBound && o.TargetSubjectKey == subjectKey
+	})
 }
 
 // ObligationsByTaskOwner pages the current versions whose declared owning
@@ -454,17 +457,32 @@ func (r semRead) ObligationsByTaskOwner(taskID string, p store.Page) (store.Resu
 	if err := r.r.check(); err != nil {
 		return store.ResultPage[domain.ObligationVersion]{}, err
 	}
-	return page(p, r.r.sem.proof.owners.after(taskID, cursorRef(p.After)), r.currentVersion)
+	return pageRefs(p, r.r.sem.proof.owners.after(taskID, cursorRef(p.After)), func(ref seqRef) (domain.ObligationVersion, bool) {
+		o, ok := r.indexedVersion(ref)
+		return o, ok && o.Access.TaskID == taskID && (o.Access.Scope == domain.ScopeTask || o.Access.Scope == domain.ScopeTurn)
+	})
 }
 
-// currentVersion loads the current version of an obligation ID.
-func (r semRead) currentVersion(id string) (domain.ObligationVersion, bool) {
-	latest, ok := r.r.latest.peek(id)
+// indexedVersion loads the exact current version an index entry names by
+// its (CreatedSeq, ObligationID), not the obligation's latest version
+// (DUR-1.13): versions take increasing creation sequences, so the newest
+// matching one is found walking back from the latest.
+func (r semRead) indexedVersion(ref seqRef) (domain.ObligationVersion, bool) {
+	latest, ok := r.r.latest.peek(ref.id)
 	if !ok {
 		return domain.ObligationVersion{}, false
 	}
-	o, ok := r.r.obligations.get(obligationKey{id, latest})
-	return o, ok && o.Current
+	for v := latest; v > 0; v-- {
+		o, ok := r.r.obligations.peek(obligationKey{ref.id, v})
+		if !ok || o.CreatedSeq < ref.seq {
+			return domain.ObligationVersion{}, false
+		}
+		if o.CreatedSeq == ref.seq {
+			o, ok = r.r.obligations.get(obligationKey{ref.id, v})
+			return o, ok && o.Current
+		}
+	}
+	return domain.ObligationVersion{}, false
 }
 
 func (r semRead) TransitionsByVersion(target domain.ObligationRef, p store.Page) (store.ResultPage[domain.ObligationTransition], error) {
@@ -621,6 +639,9 @@ func (t *semTx) AppendSemanticObligationTransition(tr domain.ObligationTransitio
 	if d.ResourceUpdateID != "" && !t.r.sem.res.updates.has(d.ResourceUpdateID) || d.ObservationID != "" && !t.r.sem.res.observations.has(d.ObservationID) {
 		return domain.ObligationVersion{}, invalid("transition %s: detail names an unstored cause", tr.ID)
 	}
+	if err := store.ValidateSatisfactionBacking(tr, d); err != nil {
+		return domain.ObligationVersion{}, err
+	}
 	next.CurrentProofID, next.CurrentAssertionID = "", ""
 	if tr.To == domain.ObligationSatisfied {
 		next.CurrentProofID, next.CurrentAssertionID = tr.ProofID, d.AssertionID
@@ -640,13 +661,45 @@ func (t *semTx) AppendSemanticObligationTransition(tr domain.ObligationTransitio
 		}
 		if d.AssertionID != "" {
 			a, ok := t.r.sem.proof.assertions.peek(d.AssertionID)
-			if !ok || a.TransitionID != tr.ID {
+			if !ok || a.TransitionID != tr.ID || a.Target != ref || a.Mode != tr.AssertionMode || a.ProofID != tr.ProofID {
 				return invalid("transition %s: assertion %s is not stored for it", tr.ID, d.AssertionID)
 			}
 		}
-		return nil
+		return t.r.checkProofNotStale(ref, tr.ProofID)
 	})
 	return next.Clone(), nil
+}
+
+// checkProofNotStale is the commit-time half of G1 (INV-16, P3-16/22): if
+// the version still rests on proofID at commit and that proof rests on an
+// observation, no CURRENT subject state of the run's own partition may
+// have accepted a newer run.
+func (r *readTx) checkProofNotStale(ref domain.ObligationRef, proofID string) error {
+	if proofID == "" {
+		return nil
+	}
+	o, ok := r.obligations.peek(refKey(ref))
+	if !ok || o.Status != domain.ObligationSatisfied || o.CurrentProofID != proofID {
+		return nil
+	}
+	p, _ := r.sem.proof.proofs.peek(proofID)
+	if p.ObservationID == "" {
+		return nil
+	}
+	obs, ok := r.sem.res.observations.peek(p.ObservationID)
+	if !ok {
+		return invalid("proof %s: observation %s is not stored", proofID, p.ObservationID)
+	}
+	run, ok := r.sem.res.runs.peek(obs.RunID)
+	if !ok {
+		return invalid("proof %s: run %s is not stored", proofID, obs.RunID)
+	}
+	st, ok := r.sem.res.subjects.peek(subjectKey{run.SubjectKey, run.TaskID, run.Access})
+	if ok && st.Applicability == domain.ApplicabilityCurrent && st.AcceptedOrdinal > run.Ordinal {
+		return fmt.Errorf("proof %s: run ordinal %d is older than the subject's accepted ordinal %d: %w",
+			proofID, run.Ordinal, st.AcceptedOrdinal, domain.ErrInvalidTransition)
+	}
+	return nil
 }
 
 // SetObligationMaterialization records an audited materialization

@@ -18,6 +18,10 @@ type pathStateRow struct {
 	State      domain.ResourcePathState
 }
 
+// SemanticSeq places the row's sequence in the TargetCall sharing check
+// (P3-1, SPEC-1.4).
+func (r pathStateRow) SemanticSeq() uint64 { return r.State.Seq }
+
 // subjectStateRow is a subject's current state in one (task, boundary)
 // partition, keyed by that partition; Resource and FirstSeq place it in
 // the by-resource index in first-filing order (P3-22).
@@ -29,6 +33,10 @@ type subjectStateRow struct {
 	State     domain.SubjectState
 }
 
+// SemanticSeq places the row's sequence in the TargetCall sharing check
+// (P3-1, SPEC-1.4).
+func (r subjectStateRow) SemanticSeq() uint64 { return r.State.Seq }
+
 func subjectPartitionKey(subject, task string, a domain.AccessBoundary) string {
 	parts := []string{subject, task, string(a.Scope), a.SessionID, a.WorkflowID, a.TaskID, a.AgentID}
 	for i, p := range parts {
@@ -36,6 +44,10 @@ func subjectPartitionKey(subject, task string, a domain.AccessBoundary) string {
 	}
 	return strings.Join(parts, ".")
 }
+
+// closingObservation is store.ClosesRun over rec_observation columns. It
+// is also the predicate of migration 0030's partial unique index.
+const closingObservation = "(f_outcome IN ('ERROR','TIMEOUT','CANCELLED') OR f_completeness='COMPLETE' AND f_outcome IN ('PASS','FAIL'))"
 
 // subjectResource is the resource a subject's target lives in.
 func subjectResource(s domain.ObservationSubject) string {
@@ -97,7 +109,12 @@ func (s semTx) InsertResourceUpdate(u domain.ResourceUpdate) error {
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return err
 	}
-	return t.put("resource_update", u.ID, 0, u, false)
+	return t.atomic(func() error {
+		if err := t.put("resource_update", u.ID, 0, u, false); err != nil {
+			return err
+		}
+		return t.indexUpdatePaths(u)
+	})
 }
 
 func (s semRead) ResourceUpdate(id string) (domain.ResourceUpdate, error) {
@@ -252,6 +269,14 @@ func (s semTx) InsertObservationRun(run domain.ObservationRun) error {
 	if ok, err := t.exists("observation_run", run.ID); err != nil || ok {
 		return errors.Join(err, immutableIf(ok, "observation run", run.ID))
 	}
+	// (subject, Ordinal) is the run's second key (SEC-1.13), backed by the
+	// unique index of migration 0029.
+	var other domain.ObservationRun
+	if err := t.getWhere("observation_run", "f_subject_key=? AND f_ordinal=?", &other, run.SubjectKey, run.Ordinal); err == nil {
+		return invalid("observation run %s: subject ordinal %d is already run %s", run.ID, run.Ordinal, other.ID)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
+	}
 	if ok, err := t.exists("task", run.TaskID); err != nil || !ok {
 		return errors.Join(err, invalidIf(!ok, "observation run %s: task %s is not stored", run.ID, run.TaskID))
 	}
@@ -281,6 +306,14 @@ func (s semTx) InsertObservation(o domain.ObservationRecord) error {
 	}
 	if err != nil || ev.Authority != domain.AuthorityTool || ev.Access != o.Access {
 		return invalid("observation %s: evidence is not a stored TOOL item in its boundary", o.ID)
+	}
+	// A run closes once (DUR-1.1, G1); migration 0030's partial unique
+	// index backs this check.
+	var closed domain.ObservationRecord
+	if err := t.getWhere("observation", "f_run_id=? AND "+closingObservation, &closed, o.RunID); err == nil {
+		return fmt.Errorf("observation %s: run %s already closed with %s: %w", o.ID, o.RunID, closed.ID, domain.ErrInvalidTransition)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
 	}
 	return t.put("observation", o.ID, 0, o, false)
 }
@@ -390,7 +423,8 @@ func (s semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 	if err != nil {
 		return out, err
 	}
-	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND (f_first_seq>? OR (f_first_seq=? AND f_state_semantic_meta_id>?)) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
+	// Only CURRENT states, through migration 0032's partial index (G2).
+	rows, err := t.query(sc.selectSQL+" WHERE session_id=? AND f_resource=? AND f_state_applicability='CURRENT' AND (f_first_seq>? OR (f_first_seq=? AND f_state_semantic_meta_id>?)) ORDER BY f_first_seq, f_state_semantic_meta_id LIMIT ?",
 		t.session, resourceID, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
 	if err != nil {
 		return out, err
@@ -410,4 +444,74 @@ func (s semRead) SubjectStatesByResource(resourceID string, p store.Page) (store
 		out.Next = store.Cursor{Seq: row.FirstSeq, ID: row.State.ID}
 	}
 	return out, rows.Err()
+}
+
+// updatePathKey is a lookup_resource_update_path key (migration 0033).
+func updatePathKey(p string) string { return "path:" + hex.EncodeToString([]byte(p)) }
+
+// indexUpdatePaths files u under every path it may change.
+func (t *transaction) indexUpdatePaths(u domain.ResourceUpdate) error {
+	var keys []string
+	if u.AllPaths {
+		keys = append(keys, "all")
+	}
+	for _, p := range u.ChangedPaths {
+		keys = append(keys, updatePathKey(p))
+	}
+	for _, k := range keys {
+		if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_resource_update_path(session_id,resource_id,path_key,seq,update_id) VALUES(?,?,?,?,?)",
+			t.session, u.ResourceID, k, u.Seq, u.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResourceUpdatesAffectingPath implements store.ResourceReader over
+// migration 0033's index: ALL-paths updates, and updates naming path or an
+// ancestor directory, in (Seq, ID) order.
+func (s semRead) ResourceUpdatesAffectingPath(resourceID, path string, p store.Page) (store.ResultPage[domain.ResourceUpdate], error) {
+	t := s.t
+	var out store.ResultPage[domain.ResourceUpdate]
+	if p.Limit <= 0 {
+		return out, invalid("page limit must be positive")
+	}
+	affect, err := store.PathAffectKeys(path)
+	if err != nil {
+		return out, err
+	}
+	args := []any{t.session, resourceID, "all"}
+	for _, k := range affect {
+		args = append(args, updatePathKey(k))
+	}
+	args = append(args, p.After.Seq, p.After.Seq, p.After.ID, p.Limit+1)
+	rows, err := t.query("SELECT DISTINCT seq, update_id FROM lookup_resource_update_path WHERE session_id=? AND resource_id=? AND path_key IN (?"+
+		strings.Repeat(",?", len(affect))+") AND (seq>? OR (seq=? AND update_id>?)) ORDER BY seq, update_id LIMIT ?", args...)
+	if err != nil {
+		return out, err
+	}
+	var refs []store.Cursor
+	for rows.Next() {
+		var c store.Cursor
+		if err := rows.Scan(&c.Seq, &c.ID); err != nil {
+			rows.Close()
+			return out, err
+		}
+		refs = append(refs, c)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+	if len(refs) > p.Limit {
+		refs, out.More = refs[:p.Limit], true
+	}
+	for _, c := range refs {
+		var u domain.ResourceUpdate
+		if err := t.get("resource_update", c.ID, 0, &u); err != nil {
+			return out, fmt.Errorf("%w: path index names missing update %s", domain.ErrIntegrity, c.ID)
+		}
+		out.Records = append(out.Records, u)
+		out.Next = c
+	}
+	return out, nil
 }

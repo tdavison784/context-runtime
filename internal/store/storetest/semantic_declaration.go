@@ -282,6 +282,83 @@ func testSemanticGrantsFor(t *testing.T, s store.Store) {
 	})
 }
 
+// testSemanticLiveGrantsFor checks the live-only grant read (G2, SEC-1.5,
+// DUR-1.4): only grants in force at the given sequence (issued by it, not
+// expired before it, not revoked at or before it) count toward the limit,
+// so revoked and expired history never makes a live grant unreadable. A
+// grant revoked later is still live at an earlier sequence.
+func testSemanticLiveGrantsFor(t *testing.T, s store.Store) {
+	issuer := NewPrincipal(sessA, domain.AuthoritySystem)
+	item := domain.ItemGrantTarget(sessA, "i1")
+	grant := func(id string, seq uint64) domain.MutationGrant {
+		g := NewGrant(sessA, id, seq)
+		g.Issuer, g.TargetIDs, g.Targets = issuer, nil, []domain.GrantTarget{item}
+		return g
+	}
+	var revokedAt, before uint64
+	update(t, s, sessA, func(tx store.Tx) error {
+		for _, id := range []string{"g-dead-1", "g-dead-2", "g-dead-3"} {
+			noErr(t, tx.InsertGrant(grant(id, tx.NextSeq())))
+		}
+		expired := grant("g-expired", tx.NextSeq())
+		expired.ExpiresAtSeq = expired.IssuedSeq
+		noErr(t, tx.InsertGrant(expired))
+		legacy := NewGrant(sessA, "g-legacy", tx.NextSeq(), "i1")
+		legacy.Issuer = issuer
+		noErr(t, tx.InsertGrant(legacy))
+		before = tx.NextSeq()
+		noErr(t, tx.AppendLifecycleEvent(NewLifecycleEvent(sessA, "tick", before, domain.TargetTask, "task")))
+		for _, id := range []string{"g-dead-1", "g-dead-2", "g-dead-3"} {
+			revokedAt = tx.NextSeq()
+			_, err := tx.RevokeGrant(id, NewLifecycleEvent(sessA, "revoke-"+id, revokedAt, domain.TargetGrant, id))
+			noErr(t, err)
+		}
+		_, err := tx.RevokeGrant("g-legacy", NewLifecycleEvent(sessA, "revoke-g-legacy", tx.NextSeq(), domain.TargetGrant, "g-legacy"))
+		noErr(t, err)
+		return tx.InsertGrant(grant("g-live", tx.NextSeq()))
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		r := readSemantic(t, tx)
+		ids := func(seq uint64, limit int) ([]string, error) {
+			gs, err := r.LiveGrantsFor(domain.ActionResolve, item, seq, limit)
+			var out []string
+			for _, g := range gs {
+				out = append(out, g.ID)
+			}
+			return out, err
+		}
+		now := tx.LastSeq()
+		got, err := ids(now, 1)
+		noErr(t, err)
+		assertEqual(t, "LiveGrantsFor(now, 1)", got, []string{"g-live"})
+		// Before the revocations the three grants and the legacy grant were
+		// live; the expired grant and the not yet issued one were not.
+		got, err = ids(before, 5)
+		noErr(t, err)
+		assertEqual(t, "LiveGrantsFor(before revocation)", got, []string{"g-dead-1", "g-dead-2", "g-dead-3", "g-legacy"})
+		_, err = ids(before, 3)
+		wantErr(t, err, store.ErrLimitExceeded)
+		got, err = ids(revokedAt, 5)
+		noErr(t, err)
+		assertEqual(t, "LiveGrantsFor(at the last revocation)", got, []string{"g-legacy"})
+		_, err = ids(now, 0)
+		wantErr(t, err, domain.ErrInvalidRecord)
+		return nil
+	})
+}
+
+// testSemanticGrantDuplicateTargets checks a legacy grant's TargetIDs are
+// a set (DUR-1.10): a grant naming one item twice is rejected with
+// ErrInvalidRecord by both stores, never a raw driver error or a doubled
+// index entry.
+func testSemanticGrantDuplicateTargets(t *testing.T, s store.Store) {
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+		g := NewGrant(sessA, "g-dup", tx.NextSeq(), "i1")
+		g.Issuer, g.Action, g.TargetIDs = NewPrincipal(sessA, domain.AuthoritySystem), domain.ActionResolve, []string{"i1", "i1"}
+		return tx.InsertGrant(g)
+	})
+}
+
 // testSemanticChanges checks semantic change records (P3-36) and the
 // indexed audit read by target: a change names an existing target and its
 // audit event for that target, pages are access filtered before the limit,

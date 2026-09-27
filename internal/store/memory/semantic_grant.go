@@ -37,6 +37,16 @@ func (t *tx) indexGrant(g domain.MutationGrant) {
 // store.ErrLimitExceeded, so an authorization check never sees a partial
 // set. Liveness at a sequence is the caller's check.
 func (r semRead) GrantsFor(action domain.Action, target domain.GrantTarget, limit int) ([]domain.MutationGrant, error) {
+	return r.grantsFor(action, target, limit, func(domain.MutationGrant) bool { return true })
+}
+
+// LiveGrantsFor is GrantsFor over the grants in force at seq only, so
+// dead history never counts toward limit (G2, SEC-1.5, DUR-1.4).
+func (r semRead) LiveGrantsFor(action domain.Action, target domain.GrantTarget, seq uint64, limit int) ([]domain.MutationGrant, error) {
+	return r.grantsFor(action, target, limit, func(g domain.MutationGrant) bool { return store.GrantLiveAt(g, seq) })
+}
+
+func (r semRead) grantsFor(action domain.Action, target domain.GrantTarget, limit int, keep func(domain.MutationGrant) bool) ([]domain.MutationGrant, error) {
 	if err := r.r.check(); err != nil {
 		return nil, err
 	}
@@ -55,12 +65,15 @@ func (r semRead) GrantsFor(action domain.Action, target domain.GrantTarget, limi
 	}
 	var out []domain.MutationGrant
 	for ref := range mergeAfter(&r.r.sem.grantIdx, keys, seqRef{}) {
-		if len(out) == limit {
-			return nil, store.ErrLimitExceeded
-		}
 		g, ok := r.r.grants.get(ref.id)
 		if !ok {
 			return nil, domain.ErrIntegrity
+		}
+		if !keep(g) {
+			continue
+		}
+		if len(out) == limit {
+			return nil, store.ErrLimitExceeded
 		}
 		out = append(out, g)
 	}

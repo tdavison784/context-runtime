@@ -288,9 +288,7 @@ func checkNothingInvented(t *testing.T, tx store.ReadTx, st sqlitetest.Phase2Ses
 	}
 	page := store.Page{Limit: 5}
 	for _, it := range st.Items {
-		if _, err := r.CreationDeclaration(it.ID); !errors.Is(err, domain.ErrNotFound) {
-			t.Errorf("item %s has a creation declaration after upgrade: %v", it.ID, err)
-		}
+		checkReconciledDeclaration(t, r, it)
 		leases, err := r.LeasesBySource(domain.ItemContentRef{ItemID: it.ID, ContentHash: it.ContentHash}, page)
 		if err != nil || len(leases.Records) != 0 {
 			t.Errorf("item %s has leases after upgrade: %+v, %v", it.ID, leases.Records, err)
@@ -321,6 +319,40 @@ func checkNothingInvented(t *testing.T, tx store.ReadTx, st sqlitetest.Phase2Ses
 				t.Errorf("owner %s %s registered by upgrade: %v", kind, id, err)
 			}
 		}
+	}
+}
+
+// checkReconciledDeclaration checks migration 0034 (G5, P3-41): an unkeyed
+// item gains no creation declaration; a keyed pre-upgrade item gains
+// exactly one at its creation sequence under the reconciliation policy,
+// either unknown or known with semantics that restate the item's own
+// creation fields, never invented ones.
+func checkReconciledDeclaration(t *testing.T, r store.SemanticReader, it domain.ContextItem) {
+	t.Helper()
+	d, err := r.CreationDeclaration(it.ID)
+	if it.DirectiveID == "" {
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("unkeyed item %s has a creation declaration after upgrade: %v", it.ID, err)
+		}
+		return
+	}
+	if err != nil {
+		t.Errorf("keyed item %s [%s] has no reconciled declaration: %v", it.ID, it.DirectiveID, err)
+		return
+	}
+	if err := d.Validate(); err != nil || d.ItemID != it.ID || d.Seq != it.Seq || d.PolicyVersion != "legacy-creation-reconciliation/v1" {
+		t.Errorf("item %s: reconciled declaration %+v (%v)", it.ID, d, err)
+		return
+	}
+	if !d.LegacyKnown {
+		return
+	}
+	a := d.AcceptedSemantics
+	key, _ := it.CurrentKey()
+	if a.Key != key || a.Authority != it.Authority || a.Section != it.Section || a.Kind != it.Kind || a.ContentHash != it.ContentHash ||
+		a.WorkflowID != it.WorkflowID || a.AgentID != it.AgentID || a.OriginTaskID != it.TaskID || a.OriginTurnID != it.TurnID ||
+		a.ObligationDeclarationHash != "" || a.SupportIDs != nil {
+		t.Errorf("item %s: known declaration does not restate its creation: %+v", it.ID, a)
 	}
 }
 

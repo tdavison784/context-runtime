@@ -1,6 +1,10 @@
 package store
 
-import "github.com/tdavison784/context-runtime/internal/domain"
+import (
+	"fmt"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+)
 
 type ProofReader interface {
 	ExactObligation(domain.ObligationRef) (domain.ObligationVersion, error)
@@ -28,4 +32,25 @@ type ProofWriter interface {
 	// A proof-refresh pair may call this twice with successive revisions.
 	AppendSemanticObligationTransition(domain.ObligationTransition, domain.TransitionDetail, uint64) (domain.ObligationVersion, error)
 	SetObligationMaterialization(target domain.ObligationRef, disabled bool, expectedRevision uint64, event domain.LifecycleEvent) (domain.ObligationVersion, error)
+}
+
+// ValidateSatisfactionBacking enforces INV-16's shape (DUR-1.9): a SATISFIED
+// transition carries exactly the backing its mode requires. A matcher
+// satisfies through its matcher proof alone; any other satisfaction names
+// its assertion, which commit checks against the transition's mode and
+// proof. A nonpositive transition carries neither.
+func ValidateSatisfactionBacking(tr domain.ObligationTransition, d domain.TransitionDetail) error {
+	switch {
+	case tr.To != domain.ObligationSatisfied:
+		if d.AssertionID != "" {
+			return fmt.Errorf("transition %s: a nonpositive transition names an assertion: %w", tr.ID, domain.ErrInvalidRecord)
+		}
+	case tr.Matcher != nil:
+		if tr.ProofID == "" || d.AssertionID != "" {
+			return fmt.Errorf("transition %s: a matcher satisfies through its proof alone: %w", tr.ID, domain.ErrInvalidRecord)
+		}
+	case d.AssertionID == "":
+		return fmt.Errorf("transition %s: SATISFIED without its assertion: %w", tr.ID, domain.ErrInvalidRecord)
+	}
+	return nil
 }
