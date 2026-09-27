@@ -555,7 +555,10 @@ func (s semRead) LatestResourceUpdateAffectingPath(resourceID, path string) (dom
 	return u, nil
 }
 
-// ClosingObservation implements store.ResourceReader.
+// ClosingObservation implements store.ResourceReader: a keyed search of
+// migration 0030's partial unique index, which holds at most one row per
+// run.
 func (s semRead) ClosingObservation(runID string) (domain.ObservationRecord, error) {
-	return domain.ObservationRecord{}, domain.ErrUnsupportedSchema
+	var o domain.ObservationRecord
+	return o, s.t.getWhere("observation", "f_run_id=? AND "+closingObservation, &o, runID)
 }

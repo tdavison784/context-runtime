@@ -238,10 +238,14 @@ func TestLiveReadsUseLiveIndexes(t *testing.T) {
 func TestH2LatestReadsAreKeyed(t *testing.T) {
 	s, _ := openTemp(t)
 	for _, c := range []struct {
-		keys []string
-		q    string
+		index string
+		keys  []string
+		q     string
 	}{
-		{[]string{"session_id", "resource_id", "path_key"}, "SELECT seq, update_id FROM lookup_resource_update_path WHERE session_id=? AND resource_id=? AND path_key=? ORDER BY seq DESC, update_id DESC LIMIT 1"},
+		{"", []string{"session_id", "resource_id", "path_key"}, "SELECT seq, update_id FROM lookup_resource_update_path WHERE session_id=? AND resource_id=? AND path_key=? ORDER BY seq DESC, update_id DESC LIMIT 1"},
+		// The closing lookup must use 0030's one-row-per-run partial index,
+		// never the by-run index over every partial report.
+		{"observation_run_closing", []string{"session_id", "f_run_id"}, "SELECT id FROM rec_observation WHERE session_id=? AND f_run_id=? AND " + closingObservation},
 	} {
 		args := make([]any, strings.Count(c.q, "?"))
 		for i := range args {
@@ -249,6 +253,31 @@ func TestH2LatestReadsAreKeyed(t *testing.T) {
 		}
 		assertIndexed(t, s, c.keys, c.q, args...)
 		assertNoSort(t, s, c.q, args...)
+		if c.index != "" {
+			assertUsesIndex(t, s, c.index, c.q, args...)
+		}
+	}
+}
+
+// assertUsesIndex fails unless q's plan searches index.
+func assertUsesIndex(t *testing.T, s *Store, index, q string, args ...any) {
+	t.Helper()
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if !strings.Contains(strings.Join(plan, "\n"), "USING INDEX "+index+" ") {
+		t.Errorf("%q does not search %s\nplan: %v", q, index, plan)
 	}
 }
 
