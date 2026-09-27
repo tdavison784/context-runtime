@@ -343,8 +343,10 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 		return "", err
 	default:
 		// An identical restatement of a version whose creation identity is
-		// unknown never replaces or rebinds it (SPEC-1.3); explicit
-		// same-content replacement of a known version stays possible (C-1).
+		// unknown never replaces or rebinds it (SPEC-1.3): a directive line
+		// fails closed, and an attribute-free duplicate must be linked, not
+		// filed (SPEC-2.9/2.10). A distinct version, and explicit same-content
+		// replacement of a known version (C-1), still replace.
 		prior, err := tx.Item(previousID)
 		if err != nil {
 			return "", err
@@ -355,7 +357,13 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 				return "", err
 			}
 			if _, err := knownDeclaration(r, prior); err != nil {
-				return "", err
+				same, err2 := SameDirective(tx, newItem, "", prior)
+				if err2 != nil {
+					return "", err2
+				}
+				if same {
+					return "", err
+				}
 			}
 		}
 		if _, err := Supersede(tx, actor, newItemID, previousID, eventID, ""); err != nil {
