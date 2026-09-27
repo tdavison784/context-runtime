@@ -621,6 +621,9 @@ func (t *semTx) AppendSemanticObligationTransition(tr domain.ObligationTransitio
 	if d.ResourceUpdateID != "" && !t.r.sem.res.updates.has(d.ResourceUpdateID) || d.ObservationID != "" && !t.r.sem.res.observations.has(d.ObservationID) {
 		return domain.ObligationVersion{}, invalid("transition %s: detail names an unstored cause", tr.ID)
 	}
+	if err := store.ValidateSatisfactionBacking(tr, d); err != nil {
+		return domain.ObligationVersion{}, err
+	}
 	next.CurrentProofID, next.CurrentAssertionID = "", ""
 	if tr.To == domain.ObligationSatisfied {
 		next.CurrentProofID, next.CurrentAssertionID = tr.ProofID, d.AssertionID
@@ -640,13 +643,45 @@ func (t *semTx) AppendSemanticObligationTransition(tr domain.ObligationTransitio
 		}
 		if d.AssertionID != "" {
 			a, ok := t.r.sem.proof.assertions.peek(d.AssertionID)
-			if !ok || a.TransitionID != tr.ID {
+			if !ok || a.TransitionID != tr.ID || a.Target != ref || a.Mode != tr.AssertionMode || a.ProofID != tr.ProofID {
 				return invalid("transition %s: assertion %s is not stored for it", tr.ID, d.AssertionID)
 			}
 		}
-		return nil
+		return t.r.checkProofNotStale(ref, tr.ProofID)
 	})
 	return next.Clone(), nil
+}
+
+// checkProofNotStale is the commit-time half of G1 (INV-16, P3-16/22): if
+// the version still rests on proofID at commit and that proof rests on an
+// observation, no CURRENT subject state of the run's own partition may
+// have accepted a newer run.
+func (r *readTx) checkProofNotStale(ref domain.ObligationRef, proofID string) error {
+	if proofID == "" {
+		return nil
+	}
+	o, ok := r.obligations.peek(refKey(ref))
+	if !ok || o.Status != domain.ObligationSatisfied || o.CurrentProofID != proofID {
+		return nil
+	}
+	p, _ := r.sem.proof.proofs.peek(proofID)
+	if p.ObservationID == "" {
+		return nil
+	}
+	obs, ok := r.sem.res.observations.peek(p.ObservationID)
+	if !ok {
+		return invalid("proof %s: observation %s is not stored", proofID, p.ObservationID)
+	}
+	run, ok := r.sem.res.runs.peek(obs.RunID)
+	if !ok {
+		return invalid("proof %s: run %s is not stored", proofID, obs.RunID)
+	}
+	st, ok := r.sem.res.subjects.peek(subjectKey{run.SubjectKey, run.TaskID, run.Access})
+	if ok && st.Applicability == domain.ApplicabilityCurrent && st.AcceptedOrdinal > run.Ordinal {
+		return fmt.Errorf("proof %s: run ordinal %d is older than the subject's accepted ordinal %d: %w",
+			proofID, run.Ordinal, st.AcceptedOrdinal, domain.ErrInvalidTransition)
+	}
+	return nil
 }
 
 // SetObligationMaterialization records an audited materialization
