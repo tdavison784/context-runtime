@@ -167,6 +167,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"DUR31ReportsReadOnlyAffectedProofs", TestDUR31ReportsReadOnlyAffectedProofs, true},
 		{"DUR31AssertionRespectsDependentCap", TestDUR31AssertionRespectsDependentCap, false},
 		{"DUR31MatcherRespectsDependentCap", TestDUR31MatcherRespectsDependentCap, true},
+		{"SEC410BindingVersionIsNoOracle", TestSEC410BindingVersionIsNoOracle, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			switch {
