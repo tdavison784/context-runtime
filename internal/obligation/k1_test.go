@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
 	"github.com/tdavison784/context-runtime/internal/store"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
 
 // effective reads ref's effective status through the K1 helper.
@@ -475,4 +477,97 @@ func (f fixture) wantSettled(t *testing.T, ref domain.ObligationRef, resource, m
 		t.Fatalf("%s: settlement = %+v (cause update %+v)", msg, last, u)
 	}
 	return last
+}
+
+// replacePinSettled is replacePin with the obligation service injected as
+// graph's PendingSettler, as production wires it (ruling M2).
+func replacePinSettled(t *testing.T, f fixture, id, dirID, text string, attrs []string) (*domain.ObligationRef, error) {
+	t.Helper()
+	var ref *domain.ObligationRef
+	err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+		it := storetest.NewDirective(testSession, id, dirID, tx.NextSeq(), text)
+		it.Authority, it.Namespace, it.Role = domain.AuthoritySystem, domain.NamespaceDirective, domain.RoleSemantic
+		if err := tx.InsertItem(it); err != nil {
+			return err
+		}
+		if _, err := graph.DeclareCreation(tx, it, graph.CreationAcceptance{PolicyVersion: "declaration/1", AcceptedAttributes: attrs}); err != nil {
+			return err
+		}
+		if _, err := graph.ReplaceDirective(tx, f.system, "task", dirID, it.ID, "evt-"+id, graph.WithPendingSettler(f.s)); err != nil {
+			return err
+		}
+		var err error
+		ref, err = f.s.DeclareForReplacementTx(tx, f.system, it.ID, tx.NextSeq())
+		return err
+	})
+	return ref, err
+}
+
+// K1 A3 / ruling M2, end to end: replacing a directive whose obligation's
+// resource-bound proof really went stale settles it first, so the retired
+// version's history reads RESOURCE_INVALIDATION and then retirement; a
+// still-valid proof is retired SATISFIED with no invalidation record.
+func TestK1ReplacementSettlesPendingBeforeRetirement(t *testing.T) {
+	f := newEvalFixture(t)
+	if _, err := f.s.bindWS(t, f.st, f.system, bindIntent("ws-task", 1, domain.WorkspaceSourceContext{Kind: domain.WorkspaceTask, ID: "task"})); err != nil {
+		t.Fatal(err)
+	}
+	attrs := []string{"obligation=tests_pass"}
+	assertWorkspace := func(ref domain.ObligationRef) {
+		t.Helper()
+		o := f.status(t, ref)
+		in := intent(ref, o.Revision, domain.ObligationSatisfied)
+		in.AssertionMode = domain.AssertionResourceBound
+		in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyWorkspace, ResourceID: "repo1", ResourceRevision: f.r.auth, Fingerprint: f.fp(t)}}
+		if _, err := f.s.transition(t, f.st, f.system, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale, err := replacePinSettled(t, f.fixture, "rs1", "rep-stale", "Keep the build green.", attrs)
+	if err != nil || stale == nil {
+		t.Fatalf("first version: %v %v", stale, err)
+	}
+	assertWorkspace(*stale)
+	f.r.set(t, f.fixture, hashOf("W2"), false)
+	cause := f.repo1Update()
+	if _, err := replacePinSettled(t, f.fixture, "rs2", "rep-stale", "Keep the build green.", attrs); err != nil {
+		t.Fatalf("replacement over a pending version: %v", err)
+	}
+	h := f.history(t, *stale)
+	last := h[len(h)-1]
+	if last.Cause != domain.CauseResourceInvalidation || last.CauseRecordID != cause || last.Actor != runtimeActor(testSession) {
+		t.Errorf("retired pending version's last transition = %+v, want its settlement", last)
+	}
+	if o := f.status(t, *stale); o.Current || o.Status != domain.ObligationUnresolved {
+		t.Errorf("retired pending version = %+v, want retired UNRESOLVED", o)
+	}
+	// A still-valid proof: no settlement, retired SATISFIED.
+	valid, err := replacePinSettled(t, f.fixture, "rv1", "rep-valid", "Keep the build green.", attrs)
+	if err != nil || valid == nil {
+		t.Fatalf("valid first version: %v %v", valid, err)
+	}
+	assertWorkspace(*valid)
+	if _, err := replacePinSettled(t, f.fixture, "rv2", "rep-valid", "Keep the build green.", attrs); err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range f.history(t, *valid) {
+		if tr.Cause == domain.CauseResourceInvalidation {
+			t.Errorf("valid proof got a settlement: %+v", tr)
+		}
+	}
+	if o := f.status(t, *valid); o.Current || o.Status != domain.ObligationSatisfied {
+		t.Errorf("retired valid version = %+v, want retired SATISFIED", o)
+	}
+}
+
+// fp is repo1's current workspace fingerprint.
+func (f *evalFixture) fp(t *testing.T) string {
+	t.Helper()
+	var rs domain.ResourceState
+	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		r, _ := store.ReadSemantic(tx)
+		rs, _ = r.ResourceState("repo1")
+		return nil
+	})
+	return rs.WorkspaceFingerprint
 }
