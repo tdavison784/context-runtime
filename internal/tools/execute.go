@@ -151,7 +151,7 @@ func replayTool[I any](sem store.SemanticReader, prior domain.ToolExecutionRecei
 		return none, err
 	}
 	// A later, smaller policy limit cannot turn a committed request into a conflict.
-	args, err := domain.CanonicalSemanticArguments(request, max(policy.MaxMetadataBytes, len(m.CanonicalArguments)))
+	args, err := domain.CanonicalSemanticArguments(request, graph.ReplayArgumentLimit(policy, m.CanonicalArguments))
 	if err != nil {
 		return none, domain.ErrEventIDConflict
 	}
