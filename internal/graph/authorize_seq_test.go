@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 	"testing"
 )
 
@@ -38,4 +39,44 @@ func TestAuthorizationUsesActualAllocatedGrantBoundary(t *testing.T) {
 	if _, err := AuthorizeAtSequence(f, actor, domain.ActionResolve, []domain.GrantTarget{ref}, nil, 8, 8); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
 		t.Fatal("expired grant accepted", err)
 	}
+}
+
+// TestAuthorizationIgnoresDeadGrantHistory checks G2 (SEC-1.5, DUR-1.4):
+// revoked grant history on a target never makes a live grant unusable,
+// because authorization reads only the grants in force at its sequence.
+func TestAuthorizationIgnoresDeadGrantHistory(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		actor := domain.Principal{SessionID: "s", Authority: domain.AuthorityHarness}
+		issuer := domain.Principal{SessionID: "s", Authority: domain.AuthoritySystem}
+		ref := domain.ItemGrantTarget("s", "i")
+		grant := func(id string, seq uint64) domain.MutationGrant {
+			return domain.MutationGrant{ID: id, SessionID: "s", Action: domain.ActionResolve, Targets: []domain.GrantTarget{ref}, Issuer: issuer, Grantee: &actor, IssuedSeq: seq}
+		}
+		update(t, s, "s", func(tx store.Tx) error {
+			it := storetest.NewItem("s", "i", tx.NextSeq(), "system fact")
+			it.Authority = domain.AuthoritySystem
+			if err := tx.InsertItem(it); err != nil {
+				return err
+			}
+			for _, id := range []string{"g1", "g2", "g3"} {
+				if err := tx.InsertGrant(grant(id, tx.NextSeq())); err != nil {
+					return err
+				}
+				if _, err := tx.RevokeGrant(id, storetest.NewLifecycleEvent("s", "revoke-"+id, tx.NextSeq(), domain.TargetGrant, id)); err != nil {
+					return err
+				}
+			}
+			return tx.InsertGrant(grant("g-live", tx.NextSeq()))
+		})
+		update(t, s, "s", func(tx store.Tx) error {
+			auth, err := AuthorizeAtSequence(tx, actor, domain.ActionResolve, []domain.GrantTarget{ref}, nil, tx.NextSeq(), 2)
+			if err != nil {
+				t.Fatalf("live grant behind %d revoked ones: %v", 3, err)
+			}
+			if auth.GrantIDs["i"] != "g-live" {
+				t.Errorf("authorization = %+v, want grant g-live", auth)
+			}
+			return nil
+		})
+	})
 }
