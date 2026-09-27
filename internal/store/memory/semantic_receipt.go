@@ -27,6 +27,7 @@ func (t *semTx) InsertMutationReceipt(r domain.MutationReceipt) error {
 	t.r.sem.mutReceipts.put(r.ID, r)
 	t.r.sem.mutByKey.put(key, r.ID)
 	t.t.sequencedWrite(r.Seq)
+	t.checkResultRefs("mutation receipt", r.ID, resultRefs(r.Result))
 	return nil
 }
 
@@ -50,6 +51,7 @@ func (t *semTx) InsertToolExecutionReceipt(r domain.ToolExecutionReceipt) error 
 	}
 	t.r.sem.toolReceipts.put(r.ID, r)
 	t.t.sequencedWrite(r.Seq)
+	t.checkResultRefs("tool receipt", r.ID, toolRefs(r.Result))
 	return nil
 }
 
@@ -74,4 +76,64 @@ func (r semRead) ToolExecutionReceipt(invocationID string) (domain.ToolExecution
 		return m, notFound("tool receipt", invocationID)
 	}
 	return m, nil
+}
+
+// refStored reports whether a result reference names a stored record.
+func (t *semTx) refStored(ref resultRef) bool {
+	s := &t.r.sem
+	switch ref.kind {
+	case "item":
+		return t.r.items.has(ref.id)
+	case "audit":
+		e, ok := t.r.lifecycle.peek(ref.id)
+		return ok && (ref.auditOf == "" || e.TargetID == ref.auditOf)
+	case "obligation":
+		return t.r.obligations.has(obligationKey{ref.id, ref.version})
+	case "transition":
+		return t.r.transitions.has(ref.id)
+	case "proof":
+		return s.proof.proofs.has(ref.id)
+	case "assertion":
+		return s.proof.assertions.has(ref.id)
+	case "task":
+		return t.r.tasks.has(ref.id)
+	case "gc_request":
+		return s.gc.requests.has(ref.id)
+	case "collect_receipt":
+		return s.gc.receipts.has(ref.id)
+	case "checkpoint":
+		return s.checkpoints.has(ref.id)
+	case "retrieval_result":
+		return s.ret.results.has(ref.id)
+	case "grant":
+		return t.r.grants.has(ref.id)
+	case "resource_update":
+		return s.res.updates.has(ref.id)
+	case "observation_run":
+		return s.res.runs.has(ref.id)
+	case "observation":
+		return s.res.observations.has(ref.id)
+	case "resource_binding_id":
+		return s.res.bindingIDs.has(ref.id)
+	case "obligation_declaration_id":
+		return s.proof.declIDs.has(ref.id)
+	case "workspace_binding_id":
+		return s.res.wbLatest.has(ref.id)
+	}
+	return false
+}
+
+// checkResultRefs requires, at commit, every record refs names.
+func (t *semTx) checkResultRefs(what, id string, refs []resultRef) {
+	if len(refs) == 0 {
+		return
+	}
+	t.t.deferCheck(func() error {
+		for _, ref := range refs {
+			if !t.refStored(ref) {
+				return invalid("%s %s: result names %s %s, which is not stored", what, id, ref.kind, ref.id)
+			}
+		}
+		return nil
+	})
 }

@@ -584,7 +584,7 @@ func testSemanticReceipts(t *testing.T, s store.Store) {
 		noErr(t, err)
 		return domain.MutationReceipt{SemanticMeta: Meta(sessA, id, seq), Family: domain.MutationTool, RequestID: requestID, Principal: principal,
 			CanonicalMethod: "context_remember", CanonicalArguments: args, RequestHashVersion: domain.RequestHashV3, RequestHash: h,
-			PolicyVersion: domain.Phase3PolicyVersion, Result: domain.MutationResult{Tool: &domain.ToolResult{CheckpointID: "c1"}}}
+			PolicyVersion: domain.Phase3PolicyVersion, Result: domain.MutationResult{Tool: &domain.ToolResult{Keyed: &domain.KeyedWriteResult{ItemID: "k1", CanonicalItemID: "k1"}}}}
 	}
 	inv := domain.ToolInvocation{SessionID: sessA, ConversationID: domain.ConversationIDFor("task", "agent"), CallID: "call-1", ToolCallID: "tc-1", ExchangeID: "x1", TurnID: "turn-1", Principal: principal}
 	invID, err := inv.ID()
@@ -592,9 +592,10 @@ func testSemanticReceipts(t *testing.T, s store.Store) {
 	var mr domain.MutationReceipt
 	toolReceipt := func(seq uint64) domain.ToolExecutionReceipt {
 		return domain.ToolExecutionReceipt{SemanticMeta: Meta(sessA, invID, seq), Invocation: inv, Method: "context_remember", MutationReceiptID: mr.ID,
-			RequestHash: mr.RequestHash, Result: domain.ToolResult{CheckpointID: "c1"}}
+			RequestHash: mr.RequestHash, Result: domain.ToolResult{Keyed: &domain.KeyedWriteResult{ItemID: "k1", CanonicalItemID: "k1"}}}
 	}
 	update(t, s, sessA, func(tx store.Tx) error {
+		noErr(t, tx.InsertItem(NewItem(sessA, "k1", tx.NextSeq(), "remembered")))
 		mr = receipt(tx.NextSeq(), "req-1")
 		sem := semantic(t, tx)
 		noErr(t, sem.InsertMutationReceipt(mr))
@@ -609,7 +610,7 @@ func testSemanticReceipts(t *testing.T, s store.Store) {
 		wantErr(t, err, domain.ErrNotFound)
 		tr, err := r.ToolExecutionReceipt(invID)
 		noErr(t, err)
-		assertEqual(t, "ToolExecutionReceipt", tr, toolReceipt(2))
+		assertEqual(t, "ToolExecutionReceipt", tr, toolReceipt(3))
 		return nil
 	})
 	rejected(t, s, sessA, domain.ErrImmutable, func(tx store.Tx) error {
@@ -644,13 +645,44 @@ func testSemanticReceipts(t *testing.T, s store.Store) {
 			t.Errorf("tool receipt %s: error = %v, want ErrInvalidRecord", tc.name, err)
 		}
 	}
+	// Every record a result names must be stored by commit (P3-2), in the
+	// same transaction or earlier.
+	for _, tc := range []struct {
+		name   string
+		result domain.MutationResult
+	}{
+		{"keyed item missing", domain.MutationResult{Tool: &domain.ToolResult{Keyed: &domain.KeyedWriteResult{ItemID: "ghost", CanonicalItemID: "ghost"}}}},
+		{"checkpoint missing", domain.MutationResult{Tool: &domain.ToolResult{CheckpointID: "c-missing"}}},
+		{"item audit missing", domain.MutationResult{Item: &domain.ItemMutationResult{ItemID: "k1", BeforeVersion: 1, AfterVersion: 2, AuditID: "l-missing",
+			Before: domain.ObservedItemState{Source: domain.ItemContentRef{ItemID: "k1", ContentHash: fpA}, Version: 1, Currentness: domain.ItemUnkeyed,
+				Generation: domain.GenerationWorking, Residency: domain.ResidencyResident, Authority: domain.AuthorityUser, Expiry: domain.ExpiryLive},
+			After: domain.ObservedItemState{Source: domain.ItemContentRef{ItemID: "k1", ContentHash: fpA}, Version: 2, Currentness: domain.ItemUnkeyed,
+				Generation: domain.GenerationWorking, Residency: domain.ResidencyResident, Authority: domain.AuthorityUser, Expiry: domain.ExpiryLive}}}},
+		{"granted record missing", domain.MutationResult{Records: &domain.RecordResult{Kind: "GRANT", IDs: []string{"g-missing"}}}},
+	} {
+		err := s.Update(ctx, sessA, func(tx store.Tx) error {
+			r := receipt(tx.NextSeq(), "req-"+tc.name[:4])
+			r.Result = tc.result
+			return semantic(t, tx).InsertMutationReceipt(r)
+		})
+		if !errors.Is(err, domain.ErrInvalidRecord) {
+			t.Errorf("result %s: error = %v, want ErrInvalidRecord", tc.name, err)
+		}
+	}
+	// A result may name a record the same transaction stores after it.
+	update(t, s, sessA, func(tx store.Tx) error {
+		r := receipt(tx.NextSeq(), "req-later")
+		r.Result = domain.MutationResult{Tool: &domain.ToolResult{Keyed: &domain.KeyedWriteResult{ItemID: "k2", CanonicalItemID: "k2"}}}
+		noErr(t, semantic(t, tx).InsertMutationReceipt(r))
+		return tx.InsertItem(NewItem(sessA, "k2", tx.NextSeq(), "written after its receipt"))
+	})
 	// Records returned by the facet are deep copies.
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		r := readSemantic(t, tx)
 		got, err := r.MutationReceipt(domain.MutationTool, "req-1")
 		noErr(t, err)
 		got.CanonicalArguments[0] = 'X'
-		got.Result.Tool.CheckpointID = "mutated"
+		got.Result.Tool.Keyed.ItemID = "mutated"
 		again, err := r.MutationReceipt(domain.MutationTool, "req-1")
 		noErr(t, err)
 		assertEqual(t, "MutationReceipt after caller mutation", again, mr)
