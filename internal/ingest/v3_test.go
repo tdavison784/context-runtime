@@ -60,7 +60,7 @@ func TestV3_NewEventRecordsSchema(t *testing.T) {
 		user := principal(domain.AuthorityUser)
 		e := userEvent("v3-1", "a plain question", false)
 		r := f.mustIngest(user, e)
-		if r.SchemaVersion != domain.IngestReceiptSchemaV2 || r.RequestHashVersion != domain.RequestHashV3 || r.Versions.Semantic == nil || *r.Versions.Semantic != *f.in.Semantic {
+		if r.SchemaVersion != domain.IngestReceiptSchemaV2 || r.RequestHashVersion != domain.RequestHashV3 || r.Versions.Semantic == nil || !reflect.DeepEqual(*r.Versions.Semantic, *f.in.Semantic) {
 			t.Fatalf("receipt schema %q hash %q semantic %v", r.SchemaVersion, r.RequestHashVersion, r.Versions.Semantic)
 		}
 		want, err := e.PayloadHashFor(domain.RequestHashV3, user, f.in.Limits.Effective(), *f.in.Semantic)
@@ -238,7 +238,7 @@ func TestV3_DefaultPolicy(t *testing.T) {
 	t.Cleanup(func() { ms.Close() })
 	f := newFixture(t, ms)
 	r := f.mustIngest(principal(domain.AuthorityUser), userEvent("dflt", "hello", false))
-	if r.RequestHashVersion != domain.RequestHashV3 || r.Versions.Semantic == nil || *r.Versions.Semantic != policy.DefaultPhase3Policy() {
+	if r.RequestHashVersion != domain.RequestHashV3 || r.Versions.Semantic == nil || !reflect.DeepEqual(*r.Versions.Semantic, policy.DefaultPhase3Policy()) {
 		t.Fatalf("receipt policy %+v under %q", r.Versions.Semantic, r.RequestHashVersion)
 	}
 }
