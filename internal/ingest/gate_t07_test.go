@@ -428,3 +428,48 @@ func TestGateT07_Repeats(t *testing.T) {
 		})
 	})
 }
+
+// reevaluate ingests a HARNESS REEVALUATE operation for ref at its current
+// revision (C-4: trusted, exact-version, no caller-selected matcher or
+// evidence).
+func (w *t07) reevaluate(ref domain.ObligationRef) {
+	w.f.t.Helper()
+	w.f.mustIngest(w.harness, domain.Event{EventID: w.id("reeval"), Kind: domain.EventHarness, Operations: []domain.SemanticOperation{{
+		Kind: domain.OperationReevaluate, Reevaluate: &domain.ReevaluateIntent{Target: ref, ExpectedRevision: w.statusOf(ref).Revision}}}})
+}
+
+// t02Reevaluation is T02's satisfied-obligation repeat through ingest: v1
+// is satisfied under its own matcher grant; replacing the pin retires v1
+// and starts v2 UNRESOLVED; reevaluating v2 under only the v1 grant leaves
+// it UNRESOLVED; once v2 has its own grant, reevaluation satisfies it from
+// the existing evidence, with a new proof and no new run.
+func t02Reevaluation(t *testing.T, f *fixture) {
+	w := newT07(t, f, true, 1)
+	w.run(t07Target(nil), fingerprint("W1"))
+	v1 := w.status()
+	if v1.Status != domain.ObligationSatisfied {
+		t.Fatalf("v1 = %+v", v1)
+	}
+	// Changed text that still states the claim: a replacement, not a
+	// duplicate, declaring the same obligation's next version.
+	r := f.mustIngest(principal(domain.AuthoritySystem), sysEvent("t02-replace-pin", "## Pinned\n- [tests0] All tests must pass\n"))
+	o2 := f.currentObligation(mustDirective(t, r, "tests0").ID)
+	v2 := domain.ObligationRef{SessionID: sess, ObligationID: o2.ObligationID, Version: o2.Version}
+	if o2.ObligationID != v1.ObligationID || o2.Version != v1.Version+1 || o2.Status != domain.ObligationUnresolved || o2.CurrentProofID != "" || o2.BindingState != domain.BindingBound {
+		t.Fatalf("v2 = %+v", o2)
+	}
+	if retired := w.statusOf(w.ref); retired.Current || retired.Status != domain.ObligationSatisfied || retired.CurrentProofID != v1.CurrentProofID {
+		t.Fatalf("retired v1 = %+v", retired)
+	}
+	runs := w.runs
+	w.reevaluate(v2)
+	if got := w.statusOf(v2); got.Status != domain.ObligationUnresolved {
+		t.Fatalf("v2 satisfied under the v1 grant: %+v", got)
+	}
+	w.grantMatcher("g-v2", v2)
+	w.reevaluate(v2)
+	got := w.statusOf(v2)
+	if got.Status != domain.ObligationSatisfied || got.CurrentProofID == "" || got.CurrentProofID == v1.CurrentProofID || w.runs != runs {
+		t.Fatalf("v2 after its own grant and reevaluation = %+v", got)
+	}
+}

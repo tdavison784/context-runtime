@@ -169,7 +169,9 @@ func TestGateT02_ReplacementRetiresOldRequirement(t *testing.T) {
 			})
 		})
 	})
-	t.Run("v2 satisfied only by separately authorized reevaluation", func(t *testing.T) { pending(t, depW4+" (C-4 REEVALUATE)") })
+	t.Run("v2 satisfied only by separately authorized reevaluation", func(t *testing.T) {
+		semanticStores(t, func(t *testing.T, f *fixture) { t02Reevaluation(t, f) })
+	})
 	t.Run("explicit same-content ReplaceDirective starts a new OPEN version", func(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
 			sys := principal(domain.AuthoritySystem)
