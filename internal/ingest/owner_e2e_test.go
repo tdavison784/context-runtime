@@ -49,7 +49,7 @@ func TestIngestRegisteredOwnersOutliveTaskAndRestart_SPEC212(t *testing.T) {
 	}
 	f := newFixture(t, db)
 	pol := testPolicy()
-	f.in.Semantic = &pol
+	f.usePolicy(pol)
 	sys := principal(domain.AuthoritySystem)
 	e := domain.Event{EventID: "owners", Kind: domain.EventSystem, Spans: []domain.Span{
 		textSpan(domain.AuthoritySystem, true, "## Goal [wg] scope=WORKFLOW\nShip the workflow.\n"),

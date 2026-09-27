@@ -5,6 +5,7 @@ import (
 	"github.com/tdavison784/context-runtime/internal/lifecycle"
 	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/store"
+	"reflect"
 )
 
 // OperationHandler executes one resolved typed operation of an event's
@@ -78,6 +79,32 @@ func (h grantHandler) Execute(tx store.Tx, actor domain.Principal, op domain.Sem
 		res.Created.GrantID = op.Grant.GrantID
 	}
 	return res, nil
+}
+
+// PolicyExecutor reports the Phase 3 policy a lifecycle executor was frozen
+// with. *lifecycle.Service implements it.
+type PolicyExecutor interface {
+	Policy() domain.Phase3Policy
+}
+
+var _ PolicyExecutor = (*lifecycle.Service)(nil)
+
+// underRecordedPolicy requires the lifecycle executor x to execute under
+// the event's recorded policy (SPEC-3.5, SPEC-2.11, P3-40): its trigger
+// enablement, limits and registries decide what the event's lifecycle
+// effects persist, so an executor frozen with any other policy, or one that
+// cannot report its policy, is a configuration error and the event is
+// refused (ErrUnsupportedSchema) before it executes anything. Frozen v2
+// history records no policy and executes no lifecycle effect.
+func (r *run) underRecordedPolicy(x any) error {
+	if r.pol == nil {
+		return nil
+	}
+	pe, ok := x.(PolicyExecutor)
+	if !ok || !reflect.DeepEqual(pe.Policy(), *r.pol) {
+		return domain.ErrUnsupportedSchema
+	}
+	return nil
 }
 
 // ReplaceExecutor executes the explicit typed directive replacement
@@ -183,12 +210,18 @@ func (r *run) handler(kind domain.SemanticOperationKind) (OperationHandler, erro
 		if !ok {
 			return nil, domain.ErrUnsupportedSchema
 		}
+		if err := r.underRecordedPolicy(x); err != nil {
+			return nil, err
+		}
 		return replaceHandler{x}, nil
 	}
 	if kind == domain.OperationGrant || kind == domain.OperationRevokeGrant {
 		g, ok := r.g.Lifecycle.(GrantExecutor)
 		if !ok {
 			return nil, domain.ErrUnsupportedSchema
+		}
+		if err := r.underRecordedPolicy(g); err != nil {
+			return nil, err
 		}
 		return grantHandler{g}, nil
 	}

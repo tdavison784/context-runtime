@@ -47,7 +47,7 @@ func semanticStores(t *testing.T, fn func(t *testing.T, f *fixture)) {
 		}
 		f := newFixture(t, s)
 		pol := testPolicy()
-		f.in.Semantic = &pol
+		f.usePolicy(pol)
 		fn(t, f)
 	}
 	t.Run("memory", func(t *testing.T) {

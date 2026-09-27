@@ -433,6 +433,9 @@ func (r *run) executeCommand(rec *domain.LifecycleCommandRecord, outcome domain.
 	if r.g.Lifecycle == nil {
 		return domain.ErrUnsupportedSchema
 	}
+	if err := r.underRecordedPolicy(r.g.Lifecycle); err != nil {
+		return err
+	}
 	req, err := domain.OperationRequestID(r.p, rec.Actor, r.occurrence, r.seq, r.unitOp, uint64(rec.Ordinal)+1)
 	if err != nil {
 		return err

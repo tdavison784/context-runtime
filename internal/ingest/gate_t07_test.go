@@ -402,7 +402,7 @@ func TestGateT07_Repeats(t *testing.T) {
 		semanticStores(t, func(t *testing.T, f *fixture) {
 			pol := testPolicy()
 			pol.MaxPageSize = 2
-			f.in.Semantic = &pol
+			f.usePolicy(pol)
 			w := newT07(t, f, true, 5)
 			w.run(t07Target(nil), fingerprint("W1"))
 			for _, ref := range w.refs {
@@ -417,7 +417,7 @@ func TestGateT07_Repeats(t *testing.T) {
 			// an invalid policy's.
 			tight := pol
 			tight.MaxTransactionWork, tight.MaxLiveProofDependents = 10, 1
-			f.in.Semantic = &tight
+			f.usePolicy(tight)
 			before := f.lastSeq()
 			if err := w.reportAt(fingerprint("W2"), false, w.auth, w.auth+1); !errors.Is(err, domain.ErrResourceLimit) || f.lastSeq() != before {
 				t.Fatalf("over-limit invalidation: err %v, seq %d -> %d", err, before, f.lastSeq())
@@ -427,7 +427,7 @@ func TestGateT07_Repeats(t *testing.T) {
 					t.Fatalf("partial invalidation: %+v", got)
 				}
 			}
-			f.in.Semantic = &pol
+			f.usePolicy(pol)
 			w.report(fingerprint("W2"), false)
 			for _, ref := range w.refs {
 				if got := w.statusOf(ref); got.Status != domain.ObligationUnresolved {

@@ -15,12 +15,7 @@ func (f *fixture) withGCTriggers() {
 	f.t.Helper()
 	pol := testPolicy()
 	pol.GCTriggers = domain.DefaultGCTriggers()
-	f.in.Semantic = &pol
-	svc, err := lifecycle.New(f.s, pol)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	f.in.Lifecycle = svc
+	f.usePolicy(pol)
 }
 
 // gcRequests returns the session's pending GC requests by trigger.
@@ -95,7 +90,7 @@ func TestGCProducers_SPEC16(t *testing.T) {
 func (f *fixture) gcTriggersOff() {
 	pol := testPolicy()
 	pol.GCTriggers = []domain.GCTrigger{domain.GCManual, domain.GCTaskCompletion}
-	f.in.Semantic = &pol
+	f.usePolicy(pol)
 }
 
 // withoutGCTriggers records and executes a policy that disables SUPERSESSION

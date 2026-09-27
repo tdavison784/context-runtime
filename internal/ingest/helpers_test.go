@@ -110,6 +110,26 @@ func lifecycleFor(t *testing.T, s store.Store) LifecycleExecutor {
 	return svc
 }
 
+// usePolicy records pol for new events and freezes the fixture's lifecycle
+// executor with the same policy, as a correctly configured embedder does
+// (SPEC-3.5): ingest refuses lifecycle execution under any other policy.
+func (f *fixture) usePolicy(pol domain.Phase3Policy) {
+	f.t.Helper()
+	f.in.Semantic = &pol
+	switch x := f.in.Lifecycle.(type) {
+	case *lifecycle.Service:
+		svc, err := lifecycle.New(f.s, pol)
+		if err != nil {
+			f.t.Fatalf("lifecycle.New: %v", err)
+		}
+		f.in.Lifecycle = svc
+		_ = x
+	case fakeLifecycle:
+		x.pol = &pol
+		f.in.Lifecycle = x
+	}
+}
+
 const sess = "S"
 
 func principal(a domain.Authority) domain.Principal {

@@ -117,7 +117,7 @@ func newPropertyFixture(t *testing.T, open propertyStore) *fixture {
 	}
 	f := newFixture(t, s)
 	pol := testPolicy()
-	f.in.Semantic = &pol
+	f.usePolicy(pol)
 	return f
 }
 

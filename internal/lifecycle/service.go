@@ -15,6 +15,11 @@ type Service struct {
 	obligations ReplacementObligations // nil: claim-bearing replacement fails closed
 }
 
+// Policy returns a copy of the execution policy the service was frozen with,
+// so a caller executing for a recorded request (ingest, SPEC-3.5) can refuse
+// a service frozen with any other policy.
+func (s *Service) Policy() domain.Phase3Policy { return s.policy.Clone() }
+
 // New freezes the execution policy by value; no zero/unlimited defaults exist.
 func New(s store.Store, p domain.Phase3Policy) (*Service, error) {
 	if s == nil {
