@@ -372,6 +372,13 @@ func (f *faultSemantic) InsertGCRequest(a0 domain.GCRequest) error {
 	return f.SemanticTx.InsertGCRequest(a0)
 }
 
+func (f *faultSemantic) PutGCQueueCursor(a0 domain.GCQueueCursor, a1 uint64) (domain.GCQueueCursor, error) {
+	if err := f.hit("PutGCQueueCursor"); err != nil {
+		return *new(domain.GCQueueCursor), err
+	}
+	return f.SemanticTx.PutGCQueueCursor(a0, a1)
+}
+
 func (f *faultSemantic) PutGCProgress(a0 domain.GCProgress, a1 uint64) (domain.GCProgress, error) {
 	if err := f.hit("PutGCProgress"); err != nil {
 		return *new(domain.GCProgress), err

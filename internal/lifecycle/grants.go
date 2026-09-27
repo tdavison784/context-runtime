@@ -81,9 +81,6 @@ func (s *Service) executeRecord(tx store.Tx, p domain.Principal, method, request
 func (s *Service) standaloneRecord(ctx context.Context, p domain.Principal, method, requestID string, intent any, run func(store.Tx, uint64) (MutationOutcome, error)) (domain.RecordResult, error) {
 	var out MutationOutcome
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
-		if err := domain.ValidateCallerReplayID(requestID); err != nil {
-			return err
-		}
 		_, _, prior, err := s.begin(tx, p, domain.MutationGrantFamily, method, requestID, intent)
 		if err != nil {
 			return err

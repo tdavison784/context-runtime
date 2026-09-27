@@ -70,9 +70,6 @@ func (s *Service) executeItem(tx store.Tx, p domain.Principal, op itemOp, seq ui
 func (s *Service) standaloneItem(ctx context.Context, p domain.Principal, op itemOp) (domain.ItemMutationResult, error) {
 	var out domain.ItemMutationResult
 	err := s.store.Update(ctx, p.SessionID, func(tx store.Tx) error {
-		if err := domain.ValidateCallerReplayID(op.requestID); err != nil {
-			return err
-		}
 		// Look up replay before allocating even the caller-supplied effect seq.
 		_, _, prior, err := s.begin(tx, p, domain.MutationLifecycle, string(op.action), op.requestID, op.intent)
 		if err != nil {

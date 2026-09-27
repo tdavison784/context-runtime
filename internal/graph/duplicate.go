@@ -60,7 +60,12 @@ func SameDirective(tx store.ReadTx, it domain.ContextItem, _ string, canonical d
 		// G5 residual (SPEC-2.9/2.10): an attribute-free class cannot have
 		// carried accepted attributes, an obligation or support its row does
 		// not show, so a row-identical restatement that adds none of those is
-		// a duplicate of the unknown pre-upgrade version.
+		// a duplicate of the unknown pre-upgrade version. A TURN/TTL
+		// eligibility origin on either side is a meaningful identity change
+		// (C-1, SPEC-3.1): that restatement is a new version.
+		if !originFree(it) || !originFree(canonical) {
+			return false, nil
+		}
 		return plainDeclaration(fresh), nil
 	}
 	if err != nil {
@@ -85,6 +90,11 @@ func attributeFreeIdentity(it domain.ContextItem) bool {
 		return it.Authority == domain.AuthorityAgent && it.Section == domain.SectionNone
 	}
 	return false
+}
+
+// originFree reports whether it carries no TURN/TTL eligibility origin.
+func originFree(it domain.ContextItem) bool {
+	return it.TTLTurns == nil && it.Scope != domain.ScopeTurn && it.Access.Scope != domain.ScopeTurn
 }
 
 // plainDeclaration reports whether d declares nothing beyond the item row.
