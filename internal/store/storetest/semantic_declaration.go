@@ -282,6 +282,18 @@ func testSemanticGrantsFor(t *testing.T, s store.Store) {
 	})
 }
 
+// testSemanticGrantDuplicateTargets checks a legacy grant's TargetIDs are
+// a set (DUR-1.10): a grant naming one item twice is rejected with
+// ErrInvalidRecord by both stores, never a raw driver error or a doubled
+// index entry.
+func testSemanticGrantDuplicateTargets(t *testing.T, s store.Store) {
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+		g := NewGrant(sessA, "g-dup", tx.NextSeq(), "i1")
+		g.Issuer, g.Action, g.TargetIDs = NewPrincipal(sessA, domain.AuthoritySystem), domain.ActionResolve, []string{"i1", "i1"}
+		return tx.InsertGrant(g)
+	})
+}
+
 // testSemanticChanges checks semantic change records (P3-36) and the
 // indexed audit read by target: a change names an existing target and its
 // audit event for that target, pages are access filtered before the limit,

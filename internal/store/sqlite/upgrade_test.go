@@ -555,8 +555,13 @@ func TestUpgradeGrantTargetIndex(t *testing.T) {
 	item := storetest.NewGrant("s", "g-item", 1, "i1")
 	obl := storetest.NewGrant("s", "g-obl", 2, "o1")
 	obl.Action = domain.ActionAssertObligation
+	// A Phase 2 grant could name one item twice (DUR-1.10); the backfill
+	// indexes it once.
+	dup := storetest.NewGrant("s", "g-dup", 3, "i2")
+	dup.TargetIDs = []string{"i2", "i2"}
 	l.insert("grant", item, nil)
 	l.insert("grant", obl, nil)
+	l.insert("grant", dup, nil)
 	s := l.upgrade()
 	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
 		r, err := store.ReadSemantic(tx)
@@ -566,6 +571,10 @@ func TestUpgradeGrantTargetIndex(t *testing.T) {
 		gs, err := r.GrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i1"), 5)
 		if err != nil || len(gs) != 1 || gs[0].ID != "g-item" {
 			t.Errorf("GrantsFor(resolve, i1) = %v, %v; want the legacy occurrence grant", gs, err)
+		}
+		gs, err = r.GrantsFor(domain.ActionResolve, domain.ItemGrantTarget("s", "i2"), 1)
+		if err != nil || len(gs) != 1 || gs[0].ID != "g-dup" {
+			t.Errorf("GrantsFor(resolve, i2) = %v, %v; want the duplicated legacy grant once", gs, err)
 		}
 		gs, err = r.GrantsFor(domain.ActionAssertObligation, domain.ObligationGrantTarget("s", "o1", 1), 5)
 		if err != nil || len(gs) != 0 {
