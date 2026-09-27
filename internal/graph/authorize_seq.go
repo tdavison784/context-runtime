@@ -59,7 +59,9 @@ func AuthorizeAtSequence(tx store.Tx, actor domain.Principal, action domain.Acti
 		if err != nil {
 			return domain.Authorization{}, err
 		}
-		found, err := r.GrantsFor(action, ref, maxGrants)
+		// Only grants in force at seq count toward maxGrants, so revoked or
+		// expired history never wedges a live grant (G2, SEC-1.5, DUR-1.4).
+		found, err := r.LiveGrantsFor(action, ref, seq, maxGrants)
 		if err != nil {
 			return domain.Authorization{}, err
 		}

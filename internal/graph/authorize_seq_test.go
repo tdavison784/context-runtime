@@ -20,7 +20,10 @@ func (f *sequenceFixture) SessionID() string                         { return "s
 func (f *sequenceFixture) Allocated(seq uint64) bool                 { return seq == f.allocated }
 func (f *sequenceFixture) Item(string) (domain.ContextItem, error)   { return f.item, nil }
 func (f *sequenceFixture) SemanticReadBackend() store.SemanticReader { return f }
-func (f *sequenceFixture) GrantsFor(domain.Action, domain.GrantTarget, int) ([]domain.MutationGrant, error) {
+func (f *sequenceFixture) LiveGrantsFor(_ domain.Action, _ domain.GrantTarget, seq uint64, _ int) ([]domain.MutationGrant, error) {
+	if !store.GrantLiveAt(f.grant, seq) {
+		return nil, nil
+	}
 	return []domain.MutationGrant{f.grant}, nil
 }
 func TestAuthorizationUsesActualAllocatedGrantBoundary(t *testing.T) {
@@ -73,7 +76,7 @@ func TestAuthorizationIgnoresDeadGrantHistory(t *testing.T) {
 			if err != nil {
 				t.Fatalf("live grant behind %d revoked ones: %v", 3, err)
 			}
-			if auth.GrantIDs["i"] != "g-live" {
+			if auth.GrantIDs[ref.AuthorizationKey] != "g-live" {
 				t.Errorf("authorization = %+v, want grant g-live", auth)
 			}
 			return nil

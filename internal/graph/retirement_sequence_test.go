@@ -30,9 +30,12 @@ func (f *retirementFixture) ExactObligation(ref domain.ObligationRef) (domain.Ob
 	}
 	return f.version, nil
 }
-func (f *retirementFixture) GrantsFor(action domain.Action, ref domain.GrantTarget, limit int) ([]domain.MutationGrant, error) {
+func (f *retirementFixture) LiveGrantsFor(action domain.Action, ref domain.GrantTarget, seq uint64, limit int) ([]domain.MutationGrant, error) {
 	if action != domain.ActionReplaceDirective || ref != domain.ObligationGrantTarget("s", f.version.ObligationID, f.version.Version) || limit <= 0 {
 		panic("non-exact grant query")
+	}
+	if !store.GrantLiveAt(f.grant, seq) {
+		return nil, nil
 	}
 	return []domain.MutationGrant{f.grant}, nil
 }
