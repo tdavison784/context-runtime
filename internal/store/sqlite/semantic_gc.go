@@ -64,7 +64,10 @@ func (s semTx) InsertGCRequest(g domain.GCRequest) error {
 		if err := t.put("gc_request", g.ID, 0, g, false); err != nil {
 			return err
 		}
-		_, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_pending_gc(session_id,seq,request_id) VALUES(?,?,?)", t.session, g.Seq, g.ID)
+		if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_pending_gc(session_id,seq,request_id) VALUES(?,?,?)", t.session, g.Seq, g.ID); err != nil {
+			return err
+		}
+		_, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_pending_gc_trigger(session_id,trigger,seq,request_id) VALUES(?,?,?,?)", t.session, string(g.Trigger), g.Seq, g.ID)
 		return err
 	})
 }
@@ -119,7 +122,10 @@ func (s semTx) InsertGCResult(g domain.GCResult) error {
 		if err := t.put("gc_result", g.GCRequestID, 0, g, false); err != nil {
 			return err
 		}
-		_, err := t.conn.ExecContext(t.ctx, "DELETE FROM lookup_pending_gc WHERE session_id=? AND seq=? AND request_id=?", t.session, req.Seq, req.ID)
+		if _, err := t.conn.ExecContext(t.ctx, "DELETE FROM lookup_pending_gc WHERE session_id=? AND seq=? AND request_id=?", t.session, req.Seq, req.ID); err != nil {
+			return err
+		}
+		_, err := t.conn.ExecContext(t.ctx, "DELETE FROM lookup_pending_gc_trigger WHERE session_id=? AND trigger=? AND seq=? AND request_id=?", t.session, string(req.Trigger), req.Seq, req.ID)
 		return err
 	})
 }

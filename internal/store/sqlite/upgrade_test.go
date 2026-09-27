@@ -1105,3 +1105,32 @@ func TestUpgradePolicyMaxLiveProofDependents(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradePendingGCByTrigger checks migration 0047 on a database
+// migrated through 0046 (DUR-3.2): pending requests stored before it are
+// indexed by their trigger.
+func TestUpgradePendingGCByTrigger(t *testing.T) {
+	l := openLegacy(t, 46)
+	for i, trig := range []domain.GCTrigger{domain.GCSupersession, domain.GCPolicy} {
+		r := storetest.NewGCRequest("s", fmt.Sprintf("g%d", i), uint64(i+1))
+		r.RequestID, r.Trigger = fmt.Sprintf("collect-g%d", i), trig
+		l.insert("gc_request", r, nil)
+		if _, err := l.db.Exec("INSERT INTO lookup_pending_gc(session_id,seq,request_id) VALUES(?,?,?)", "s", r.Seq, r.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := l.upgrade()
+	if err := s.View(context.Background(), "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pg, err := r.PendingGCRequestsByTrigger([]domain.GCTrigger{domain.GCSupersession}, store.Page{Limit: 5})
+		if err != nil || len(pg.Records) != 1 || pg.Records[0].ID != "g0" {
+			t.Errorf("PendingGCRequestsByTrigger after 0047 = %+v (%v), want g0", pg.Records, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

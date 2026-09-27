@@ -310,6 +310,7 @@ var committedMigrations = map[string]string{
 	"0044_gc_retry_item.sql":                         "1b57c09073936341b5833c8ed11dc88e402aca20a425f3acfbd9a5c219ec9d7b",
 	"0045_live_proof_paths.sql":                      "c0b0a62175f14ffef95b7f19e424c866bf83070fd69954f223f7d10a642528ce",
 	"0046_policy_max_live_proof_dependents.sql":      "2c920abd1a7a23af573d63161ccc7dd358602499647943fb328cd88e02464d05",
+	"0047_gc_queue.sql":                              "a33b61afa750bd86de7c46032888f5777c93f3b168314a6a4f1304dc4804c263",
 }
 
 func TestCommittedMigrationsUnchanged(t *testing.T) {
