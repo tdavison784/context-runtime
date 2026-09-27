@@ -346,3 +346,35 @@ func TestDUR12ReevaluateScalesWithLiveState(t *testing.T) {
 		t.Errorf("not satisfied: %+v", o)
 	}
 }
+
+// DUR-1.12 (P3-39): one transaction-wide work budget. Recording path content
+// and invalidating proofs each fit the bound alone but not together, so the
+// report is rejected atomically instead of doing ~2x the bound.
+func TestDUR112OneBudgetPerTransaction(t *testing.T) {
+	f := newEvalFixture(t)
+	for _, ref := range []domain.ObligationRef{f.user, f.sysTests} {
+		o := f.status(t, ref)
+		in := intent(ref, o.Revision, domain.ObligationSatisfied)
+		in.AssertionMode = domain.AssertionResourceBound
+		in.Resources = []domain.ResourceClaim{{Kind: domain.DependencyWorkspace, ResourceID: "repo1", ResourceRevision: f.r.auth, Fingerprint: hashOf("W1")}}
+		if _, err := f.s.transition(t, f.st, f.system, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var contents []domain.ResourcePathContent
+	for i := range 60 {
+		contents = append(contents, domain.ResourcePathContent{Path: fmt.Sprintf("f%02d.txt", i), ContentHash: hashOf(fmt.Sprint(i))})
+	}
+	f.r.n++
+	in := domain.ReportResourceChangeIntent{RequestID: "big-resync", ResourceID: "repo1", ExpectedRevision: f.r.rev,
+		ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf("W2"),
+		Resynchronization: true, PathContents: contents}
+	if _, err := f.s.report(t, f.st, f.harness, in); !errors.Is(err, domain.ErrResourceLimit) {
+		t.Errorf("report spending more than one budget in total: %v", err)
+	}
+	for _, ref := range []domain.ObligationRef{f.user, f.sysTests} {
+		if o := f.status(t, ref); o.Status != domain.ObligationSatisfied {
+			t.Errorf("rejected report changed %s: %+v", ref.ObligationID, o)
+		}
+	}
+}

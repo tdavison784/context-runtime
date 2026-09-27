@@ -119,6 +119,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"SPEC118DirectoryChangeIntersectsFiles", TestSPEC118DirectoryChangeIntersectsFiles, false},
 		{"SEC19ReevaluateIgnoresHiddenObservation", TestSEC19ReevaluateIgnoresHiddenObservation, true},
 		{"DUR12ReevaluateScalesWithLiveState", TestDUR12ReevaluateScalesWithLiveState, true},
+		{"DUR112OneBudgetPerTransaction", TestDUR112OneBudgetPerTransaction, false},
 		{"ObservationStateChain", TestObservationStateChain, true},
 		{"ObservationStateGating", TestObservationStateGating, true},
 		{"MatcherGrantT06", TestMatcherGrantT06, true},
