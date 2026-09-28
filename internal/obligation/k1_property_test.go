@@ -1,6 +1,7 @@
 package obligation
 
 import (
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"path"
@@ -97,20 +98,24 @@ func (m *k1Model) valid(d domain.ProofDependency) bool {
 // K1 A5: over generated report/observation/assertion histories on both
 // stores, stored SATISFIED implies effective SATISFIED or pending
 // settlement, and effective SATISFIED is always backed by a proof the
-// independent model finds valid.
+// independent model finds valid. SPEC-5.10 strengthens it: every pending
+// version's settlement cause is a STORED update at or before the read
+// point, and a generated same-transaction satisfy-then-fell step is
+// refused by the A5 commit guard in whichever store backs the fixture.
 func TestK1PropertyEffectiveSatisfactionIsValid(t *testing.T) {
 	var cov k1Coverage
 	for seed := uint64(1); seed <= 6; seed++ {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) { k1History(t, seed, &cov) })
 	}
 	// The histories must exercise the invariant, not pass vacuously.
-	if cov.satisfied < 10 || cov.lost < 3 {
-		t.Errorf("coverage: %d effectively SATISFIED checks, %d satisfactions lost; the generator is too weak", cov.satisfied, cov.lost)
+	if cov.satisfied < 10 || cov.lost < 3 || cov.pending < 5 || cov.guard < 2 {
+		t.Errorf("coverage: %d effectively SATISFIED checks, %d satisfactions lost, %d pending-cause checks, %d A5 guard refusals; the generator is too weak",
+			cov.satisfied, cov.lost, cov.pending, cov.guard)
 	}
 }
 
 // k1Coverage counts what the generated histories exercised.
-type k1Coverage struct{ satisfied, lost int }
+type k1Coverage struct{ satisfied, lost, pending, guard int }
 
 func k1History(t *testing.T, seed uint64, cov *k1Coverage) {
 	rng := rand.New(rand.NewPCG(seed, 31))
@@ -139,7 +144,7 @@ func k1History(t *testing.T, seed uint64, cov *k1Coverage) {
 	}
 	was := map[string]bool{} // effectively SATISFIED at the previous step
 	for step := range 40 {
-		switch op := rng.IntN(9); {
+		switch op := rng.IntN(10); {
 		case op == 0: // same fingerprint, unrelated path
 			send(k1Update{paths: []string{"other/z.md"}, fp: m.fp}, domain.ReportResourceChangeIntent{WorkspaceFingerprint: m.fp, ChangedPaths: []string{"other/z.md"}})
 		case op == 1: // new fingerprint
@@ -176,6 +181,39 @@ func k1History(t *testing.T, seed uint64, cov *k1Coverage) {
 			}
 		case op == 8 && m.known: // tests FAIL at the current fingerprint
 			f.report(t, f.newRun(t), domain.OutcomeFail, m.fp, nil)
+		case op == 9 && m.known: // SPEC-5.10: satisfy, then fell the workspace, in ONE transaction
+			fp := hashOf(fmt.Sprintf("G%d", step))
+			err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+				sem, err := store.Semantic(tx)
+				if err != nil {
+					return err
+				}
+				runN++
+				seq := tx.NextSeq()
+				run, err := f.s.registerRun(tx, sem, f.harness, runIntent(fmt.Sprintf("run-%d", runN), fmt.Sprintf("exec-%d", runN), f.target), seq)
+				if err != nil {
+					return err
+				}
+				ev := evidenceItem(tx.NextSeq(), run)
+				if err := tx.InsertItem(ev); err != nil {
+					return err
+				}
+				if _, err := f.s.reportObservation(tx, sem, f.harness, obsIntent(fmt.Sprintf("k1g-%d-%d", seed, step), run, ev.ID, domain.OutcomePass, m.fp), tx.NextSeq()); err != nil {
+					return err
+				}
+				// The proof just written rests on the workspace this same
+				// transaction now fells: only the A5 commit guard stands
+				// between the commit and a stored-SATISFIED pending lie.
+				in := domain.ReportResourceChangeIntent{RequestID: fmt.Sprintf("k1g-%d-%d", seed, step), ResourceID: "repo1", ExpectedRevision: f.r.rev, ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: fp}
+				_, err = f.s.ReportResourceChangeTx(tx, f.harness, in, tx.NextSeq())
+				return err
+			})
+			if err == nil {
+				t.Errorf("step %d: same-transaction satisfy-then-fell committed; the A5 commit guard must refuse it (K1 A5)", step)
+			}
+			if errors.Is(err, domain.ErrInvalidTransition) {
+				cov.guard++
+			}
 		}
 		k1CheckInvariant(t, f, m, step, []domain.ObligationRef{f.sysTests, file}, cov, was)
 	}
@@ -198,6 +236,27 @@ func k1CheckInvariant(t *testing.T, f *evalFixture, m *k1Model, step int, refs [
 				cov.lost++
 			}
 			was[ref.ObligationID] = eff == domain.ObligationSatisfied
+			if pending {
+				// SPEC-5.10: the pending version's settlement cause must be a
+				// STORED update this read can itself see — read back by ID,
+				// identical, and at or before the read point.
+				cov.pending++
+				cause, err := settlementCause(r, o.CurrentProofID)
+				if err != nil {
+					t.Fatalf("step %d %s: settlement cause: %v", step, ref.ObligationID, err)
+				}
+				got, err := r.ResourceUpdate(cause.ID)
+				if err != nil {
+					t.Fatalf("step %d %s: settlement cause %s is not stored: %v", step, ref.ObligationID, cause.ID, err)
+				}
+				if got.ID != cause.ID || got.Seq != cause.Seq {
+					t.Errorf("step %d %s: settlement cause (seq %d, %s) does not read back as itself: seq %d, %s",
+						step, ref.ObligationID, cause.Seq, cause.ID, got.Seq, got.ID)
+				}
+				if cause.Seq > tx.LastSeq() {
+					t.Errorf("step %d %s: settlement cause seq %d is beyond the read point %d", step, ref.ObligationID, cause.Seq, tx.LastSeq())
+				}
+			}
 			if eff != domain.ObligationSatisfied || o.CurrentProofID == "" {
 				return nil
 			}
