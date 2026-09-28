@@ -137,11 +137,19 @@ excluded by it).
   index holds every filed state, not exactly the current ones — "a state
   enters and leaves the index as its applicability changes" no longer
   happens.** Current applicability is instead read through
-  `obligation.Service.SubjectApplicability` (ADR 8's DUR-3.1 (B)), derived
-  at read time from the authoritative resource state; neither this index
-  nor `store.SubjectStatesByResource`'s equivalent "only CURRENT states"
-  filter has a production caller today (SEC-4.11/SPEC-4.10/DUR-4.7) — both
-  are recorded as an explicit Phase 4 deferral in ADR 8, not removed here.
+  `store.SubjectApplicability`
+  (`internal/store/subject_applicability.go`, ruling L1; the round-3
+  `obligation.Service.SubjectApplicability` method this bullet named is
+  deleted), derived at read time from the authoritative resource state
+  and already consumed in production by retrieval's
+  `ItemHistorical`/`ItemCurrent` labeling (L1.2). The equivalent "only
+  CURRENT states" filter is likewise gone from
+  `store.SubjectStatesByResource` (L1.5/SEC-4.11/DUR-4.7, round 4):
+  every filed state pages in first-filing order whatever its
+  applicability, so this partial index bounds nothing and is stale
+  metadata. The read itself still has no production caller, and removing
+  the index remains an explicit Phase 4 deferral recorded in ADR 8, not
+  done here.
 - `0033_resource_update_paths.sql` (PR #6 round 1, G2/SEC-1.7/DUR-1.2) — an
   index of resource updates by the paths they may affect (a path or one of
   its ancestor directories, plus every ALL-paths/UNKNOWN update), so a
@@ -216,8 +224,9 @@ excluded by it).
   `"ws"`, so a resource report reads only the proofs it can actually
   affect (ADR 8's DUR-3.1 (A)); `lookup_live_dependents` counts live
   non-`FIXED_CONTENT` dependency rows per resource, the policy cap ADR 8's
-  DUR-3.1 (C) validates against (superseded by the commander's FROZEN K1
-  ruling, ADR 8 K1e, once K1 lands). The frozen Go step
+  DUR-3.1 (C) validated against (superseded by the commander's FROZEN K1
+  ruling, ADR 8 K1, which landed in round 4 and retired the cap outright).
+  The frozen Go step
   `reconcileLiveProofPathsV1` (`steps_0045.go`, registered as
   `"0045/proofs/reconcile-live-proof-paths-v1"` in `steps.go`) rebuilds
   `lookup_live_dependency` and fills both new tables from the live proofs.
@@ -230,7 +239,7 @@ excluded by it).
   by fixing the backfill:** a recorded policy with `MaxTransactionWork <
   10` still backfills `MaxLiveProofDependents` to 0, but
   `Phase3Policy.Validate` (`internal/domain/semantic.go`) no longer
-  validates that field at all once K1 lands (below), so the
+  validates that field at all under K1 (landed round 4, below), so the
   previously-rejecting 0 value is never checked and the exact-retry
   regression this bullet originally described cannot occur.
 - `0047_gc_queue.sql` (PR #6 round 3, DUR-3.2; SPEC-4.4/DUR-4.10) —

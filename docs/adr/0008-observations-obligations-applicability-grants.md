@@ -507,71 +507,90 @@ SATISFIED→UNRESOLVED direction.
 `4ff6ca1` — SPEC-4.4/DUR-4.10 correct the prior "assigned W4b, not yet
 landed" text).** All three parts are implemented:
 
-- **(A) Reports read only what they can affect.**
-  `lookup_live_proof_path` (migration 0045, frozen step
-  `0045/proofs/reconcile-live-proof-paths-v1`) files each live proof's
+- **(A) Reports read only what they can affect — historical as of round
+  4, superseded by K1 A1 below.** As landed in round 3 this was an index
+  design: `lookup_live_proof_path` (migration 0045, frozen step
+  `0045/proofs/reconcile-live-proof-paths-v1`) filed each live proof's
   `CURRENT_PATH` dependency under its exact path plus the hex of every
-  ancestor directory, and each `WORKSPACE` dependency under `"ws"`;
-  `affectedProofs` (`internal/obligation/invalidate.go`) reads only the
-  resource's live proofs an accepted report actually touches through
-  that index — a non-`ALL` KNOWN report reads its exact
-  path/ancestor/workspace keys, never the resource's whole live set, and
-  `FIXED_CONTENT` dependencies are excluded from the index and are never
-  affected. This is the same directory-intersects-files rule §13 already
-  requires, now an index rather than a linear scan. Tests:
-  `TestDUR31ReportsReadOnlyAffectedProofs`,
+  ancestor directory, and each `WORKSPACE` dependency under `"ws"`, and
+  `affectedProofs` (removed with K1) read only the live proofs an
+  accepted report touched through that index. K1 replaced the read side
+  outright: an accepted report now writes only its O(1) monotone
+  pointers and reads **zero** proof pages (K1a), and the 0045 tables
+  survive only as an unused write-time metric (A6 below). The
+  directory-intersects-files rule itself — a changed directory affects
+  every file under it, §13/SPEC-1.18 — lives on inside K1 A1's key rule
+  (`store.PathAffectKeys`, `internal/store/semantic_resource.go`: the
+  exact path plus every ancestor directory). Tests:
+  `TestK1ReportsNeverFanOut` (the store's proof-page counters stay at
+  zero across reports), `TestDUR31ReportsReadOnlyAffectedProofs`
+  (reworked for K1: every report reads zero proof pages, with
+  effective-status semantics asserted per path shape),
   `TestDUR31ReportsIgnoreUntouchedLiveState`.
 - **(B) Applicability is derived, not recorded, for planning.**
-  `obligation.Service.SubjectApplicability(tx, st)`
-  (`internal/obligation/read.go`) re-derives a file subject state's
-  applicability from the authoritative resource state at read time,
-  never stored as a static flag a later resource change would otherwise
-  have to walk out and update by hand; the stored
-  `SubjectState.Applicability` (`subject_state.go`) is written once, at
-  filing, and is filing-time-only metadata. Test:
-  `TestDUR31SubjectApplicabilityIsDerived`. **Residual gap, not yet fixed
-  as of this pass (DUR-4.7/SEC-4.11/SPEC-4.10; recorded here as an
-  explicit Phase 4 deferral, not a Phase 3 defect):** `PutSubjectState`
-  only ever writes `ApplicabilityCurrent`, so SQLite's 0032 partial index
-  and `SubjectStatesByResource` ("only CURRENT states") both still
-  describe a set that includes states `SubjectApplicability` would
-  derive STALE — and `SubjectApplicability` itself has no production
-  caller today: nothing populates `policy.EligibilitySnapshot
-  .Applicability` (`internal/policy/eligibility.go`), and
-  `retrieve.readGet`'s `ItemHistorical`/`ItemCurrent` labeling is a
-  directive/agent-key-namespace currentness check (`graph.IsCurrent`),
-  an unrelated dimension from this OBSERVATION-namespace one. A future
-  `EligibilitySnapshot` builder must fill `Applicability` from
-  `SubjectApplicability`; only then should 0032's index and
-  `SubjectStatesByResource`'s filter be removed or redocumented as
-  "every filed state" — neither is Phase 3 scope.
-- **(C) A per-resource live-dependents cap, landed but with known gaps
-  (DUR-4.2/DUR-4.3, SEC-4.1/SPEC-4.1, unfixed as of this pass; retired
-  outright by the commander's FROZEN K1 ruling once K1 itself lands — see
-  below).** `domain.Phase3Policy.MaxLiveProofDependents` (default 256,
-  `internal/policy/phase3.go`) bounds a resource's live
+  `store.SubjectApplicability(r, st)`
+  (`internal/store/subject_applicability.go`) is the one shared rule
+  (ruling L1, resolving GLM-1: the former
+  `obligation.Service.SubjectApplicability` method is deleted): a few
+  exact-key reads re-deriving a subject state's applicability from the
+  authoritative resource state at read time, failing closed — any read
+  error yields `UNKNOWN` plus the error, never `CURRENT` — never a
+  static flag a later resource change would otherwise have to walk out
+  and update by hand; the stored `SubjectState.Applicability`
+  (`subject_state.go`) is written once, at filing, is filing-time-only
+  metadata, and is deprecated there with a pointer to this rule. Tests:
+  `TestDUR31SubjectApplicabilityIsDerived`,
+  `TestSubjectApplicabilityIsExactAndFailsClosed`
+  (`internal/store/subject_applicability_test.go`). **L1 landed in round
+  4; the gap this section previously recorded as open is closed except
+  for one Phase 4 deferral:** retrieval consumes the rule —
+  `retrieve.observationCurrent` (`internal/retrieve/read.go`) labels a
+  NamespaceObservation item `ItemHistorical` whenever its derived
+  applicability is not CURRENT, failing closed on any derivation error,
+  a constant label that is no oracle (L1.2); the
+  `SubjectStatesByResource` CURRENT filter is gone from both stores
+  (L1.5/SEC-4.11/DUR-4.7) — every filed state pages in first-filing
+  order whatever its applicability, and both implementations' comments
+  say so; reevaluation's `selectEvidence`
+  (`internal/obligation/reevaluate.go`) selects only CURRENT-derived
+  partitions (`TestSPEC410ReevaluationSelectsOnlyCurrentEvidence`). The
+  one remaining deferral, recorded here as an explicit Phase 4 item, not
+  a Phase 3 defect: there is still no production
+  `policy.EligibilitySnapshot` builder, so nothing populates
+  `policy.EligibilitySnapshot.Applicability`
+  (`internal/policy/eligibility.go`, whose field comment now carries
+  L1.3's contract — any builder MUST fill it from
+  `store.SubjectApplicability`). Migration 0032's CURRENT-only partial
+  index is stale metadata recorded in ADR 3; removing it is Phase 4
+  scope.
+- **(C) A per-resource live-dependents cap — historical as of round 4,
+  retired outright by the commander's FROZEN K1 ruling, which has landed
+  (below).** `domain.Phase3Policy.MaxLiveProofDependents` (default 256,
+  `internal/policy/phase3.go`) bounded a resource's live
   non-`FIXED_CONTENT` proof-dependency rows so invalidating all of them
   fits half of `MaxTransactionWork` at 5 work units per row
-  (`domain/semantic.go`). At the cap, a new proof is refused before any
-  write (`dependentRoom`, `internal/obligation/evaluate.go`); a matcher
-  satisfaction is silently left as evidence only, and an explicit
-  resource-bound assertion fails `ErrResourceLimit`
-  (`internal/obligation/transition.go`) — this is refusal to record a
-  *new* proof, never "invalidation failing closed" on an existing one.
-  Tests: `TestDUR31AssertionRespectsDependentCap`,
-  `TestDUR31MatcherRespectsDependentCap`. **Round 4 review found the cap
-  does not actually bound what an ALL/UNKNOWN/resync report costs:**
-  `proofAffected` (`internal/obligation/invalidate.go`) pages *every*
-  dependency of each live proof, including rows on other resources and
-  `FIXED_CONTENT` rows the cap never counted, so a handful of
-  multi-resource proofs exhaust the cap while leaving the resource far
-  from actually bounded, and the wedge (C) exists to prevent — every
-  report on that resource refused, its SATISFIED proofs stuck stale — is
-  still reachable (SEC-4.1/SPEC-4.1, High). Nothing but an ALL/UNKNOWN
-  report or task completion releases cap room, so long-lived path-stable
-  proofs can hold it indefinitely and silently starve a later, unrelated
-  satisfaction (DUR-4.3). This is P3-23/P3-19 failing open exactly as (C)
-  exists to prevent, not an accepted residual risk.
+  (`domain/semantic.go`); at the cap a new proof was refused before any
+  write (`dependentRoom`, since removed). Round 4 review found the cap
+  did not actually bound what an ALL/UNKNOWN/resync report costs —
+  `proofAffected` (also removed) paged *every* dependency of each live
+  proof, including rows on other resources and `FIXED_CONTENT` rows the
+  cap never counted — so the wedge (C) existed to prevent (every report
+  on that resource refused, its SATISFIED proofs stuck stale,
+  SEC-4.1/SPEC-4.1, High) was still reachable, and path-stable proofs
+  could hold cap room indefinitely and silently starve a later,
+  unrelated satisfaction (DUR-4.3). **K1 resolves all of this by
+  removing the cap and its refusal path entirely (A6 below), not by
+  narrowing it:** reports are O(1) pointer writes that never read proofs
+  and are never refused for dependent volume, so neither wedge nor
+  starvation is reachable; the field and migration 0046's column stay
+  recorded but unvalidated (P3-40 hashes), and the two round-3 cap
+  tests (`TestDUR31AssertionRespectsDependentCap`,
+  `TestDUR31MatcherRespectsDependentCap`) were removed with the code
+  they pinned. Tests that pin the retirement:
+  `TestK1MultiResourceProofsNeverWedgeReports_DUR42`,
+  `TestK1StableLiveProofsNeverBlockSatisfaction_DUR43`,
+  `TestMaxLiveProofDependentsRecordedNotValidated`,
+  `TestConformance/IngestionV3BackfilledPolicyReplays`.
 
 This changes §12's "recorded" framing for the file-content case
 specifically; the OBSERVATION-derived `task_state` item itself (§11/§12,
@@ -589,11 +608,16 @@ and its refusal path entirely (K1a, K1d):
   (`internal/store/semantic_validity.go`) is the one shared rule: a proof
   is valid iff its resource is KNOWN and, for every recorded
   non-`FIXED_CONTENT` dependency, no accepted update with a later
-  revision *affects* it under `change.affects`'s existing rule (a
+  revision *affects* it under the shared key rule — `store.PathAffectKeys`
+  (`internal/store/semantic_resource.go`): a dependency's exact path plus
+  each of its ancestor directories, with the `"all"` key for all-paths and
+  UNKNOWN reports (a
   `WORKSPACE` dependency only on a fingerprint change or lost freshness;
   a `CURRENT_PATH` dependency only on a touch to its path, an ancestor
   directory, `ALL`, or `UNKNOWN`, never on a same-content path report;
-  `FIXED_CONTENT` never). This is decided from two write-time pointers,
+  `FIXED_CONTENT` never; the directory-intersection half of the old
+  `change.affects` predicate also survives as `under`,
+  `internal/obligation/invalidate.go`). This is decided from two write-time pointers,
   migration 0048's `lookup_workspace_divergence` (per resource, the
   raises' revision order — `LastWorkspaceDivergenceRev`) and
   `lookup_affecting_raise` (per resource/key, `LastAffectingRev`),
@@ -605,11 +629,16 @@ and its refusal path entirely (K1a, K1d):
   again, so a W1→W2→W1 revert cannot resurrect it. Migration: `0048_k1_pointers.sql`,
   frozen step `0048/k1/reconcile-workspace-divergence-v1`
   (`reconcileK1PointersV1`, `steps_0048.go`) backfills divergence exactly
-  from each resource's fingerprint chain, and conservatively raises every
-  stored report's `ALL` key and every changed path (same-content history
+  from each resource's fingerprint chain, and conservatively raises the
+  `ALL` key only for UNKNOWN or all-paths reports plus every recorded
+  `ChangedPath` of every stored report (same-content history
   isn't reconstructible, so a backfilled raise can settle a proof a live
   report would have spared — an accepted, one-time-upgrade-only
-  overapproximation, not an ongoing behavior). Tests:
+  overapproximation, not an ongoing behavior). **A KNOWN report after an
+  UNKNOWN one raises divergence** through the same general rule as any
+  fingerprint change: going UNKNOWN clears the resource's stored
+  fingerprint, so the next KNOWN report's fingerprint (never empty)
+  always differs from it, with no special-case code. Tests:
   `TestK1ReportsNeverFanOut`, `TestK1ValidityIsMonotone`,
   `TestK1DependencySemantics`, `TestConformance/SemanticProofDerivedValid`
   (storetest); `TestUpgradeK1Pointers_0048`
@@ -728,7 +757,11 @@ are now both current, real code and no longer a forward-looking
 placeholder.
 
 **A changed directory intersects files under it (PR #6 round 1, SPEC-1.18).**
-`change.affects` (`internal/obligation/invalidate.go:39,50`) originally
+`change.affects` (round 1, then at `internal/obligation/invalidate.go:39,50`;
+the predicate is gone under K1, and its rule lives on as `under`,
+`internal/obligation/invalidate.go`, plus the ancestor keys
+`store.PathAffectKeys` emits, `internal/store/semantic_resource.go`)
+originally
 compared a reported path to a dependency's path by exact string equality
 only, so a report naming a changed directory (e.g. `src`) never invalidated
 a `CURRENT_CONTENT` dependency on a file under it (`src/a.go`) — the
