@@ -106,3 +106,30 @@ func TestSubjectApplicabilityIsExactAndFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+// TestCurrentPathContentUnknownResourceState pins CurrentPathContent's
+// UNKNOWN guard (SPEC-6.6(b), TEST-6.3): a path state recorded KNOWN must
+// not read as current content while the resource's state is UNKNOWN — the
+// recording update's report was a gap, so the recorded content describes
+// the resource only as of a state that no longer holds. The construction
+// keeps every other refusal inert (the path revision equals the resource's
+// authoritative revision and the latest affecting update is no newer), so
+// the resource-freshness conjunct alone decides.
+func TestCurrentPathContentUnknownResourceState(t *testing.T) {
+	loc := domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: "docs/a.md"}
+	ps := domain.ResourcePathState{Locator: loc, ContentHash: "h1", ResourceRevision: 4, Freshness: domain.ResourceKnown}
+	latest := domain.ResourceUpdate{ResultingAuthoritativeRevision: 4}
+	// Control: a KNOWN resource state at the same revision reads current.
+	known := applicabilityReader{ps: &ps, latest: latest,
+		rs: &domain.ResourceState{ResourceID: "repo", Freshness: domain.ResourceKnown, AuthoritativeRevision: 4}}
+	if _, ok, err := CurrentPathContent(&known, loc, *known.rs); err != nil || !ok {
+		t.Errorf("KNOWN resource state: ok = %v, err = %v; want current content", ok, err)
+	}
+	// SPEC-6.6(b): the UNKNOWN resource state with the same KNOWN path
+	// state must refuse, though nothing else does.
+	unknown := applicabilityReader{ps: &ps, latest: latest,
+		rs: &domain.ResourceState{ResourceID: "repo", Freshness: domain.ResourceUnknown, AuthoritativeRevision: 4}}
+	if _, ok, err := CurrentPathContent(&unknown, loc, *unknown.rs); err != nil || ok {
+		t.Errorf("UNKNOWN resource state, KNOWN path state: ok = %v, err = %v; want not current", ok, err)
+	}
+}
