@@ -13,14 +13,14 @@ fixes. `go test -race -count=1 -timeout 45m ./...` passes with no
 exceptions; every decision below cites real, `grep`-verified code and
 tests, not a proposed contract. **This ADR remains Proposed for one
 narrower reason than before:** the P3-42 required-test mapping is now
-met after the round-5 SPEC-5.1 remap (every wrong/partial/adjacent
-citation moved to a better existing test, read and confirmed before
-citing; memory-only coverage labeled in-row), with the round-5 t3 and t2
-test passes since closing the open-exchange half of P3-38 and the P3-20
-filesystem/network-read clause — the coverage table below now marks no
-clause MISSING — though it still records a small number of
-adjacent-test/Low-confidence caveats inline (see
-"Outstanding required tests" below), and K1 has fully landed, but
+evidenced per row — after the round-5 SPEC-5.1 remap (whose closing
+"read and confirmed before citing" claim the round-7 SPEC-6.1 re-audit
+found overstated; see the method note below the coverage table), the
+round-7 pass re-opened every cited test body and appended the exact
+asserting `file:line` to each row, marking the clauses with no asserting
+line MISSING in-row (pending the round-7 test writers, p7-ta/p7-tb) and
+labeling memory-only, pure-function, and adjacent-test coverage inline
+(see "Outstanding required tests" below), and K1 has fully landed, but
 the commander has not yet
 ruled this ADR Accepted at the Phase 3 gate — that ruling is explicitly
 outside this docs pass's authority.)
@@ -1476,7 +1476,7 @@ first time it appears in a row when not already obvious from context.
 | P3-42 | trace assertions distinguish state from transmitted requests | `TestGateT02_ReplacementRetiresOldRequirement` et al. (Gate evidence table, T02/T06/T07 rows) — representative: asserts at `internal/ingest/gate_traces_test.go:137` (the retired obligation) and `:161` (the replacement inherits no satisfaction) |
 | P3-42 | no unresolved C or missing schema field is labeled Accepted | this ADR's own Status line — self-referential; the round-7 rewrite of that line and the method note below remove the round-5 overclaims this row's round-5 text relied on |
 
-**Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. **Update (commander ruling M3, round 4):** this table originally found 52 genuinely MISSING clauses beyond the 21 the "Outstanding required tests" section below had already tracked (that section's 21 were always a subset, scoped to bullets a prior round had already flagged, not every clause in phase3-decisions.md). M3 ruled none of the 52 deferred; two GLM test writers wrote all of them as `p342_p3<N>_test.go` files, and every MISSING row above has been flipped to that real citation. **(SPEC-5.1, round 5) a full remap pass then re-examined all 51 rows whose citation was a wrong, partial, or adjacent test and moved each to a better existing test, read and confirmed to assert its clause before citing; memory-only coverage is labeled in-row where it applies. Two clauses are MISSING as of this pass, both recorded in-row: P3-20 "no filesystem/network reads during replay" (the package-boundary guarantee is weaker than a direct assertion and does not count) and the open-exchange half of P3-38 "open exchange and leased historical content survive" (the lease half is covered by `TestLeaseTakenAfterFirstBatchProtects_SEC42`).** **(Round-5 t3 pass, same series) the open-exchange half of P3-38 is now covered — `TestP3_38_OpenExchangeMemberSurvivesCollectUntilClosed` (`internal/lifecycle/p342b_p3_38_test.go`, both stores) — leaving P3-20's filesystem/network-read clause the table's only MISSING row.** **(Round-5 t2 pass, same series) that last clause is now covered too — `TestP3_20_ReplayPackagesImportNoFilesystemOrNetwork` and `TestP3_20_ReplayUsesStoredBytesNotTheLocator` (`internal/ingest/p342b_p3_20_test.go`) — and the same pass adds direct assertions for the P3-16 through P3-25 rows above (29 tests across `internal/{obligation,tools,ingest,graph}`, every body read and grep-verified before citing; single-layer mutation survivors are recorded in-row as layered defense-in-depth, each naming its second layer). The table now has no MISSING row.**
+**Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. **Update (commander ruling M3, round 4):** this table originally found 52 genuinely MISSING clauses beyond the 21 the "Outstanding required tests" section below had already tracked (that section's 21 were always a subset, scoped to bullets a prior round had already flagged, not every clause in phase3-decisions.md). M3 ruled none of the 52 deferred; two GLM test writers wrote all of them as `p342_p3<N>_test.go` files, and every MISSING row above has been flipped to that real citation. **(SPEC-5.1, round 5) a remap pass then re-examined the rows whose citation was a wrong, partial, or adjacent test and moved each to a better existing test; the round-5 t3 and t2 test passes closed the two clauses that pass had left MISSING (the open-exchange half of P3-38, then P3-20's filesystem/network-read clause).** **(SPEC-6.1, round 7) the round-5 pass's closing claims — that each moved citation was "read and confirmed to assert its clause before citing" and that "the table now has no MISSING row" — were false: the round-7 re-audit found rows citing tests whose bodies do not assert the cited clause, memory-only coverage presented as both-store, and clauses with no asserting line at all. Round 7 re-opened every cited test body (P3-1..P3-20 by p7-docsa, P3-21..P3-42 by this pass) and appended the exact asserting `file:line` to each row — no line is cited that was not opened this round. A clause with no asserting line is now marked MISSING in-row with a pending p7-ta/p7-tb marker rather than left under a covering citation; memory-only, pure-function, and stub-fixture coverage is labeled per row where it applies; and the P3-42 rows whose clause is the table itself are labeled self-referential rather than forced onto an unrelated test.**
 
 **SPEC-5.11 (round 5, P3-42 test hygiene of the `p342_*` files cited
 above) — fixed in six commits on the t3 test pass, merged in the round-5
@@ -1586,15 +1586,19 @@ unaffected by this pass and keep their existing citations, still real:
 `TestIdenticalRestatementOfUnknownIdentityFailsClosed`/`TestUnknownIdentityRestatementIsALineDiagnostic`.
 
 **P3-42's own gate requirement — "every P3 decision maps to named
-required tests" — is met as of this pass: the table marks no clause
-MISSING (the open-exchange half of P3-38 is covered by
-`TestP3_38_OpenExchangeMemberSurvivesCollectUntilClosed`; P3-20's
-filesystem/network-read guarantee by the round-5 t2 pass's two
-`internal/ingest` tests)**, plus the
-small number of memory-only and
-adjacent-test caveats the P3-42 table above records inline. Moving
-this ADR's Status line from Proposed to Accepted is the commander's call,
-not this docs pass's; flagged for that ruling separately.
+required tests" — is now evidenced row by row, not claimed wholesale:
+every citation in the P3-42 table above carries the `file:line` of the
+assertion that proves its clause (round 7, SPEC-6.1), and the clauses
+where no asserting line exists are marked MISSING in-row with a pending
+p7-ta/p7-tb marker — the round-5 text's "the table marks no clause
+MISSING" claim was false, and SPEC-6.1's re-audit is what found it.** The
+gate is therefore met to the exact extent the table records, gaps
+included: memory-only, pure-function, and stub-fixture coverage is
+labeled where it applies, and adjacent-test caveats still mark the rows
+a fresh reviewer should re-check. Whether the nine MISSING markers (as
+of this round) close before the Phase 3 gate rules this ADR Accepted is
+the commander's call, not this docs pass's; flagged for that ruling
+separately.
 
 ## Residual risks and limits
 
