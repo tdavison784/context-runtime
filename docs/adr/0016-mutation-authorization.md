@@ -200,8 +200,9 @@ both forms share.
   can raise it is enabled by default (`FR-GC-004` permits a disabled
   trigger); `POLICY` has no producer yet, so it stays off. **SPEC-2.3
   (PR #6 round 2): this rule was violated for SUPERSESSION on two paths;
-  one is now fixed in this reconciliation, one is fixed but not yet merged
-  here.** Observation-state supersession
+  both were fixed by the round-2/round-4 integrations (an earlier pass of
+  this section wrongly recorded one of the two as fixed-but-not-merged).**
+  Observation-state supersession
   (`graph.FileObservationState`, via `internal/obligation/subject_state.go`'s
   `deriveState`) now enqueues through `gcqueue.Enqueue`, keyed by the new
   state occurrence, under the service's own recorded policy — a first state
@@ -221,14 +222,23 @@ both forms share.
   the executor must share a Phase 3 policy version: since SPEC-2.11, a
   request carries its producer's recorded policy version, so a version
   mismatch affects every attempt from the first pass, not an occasional
-  one. **A stale `PolicyVersion`, a disabled trigger, and a missing
-  authorized collector are all J5 "configuration errors": the attempt
-  fails closed and the request stays pending, uncharged, never
-  quarantined** (`classifyGCFailure`, `internal/lifecycle/gc_failure.go`,
-  maps `ErrUnsupportedSchema` to `gcNotCharged`; `domain.GCFailurePolicyMismatch`
-  remains a defined reason code but is not produced by this path). This
+  one. **A version-mismatched request no longer strands (ruling M1,
+  DUR-4.9, fixed round 4 — amending this section's round-3 text, which
+  said such a request "stays pending, never quarantined"):** the first
+  `CollectPending` pass under the current policy settles it
+  `FAILED`/`POLICY_MISMATCH` (`ErrGCPolicyVersion`,
+  `domain.GCFailurePolicyMismatch`) — uncharged, nothing archived — so
+  the normal re-arm path applies under the current policy and the same
+  authorization; a *direct* `ExecuteGCRequest` on a version-mismatched
+  request still returns `ErrUnsupportedSchema` and leaves it pending,
+  uncharged (`classifyGCFailure`, `internal/lifecycle/gc_failure.go`,
+  maps it to `gcNotCharged`). A disabled trigger keeps returning
+  `ErrGCTriggerDisabled` (callers test it with `errors.Is`), and a
+  missing authorized collector is still the closed `ErrGCConfiguration`
+  — both J5 "configuration errors" that fail closed, charge nothing,
+  and never quarantine on their own. This
   is J5's rule exactly ("a misconfigured collector … returns an error to
-  the caller and leaves the request pending — never quarantined"), which
+  the caller"), which
   is stricter than, and supersedes, SPEC-3.4's originally suggested
   "quarantines at once as `POLICY_MISMATCH`" text — that text described
   round-2 code J1–J7's redesign has since replaced.
@@ -238,8 +248,13 @@ both forms share.
   that ceiling in `(item.Seq, item.ID)` order. `GCProgress` CAS persists
   the last fully decided candidate, completed batch count, adaptive
   item-count limit, and attempts for the next candidate. Later insertions
-  cannot extend the request. Continuations require the first batch's
-  collector principal, preserving its access boundary.
+  cannot extend the request. Continuations bind to the collector's
+  *authority class* (SYSTEM/HARNESS) plus, for task-scoped requests, the
+  task — any authorized same-task collector may run a later batch, not
+  only the principal that ran batch 1 (SEC-4.5, fixed round 4; the
+  round-3 text here wrongly required the first batch's exact principal).
+  Per-target `Archive` authorization always stays under the principal
+  executing that batch.
   **Regression, fixed round 4 (SEC-4.2/SPEC-4.2, introduced by
   `920e9e8`): freezing the candidate set at `SnapshotSeq` did not also
   freeze protection decisions.** `gc_snapshot.go` evaluated lease
@@ -267,14 +282,21 @@ both forms share.
   preserve the item and let later candidates proceed. A result becomes
   `COLLECTED` only when the bounded candidate traversal is exhausted.
   Only request-level `INVALID_REQUEST` and `INTEGRITY` failures quarantine.
-  Collector policy/trigger mismatch or missing capability returns an error
-  and leaves the request pending without charging attempts. Infrastructure
+  A disabled trigger or missing collector capability returns an error
+  (`ErrGCTriggerDisabled`/`ErrGCConfiguration`) and leaves the request
+  pending without charging attempts; a policy-version mismatch settles
+  `FAILED`/`POLICY_MISMATCH` through `CollectPending` under ruling M1
+  (above), while a direct `ExecuteGCRequest` still refuses it with
+  `ErrUnsupportedSchema`, pending and uncharged. Infrastructure
   failures also leave it pending; historical terminal reason codes remain
   readable. Terminal results remove requests from the pending index in the
-  same transaction. Each service keeps a concurrency-safe, per-session
-  scan continuation across calls and wraps at the end, so a disabled or
-  declined prefix cannot permanently hide runnable requests within that
-  service's lifetime; a new service begins at the queue head.
+  same transaction. The scan continuation is durable, not per-service:
+  the CAS-written, per-session `gc_queue_cursor` (migration 0047, below)
+  carries the scan position across calls, restarts, and service
+  replacement, and wraps at the end, so a disabled or declined prefix
+  cannot permanently hide runnable requests; a new service instance
+  resumes at the cursor, never restarting from the queue head (the
+  round-3 text here described the replaced in-process continuation).
   Direct `Collect`, including SESSION scope, uses the same durable path.
   Its receipt exposes `GCRequestID`; callers use `ExecuteGCRequest` or
   `CollectPending` to continue. Retrying the original manual intent replays
