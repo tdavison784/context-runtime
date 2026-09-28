@@ -547,7 +547,16 @@ landed" text).** All three parts are implemented:
   metadata, and is deprecated there with a pointer to this rule. Tests:
   `TestDUR31SubjectApplicabilityIsDerived`,
   `TestSubjectApplicabilityIsExactAndFailsClosed`
-  (`internal/store/subject_applicability_test.go`). **L1 landed in round
+  (`internal/store/subject_applicability_test.go`); **SPEC-6.6b (round
+  7, commit `ff0ffe4`, closing TEST-6.3): `CurrentPathContent`'s UNKNOWN
+  guard** (`internal/store/subject_applicability.go`) — a path state
+  recorded KNOWN must not read as current content while the resource's
+  own state is UNKNOWN (the recording update's report was a gap), with
+  every other refusal kept inert so the resource-freshness conjunct
+  alone decides — `TestCurrentPathContentUnknownResourceState`
+  (`internal/store/subject_applicability_test.go:118`) asserts at
+  `:133` (the UNKNOWN resource state refuses) with the KNOWN control at
+  `:126`. **L1 landed in round
   4; the gap this section previously recorded as open is closed except
   for one Phase 4 deferral:** retrieval consumes the rule —
   `retrieve.observationCurrent` (`internal/retrieve/read.go`) labels a
@@ -679,7 +688,28 @@ and its refusal path entirely (K1a, K1d):
   unchanged: the unconfirmed pointer only grows, so a confirmation can
   never resurrect an earlier invalidation — only a dependency asserted
   at or after the confirming raise's own revision is spared, and
-  H1→H2→H1 on the exact key stays a change. **The migration backfills
+  H1→H2→H1 on the exact key stays a change. **SEC-6.1 (round 7,
+  commits `84fcf31`/`336bc7e`): a store confirmation requires a
+  KNOWN-freshness cited update.** `PutResourcePathState`'s same-content
+  claim now also requires the cited update's `Freshness` to be
+  `ResourceKnown` (`memory/semantic_resource.go`, `sqlite/
+  semantic_resource.go` — the `same` flag drives both the exact-key
+  raise spare and the K1-api.3 confirmation records `applyK1Report`
+  writes, so one gate closes both): an UNKNOWN (gap/resynchronization)
+  report's same-content claim is not evidence. Domain validation already
+  forces UNKNOWN updates to `AllPaths` with no changed paths, so the
+  exact-key spare is structurally unreachable for them today — the gate
+  holds structurally if that ever changes; KNOWN reports are unaffected,
+  so K1-api.3's legitimate confirmations survive (the subtest's control).
+  Test: `TestConformance/SemanticK1UnknownFreshnessGate`
+  (`internal/store/storetest/semantic_k1_unknown_confirm.go`,
+  `testSemanticK1UnknownFreshnessGate` at `:51`, both stores) — asserts
+  at `:93` (an UNKNOWN report's update never confirms: the dependent
+  proof falls), `:96` (zero confirmation records), `:100-101` (the
+  control's KNOWN update at the next revision confirms and validates),
+  `:109`/`:114-115` (a later legitimate KNOWN report confirms
+  `LastConfirmedRev`), `:111-112` (the earlier fallen proof stays
+  fallen — monotonicity). **The migration backfills
   nothing** (the same non-reconstructibility 0048's ALL-key backfill
   accepted), so pre-0049 history keeps invalidating exactly as before
   — conservative over-invalidation, never under — and a post-upgrade
@@ -709,7 +739,16 @@ and its refusal path entirely (K1a, K1d):
   in-transaction read is felled by the same transaction's change and
   stays felled through an in-transaction H1→H2→H1; a confirming broad
   report followed by a same-transaction satisfaction reads valid and
-  commits through the A5 guard); `TestXREV5SameContentAllPaths` and
+  commits through the A5 guard; **SPEC-6.3, round 7, commit `0938f74`:
+  the unrelated-then-affecting case — an unrelated report first
+  (`docs/b.md` raises nothing the proof rests on), a read that advances
+  the pending-report watermark, then a CHANGE to `docs/a.md` whose raise
+  must be visible to the second in-transaction read and in the committed
+  state, because finalizing the reports only once per transaction would
+  lose the second report's raise everywhere — asserts at
+  `internal/store/storetest/semantic_k1_intx.go:88-96` (the u5/u6
+  transaction) and `:104-105` (both proofs invalid after commit)**);
+  `TestXREV5SameContentAllPaths` and
   `TestXREV5PathReadAndWaiverInReportTx` (`internal/obligation`
   service level, `zz_xrev5_ports_test.go`, both backends — the latter:
   a waiver appended after a same-transaction report settles first, so

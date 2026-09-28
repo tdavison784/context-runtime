@@ -386,7 +386,22 @@ plus `TestCursorPagesSeekRange` and `TestLiveProofPathReadsSeek`
 list (DUR-4.10).** `TestUpgradeK1Pointers_0048` (round 4, SPEC-4.4) is
 0048's own upgrade-parity fixture, landed after this list's prior pass;
 `TestUpgradePathConfirmations_0049` (round 5, K1-api.3) is 0049's own,
-same pattern.
+same pattern. **`TestUpgradeGCCandidateViewer_0050` (round 7, SPEC-6.7,
+commit `d698cdb`) is 0050's own:** a `gc_progress` row a 49-binary left
+in flight has no viewer columns, so after the upgrade the frozen viewer
+is recovered from batch 1's committed receipt — a continuation by a
+DIFFERENT collector pages the first collector's frozen candidate set and
+decides every frozen candidate (each one it cannot access gets an
+explicit INELIGIBLE, P3-38), and the recovered viewer is what the next
+progress row records — asserts at
+`internal/store/sqlite/upgrade_test.go:1987` (the request finishes
+COLLECTED), `:2024` (every frozen candidate decided exactly once,
+`eph-001`/`eph-002` INELIGIBLE to the continuator at `:2028`), `:2038`
+(the recovered viewer, not the continuator, recorded), `:2055` (only
+batch 1's item archived); without batch 1's receipt the continuation
+fails closed — `ErrNotFound` at `:2076`, the request still pending at
+`:2086`, the legacy progress row untouched at `:2093`, nothing archived
+at `:2106`.
 `internal/obligation`'s own SQLite suite
 (50/50 subtests, 8/8 failure-injection scenarios, ADR 8) runs against these
 migrations through W2's `sqlitetest` template.
