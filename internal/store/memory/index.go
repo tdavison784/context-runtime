@@ -140,8 +140,8 @@ func (a seqRef) less(b seqRef) bool { return a.seq < b.seq || a.seq == b.seq && 
 // (SPEC-3.1 item 3).
 type orderedIndex[K comparable] struct {
 	base map[K][]seqRef
-	over map[K][]seqRef          // sorted additions; nil when read-only
-	gone map[K]map[string]seqRef // removals in this transaction, by ID
+	over map[K][]seqRef        // sorted additions; nil when read-only
+	gone map[K]map[seqRef]bool // removals in this transaction, by exact entry
 	// commitWork counts additions and removals commit applied, so tests
 	// can assert it never rebuilds a list.
 	commitWork int
@@ -150,7 +150,7 @@ type orderedIndex[K comparable] struct {
 func newOrderedIndex[K comparable](base map[K][]seqRef, writable bool) orderedIndex[K] {
 	x := orderedIndex[K]{base: base}
 	if writable {
-		x.over, x.gone = map[K][]seqRef{}, map[K]map[string]seqRef{}
+		x.over, x.gone = map[K][]seqRef{}, map[K]map[seqRef]bool{}
 	}
 	return x
 }
@@ -163,15 +163,16 @@ func search(l []seqRef, r seqRef) int {
 func (x *orderedIndex[K]) add(k K, r seqRef) {
 	l := x.over[k]
 	x.over[k] = slices.Insert(l, search(l, r), r)
-	delete(x.gone[k], r.id)
+	delete(x.gone[k], r)
 }
 
-// remove drops entry r (its Seq locates it) from k.
+// remove drops exactly entry r (its Seq locates it) from k; another entry
+// with the same ID, such as a newer version's, is unaffected.
 func (x *orderedIndex[K]) remove(k K, r seqRef) {
 	if x.gone[k] == nil {
-		x.gone[k] = map[string]seqRef{}
+		x.gone[k] = map[seqRef]bool{}
 	}
-	x.gone[k][r.id] = r
+	x.gone[k][r] = true
 }
 
 // after yields k's entries strictly after c, in order.
@@ -187,7 +188,36 @@ func (x *orderedIndex[K]) after(k K, c seqRef) iter.Seq[seqRef] {
 			} else {
 				r, j = o[j], j+1
 			}
-			if _, removed := gone[r.id]; removed {
+			if gone[r] {
+				continue
+			}
+			if !yield(r) {
+				return
+			}
+		}
+	}
+}
+
+// before yields k's entries strictly before c in descending (Seq, ID)
+// order; a zero c starts at the newest entry.
+func (x *orderedIndex[K]) before(k K, c seqRef) iter.Seq[seqRef] {
+	return func(yield func(seqRef) bool) {
+		b, o, gone := x.base[k], x.over[k], x.gone[k]
+		end := func(l []seqRef) int {
+			if c == (seqRef{}) {
+				return len(l)
+			}
+			return sort.Search(len(l), func(i int) bool { return !l[i].less(c) })
+		}
+		i, j := end(b)-1, end(o)-1
+		for i >= 0 || j >= 0 {
+			var r seqRef
+			if j < 0 || i >= 0 && o[j].less(b[i]) {
+				r, i = b[i], i-1
+			} else {
+				r, j = o[j], j-1
+			}
+			if gone[r] {
 				continue
 			}
 			if !yield(r) {
@@ -203,7 +233,7 @@ func (x *orderedIndex[K]) after(k K, c seqRef) iter.Seq[seqRef] {
 func (x *orderedIndex[K]) commit() {
 	for k, gone := range x.gone {
 		l := x.base[k]
-		for _, r := range gone {
+		for r := range gone {
 			x.commitWork++
 			if i := search(l, r); i < len(l) && l[i] == r {
 				l = slices.Delete(l, i, i+1)
@@ -214,7 +244,7 @@ func (x *orderedIndex[K]) commit() {
 	for k, adds := range x.over {
 		l := x.base[k]
 		for _, r := range adds {
-			if _, removed := x.gone[k][r.id]; removed {
+			if x.gone[k][r] {
 				continue
 			}
 			x.commitWork++

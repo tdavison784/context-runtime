@@ -14,6 +14,66 @@ M6/R6, ADR 19 §17). This ADR's atomic-audit-event requirement and the
 disclosure fix it describes both still hold for the typed methods; only
 the names changed.
 
+## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
+
+Phase 3's binding decision record (`.worktrees/_commander/phase3-decisions.md`,
+P3-34; commander rulings FROZEN 2026-09-26, reconciled against W7's landed
+`internal/ingest` outcome path and W5's `internal/graph` membership package)
+binds a completed provider outcome to the logical exchange/membership
+machinery ADR 6's amendment introduces (P3-7), without claiming any actual
+provider transport — that remains Phase 5.
+
+- **`domain.OutcomeBinding{Principal, TurnID, Turn, ExchangeID,
+  ConversationID, CallID}` (`internal/domain/outcome_binding.go`) is the
+  immutable, authenticated originating context every call-ledger outcome
+  carries.** `Validate` requires a nonempty task/agent, exactly the
+  conversation ID `ConversationIDFor(taskID, agentID)` already derives
+  (ADR 4), and every ID present — a late outcome can never borrow the
+  newest task turn or reactivate a completed task, per this ADR's existing
+  FR-CALL-004 discipline. `ingest.IngestOutcome`/`ApplyOutcome`
+  (`internal/ingest/outcome.go`) ingest the call's AGENT output under
+  `domain.OutcomeEventID(b)` (ADR 4), stamped with the *originating* turn
+  even when the task has since opened a newer one. Tests:
+  `TestOutcome_KeepsOriginatingTurn`, `TestOutcome_CompletedTaskAuditOnly`,
+  `TestOutcome_BindingIsIdentity`.
+- **A completed output joins its logical exchange in the same transaction as
+  its outcome, through the trusted dispatcher that executed the call, not
+  the recorded call actor (P3-7/P3-34).** `ingest.OutcomeMembership{Dispatcher,
+  ToolCallIDs}` names the completed call's own service actor; the event's
+  AGENT transcript becomes the round's `OUTPUT` member and each tool call ID
+  a `TOOL_CALL` member, registered through W5's `graph.MembershipService`
+  (ADR 6's amendment). An external tool result becomes its tool call's
+  `TOOL_RESULT` member the same way, under
+  `domain.ToolOutcomeEventID`/`ingest.ToolResultEventID` (ADR 4). Tests:
+  `TestOutcome_RegistersExchangeMembers`,
+  `TestOutcome_MembershipRequiresTheCallsDispatcher`,
+  `TestOutcome_RegistersExternalToolResult`.
+- **The completed-inference index this ADR's `Conversation.LogicalCalls`
+  already counts is the same counter Phase 3's retrieval leases consume
+  (ADR 6's amendment, P3-29) — no new provider-call counter was added.**
+  `internal/invocation/dispatch.go`'s existing `conv.LogicalCalls++` (on a
+  completed inference only; compaction does not advance it) is untouched by
+  Phase 3; `policy.LeaseLive` and `retrieve.Apply` read it, they do not
+  duplicate it. `TestRandomizedLedgerInvariants`, `TestSQLiteRandomizedInvariants`
+  continue to lock this ADR's ledger invariants unchanged.
+- **`CompleteTask` (ADR 16's amendment, P3-9) is the one place task
+  completion checks this ADR's ledger reservation directly (P3-42's
+  "late-outcome/completion integration").** `lifecycle.completionBlockers`
+  (`internal/lifecycle/completion_blockers.go`) reads
+  `ReservingCallsByTask`/`OpenExchangesByTask` and returns this ADR's own
+  `ErrCallInFlight` for either a reserving call (`PREPARED`/`SENT`/`UNKNOWN`,
+  this ADR's `Reserving()` states) or an open/unacknowledged exchange —
+  completion never races ahead of an in-flight operation or an unclosed
+  round, and never cancels one itself; the caller must reconcile, cancel, or
+  abandon through this ADR's existing recovery paths first. A late outcome
+  for an already-completed task is audit-only under `domain.OutcomeBinding`
+  above, never silently joining a newer epoch or reactivating the task —
+  this is the same non-reactivation rule this ADR's FR-CALL-004 discipline
+  already states, now exercised by completion specifically. Tests:
+  `TestCompletionX8RejectsEveryReservationAndOpenExchange`,
+  `TestCompletionRejectsInFlightWorkOnRealStores`,
+  `TestOutcome_CompletedTaskAuditOnly`.
+
 ## Context
 
 FR-CALL-001 through FR-CALL-005 define the provider-call lifecycle: Prepare

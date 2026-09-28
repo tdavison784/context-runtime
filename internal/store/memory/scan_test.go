@@ -24,7 +24,7 @@ func TestKeyedReadsDoNotScan(t *testing.T) {
 			if err := tx.InsertItem(storetest.NewDirective("s", id, id, tx.NextSeq(), id)); err != nil {
 				return err
 			}
-			if err := tx.SetCurrentVersion(id); err != nil {
+			if err := storetest.UncheckedSetCurrentVersion(tx, id); err != nil {
 				return err
 			}
 			if err := tx.InsertObligationVersion(storetest.NewObligation("s", "o"+id, 1, tx.NextSeq(), id)); err != nil {
@@ -127,6 +127,53 @@ func TestRelationshipsReadTheirTypedKey(t *testing.T) {
 			}
 			if n := r.relsTo.yields + r.relsFrom.yields + r.relsByType.yields - yieldsBefore; n > 1 || r.rels.scanned != 0 {
 				t.Errorf("Relationships(%+v) walked %d index entries and scanned %d edges", f, n, r.rels.scanned)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUntypedEndpointReadsAllRelationshipTypes_SPEC31 ranges over the domain
+// set, so adding a valid type without probing its endpoint key fails here.
+func TestUntypedEndpointReadsAllRelationshipTypes_SPEC31(t *testing.T) {
+	s := New()
+	defer s.Close()
+	ctx := context.Background()
+	types := domain.RelationshipTypes()
+	if err := s.Update(ctx, "s", func(tx store.Tx) error {
+		for _, id := range []string{"from", "to"} {
+			if err := tx.InsertItem(storetest.NewItem("s", id, tx.NextSeq(), id)); err != nil {
+				return err
+			}
+		}
+		for _, typ := range types {
+			if err := tx.InsertRelationship(storetest.NewRelationship("s", string(typ), typ, "from", "to", tx.NextSeq())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+		for _, f := range []store.RelationshipFilter{{FromID: "from"}, {ToID: "to"}} {
+			rels, err := tx.Relationships(f)
+			if err != nil {
+				return err
+			}
+			seen := map[domain.RelationshipType]bool{}
+			for _, rel := range rels {
+				seen[rel.Type] = true
+			}
+			if len(rels) != len(types) {
+				t.Errorf("Relationships(%+v) returned %d edges, want %d", f, len(rels), len(types))
+			}
+			for _, typ := range types {
+				if !seen[typ] {
+					t.Errorf("Relationships(%+v) missed %s", f, typ)
+				}
 			}
 		}
 		return nil

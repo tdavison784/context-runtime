@@ -398,6 +398,240 @@ item ID only when it actually occurs, is less disruptive and matches how
   behavior — see ADR 16's `ReplaceDirective`/`rejectVisibleBoundaryConflict`
   decision for its tests.
 
+## Canonical domain registry (Phase 3)
+
+Every `domain.CanonicalEncoder` domain tag names exactly one identity or
+hash family. A tag is never reused for a different field sequence or
+meaning, and a changed encoding takes a new version. Distinct families
+therefore cannot collide even when their inputs are equal. The golden list
+in `internal/domain/canonical_domains_test.go` is the enforced copy of this
+table. It fails when production code uses an unregistered literal domain,
+when a computed mutation-family domain is unregistered, or when this
+section omits a registered domain. Registering a domain means changing the
+test list and this section in the same commit.
+
+Phase 1–2 identity and hashing (domain, invocation):
+
+- `context-runtime/call-id/v2`
+- `context-runtime/call-lifecycle-id/v1`
+- `context-runtime/call-outcome/v2`
+- `context-runtime/call-proposal/v1`
+- `context-runtime/content/v1`
+- `context-runtime/conversation/v1`
+- `context-runtime/event-occurrence/v1`
+- `context-runtime/ingest-payload/v2`
+- `context-runtime/item-id/v1`
+- `context-runtime/tool-invocation/v1`
+- `context-runtime/turn-id/v1`
+
+Phase 3 domain contracts (W1):
+
+- `context-runtime/coverage-member/v1`
+- `context-runtime/coverage/v1`
+- `context-runtime/creation-declaration/v1`
+- `context-runtime/current-key/v2`
+- `context-runtime/grant-target/v1`
+- `context-runtime/ingest-payload/v3`
+- `context-runtime/ingest/outcome-event-id/v1`
+- `context-runtime/mutation-receipt-id/v1`
+- `context-runtime/mutation-request/v3`
+- `context-runtime/obligation-id/v1`
+- `context-runtime/obligation-target/v1`
+- `context-runtime/observation-subject/v1`
+- `context-runtime/operation-request-id/v1`
+- `context-runtime/operation-request-id/v2`
+- `context-runtime/operation-request-binding/v1`
+- `context-runtime/operation-request-id/v3`
+- `context-runtime/operation-request-binding/v2`
+- `context-runtime/proof-id/v1`
+- `context-runtime/resource-locator/v1`
+- `context-runtime/semantic-arguments/v1`
+- `context-runtime/snapshot-declaration/v1`
+
+Graph record identities (W1):
+
+- `context-runtime/graph/creation-declaration-id/v1`
+- `context-runtime/graph/derived-coverage-id/v1`
+- `context-runtime/graph/derived-relationship-id/v2`
+- `context-runtime/graph/lifecycle-event-id/v2`
+- `context-runtime/graph/obligation-audit-id/v1`
+- `context-runtime/graph/relationship-id/v1`
+- `context-runtime/graph/snapshot-declaration-id/v1`
+
+Lifecycle, grant and GC audit/receipt identities (W3):
+
+- `context-runtime/collect-audit/v1`
+- `context-runtime/collect-receipt/v1`
+- `context-runtime/gc-manual/v1`
+- `context-runtime/gc-rearm/v1`
+- `context-runtime/gc-request/v1`
+- `context-runtime/gc-result/v1`
+- `context-runtime/gc-trigger/v1`
+- `context-runtime/gc-trigger/v2`
+- `context-runtime/grant-revocation-audit/v1`
+- `context-runtime/lifecycle-audit/v1`
+- `context-runtime/lifecycle-change/v1`
+- `context-runtime/lifecycle-replacement-event/v1`
+- `context-runtime/lifecycle-replacement-item/v1`
+- `context-runtime/task-completion-audit/v1`
+
+Logical membership and tool identities (W5):
+
+- `context-runtime/logical-membership-id/v1`
+- `context-runtime/tools/id/v1`
+
+Retrieval records (W6):
+
+- `context-runtime/retrieval-record/v1`
+
+Ingest audit identities (W7):
+
+- `context-runtime/ingest/owner-registration-id/v1`
+- `context-runtime/ingest/task-audit-id/v1`
+
+`context-runtime/ingest/owner-registration-id/v1` derives the record ID
+`own_` + hex hash of (session, owner kind, owner ID) for the immutable
+WORKFLOW/AGENT `OwnerRegistration` that ingest writes on an owner's first
+trusted association (P3-32/C-15). The record is unique per (session, kind,
+owner ID), so the ID never needs another input.
+
+W4 obligation/resource/observation (request hash per mutation family, then record identities):
+
+- `context-runtime/w4/obligation.declare/v1`
+- `context-runtime/w4/obligation.materialization/v1`
+- `context-runtime/w4/obligation.reevaluate/v1`
+- `context-runtime/w4/obligation.transition/v1`
+- `context-runtime/w4/observation.report/v1`
+- `context-runtime/w4/observation.run/v1`
+- `context-runtime/w4/resource.register/v1`
+- `context-runtime/w4/resource.report/v1`
+- `context-runtime/w4/resource.resync/v1`
+- `context-runtime/w4/workspace.bind/v1`
+- `context-runtime/w4/record-id/v1`
+
+`context-runtime/w4/record-id/v1` (W4, `internal/obligation`) derives W4
+record IDs: audit events, transitions, dependencies, observations, runs and
+updates. Each ID is a prefix plus the full hash of (kind, ordered parts).
+The kind is encoded first, so records of different kinds never share an ID.
+This domain is separate from W4's per-family request-hash domains
+`context-runtime/w4/<family>/v1`. Family names contain a dot, so no family
+domain can equal it.
+
+### Runtime operation request IDs (G3, SEC-1.2; H5, SEC-2.2)
+
+`domain.OperationRequestID(authenticated, owner, occurrence, eventSeq,
+operation, command)` derives `req_<eventSeq>_<inner>.<tag>`. `inner`
+(`operation-request-id/v3`) hashes the authenticated ingesting principal,
+the receipt owner (the lowered source actor or the dispatcher), the
+occurrence, the event's own sequence and the ordinals. `tag`
+(`operation-request-binding/v2`) binds `eventSeq` and `inner` to the owner.
+
+**Corrected check order (SPEC-4.5, round 4): `MutationReceiptID` does not
+run before any receipt lookup — `domain.CheckRequestBeforeLookup` does,
+and `MutationReceiptID` runs last, only for a genuinely new request.**
+At a standalone lifecycle entry point, `lifecycle.Service.begin`
+(`internal/lifecycle/receipt.go`) runs, in order: (1)
+`CheckRequestBeforeLookup(tx, p, requestID)`, which refuses a
+current-format `req_` ID unless it was allocated in this transaction,
+before any lookup (SEC-3.6); (2) the exact-replay lookup
+(`sem.MutationReceipt`), applying `RuntimeRequestOwnedBy` only to a
+foreign receipt (no existence oracle, SEC-2.8); (3)
+`ValidateNewRequestID(tx, p, requestID)` on a genuinely new request
+(skipped for the collection family, whose only caller already
+validated); then (4) `MutationReceiptID(tx, owner, family, requestID)`,
+computed only once (1)-(3) pass, to name the receipt a new request will
+be stored under. It accepts a `req_` ID only if it was derived for
+`owner` and its `eventSeq` was allocated in `tx`. No secret is needed.
+Another principal, a caller predicting a future event, and anyone
+replaying a past event cannot name a runtime request, even a principal
+whose fields equal the lowered actor's. They are refused identically
+whether or not the owner's receipt exists, so there is neither an oracle
+nor a squat. Tests: `TestLoweredActorCannotReplayRelayReceipt_SEC36`
+(standalone path) and `TestLoweredActorCannotReplayRelayReceiptTxLevel_SEC36`
+(transaction-level `Resolve(tx, ...)`), both
+`internal/ingest/sec36_relay_replay_test.go`, both stores — a USER whose
+fields equal a HARNESS relay's lowered actor can neither replay the relay's
+runtime `req_` receipt nor distinguish it from an absent one.
+
+`req_`, `gc_`, `gcq_`, and `outcome-` (`domain.OutcomeEventID`/
+`ToolOutcomeEventID`, above) are reserved prefixes: no caller EventID can
+name them. **The check runs after the exact-replay lookup, not before
+(DUR-2.8, PR #6 round 2; SEC-3.3/3.4, PR #6 round 3, added at
+`internal/ingest`/`internal/lifecycle`'s own receipt-lookup entry points):**
+rejecting a reserved namespace before checking for an existing receipt
+would refuse to replay a Phase 2 event whose caller EventID happens to
+collide with a namespace reserved only starting at Phase 3; both `ingest`'s
+`lookupReceipt` and `lifecycle`'s `begin` (ADR 19's Phase 3 amendment) look
+up an exact match first and apply the reserved-namespace/ownership check
+only once no receipt is found. **`ValidateCallerRequestID` (SEC-3.7,
+round 4: this sentence previously named only the two entry points below)
+guards every caller-request-ID entry point, not only standalone
+lifecycle requests (`*Standalone`, manual `Collect`):** it also runs at
+the semantic-tool handlers (`internal/tools`), retrieval
+(`internal/retrieve`), graph membership (`internal/graph`), obligation
+mutations (`internal/obligation`), and the harness checkpoint path.
+Tests: `TestToolsRefuseReservedRequestIDs_SEC37` (`internal/tools`),
+`TestMembershipRefusesReservedRequestIDs_SEC37` (`internal/graph`),
+`TestObligationEntriesRefuseReservedRequestIDs_SEC37`
+(`internal/obligation`), `TestRetrievalRefusesReservedRequestIDs_SEC37`
+(`internal/retrieve`), and
+`TestLifecycleTxEntriesRefuseReservedRequestIDs_SEC37`
+(`internal/ingest`) — all five named, because the
+`*RefuseReservedRequestIDs_SEC37` glob this sentence used missed the two
+spelled `Refuses`. Stores derive keys with
+`MutationReceiptKey(session, family, requestID)` and check ownership with
+`RuntimeRequestOwnedBy`. Receipt ID values stay a hash of (session, family,
+requestID). `operation-request-id/v1..v2` and `operation-request-binding/v1`
+remain registered and are never reused.
+
+GC runtime IDs (SEC-2.6): `GCTriggerRequestID(origin, trigger, triggerID)`
+(`gc-trigger/v2`) binds the authenticated origin that raised the trigger.
+`GCRequestRecordID(session, requestID)` (`gc-request/v1`, `gcq_`) names
+the queued request. Explicit collections derive separately: a manual
+`Collect` records under `GCManualRequestID(origin, requestID)`
+(`gc-manual/v1`, SEC-4.8), so it can neither precompute a runtime trigger
+record nor alias its batch receipts, and a re-arm records under
+`GCRearmRequestID(failedID)` (`gc-rearm/v1`, SEC-4.4), derived from the
+failed request alone so any authorized actor re-arms idempotently.
+`gc-trigger/v1` remains registered.
+
+**Manual collection and re-arm each get their own encoder domain (SEC-4.8,
+round 4).** Before this, both derived their durable request identity
+through `GCTriggerRequestID` itself, sharing its domain with every runtime
+trigger: a manual `Collect{RequestID: <taskID>, Trigger: TASK_COMPLETION}`
+could precompute the same `gcq_` record its own later `CompleteTask` would
+try to create, wedging the completion with `ErrEventIDConflict`, and a
+`"rearm/"+failedID` request ID could self-collide the same way.
+`GCManualRequestID(origin, requestID)` (`gc-manual/v1`) derives a manual
+collection's identity from the collector and its caller-named request ID;
+`GCRearmRequestID(failedID)` (`gc-rearm/v1`) derives a re-arm's identity
+from the failed request alone, in its own domain, so it is idempotent
+under whichever authorized actor re-arms it. Neither domain is shared with
+`gc-trigger/v1`/`v2` or with each other, so no runtime trigger, manual
+collection, or re-arm can alias or squat another's identity; both stay in
+the reserved `gc_` namespace, so no caller can name them either. Golden
+list: `internal/domain/canonical_domains_test.go`.
+
+### Tool-outcome EventID format (W7)
+
+The external result of a tool call issued by an authenticated provider
+output is ingested under the EventID `OutcomeEventID(b) + "/" +
+toolCallID`. `domain.ToolOutcomeEventID` builds it,
+`domain.ValidateToolOutcomeEventID` binds an EventID to an exact
+authenticated output and call, and `domain.ParseToolOutcomeEventID` checks
+its shape without authenticating anything. The format registers no new
+canonical domain. Its prefix is the `outcome-` plus 64 lowercase hex
+`OutcomeEventID` under `context-runtime/ingest/outcome-event-id/v1`, a
+fixed 72 bytes. The split is therefore unambiguous even when the tool call
+ID itself contains `/`. The tool call ID must be 1 to
+`MaxToolOutcomeCallIDBytes` (183) printable ASCII bytes with no space, so
+the whole EventID fits `MaxEventIDBytes`. Longer tool call IDs have no
+tool-outcome EventID and are rejected. The result is bound to exactly one
+call of one output: a different output, exchange, turn or tool call yields
+a different EventID. Golden vectors in
+`internal/domain/tool_outcome_id_test.go` freeze both the outcome ID and
+this format.
+
 ## Open questions
 
 ### Resolved at acceptance (2026-09-26)

@@ -1,6 +1,6 @@
 # 19. Directive parsing and ingestion
 
-Status: Proposed
+Status: Accepted (2026-09-26, Phase 2 exit; PR #5 merged as b869cb1 after SEC 4, SPEC 5, DUR 5, TEST 2 review rounds reported NO FURTHER WORK NEEDED)
 Date: 2026-09-26
 
 ## Context
@@ -27,6 +27,231 @@ applies — grouped by subsystem, for Phase 2's five worker branches
 Sources: `phase2-brief.md` (D1-D20), `phase2-decision-review.md`
 (amendments and M1-M8), `phase2-amendments.md` (R1-R8, binding).
 
+## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
+
+Phase 3's binding decision record (`.worktrees/_commander/phase3-decisions.md`,
+P3-4, P3-34, P3-35, P3-36, P3-40, with commander ruling C-1 FROZEN
+2026-09-26, reconciled against W7's landed `internal/ingest`) restates and
+extends this ADR's §7 (D10's deduplication/replacement rule) and adds the
+typed-operation/lifecycle-v2/v3-identity decisions this ADR's ingestion
+pipeline already owned, now that Phase 3 implements them.
+
+**Q1, restated (already accepted before this Phase 3 record, unchanged
+here):** "Reopening requires a changed version (different content or
+attributes) under FR-DIR-002['s] authorized replacement." Ordinary identical
+restatement — the same content and the same accepted attributes as the
+current version's immutable creation declaration (§7's `SameDirectiveSemantics`
+comparison, now formalized as a persisted `CreationDeclaration` per ADR 8's
+domain-work; see that ADR's §P3-4 in the binding record) — never reopens,
+re-pins, unarchives, or rebinds an obligation merely by being reingested. A
+new TURN/TTL eligibility origin remains, as it always has been under §7's
+D10, a meaningful identity change, not a refresh of the old occurrence in
+place.
+
+**C-1's addition (new in Phase 3): an explicit authenticated typed
+replacement intent may reuse identical content.** `ActionReplaceDirective`
+is a new mutation naming an expected current occurrence and version (CAS),
+carrying its own idempotent request identity (§10/D14's idempotency
+discipline, unchanged), authorized exactly as any other lifecycle mutation
+under this ADR's §11/D15 source-actor rule and ADR 16's `AuthorizeMutation`.
+Unlike ordinary D10 restatement, it may legally recreate a version whose
+content and attributes are byte-identical to the version it replaces — this
+is not automatic reopening through re-ingestion, because it requires an
+explicit, authenticated, CAS'd operation naming exactly which occurrence/
+version it replaces, the same discipline this ADR's §7 already requires for
+every other authorized replacement. It is audited together with all
+indirect consequences: every obligation version bound to the retired source
+is authorized and retired in the same operation (§9/D13, unchanged), and the
+new version starts fresh (a new OPEN goal, or a new UNRESOLVED obligation
+with no inherited proof or grant), exactly as any other D10 replacement
+already does. This is not a new textual `Reopen` directive keyword — §1/M4's
+closed unsupported-lifecycle vocabulary (`Archive, Unarchive, Promote,
+Demote, Block, Unblock, Waive, CompleteTask, Reopen`) is unchanged, and
+`Reopen` remains an `ErrUnsupportedDirective` diagnostic when written as a
+directive heading; `ActionReplaceDirective` is a typed mutation-service
+operation, not directive-grammar surface.
+
+**Alternative considered and rejected.** Claude M9 had originally
+recommended "keep[ing] the spec-literal behavior (it is an authorized
+replacement)" — treating an identical-content restatement itself as an
+authorized replacement, which Q1 already overrode before this Phase 3 record
+existed. The Phase 3 cross-check's proposal — "[an authenticated intent] may
+reuse identical content, and is checked/audited as `ActionReplaceDirective`,
+including all indirect obligation retirements" — is what C-1 adopts, as an
+*additional* explicit escape hatch alongside Q1's changed-content
+requirement, not a reversal of Q1. **Trade-off:** Q1's changed-content rule
+alone is simple and prevents accidental reopening, but requires an artificial
+edit merely to recommission identical work or rebind a legacy claim; adding
+the explicit typed intent preserves Q1's default while giving an authorized
+principal a deliberate, audited way to do exactly that when it is actually
+needed. **Commander ruling (FROZEN 2026-09-26): ADOPT the recommendation and
+amend Q1 to add this explicit escape hatch, without weakening Q1's default.**
+Real code confirms this exactly: `domain.ActionReplaceDirective`
+(`internal/domain/authz.go`), `domain.ReplaceDirectiveIntent`
+(`internal/domain/lifecycle_intent.go`), and
+`lifecycle.Service.ReplaceDirective` (`internal/lifecycle/replace.go`, W3),
+which itself calls `graph.ReplaceDirective` (`internal/graph/graph.go:298`,
+this ADR's §7 original decision, unchanged), implement it; obligation retirement
+runs through ADR 8 §2's `obligation.DeclareForReplacementTx`. Tests:
+`internal/lifecycle`: `TestReplaceDirectiveReopensWithIdenticalContentAndRetiresObligations`,
+`TestReplaceDirectiveNeedsAuthorityOrExactGrant`,
+`TestReplaceDirectiveFailsClosedOnUnknownIdentity`; `internal/ingest`:
+`TestGateT02_ReplacementRetiresOldRequirement`,
+`TestP336_ChangedRestatementReplaces`,
+`TestP336_ResolvedRestatementStaysResolved`,
+`TestP336_UnpinnedRestatementStaysUnpinned`; `internal/graph`:
+`TestReplaceDirective_T02`.
+
+**Typed operations, v3 identity, and lifecycle-command v2 execution (P3-34,
+P3-35, P3-40) — implemented in `internal/ingest`, this ADR's own package.**
+`Event.Operations` is an ordered, typed operation stream (span, alias,
+control, and mutation-intent operations) hashed under
+`ingest-payload/v3` (ADR 4), replacing the frozen v2 encoder for new events
+only — v2 stays frozen and still validated for legacy replay. A submitted
+operation's `RequestID` must be empty; `domain.OperationRequestID` derives
+it only after acceptance, so no caller can forge or predict one. At G3/SEC-1.2
+(PR #6 round 1) its signature became `(p Principal, occurrence string,
+operation, command uint64)`, binding a full principal instead of the stale
+`(session, occurrence, opIndex, ordinal)` signature this ADR originally
+described — that four-argument form is itself now superseded (below), not
+the current one. **H5 landed in this
+reconciliation (PR #6 round 2, SEC-2.2/SEC-2.6, commit `a1d734f`, W1):
+`OperationRequestID` now binds both principals explicitly, not one.** Its
+current signature is `OperationRequestID(authenticated, owner Principal,
+occurrence string, eventSeq, operation, command uint64)`: `authenticated`
+is the ingesting principal H5 requires (`internal/ingest/ops.go`'s
+`typedOperation` now passes `r.p`, the authenticated caller, not the
+lowered source actor it passed before), and `owner` is the receipt owner
+(the lowered actor or dispatcher) the request is filed under — the ID also
+now binds the event's own sequence (`req_<eventSeq>_<inner>.<tag>`), so a
+caller cannot name a future or past event's request. **The actual check
+order at a standalone lifecycle entry point (SPEC-4.5, round 4; corrects
+this paragraph's prior "`MutationReceiptID` runs before any receipt
+lookup" text, which conflated it with a different function).**
+`lifecycle.Service.begin` (`internal/lifecycle/receipt.go`) runs four
+steps in this exact order, and `MutationReceiptID` is the *last* one, not
+the first:
+
+1. `domain.CheckRequestBeforeLookup(tx, p, requestID)` — the function that
+   actually "runs before any receipt lookup": a current-format `req_` ID
+   is refused unless it was allocated in this transaction (SEC-3.6).
+   Tests: `TestLoweredActorCannotReplayRelayReceipt_SEC36` and
+   `TestLoweredActorCannotReplayRelayReceiptTxLevel_SEC36`
+   (`internal/ingest/sec36_relay_replay_test.go`).
+2. The exact-replay lookup (`sem.MutationReceipt`), with
+   `domain.RuntimeRequestOwnedBy` applied only to a foreign receipt
+   (SEC-2.8's no-existence-oracle rule, above).
+3. `domain.ValidateNewRequestID(tx, p, requestID)` on a genuinely new
+   request (skipped for the collection family, whose only caller,
+   `Collect`, already validated).
+4. `domain.MutationReceiptID(tx, p, family, requestID)` — computed only
+   once steps 1-3 pass, to name the receipt a brand-new request will be
+   stored under; it accepts a `req_` ID only for its exact owner and only
+   when its event sequence was allocated in the current transaction, so
+   no principal, including one sharing every field with the lowered
+   actor, can name another principal's runtime request.
+
+GC runtime IDs follow the same rule from `domain` directly:
+`GCTriggerRequestID` binds the authenticated origin (`gc-trigger/v2`) and
+`GCRequestRecordID` names the queued request; `gc_` and `gcq_` join `req_`
+as reserved prefixes callers may never supply. **`ValidateCallerRequestID`
+(SEC-3.7) now guards every caller-request-ID entry point, not only the
+short list this paragraph previously named:** standalone lifecycle
+mutations (item, grant, `CompleteTask`, `ReplaceDirective`) and manual
+`Collect`, plus the semantic-tool handlers (`internal/tools`), retrieval
+(`internal/retrieve`), graph membership (`internal/graph`), obligation
+mutations (`internal/obligation`), and the harness checkpoint path.
+Tests: `TestToolsRefuseReservedRequestIDs_SEC37` (`internal/tools`),
+`TestMembershipRefusesReservedRequestIDs_SEC37` (`internal/graph`),
+`TestObligationEntriesRefuseReservedRequestIDs_SEC37`
+(`internal/obligation`), `TestRetrievalRefusesReservedRequestIDs_SEC37`
+(`internal/retrieve`), and
+`TestLifecycleTxEntriesRefuseReservedRequestIDs_SEC37`
+(`internal/ingest`) — all five named, because the
+`*RefuseReservedRequestIDs_SEC37` glob this sentence used missed the two
+spelled `Refuses`.
+
+**Reserved-namespace rejection runs after the exact-replay lookup, not
+before (PR #6 round 2, DUR-2.8/SEC-2.8).** Checking a reserved prefix
+(`req_`/`outcome-`/`gc_`/`gcq_`) before looking up an existing receipt
+would refuse to replay a Phase 2 event whose caller `EventID` happens to
+collide with a namespace this ADR reserved only at Phase 3.
+`lookupReceipt` (`internal/ingest/ingest.go`) now runs first; a match
+replays regardless of namespace, and the reserved-namespace check applies
+only once no receipt is found, i.e. only to a genuinely new request. This
+is the same ownership-before-existence discipline §11's
+`AuthorizeMutation`/`AuthorizeSupersession` already use for access
+disclosure, now applied to receipt disclosure: `internal/lifecycle`'s
+`begin` (`internal/lifecycle/receipt.go`) applies the identical rule —
+exact-replay lookup first, then `domain.RuntimeRequestOwnedBy` before a
+foreign receipt's existence can affect the outcome (SEC-2.8, no existence
+oracle). Tests: `internal/ingest`'s frozen-fixture round-trip in
+`testdata/phase2/reserved.db`/`reserved.golden.json`; `internal/lifecycle`'s
+`TestLifecycleDerivedRequestIDIsNoExistenceOracle` and
+`TestLegacyRuntimeRequestIDReplaysForItsOwnerOnly`.
+
+**Owner registration is exercised end to end through ingest, including
+restart (PR #6 round 2, SPEC-2.12, closing the SPEC-1.7 test gap).**
+`internal/ingest`'s `TestIngestRegisteredOwnersOutliveTaskAndRestart_SPEC212`
+registers a WORKFLOW/AGENT owner through a real ingested event (not a
+seeded fixture), completes its task, restarts the store, and confirms the
+owner's broad-scope goal/pin survives and Collect does not archive it —
+closing the gap where the existing pure/seeded tests could pass even with
+the ingest-side producer removed.
+
+**An empty, non-nil `Operations` is rejected at validation, never
+silently treated as "no operations" (G4 = SEC-1.11 = SPEC-1.2).**
+`Event.ValidateV3` (`internal/domain/ingest_v3.go`) requires `Operations`
+to be either `nil` (every span ingests in the frozen per-span order) or a
+non-empty stream covering every span — before this fix, an event with
+spans and an explicitly empty `Operations` slice (e.g. JSON
+`"operations": []`) took the v3 path and stored its spans without ingesting
+any of them, silently losing content under an `EventID` a caller could
+never successfully retry (`Operations: nil` on retry produced
+`ErrEventIDConflict` instead of re-ingesting). Tests:
+`TestV3RejectsEmptyNonNilOperationStream`,
+`TestEmptyOperationStreamRejected_G4`. Lifecycle-command v2 executes
+Resolve/Unpin
+in source order at each command's exact, allocated authorization sequence
+(never a predicted one), with C-2's narrowed `DetailAccess` redaction
+applied to the execution outcome itself, not just target resolution. A
+malformed operation, an alias to a nonexistent prior result, or an
+unauthorized source actor aborts the whole event atomically. Tests:
+`TestV3_SpanOperationsFollowStreamOrder`, `TestV3_RetryUsesRecordedSchema`,
+`TestV3_RetryUsesRecordedPolicy`, `TestV3_DirectiveNamespaceExplicit`,
+`TestOps_OrderSequenceAndAliases`, `TestOps_AliasBindsSpanItem`,
+`TestOps_AliasRejections`, `TestOps_SourceSpanActor`,
+`TestOps_ControlEventOpensNothing`, `TestOps_MissingHandlerFailsClosed`,
+`TestOps_CallerRequestIDRejected`, `TestCommandsV2_ExecuteInSourceOrder`,
+`TestCommandsV2_DetailRedaction`, `TestCommandsV2_AbortsAtomically`,
+`TestLifecycle_ExecutesInOrder_P335`, `TestConcurrency_IdenticalV3Retries`.
+Frozen-fixture/upgrade coverage: `TestPhase2FixtureReplay` (a Phase 2 SQLite
+database, frozen at `b5f6b1f`, replays every original receipt unchanged
+under the new v3 code with no new sequence and no lifecycle command
+executing).
+
+**Semantic-change audit data (P3-36) — implemented across `internal/ingest`,
+`internal/lifecycle`, and ADR 8's `internal/obligation`, stored and checked
+by the stores.** `domain.SemanticChange` records old/new revision/status/
+currentness for every lifecycle/replacement/proof-invalidation/observation-
+state change, with an immutable, stored cause. Tests: `TestP336_ChangedRestatementReplaces`,
+`TestP336_ReplacementHistoryReconstructible`, `TestP336_ResolvedRestatementStaysResolved`,
+`TestP336_UnpinnedRestatementStaysUnpinned` (`internal/ingest`);
+`internal/obligation`'s `TestSemanticChangeRecords` (ADR 8's "Implementation
+decisions beyond the frozen text," change causes).
+
+### SDD amendment (applied in v0.10)
+
+- **FR-DIR-005 / FR-ING-005.** Add: "Ordinary identical restatement compares
+  the immutable creation declaration and does not reopen, re-pin, unarchive,
+  or rebind an obligation. TURN/TTL eligibility origin remains part of
+  semantic identity." Retain Q1's changed-content/attributes requirement as
+  the default; `ActionReplaceDirective` (above) is the one authorized
+  exception, itself recorded at FR-DIR-005/FR-ING-005 (this same amendment)
+  rather than as a weakening of this sentence.
+
+Applied to SDD.md as v0.10 (this ADR does not itself edit SDD.md).
+
 ## Decision
 
 Grouped by subsystem. Each group names the requirements it answers, the
@@ -35,6 +260,14 @@ accepted decision, and which package(s) in the work split own it.
 ### 1. Lifecycle commands: parsed and authorized, not executed (D1, R7)
 
 FR-DIR-005, FR-AUTH-001/002, §8/9, trace T06.
+
+**This section is Phase 2's original record and describes only Phase 2's own
+v1 lifecycle-command behavior (frozen forever, per this ADR's §41 legacy
+manifest): a Phase 2 (`lifecycle-command/v1`) command never executes, and
+never will, even after upgrade.** Phase 3 (P3-35, this ADR's Phase 3
+amendment above) executes new lifecycle commands in source order instead of
+leaving them `PARSED_NOT_EXECUTED`; "not executed" below is not the current
+behavior for a new command, only the permanent behavior for an old one.
 
 Phase 2 parses `Resolve`/`Unpin` into immutable command records — action,
 exact target spelling, the authenticated source actor (§11 below), span
@@ -997,7 +1230,53 @@ Answers to `p2-ingest`'s implementation questions, appended to
   record itself — a target in the wrong state for its action is, from the
   caller's perspective, not currently a valid target for that action, the
   same outcome class as `TargetNotFound`, distinguished only by the
-  `Reason` token, never by a different `Code`.
+  `Reason` token, never by a different `Code`. **Added at Phase 3 (SPEC-1.3,
+  PR #6 round 1; SPEC-2.13, this pair was missing from the pinned list):**
+  `ReasonUnknownIdentity` ("unknown_identity") pairs with
+  `ErrUnsupportedDirective` — an identical restatement of a version whose
+  creation identity is unknown (a pre-upgrade item migration 0034 could not
+  reconcile, ADR 3's amendment) is neither a duplicate nor an authorized
+  replacement, so the line is dropped exactly as an unsupported lifecycle
+  word would be, never silently accepted or promoted to a hard event abort.
+**The unknown-identity limitation is directive-line-specific by design; two
+other `SameDirective` callers now dedup successfully instead of failing
+(SPEC-2.9/SPEC-2.10, PR #6 round 2, residual of SPEC-1.3; commit `2ca005c`,
+W1).** An attribute-only change to an unknown-identity directive (e.g.
+adding `{obligation=…}` to otherwise identical text) still produces
+`unknown_identity` and never lands as a replacement, because
+`graph.knownDeclaration` fails closed whenever the prior declaration is
+unknown, regardless of what changed, and directive lines can carry
+attributes, an obligation declaration, or cited support their row alone
+does not show — so an unknown declaration can never be safely assumed
+identical for them. **Working-snapshot members and tool-written agent
+keys are different: they never carry an obligation declaration, and the
+accepted attributes a Working line may take (`ttl`, `scope`, `kind`) are
+all reflected in the row itself (TTL, scope, kind), as is a tool-written
+agent key's content (`attributeFreeIdentity`,
+`internal/graph/duplicate.go`: a Working snapshot member,
+`Section == SectionWorking`, or a tool-written agent key,
+`AuthorityAgent`, `Section == SectionNone`).** For these two classes
+only, `SameDirective` treats an unknown pre-upgrade identity as a match
+when the fresh declaration adds nothing beyond the row
+(`plainDeclaration`) **and neither side carries a TURN/TTL eligibility
+origin** (`originFree`: no TTL, not TURN-scoped). A new or dropped TTL
+or TURN origin is a meaningful identity change (C-1), so that
+restatement is a new version that supersedes normally (SPEC-3.1, PR #6
+round 3, commit `1a3e4a4`). Otherwise the match links
+`DUPLICATE_OF`, never replacing, re-filing, or rebinding it, closing both
+SPEC-2.9's Working-snapshot-abort failure and SPEC-2.10's
+agent-key-returns-an-error failure with the same successful dedup G5
+always intended. A *distinct* version (genuinely new support, attributes,
+or content) still replaces normally, going through the ordinary
+authorized path. The explicit `graph.ReplaceDirective` still refuses an
+identical restatement of unknown identity outright, for any class — this
+dedup path is detection only, never an authorized replacement, matching
+Q1's default. Tests: `internal/graph`'s
+`TestIdenticalSnapshotOverUnknownIdentityIsDuplicate`,
+`TestIdenticalAgentKeyOverUnknownIdentityIsDuplicate`; `internal/ingest`'s
+`TestUpgradeAgentOwnOldKey_G5`.
+
+
 
 ### 24. Round 6 ruling (ingest-suite findings): R20
 
@@ -1099,7 +1378,11 @@ landed `internal/ingest/derive.go:residue` function (§24).
   `## Resolve`/`## Unpin`/unsupported-word heading became residual
   instruction text, a runtime command that failed to parse would reappear
   as ordinary trusted prose, which is worse than the diagnostic-only
-  status quo it would replace.
+  status quo it would replace. This reasoning is about a *malformed*
+  command specifically and is unaffected by Phase 3's P3-35 execution of
+  well-formed ones (§1's note above): a malformed lifecycle heading never
+  executes in either version, so it must never be rendered as instruction
+  text in either version.
 - **Creation order: a unit's residual instruction item is created after
   its directive items, amending M3 (refines §10).** M3 (§10) originally
   ordered a unit's items as "transcript items first, then residual/
@@ -1712,9 +1995,13 @@ isn't covered), that is called out explicitly rather than left silent.
   `TestD1_AuthorizeLifecycleCommand_Grant`,
   `TestD1_AuthorizeLifecycleCommand_Targets`; `internal/ingest/working_test.go`
   — `TestLifecycle_SourceActor_R7` (unauthorized source actor aborts the
-  whole event), `TestLifecycle_ParsedNotExecuted_D1` (resolved, authorized
-  command recorded `PARSED_NOT_EXECUTED`, including `TargetMismatch`,
-  changing no goal/pin/obligation state); `internal/ingest/clauses_test.go`
+  whole event); `internal/ingest/working_test.go:TestLifecycle_ExecutesInOrder_P335`
+  is this same D1 scenario as Phase 3 actually executes it (P3-35): the
+  resolved, authorized command executes in source order rather than staying
+  `PARSED_NOT_EXECUTED`. `internal/ingest/phase2_fixture_test.go:TestPhase2FixtureReplay`
+  is the v1 guarantee this ADR originally described (a v1 lifecycle command
+  stays `PARSED_NOT_EXECUTED` forever, replayed unchanged from the frozen
+  Phase 2 fixture, never executed by the upgrade). `internal/ingest/clauses_test.go`
   — `TestAmbiguousLifecycleTarget`; `internal/ingest/traces_test.go` —
   `TestT06_ParseAndAuthorizationHalf` (trace T06). Both stores via
   `eachStore`.
@@ -1914,9 +2201,12 @@ isn't covered), that is called out explicitly rather than left silent.
   :TestR13_CheckBoundaryConflict` and `internal/ingest/directives_test.go
   :TestDirectives_BoundaryConflict_R13` (a same-ID boundary conflict on one
   item among several rejects only that item and commits the rest, R13);
-  `internal/ingest/working_test.go:TestLifecycle_ParsedNotExecuted_D1`
+  `internal/ingest/working_test.go:TestLifecycle_ExecutesInOrder_P335`
   (Resolve on a non-OPEN goal / Unpin on a non-pinned target each produce a
-  diagnostic and commit the rest of the event, R14, `TargetMismatch`).
+  `TargetMismatch` diagnostic with result status `domain.CommandNotExecuted`
+  (`"NOT_EXECUTED"`, a `domain.CommandStatus` value, not itself a diagnostic)
+  and commit the rest of the event, R14; this is the same test that now also
+  carries D1's execution-order scenario under Phase 3, above).
 - **§21 (round 3 ruling, R16):** `internal/directive/policycheck_test.go`
   — `TestParserAcceptedImpliesPolicyAccepted`, `FuzzPolicyAgreement` (the
   fuzz/property cross-check that every `internal/directive`-accepted
@@ -2258,8 +2548,11 @@ fixed.
   memory with the session's matching items, not with the event (a
   resource bound moved from time to memory, D17's concern either way).
   `itemcache.go`'s `itemCache` is now a genuine LRU, capped at 1024
-  entries and 16 MiB of item text (roughly two maximum-size spans') —
-  an item over the byte cap is never cached at all; `scanLookup` now
+  entries and a baseline 16 MiB of item text. The byte cap grows to
+  twice the largest transcript read in the transaction, so a configured
+  `MaxSpanBytes` above 16 MiB does not disable transcript caching;
+  non-transcript items cannot raise it, and an item over the current cap
+  is never cached. `scanLookup` now
   calls the internal `loadItem(id, cache=false)` instead of `Item`, so
   paging past many matches neither grows the cache nor evicts the one
   transcript derived-linking actually re-reads. **SPEC-4.4: `InsertRelationship`
@@ -2276,7 +2569,11 @@ fixed.
   that already keeps the transcript hot, so this restores the integrity
   guarantee without reopening the quadratic cost SPEC-3.1 item 2 fixed.
   `store.go`'s `InsertRelationship` contract now states the integrity
-  requirement explicitly. Store-level item bytes loaded, 500 vs.
+  requirement explicitly. Test:
+  `TestInsertRelationshipRejectsCorruptEndpoint_SPEC44`
+  (`internal/store/sqlite/endpoint_integrity_test.go`, corrupt endpoints
+  on either side fail with `ErrIntegrity` and write no edge).
+  Store-level item bytes loaded, 500 vs.
   4000 derived items from one transcript: x65.5 before caching, x8.0 with
   the (then-unbounded) cache (linear in item count, not transcript size
   too); end-to-end SQLite ingest of one event, 500 vs. 4000 Pinned items:
@@ -2294,7 +2591,12 @@ fixed.
   cache's own entry/byte footprint, exposed via `itemCacheFootprint`,
   never exceeds its caps at any stage), `TestItemCacheEntryCap_SPEC41`,
   `TestItemCacheLRU` (eviction order, oversize-item exclusion, and byte
-  accounting) — all `internal/store/sqlite/itemcache_test.go`;
+  accounting), `TestLookupScanDoesNotFillItemCache_SPEC41` (lookup pages
+  do not fill or evict the point-read cache) — all
+  `internal/store/sqlite/itemcache_test.go`;
+  `TestLargeTranscriptStaysCached_SPEC41`
+  (`internal/store/sqlite/scaling_test.go`, a 17 MiB transcript is decoded
+  once across eight derived links, with a 34 MiB byte cap);
   `TestRolledBackMethodClearsItemCache`
   (`internal/store/sqlite/itemcache_test.go`) locks the savepoint-rollback
   cache clear above, previously asserted only in prose.
@@ -2345,14 +2647,17 @@ fixed.
   by endpoint only, so reading `SUPERSEDES` into an item with thousands of
   unrelated `DUPLICATE_OF` edges into the same item walked all of them.
   Both maps are now keyed by `relKey{Type, ID}`; a read by endpoint alone
-  (no type filter) probes the (fixed, six-entry) `relationshipTypes` list
-  of keys instead. `Relationships(SUPERSEDES, ToID=c)` with 8,000
+  (no type filter) probes keys for every type returned by
+  `domain.RelationshipTypes()`, which `RelationshipType.Valid` also uses.
+  `Relationships(SUPERSEDES, ToID=c)` with 8,000
   `DUPLICATE_OF` edges into `c`: 257µs before. Test:
   `TestRelationshipsReadTheirTypedKey`
   (`internal/store/memory/scan_test.go` — a read by type and endpoint
   walks at most one index entry and scans zero edges, counted via the
   index's own yield counter, with 1,000 unrelated `DUPLICATE_OF` edges
-  into the same target present).
+  into the same target present);
+  `TestUntypedEndpointReadsAllRelationshipTypes_SPEC31` (iterates the
+  domain list and fails if either endpoint read misses a new type).
 - **DUR-3.1: `SourceItems` reports each unverified ID on exactly one page,
   not once per page it happens to be skipped past (refines DUR-1.4,
   §26).** A page reads one row past its limit only to learn whether more

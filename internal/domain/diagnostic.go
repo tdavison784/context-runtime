@@ -93,7 +93,7 @@ const (
 func (r DiagnosticReason) Valid() bool {
 	switch r {
 	case ReasonNone, ReasonSourceNotCapable, ReasonIndented, ReasonFencedCode, ReasonBlockQuote, ReasonHTMLComment, ReasonInvalidSyntax, ReasonInvalidID, ReasonEmptyItem, ReasonHeadingIDOnList, ReasonUnknownAttribute, ReasonDisallowedAttribute, ReasonInvalidAttribute, ReasonScopeWidening, ReasonUnsupportedLifecycle, ReasonUnknownTarget, ReasonAmbiguousTarget, ReasonLimit, ReasonDerivedID,
-		ReasonDuplicateAttribute, ReasonDuplicateID, ReasonNestedHeading, ReasonUnverifiedItem, ReasonReferenceLinksTruncated:
+		ReasonDuplicateAttribute, ReasonDuplicateID, ReasonNestedHeading, ReasonUnverifiedItem, ReasonReferenceLinksTruncated, ReasonUnknownIdentity:
 		return true
 	}
 	return r == ReasonBoundaryConflict || r == ReasonTargetMismatch
@@ -148,6 +148,7 @@ var reasonCode = map[DiagnosticReason]DiagnosticCode{
 	ReasonUnverifiedItem:   ItemUnverified,
 
 	ReasonReferenceLinksTruncated: ReferenceLinksTruncated,
+	ReasonUnknownIdentity:         ErrUnsupportedDirective,
 }
 
 // Message is the diagnostic's fixed template. It never echoes source text,
@@ -170,6 +171,10 @@ const (
 	ReasonUnverifiedItem DiagnosticReason = "unverified_item"
 	// ReasonReferenceLinksTruncated pairs with ReferenceLinksTruncated.
 	ReasonReferenceLinksTruncated DiagnosticReason = "reference_links_truncated"
+	// ReasonUnknownIdentity: an identical restatement of a version whose
+	// creation identity is unknown (pre-upgrade) is neither a duplicate nor a
+	// replacement; the line is dropped (SPEC-1.3, C-1).
+	ReasonUnknownIdentity DiagnosticReason = "unknown_identity"
 )
 
 // DiagnosticSchemaVersion versions the persisted DiagnosticRecord layout.
@@ -302,6 +307,7 @@ const LifecycleCommandSchemaVersion = "lifecycle-command/v1"
 // revalidate access, source authorization, and target currentness, and
 // historical records are never executed automatically.
 type LifecycleCommandRecord struct {
+	Execution    *CommandExecutionDetail // v2 only; all fields are governed by DetailAccess
 	ID           string
 	SessionID    string
 	OccurrenceID string
@@ -344,6 +350,10 @@ func (r LifecycleCommandRecord) Redacted(viewer Principal) LifecycleCommandRecor
 	}
 	r.Resolution, r.ResolvedItemID, r.ResolvedVersion = TargetWithheld, "", 0
 	r.DetailAccess = r.Access
+	if r.SchemaVersion == LifecycleCommandSchemaV2 {
+		r.Status = CommandWithheld
+		r.Execution = &CommandExecutionDetail{Outcome: CommandOutcomeWithheld}
+	}
 	return r
 }
 
@@ -352,7 +362,7 @@ func (r LifecycleCommandRecord) Validate() error {
 	if err := r.LifecycleCommand.Validate(); err != nil {
 		return err
 	}
-	if r.SessionID == "" || r.Ordinal < 0 || r.ParserVersion == "" || r.SchemaVersion != LifecycleCommandSchemaVersion {
+	if r.SessionID == "" || r.Ordinal < 0 || r.ParserVersion == "" || (r.SchemaVersion != LifecycleCommandSchemaVersion && r.SchemaVersion != LifecycleCommandSchemaV2) {
 		return invalid("lifecycle command record: session, ordinal, and versions are required")
 	}
 	if !OccurrenceMatchesEvent(r.SessionID, r.OccurrenceID, r.EventID) || r.ID != LifecycleCommandRecordID(r.SessionID, r.OccurrenceID, r.Ordinal) {
@@ -370,7 +380,11 @@ func (r LifecycleCommandRecord) Validate() error {
 	if !r.Access.Permits(r.Actor) {
 		return invalid("lifecycle command record: source boundary does not permit the actor")
 	}
-	if r.Status != CommandParsedNotExecuted {
+	if r.SchemaVersion == LifecycleCommandSchemaV2 {
+		if err := r.validateV2Detail(); err != nil {
+			return err
+		}
+	} else if r.Status != CommandParsedNotExecuted || r.Execution != nil {
 		return invalid("lifecycle command record: commands are never executed in this phase")
 	}
 	if r.DetailAccess != (AccessBoundary{}) {

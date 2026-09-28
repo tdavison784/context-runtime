@@ -98,7 +98,7 @@ func TestConcurrentIdenticalRetries_Rich(t *testing.T) {
 func TestConcurrentAnonymous(t *testing.T) {
 	eachStore(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
-		g := Ingester{} // random occurrence IDs, safe for concurrent use
+		g := Ingester{Lifecycle: f.in.Lifecycle} // random occurrence IDs, safe for concurrent use
 		const n = 8
 		occurrences := make([]string, n)
 		var wg sync.WaitGroup
@@ -139,7 +139,7 @@ func TestLateLimitRejectionIsAtomic(t *testing.T) {
 				user := principal(domain.AuthorityUser)
 				f.mustIngest(user, userEvent("w0", "## Working\n- earlier state\n", true))
 				before := f.snapshot()
-				tight := Ingester{Limits: limits, IDs: &domain.SequentialIDs{}, Now: f.in.Now}
+				tight := Ingester{Limits: limits, IDs: &domain.SequentialIDs{}, Now: f.in.Now, Lifecycle: f.in.Lifecycle}
 				if _, err := tight.Ingest(ctx, f.s, user, richEvent("rich")); !errors.Is(err, domain.ErrInvalidRecord) {
 					t.Fatalf("err = %v, want an ErrInvalidRecord limit rejection", err)
 				}
@@ -161,7 +161,9 @@ func TestDiagnosticsCapTruncates(t *testing.T) {
 	eachStore(t, func(t *testing.T, f *fixture) {
 		user := principal(domain.AuthorityUser)
 		full := f.mustIngest(user, richEvent("full"))
-		capped, err := Ingester{Limits: domain.Limits{MaxEventDiagnostics: 2}, IDs: &domain.SequentialIDs{}, Now: f.in.Now}.Ingest(ctx, f.s, user, richEvent("capped"))
+		cappedIn := f.in
+		cappedIn.Limits, cappedIn.IDs = domain.Limits{MaxEventDiagnostics: 2}, &domain.SequentialIDs{}
+		capped, err := cappedIn.Ingest(ctx, f.s, user, richEvent("capped"))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -33,7 +33,8 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		call.Outcome.Usage = []domain.UsageIteration{{Iteration: 1, InputTokens: &in}}
 		call.OutcomeHash = call.Outcome.OutcomeHash()
 		obl := NewObligation(sessA, "o", 1, 1, "rich")
-		obl.Status, obl.EvidenceIDs, obl.Revision = domain.ObligationSatisfied, []string{"ev-t"}, 2
+		// BLOCKED: the raw Phase 2 path never satisfies (INV-16, DUR-2.12).
+		obl.Status, obl.Revision = domain.ObligationBlocked, 2
 		obl.Claim = "tests_pass"
 		rel := NewRelationship(sessA, "r", domain.RelDerivedFrom, "rich", "plain", 2)
 		rel.Coverage = &domain.Coverage{ConversationID: "conv", FromSeq: 1, ToSeq: 2}
@@ -43,7 +44,7 @@ func testDeepCopies(t *testing.T, s store.Store) {
 			event: NewEvent(sessA, "e", 1, "p"),
 			blob:  NewBlob(sessA, []byte("bytes")),
 			obl:   obl,
-			tr:    NewTransition(sessA, "t", "o", 1, 2, domain.ObligationUnresolved, domain.ObligationSatisfied),
+			tr:    NewTransition(sessA, "t", "o", 1, 2, domain.ObligationUnresolved, domain.ObligationBlocked),
 			grant: NewGrant(sessA, "g", 1, "rich"),
 			call:  call,
 		}
@@ -59,7 +60,6 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		f.rel.Coverage.ToSeq = 99
 		f.event.ItemIDs[0] = "scribbled"
 		f.blob.Data[0] = 'X'
-		f.obl.EvidenceIDs[0] = "scribbled"
 		f.obl.Matcher.Name = "scribbled"
 		f.tr.EvidenceIDs[0] = "scribbled"
 		f.tr.Fingerprints[0] = "scribbled"
@@ -129,7 +129,7 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		obl.Matcher.Name = "scribbled"
 		applied, err := tx.AppendObligationTransition(f.tr, 1)
 		noErr(t, err)
-		applied.EvidenceIDs[0] = "scribbled"
+		applied.Matcher.Name = "scribbled"
 		noErr(t, tx.InsertGrant(f.grant))
 		noErr(t, tx.InsertCall(NewCall(sessA, "call", "conv", 1)))
 		noErr(t, tx.PutCallAttempt(NewAttempt(sessA, "call", 1, 4)))
@@ -160,7 +160,7 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		it.Parts[0].Text = "scribbled"
 		ov, err := tx.UpdateObligationVersion(fresh().obl, 2)
 		noErr(t, err)
-		ov.EvidenceIDs[0] = "scribbled"
+		ov.Matcher.Name = "scribbled"
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
@@ -193,7 +193,7 @@ func testDeepCopies(t *testing.T, s store.Store) {
 		calls[0].Request[0] = 'X'
 		vers, err := tx.ObligationVersions("o")
 		noErr(t, err)
-		vers[0].EvidenceIDs[0] = "scribbled"
+		vers[0].Matcher.Name = "scribbled"
 		obls, err := tx.Obligations("")
 		noErr(t, err)
 		obls[0].Matcher.Version = "scribbled"

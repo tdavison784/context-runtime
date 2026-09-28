@@ -17,7 +17,8 @@ import (
 // References are immutable; the edge changes no currentness, requirement,
 // or lifecycle state. ruleVersion names the locator identity rule that
 // matched them (FR-REL-007).
-func LinkReference(tx store.Tx, actor domain.Principal, fromID, toID, eventID, ruleVersion string) (domain.Relationship, error) {
+func LinkReference(tx store.Tx, actor domain.Principal, fromID, toID, eventID, ruleVersion string) (result domain.Relationship, err error) {
+	defer poisonGraphError(tx, &err)
 	if err := actor.Validate(); err != nil {
 		return domain.Relationship{}, err
 	}

@@ -49,6 +49,509 @@ the AGENT-same-key supersession exception, obligation-transition
 authorization, `LinkDerived`'s actor-authority gate) are unaffected by
 Phase 2.
 
+## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
+
+Phase 3's binding decision record (`.worktrees/_commander/phase3-decisions.md`,
+P3-9, P3-10, P3-11, P3-23, P3-38, P3-39; commander rulings FROZEN 2026-09-26,
+reconciled against W3's landed `internal/lifecycle` package) resolves this
+ADR's "Resolved at acceptance" open item ("CompleteTask gets its own
+authorization function in Phase 3 built on `AuthorizeMutation` for each
+affected goal") and extends the grant/promotion/GC machinery this ADR
+defines. ADR 8 owns the obligation-matcher/resource-invalidation-specific
+consequences of the fourth bullet below; this ADR remains the
+authorization-mechanism record.
+
+**New lifecycle actions (P3-42, SPEC-1.14).** `domain.Action` (`internal/domain/authz.go`,
+`grant_target.go`) gains six values beyond this ADR's Phase 1 set (`resolve`,
+`unpin`, `replace_directive`, `change_scope`, `assert_obligation`,
+`block_obligation`, `unblock_obligation`, `waive_obligation`,
+`complete_task`): `promote`, `demote`, `archive`, `unarchive`,
+`declare_obligation`, and `set_obligation_materialization`. Every one goes
+through this ADR's unchanged `AuthorizeMutation`/`AuthorizeGrantIssuance`
+entry points; `Action.ValidForTarget(kind)` closes which target kind each
+action may name.
+
+**Typed grant targets extend, rather than replace, this ADR's own
+`AuthorizeGrantIssuance`/`sameTargetSet` decision (P3-42).** `domain.MutationGrant.Targets
+[]GrantTarget` (`internal/domain/authz.go:45`) is the Phase 3 decoded-target
+form; the Decision section's `TargetIDs []string` field above is now the
+legacy v1 path, kept exactly as this ADR originally described it and
+"mutually exclusive with `Targets`" (the field's own doc comment) — a grant
+never mixes the two. `sameTargetSet`'s exact-set check runs unchanged over
+whichever form is populated. ADR 8 §1 owns the exact-obligation-version
+targeting `Targets` adds; this ADR owns the issuance/revocation mechanism
+both forms share.
+
+- **`lifecycle.Service.CompleteTask(tx, p, domain.CompleteTaskIntent, seq)`
+  (`internal/lifecycle/complete.go`) is `CompleteTask`'s own authorization
+  function, built on `AuthorizeMutation` per goal, exactly as this ADR's
+  open item promised (P3-9).** It requires SYSTEM/HARNESS/USER and the
+  task's immutable workflow ownership (`TestCompleteTaskRejectsForeignWorkflowBeforeOwnerQueries`);
+  on first execution the task must be ACTIVE. It enumerates every current
+  OPEN goal whose declared owning scope is TURN/TASK and owning task is T —
+  including goals the caller cannot access — and authorizes each at its
+  actual mutation sequence; any inaccessible or unauthorized member yields
+  the fixed `ErrInvalidAuthorityPromotion`. It then separately rejects any
+  unresolved/blocked current task-owned obligation (via `obligation.UnfinishedTaskObligations`,
+  ADR 8 §8) with the fixed `ErrUnfinishedObligations`
+  (`TestCompletionRejectsAllOwnerBlockersBeforeLedger`). After authorization,
+  an in-flight operation or unacknowledged exchange blocks completion
+  (`TestCompletionX8RejectsEveryReservationAndOpenExchange`,
+  `TestCompletionRejectsInFlightWorkOnRealStores`). On success, goals
+  resolve, the task CASes to COMPLETED, and a durable GC request is written
+  atomically with the completion receipt
+  (`internal/lifecycle/completion_effect.go`'s `writeCompletion`); an
+  identical completion replay returns the original success
+  (`TestCompleteTaskResolvesOwnedGoalsAndReplaysFrozenReceipt`,
+  `TestConcurrentCompletionExecutesOnce`), and failure leaves no partial
+  effect (`TestCompleteTaskFailsClosedWithoutPartialEffects`,
+  `TestCompletionGCFailureRollsBackGoalsAndTask`). As accepted consequences,
+  not defects: the task-wide result necessarily reveals aggregate completion
+  feasibility even through a generic error, and a USER may complete a
+  no-goal task once its current task-owned obligations permit
+  (`TestCompleteTaskWithoutGoalsStillRecordsReceiptAndGC`), ending TASK pin
+  protection including a SYSTEM pin.
+- **Promotion/demotion are typed intents over a closed transition policy, not
+  arbitrary `ItemChange` (P3-10).** `lifecycle.Service.Promote`/`Demote`
+  (`internal/lifecycle/generation.go`) take `domain.PromoteIntent`/
+  `DemoteIntent` (a type alias, `internal/domain/lifecycle_intent.go`). The
+  exact allowed-pair table below is a **new V1 policy proposal this ADR
+  records, not one the SDD prescribed independently** (P3-10 says exactly
+  this: "The exact V1 pair table is a new policy proposal"): Promote allows
+  EPHEMERAL→WORKING, WORKING→DURABLE, and current constraint/instruction
+  DURABLE→PINNED; Demote allows DURABLE→WORKING and WORKING→EPHEMERAL for
+  nonrequirement semantic items. PINNED→DURABLE
+  remains exclusively Unpin (this ADR's existing rule, unchanged); goals,
+  transcript/checkpoint/projection records, and current obligation sources
+  are excluded, governed instead by this ADR's Resolve/Unpin and ADR 8's
+  obligation-transition rules (`TestGenerationExcludesObligationSourceAndNeedsAuthority`).
+  No promotion/demotion operation changes authority, kind, access, scope,
+  refreshes TTL, restores currentness, or waives an obligation
+  (`TestGenerationPairsFollowClosedPolicy`). Raw `ItemChange` remains an
+  internal storage mechanism, never a public mutation surface.
+- **Unpin now reaches any current PINNED semantic item, not only a keyed
+  DIRECTIVE (PR #6 round 1, SPEC-1.8).** Promote's DURABLE→PINNED path
+  (above) can pin an *unkeyed* semantic item — exactly the SYSTEM/HARNESS
+  residual instructions/constraints production actually creates — but
+  Unpin originally resolved only a keyed item in the DIRECTIVE namespace,
+  so a Promote-pinned instruction could never be unpinned (Demote also
+  forbids PINNED→DURABLE, since that transition is exclusively Unpin's).
+  `lifecycle.directive`'s target-resolution switch
+  (`internal/lifecycle/directive.go:46-55`) now accepts an unkeyed,
+  `RoleSemantic` item specifically for `ActionUnpin` (never for Resolve,
+  which still targets DIRECTIVE goals only) — the keyed/DIRECTIVE
+  restriction stays exactly as strict for every other case, including
+  AGENT_KEY and OBSERVATION items and every stale/superseded/lower-authority
+  target. `TestPromotedUnkeyedPinCanBeUnpinned`.
+- **Grant issuance/revocation are authenticated intents with runtime-derived
+  attribution, not caller-certified fields (P3-11).** `lifecycle.Service.IssueGrant`/
+  `RevokeGrant` (`internal/lifecycle/grants.go`) take `domain.GrantIntent`/
+  `RevokeGrantIntent`; the runtime, not the caller, derives `Issuer`/`Actor`,
+  session, issued/revoked sequence, and audit identity from authenticated
+  source context, running through this ADR's existing
+  `AuthorizeGrantIssuance`/`AuthorizeGrantRevocation` checks unchanged.
+  `lifecycle.grantTargets` resolves a target named in a grant intent only if
+  it already exists or was created earlier in the same ordered transaction;
+  a forward alias to a not-yet-existing target fails. Tests:
+  `TestIssueGrantDerivesIssuerAndAuthorizesGrantee`,
+  `TestIssueGrantFailsClosed`,
+  `TestRevokeGrantNeedsDirectAuthorityAndEndsAuthorization`.
+- **A restricted, cause-based invalidation path exists alongside this ADR's
+  authorization matrix, and is deliberately not routed through it (P3-23,
+  ADR 8 §13).** Runtime invalidation of an already-accepted resource-bound
+  obligation proof, triggered by an authenticated resource report, is a
+  narrowly scoped consequence of that accepted proof — never a fresh
+  exercise of a grant that has since expired or been revoked, and never a
+  privilege this ADR's `findGrant`/`AuthorizeMutation` path would otherwise
+  grant a session-level resource reporter. It can only move the one
+  matching current SATISFIED obligation version to UNRESOLVED; it is
+  recorded with a historical `domain.OriginAuthorizationRef`
+  (`internal/domain/assertion.go`) distinct from a live `GrantID`. This is
+  the one place in the runtime's mutation surface where a write to
+  obligation status legitimately occurs outside this ADR's
+  `AuthorizeMutation` entry point; ADR 8 §13 owns its schema and tests in
+  full.
+- **GC uses a pure decision function and an explicitly enabled trigger set,
+  built on `CompleteTask`'s durable GC request (P3-38, P3-39, C-17).**
+  `policy.CollectDecision(item, policy.GCSnapshot)` (`internal/policy/gc.go`)
+  is the pure `gc/v1` rule: it protects an open exchange, a live lease, an
+  active-turn item, and — **C-17's exact ruling** — only a `CHECKPOINT`
+  item that is its conversation's *newest* checkpoint in an active or
+  unknown conversation (`GCReasonActiveCheckpoint`; older and
+  completed-conversation checkpoints are not protected forever merely by
+  kind or role). `graph.CheckpointOfItem`/`CheckpointsCoveringItem`
+  (`internal/graph/membership_checkpoint_read.go`, W5) supply that "newest"
+  fact to `lifecycle.Service.Collect` (`internal/lifecycle/collect.go`).
+  `domain.Phase3Policy.GCTriggers`/`GCTriggerEnabled`
+  (`internal/domain/semantic.go`) is the explicit, sorted, unique enabled
+  trigger set `lifecycle.enqueueGC` checks before creating a `GCRequest` for
+  a supersession/TTL/policy trigger — an unlisted one persists nothing and
+  returns an empty ID, never firing GC merely because the enum value
+  exists. `domain.GCTaskCompletion` is the one exempt trigger: task
+  completion's request always persists regardless of the enabled set
+  (P3-39's "task completion always persists its request"), then waits
+  pending until an operator or a later policy enables its actual
+  collection.
+  **Default enabled set and its producers (PR #6 round 1/2, SPEC-2.13).**
+  `policy.DefaultPhase3Policy()` (`internal/policy/phase3.go`) enables
+  `{MANUAL, SUPERSESSION, TASK_COMPLETION, TTL}` — **not**
+  `domain.DefaultGCTriggers()`'s all-five set, which also includes `POLICY`.
+  The stated rule is that only a trigger with a producer on every path that
+  can raise it is enabled by default (`FR-GC-004` permits a disabled
+  trigger); `POLICY` has no producer yet, so it stays off. **SPEC-2.3
+  (PR #6 round 2): this rule was violated for SUPERSESSION on two paths;
+  both were fixed by the round-2/round-4 integrations (an earlier pass of
+  this section wrongly recorded one of the two as fixed-but-not-merged).**
+  Observation-state supersession
+  (`graph.FileObservationState`, via `internal/obligation/subject_state.go`'s
+  `deriveState`) now enqueues through `gcqueue.Enqueue`, keyed by the new
+  state occurrence, under the service's own recorded policy — a first state
+  (nothing to supersede) enqueues nothing, and a task-less trigger persists
+  nothing per H4 (`internal/gcqueue`, W4b). Tests:
+  `TestObservationStateSupersessionEnqueuesGC_SPEC23`. **Both SPEC-2.3
+  paths are now landed.** Agent keyed writes (`internal/tools/keyed.go`,
+  via `graph.ReplaceDirective`) and directive replacement
+  (`internal/lifecycle/replace.go`) now call `gcqueue.Enqueue` for every
+  SUPERSESSION they raise, closing the round-1/round-2 gap where that call
+  site was simply absent, so the trigger never fired at all for either
+  path despite SUPERSESSION being enabled by default. **This is not a
+  claim that a task-less write now produces a `GCRequest` (SPEC-4.3):**
+  `Enqueue` itself still returns `"", nil` for an empty `TaskID` per H4
+  above, so a session-scoped keyed write or directive replacement
+  persists nothing, exactly as H4 requires. Producers and
+  the executor must share a Phase 3 policy version: since SPEC-2.11, a
+  request carries its producer's recorded policy version, so a version
+  mismatch affects every attempt from the first pass, not an occasional
+  one. **A version-mismatched request no longer strands (ruling M1,
+  DUR-4.9, fixed round 4 — amending this section's round-3 text, which
+  said such a request "stays pending, never quarantined"):** the first
+  `CollectPending` pass under the current policy settles it
+  `FAILED`/`POLICY_MISMATCH` (`ErrGCPolicyVersion`,
+  `domain.GCFailurePolicyMismatch`) — uncharged, nothing archived — so
+  the normal re-arm path applies under the current policy and the same
+  authorization; a *direct* `ExecuteGCRequest` on a version-mismatched
+  request still returns `ErrUnsupportedSchema` and leaves it pending,
+  uncharged (`classifyGCFailure`, `internal/lifecycle/gc_failure.go`,
+  maps it to `gcNotCharged`). A disabled trigger keeps returning
+  `ErrGCTriggerDisabled` (callers test it with `errors.Is`), and a
+  missing authorized collector is still the closed `ErrGCConfiguration`
+  — both J5 "configuration errors" that fail closed, charge nothing,
+  and never quarantine on their own. This
+  is J5's rule exactly ("a misconfigured collector … returns an error to
+  the caller"), which
+  is stricter than, and supersedes, SPEC-3.4's originally suggested
+  "quarantines at once as `POLICY_MISMATCH`" text — that text described
+  round-2 code J1–J7's redesign has since replaced.
+  **GC collection resumes in bounded batches (round 3 rulings J1–J7;
+  XREV-3.1–3.3, SEC-3.1/3.2/3.9, SPEC-3.2/3.3/3.6).** The first
+  batch pins the eligibility ceiling `SnapshotSeq`; all batches traverse
+  that ceiling in `(item.Seq, item.ID)` order. `GCProgress` CAS persists
+  the last fully decided candidate, completed batch count, adaptive
+  item-count limit, and attempts for the next candidate. Later insertions
+  cannot extend the request. Continuations bind to the collector's
+  *authority class* (SYSTEM/HARNESS) plus, for task-scoped requests, the
+  task — any authorized same-task collector may run a later batch, not
+  only the principal that ran batch 1 (SEC-4.5, fixed round 4; the
+  round-3 text here wrongly required the first batch's exact principal).
+  Per-target `Archive` authorization always stays under the principal
+  executing that batch.
+  **Regression, fixed round 4 (SEC-4.2/SPEC-4.2, introduced by
+  `920e9e8`): freezing the candidate set at `SnapshotSeq` did not also
+  freeze protection decisions.** `gc_snapshot.go` evaluated lease
+  liveness against the
+  frozen `SnapshotSeq` rather than the current sequence, so a lease taken
+  on an item after batch 1 was invisible to a later batch and that item
+  was archived despite P3-38's "active lease contents" protection; every
+  other protection (open exchange, obligations, currentness, task) was
+  already read from current state and was unaffected. J2 freezes the
+  candidate *set*, not the protection decisions made about it. **Fixed,
+  round 4 (SEC-4.2/SPEC-4.2/DUR-4.1):** `gcProtection`
+  (`internal/lifecycle/gc_snapshot.go`) now evaluates lease liveness at
+  `tx.LastSeq()`, the batch's own current sequence, not the frozen
+  snapshot ceiling — every protection is now read from current state,
+  none from the frozen snapshot. Test:
+  `TestLeaseTakenAfterFirstBatchProtects_SEC42` (`internal/lifecycle/gc_round4_test.go`).
+  Shared transaction-budget exhaustion commits only the completed prefix
+  and halves the item-count limit (floor one). Receipt sizing includes
+  the complete enclosing mutation receipt, archive results, request link,
+  arguments and metadata before applying effects; a smaller prefix is
+  chosen until it fits. A single-item overflow is an explicit
+  `SKIP_RESOURCE_LIMIT` decision. Permanent item errors record
+  `SKIP_INVALID_ITEM` or `SKIP_INTEGRITY`; transient item reads retry at
+  most three times and then record `SKIP_ATTEMPTS_EXHAUSTED`. These skips
+  preserve the item and let later candidates proceed. A result becomes
+  `COLLECTED` only when the bounded candidate traversal is exhausted.
+  Only request-level `INVALID_REQUEST` and `INTEGRITY` failures quarantine.
+  A disabled trigger or missing collector capability returns an error
+  (`ErrGCTriggerDisabled`/`ErrGCConfiguration`) and leaves the request
+  pending without charging attempts; a policy-version mismatch settles
+  `FAILED`/`POLICY_MISMATCH` through `CollectPending` under ruling M1
+  (above), while a direct `ExecuteGCRequest` still refuses it with
+  `ErrUnsupportedSchema`, pending and uncharged. Infrastructure
+  failures also leave it pending; historical terminal reason codes remain
+  readable. Terminal results remove requests from the pending index in the
+  same transaction. The scan continuation is durable, not per-service:
+  the CAS-written, per-session `gc_queue_cursor` (migration 0047, below)
+  carries the scan position across calls, restarts, and service
+  replacement, and wraps at the end, so a disabled or declined prefix
+  cannot permanently hide runnable requests; a new service instance
+  resumes at the cursor, never restarting from the queue head (the
+  round-3 text here described the replaced in-process continuation).
+  Direct `Collect`, including SESSION scope, uses the same durable path.
+  Its receipt exposes `GCRequestID`; callers use `ExecuteGCRequest` or
+  `CollectPending` to continue. Retrying the original manual intent replays
+  its first receipt without rescanning. Later batch identities derive from
+  the authenticated origin in the reserved runtime namespace. H4 still
+  disables automatic task-less producers; manual session collection works.
+  SQLite migrations 0041–0044 add `SnapshotSeq`, `BatchSize`,
+  `ItemAttempts`, and `ItemAttemptID` to GC progress. Existing progress without a snapshot
+  recovers its ceiling from its first committed collect receipt. No
+  candidate-history schema change was needed for J1–J7 themselves; the
+  pending-index schema change DUR-3.2 needs lands separately, in
+  migration 0047 below (SPEC-4.3: the original text here overclaimed "no
+  ... pending-index schema change is needed" as if this covered DUR-3.2
+  too).
+  Regression tests: `TestJ1BudgetBoundaryCollectsEveryCandidate`,
+  `TestJ2SnapshotAndCursorStayFrozen`,
+  `TestJ3CompleteReceiptFitsAndBatchAdapts`,
+  `TestJ4DeadLeaseHistoryDoesNotFailRequest`,
+  `TestJ4LongCancelledMembershipHistorySkipsOnlyOneItem`,
+  `TestJ5ConfigurationErrorsLeaveRequestsPending`,
+  `TestJ6QueuePrefixCannotHideRunnableTail`, and
+  `TestJ7ManualSessionCollectionResumesAndReplays` run on both stores.
+  **DUR round 3 strengthens three of these rulings, all now landed
+  (DUR-3.2/3.3/3.4, PR #6 round 3, reconciled at head `4ff6ca1`; SPEC-4.3
+  corrects the prior pending-merge wording).** J6's queue continuation is
+  durable: `gc_queue_cursor` (migration 0047) is a CAS-written, per-session
+  cursor position, and `lookup_pending_gc_trigger` (migration 0047,
+  backfilled from `lookup_pending_gc`) indexes pending requests by trigger
+  so a collector reads only its enabled triggers — the earlier in-process
+  `gcQueueCursors` `sync.Map` on `*Service` no longer exists (DUR-3.2). J5's
+  configuration-error path never quarantines even for a collector-side
+  fault: a bad collector principal/header or a cross-session collector is
+  the closed `ErrGCConfiguration`, not charged, request stays pending; a
+  `FAILED` request becomes re-armable only through SYSTEM/HARNESS calling
+  `lifecycle.Service.RearmGCRequest` (`internal/lifecycle/gc_requests.go`),
+  which derives a new deterministic request identity from the failed
+  request alone — `domain.GCRearmRequestID(failed.ID)` filed through
+  `gcqueue.EnqueueRearm` (`internal/gcqueue`), the form SEC-4.4/DUR-4.8's
+  paragraph below describes; the `Enqueue(..., "rearm/"+req.ID)` shape this
+  sentence originally recorded no longer exists —
+  and leaves the original `FAILED` record immutable (DUR-3.3). J4's attempt
+  counter resets whenever a batch makes any progress, not only on full
+  success: every successful batch write carries `Attempts: 0`
+  (`internal/lifecycle/collect.go`, DUR-3.4). Tests:
+  `TestGCQueueContinuesDurablyPastSkippedPrefix`,
+  `TestJ5ConfigurationErrorsLeaveRequestsPending`,
+  `TestFailedGCRequestCanBeRearmed`, `TestAttemptsResetWhenABatchProgresses`.
+  **Round 4 findings (SEC-4.4/DUR-4.8, DUR-4.9/ruling M1, DUR-4.5), all
+  fixed as of the round-4 integration (`p3-int`, head `dc07666`):**
+  `RearmGCRequest` (`internal/lifecycle/gc_requests.go`) now binds a
+  task-scoped request's re-arm to `actor.TaskID == req.TaskID` (SYSTEM
+  exempt — until round 5's SPEC-5.6 removed the exemption; see the
+  round-5 paragraph below), checked before any outcome lookup so a
+  foreign principal sees the identical `ErrNotFound` for a pending,
+  failed, or absent request alike — no existence oracle (SEC-4.4). The
+  re-arm identity,
+  `domain.GCRearmRequestID(failed.ID)`, derives from the failed request
+  alone, never the actor, so repeating a re-arm is idempotent regardless
+  of who calls it. MANUAL and session-scope requests can now re-arm too
+  (DUR-4.8), through `gcqueue.EnqueueRearm`; a disabled trigger returns
+  `ErrGCTriggerDisabled` rather than a silent empty ID. **Ruling M1
+  (DUR-4.9): a pending request recorded under another policy version no
+  longer strands forever.** `CollectPending` (`gc_requests.go`) now
+  settles it `FAILED`/`POLICY_MISMATCH` (`domain.GCFailurePolicyMismatch`,
+  `ErrGCPolicyVersion`) — uncharged, nothing archived — the first time a
+  collector under the current policy encounters it, so the normal re-arm
+  path applies afterward instead of the request silently never running.
+  **DUR-4.5 (a regression of H3): the request-level retry bound, lost
+  when J4's per-item attempt counter was strengthened to reset on
+  progress, is restored** — `maxGCAttempts` (3) now bounds *consecutive
+  failed batches*, quarantining `ATTEMPTS_EXHAUSTED` after that many, so a
+  batch transaction that never progresses no longer retries forever; the
+  counter still resets to 0 whenever a batch makes any progress (DUR-3.4,
+  unchanged). Tests (`internal/lifecycle/gc_round4b_test.go` unless
+  noted): `TestRearmBindsToTheRequestTaskAndIsNoOracle_SEC44` (SEC-4.4),
+  `TestRearmSupportsManualAndReportsDisabledTriggers_SEC44` (DUR-4.8),
+  `TestPolicyMismatchSettlesAndRearms_DUR49` (M1/DUR-4.9);
+  `TestFailingGCRequestsAreQuarantined`'s `gcBatchFaultStore` subtest
+  (`internal/lifecycle/gc_quarantine_test.go`, DUR-4.5: a batch that
+  always fails its receipt commit is quarantined after exactly
+  `maxGCAttempts` calls, never retried again).
+  **SEC-4.5: continuing a pending request no longer binds to the exact
+  principal that ran batch 1.** `ExecuteGCRequest`
+  (`internal/lifecycle/gc_requests.go`) binds continuation to the
+  collector's *authority class* (SYSTEM/HARNESS) plus task, never to the
+  full principal tuple: any authorized collector — not only the one that
+  happened to run the first batch — may continue a pending request, so a
+  same-task HARNESS with a different `AgentID` no longer wedges it
+  forever. Test: `TestContinuationIsNotBoundToTheFirstCollector_SEC45`
+  (`internal/lifecycle/gc_round4b_test.go`).
+  **SEC-4.7/DUR-4.4: batch size recovers, and an item's own read bound
+  skips without halving.** `collect.go`'s batch loop now distinguishes
+  two failure shapes a heavy candidate can produce: the *shared*
+  transaction-work budget running out mid-item (`errBudget`) still halves
+  the batch size and retries the item in a smaller one, but an item's own
+  deterministic read-bound failure (`domain.ErrResourceLimit`/
+  `store.ErrLimitExceeded` — no batch size could ever fit it) now records
+  `SKIP_RESOURCE_LIMIT` immediately, with no halving at all. Separately, a
+  batch that completes fully with room to spare doubles the size back
+  toward the policy ceiling (`min(2*plan.batchSize, MaxGCDecisions)`) on
+  its *next* batch, so one heavy item early in a request no longer pins
+  `BatchSize` at 1 for its remaining lifetime. Tests:
+  `TestHeavyItemSkipsWithoutShrinkingEveryBatch_DUR44`,
+  `TestBatchSizeRecoversAfterAWorkHalving_SEC47` (`internal/lifecycle/gc_round4b_test.go`).
+  **SEC-4.8: manual collection and re-arm no longer share the runtime
+  trigger's ID domain.** Before this, both derived their durable request
+  identity through `GCTriggerRequestID` itself, so a SYSTEM/HARNESS
+  principal running a manual `Collect{RequestID: <taskID>, Trigger:
+  TASK_COMPLETION}` could precompute its own later task-completion
+  `gcq_` record and wedge that later `CompleteTask` with
+  `ErrEventIDConflict` — self-inflicted, but still a way to break one's
+  own GC. `domain.GCManualRequestID(origin, requestID)`
+  (`context-runtime/gc-manual/v1`, registered in ADR 4) and
+  `domain.GCRearmRequestID(failedID)` (`context-runtime/gc-rearm/v1`,
+  ADR 4) each get their own encoder domain, disjoint from
+  `gc-trigger/v1`/`v2` and from each other, so neither a manual collection
+  nor a re-arm can alias a runtime trigger's identity or one another's.
+  Test: `TestManualCollectDoesNotWedgeTaskCompletion_SEC48`
+  (`internal/lifecycle/gc_round4b_test.go`).
+  **Round 5 (SPEC-5.2/SPEC-5.6, merged at integration head `b8efc67`;
+  SPEC-5.6's commits `7c18a8e`/`f8949aa`).** The candidate set a request
+  decides is frozen to the principal whose visibility produced batch 1:
+  `domain.GCProgress.Viewer` (`internal/domain/collect.go`) is recorded
+  by the first batch, and every later batch — including a continuation by
+  a different authorized same-task collector under SEC-4.5 above — pages
+  `GCCandidates` under that frozen viewer (`planBatch`'s `viewer := p;
+  if progress.Batches > 0 { viewer = progress.Viewer }`, with the
+  candidate-integrity check `it.Access.Permits(viewer)`,
+  `internal/lifecycle/collect.go`), alongside the J1/J2 snapshot and
+  cursor, so swapping collectors mid-request can neither grow nor shrink
+  the set the request will decide. Two authorities stay deliberately
+  split (P3-38): *which* candidates exist follows the frozen viewer's
+  visibility, while *what may be archived* is authorized per target by
+  each batch's executing collector. A frozen candidate the executing
+  collector cannot read therefore never silently vanishes or wedges the
+  request: `decideCandidate` returns an explicit `GCIneligible` decision
+  for it, its access check running before `gcBase` reads any protection
+  state (SEC-1.6's fail-closed ordering). The freeze is durable across
+  the upgrade: `gcProgress` (`internal/lifecycle/gc_requests.go`)
+  recovers a zero `Viewer` from batch 1's committed collect receipt
+  exactly as it already recovered a zero `SnapshotSeq` (J2), so an
+  upgraded request keeps exactly the candidate set its first batch saw;
+  migration `0050_gc_candidate_viewer.sql` persists the viewer columns
+  on `rec_gc_progress` (ADR 3, checksum pinned). Tests
+  (`internal/lifecycle/gc_round5_test.go`, both stores):
+  `TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52` — with
+  `MaxGCDecisions=1` forcing multi-batch continuation, in both
+  directions (the continuator sees less than the first viewer, and the
+  same shape with the two collectors' identities swapped): every frozen
+  candidate is decided, an item the executing collector cannot read
+  getting `GCIneligible` and never archiving while the readable ones
+  archive, per-item residency asserted — and
+  `TestGCProgressFreezesAndRecoversTheCandidateViewer_SPEC52` (freezes
+  at batch 1; a live progress row rewritten with
+  `Viewer = domain.Principal{}` recovers the viewer from batch 1's
+  receipt). **SPEC-6.2, round 7 (commits `e2f1793` test, `2e4be40`
+  fix): the batch receipt each collector RECEIVES is access-projected
+  for the executing principal.** The stored `CollectReceipt` keeps every
+  frozen candidate and decision, but the copy handed to the executing
+  principal — `out.Result.Collect`, which is what its mutation receipt
+  stores and therefore what replays for it — drops the
+  `CandidateRefs`/`Decisions` pairs that principal cannot access
+  (`planBatch` records per-candidate access under the executing
+  collector, trimmed with the plan in `fitCollectionPlan`;
+  `projectCollectReceipt`, `internal/lifecycle/collect.go`). Pairs leave
+  ref+decision together, so `Validate`'s length equality and the
+  archived-results pairing hold, and an inaccessible candidate is never
+  ARCHIVE — a collector that cannot read an item cannot archive it; a
+  misaligned access vector fails closed with `ErrIntegrity`. A
+  continuing collector (SEC-4.5) that pages another viewer's frozen set
+  (SPEC-5.2) therefore no longer learns those items' IDs and versions
+  through its own outcome. Test:
+  `TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52`
+  (`internal/lifecycle/gc_round5_test.go`, both stores) now also asserts
+  the projection through its `assertReceiptProjected` helper
+  (`gc_round5_test.go:150-163`: the projected copy still `Validate`s at
+  `:153`, names no inaccessible candidate in `CandidateRefs` at `:157`
+  or `Decisions` at `:162`), applied to the fresh outcome (`:229`) and
+  to the replayed stored receipt after the request finishes (`:237`),
+  while the stored receipts keep deciding every frozen candidate
+  (`:240-244`, unchanged).
+  **SPEC-5.6: `RearmGCRequest` no longer exempts SYSTEM from
+  the SEC-4.4 task binding above** — a task-scoped request is refused
+  whenever `actor.TaskID != req.TaskID`, authority class notwithstanding,
+  so a foreign-task SYSTEM caller gets the identical `ErrNotFound` for an
+  absent, pending, and failed request alike and creates nothing.
+  `TestRearmBindsSYSTEMToTheRequestTask_SPEC56` (both stores; the
+  same-task SYSTEM principal still re-arms, as the test's positive
+  control). **GC-7.1, round 7 (commits `fd05e51` test, `fde38ae` fix):
+  a FINISHED request replays the stored final-batch receipt for ANY
+  authorized collector, projected for the caller.** The finished branch
+  previously sent every caller through `collect`, whose replay lookup
+  found the final-batch runner's mutation receipt under the shared
+  (session, family, requestID) key and refused any other principal with
+  an event-ID conflict. It now gates the caller exactly as a pending
+  continuation (SEC-4.5: same session, SYSTEM/HARNESS, the request's own
+  task for a task-scoped request), then routes: the final-batch runner
+  still replays its recorded outcome (P3-2), and any other authorized
+  collector gets `replayFinishedCollect` — the STORED final-batch
+  receipt, projected for the calling principal through
+  `projectCollectReceipt` (SPEC-6.2), re-read from the candidate items'
+  current access boundaries and failing closed to hidden on an
+  unreadable item; the projected copy also drops an `ArchivedRefs` entry
+  whose ARCHIVE pair was removed, so a replay of a receipt whose runner
+  archived items the caller cannot read never names them (P3-38). No
+  re-plan, no receipt write, no sequence allocation: the outcome records
+  no mutation-receipt ID because nothing of the caller's was committed,
+  and the stored receipt cannot collide with itself. An unauthorized
+  caller gets the same uniform `ErrInvalidAuthorityPromotion` a pending
+  continuation gets. Test:
+  `TestGC71_FinishedRequestReplaysStoredReceiptForAnyAuthorizedCollector`
+  (`internal/lifecycle/gc71_replay_test.go`, both stores) — asserts at
+  `gc71_replay_test.go:149` (the sibling collector replays),
+  `:158` (the unreadable pair gone from the projected copy),
+  `:162`/`:167` (SPEC-6.2/P3-38: the hidden item named neither candidate
+  nor archived), `:173` (writeless: no receipt of its own), `:179`
+  (snapshot-identical: rows, items, events, and the sequence floor
+  unchanged), `:184` (a second replay is identical), `:194` (the runner
+  keeps its full recorded outcome), `:207`/`:212` (USER and foreign-task
+  callers get `ErrInvalidAuthorityPromotion`), `:215` (the refused
+  replays wrote nothing). `TestCompletionGCRequestExecutesOnceAfterProducerCommit`'s
+  different-collector step now expects this projected replay
+  (`internal/lifecycle/gc_requests_test.go:104`, writeless at `:107`).
+  **Grant issuance room is tiered by authority, not a flat quarter-share
+  (SEC-2.7, superseded by SEC-3.8/DUR-3.6, landed at `4a00b06`; SPEC-4.3
+  corrects the prior pending-merge wording).** `liveGrantRoom`
+  (`internal/lifecycle/grants.go`) limits any one issuer's authority class:
+  USER issuers together hold at most half of `MaxTargets` live grants per
+  `(action, target)`; USER+HARNESS together at most three quarters; SYSTEM
+  may use all of it; no reserve applies when `MaxTargets < 4`, so a valid
+  small cap never makes issuance impossible. **Within its tier, one
+  identity holds at most half the tier's slots (SEC-4.6, fixed round 4):**
+  no single issuer, however many grants it issues, can starve its own
+  class's peers. Tests: `TestGrantRoomIsTieredByAuthority`,
+  `TestSmallGrantRoomHasNoReserves`,
+  `TestOneIdentityCannotTakeItsWholeGrantTier_SEC46`
+  (`internal/lifecycle/grants_test.go`)
+  — `TestLiveGrantCapIsSharedFairly`, the flat-quarter-share test this
+  text previously cited, no longer exists.
+  `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
+  idempotently after producer commit, never inline with it. Tests:
+  `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,
+  `TestCollectDecisionSafetyProperties` (`internal/policy`);
+  `TestGCProtectsOnlyTheNewestRelevantCheckpoint`,
+  `TestGCCheckpointWithoutCompanionRecordsItemSkip` (SPEC-4.3: renamed from
+  `TestGCCheckpointWithoutCompanionAbortsOnRealGraph`, which no longer
+  exists — J4 makes a missing checkpoint companion an item-level skip, not
+  an abort), `TestGCTriggerSetIsEnforced`,
+  `TestEnqueueGCDeduplicatesTriggerIdentity`,
+  `TestCompletionGCRequestExecutesOnceAfterProducerCommit`,
+  `TestCollectPendingExecutesDurableRequestsOnRealStore`,
+  `TestCollectArchivesOnlyAuthorizedUnprotectedCandidates`,
+  `TestCollectFailsClosedAtomically`,
+  `TestConcurrentIdenticalCollectFreezesOneReceipt` (`internal/lifecycle`).
+
 ## Context
 
 FR-AUTH-001 requires every mutation to check access to its targets and

@@ -267,6 +267,9 @@ func (s *Store) Update(ctx context.Context, session string, fn func(store.Tx) er
 	if err != nil {
 		return err
 	}
+	if err = tx.runDeferred(); err != nil {
+		return err
+	}
 	if err = ctx.Err(); err != nil {
 		return err
 	}
@@ -364,6 +367,15 @@ type transaction struct {
 	// transcript is not reloaded per derived item.
 	itemCache       *itemCache
 	itemBytesLoaded uint64
+	// deferred are Phase 3 reference checks run at commit (semantic.go).
+	deferred []func() error
+	// pendingReports are this transaction's pending reports with the path
+	// writes that resolve them, applied to the pointers as a watermark:
+	// at the latest by commit, and before that whenever a K1 pointer read
+	// or the A5 guard needs them (XREV-5.1, semantic_k1.go).
+	pendingReports []pendingReport
+	pathWrites     []pathWrite
+	k1Applied      int
 }
 
 var _ store.TxBase = (*transaction)(nil)
@@ -436,7 +448,7 @@ func (t *transaction) put(kind, id string, sub int, value any, replace bool) err
 		}
 		t.wrote = true
 		t.noteSequence(value)
-		if kind != "conversation" && kind != "call" && kind != "attempt" {
+		if kind != "conversation" && kind != "call" && kind != "attempt" && kind != "gc_progress" {
 			t.semanticWrite = true
 		}
 		return nil
@@ -445,7 +457,7 @@ func (t *transaction) put(kind, id string, sub int, value any, replace bool) err
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "PRIMARY KEY constraint failed")) {
 		return fmt.Errorf("%w: %s %s", domain.ErrImmutable, kind, id)
 	}
-	if err == nil && kind != "conversation" && kind != "call" && kind != "attempt" && (kind != "lifecycle" || value.(domain.LifecycleEvent).TargetKind != domain.TargetCall) {
+	if err == nil && kind != "conversation" && kind != "call" && kind != "attempt" && kind != "gc_progress" && (kind != "lifecycle" || value.(domain.LifecycleEvent).TargetKind != domain.TargetCall) {
 		t.semanticWrite = true
 		if kind != "task" {
 			t.semanticSeqRecord = true
@@ -488,6 +500,9 @@ func (t *transaction) noteSequence(value any) {
 		semantic(v.Seq)
 	case domain.UnresolvedReference:
 		semantic(v.Seq)
+	case interface{ SemanticSeq() uint64 }:
+		// Every Phase 3 companion (P3-1).
+		semantic(v.SemanticSeq())
 	case domain.LifecycleEvent:
 		if v.TargetKind == domain.TargetCall {
 			if t.ledgerSeqs == nil {

@@ -250,7 +250,7 @@ func testUpdateItem(t *testing.T, s store.Store) {
 	var updated domain.ContextItem
 	var audit domain.LifecycleEvent
 	update(t, s, sessA, func(tx store.Tx) error {
-		n := seqs(tx, 4)
+		n := seqs(tx, 2)
 		_, err := tx.UpdateItem("missing", 1, domain.ItemChange{}, NewItemEvent(sessA, "l0", n[0], "missing"))
 		wantErr(t, err, domain.ErrNotFound)
 		_, err = tx.UpdateItem("i1", 2, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "l0", n[0], "i1"))
@@ -271,11 +271,12 @@ func testUpdateItem(t *testing.T, s store.Store) {
 		evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetID: "i1"})
 		noErr(t, err)
 		assertEqual(t, "audit event inside Update", evs, []domain.LifecycleEvent{audit})
-
-		// The stale version now conflicts.
-		_, err = tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "l2", n[2], "i1"))
-		wantErr(t, err, domain.ErrVersionConflict)
 		return nil
+	})
+	// The stale version now conflicts.
+	rejected(t, s, sessA, domain.ErrVersionConflict, func(tx store.Tx) error {
+		_, err := tx.UpdateItem("i1", 1, domain.ItemChange{AccessDelta: 1}, NewItemEvent(sessA, "l2", tx.NextSeq(), "i1"))
+		return err
 	})
 	bad := domain.Generation("bogus")
 	earlier := uint64(3)
@@ -617,18 +618,15 @@ func testBlobs(t *testing.T, s store.Store) {
 		noErr(t, tx.InsertBlob(empty))
 		return nil
 	})
-	update(t, s, sessA, func(tx store.Tx) error {
-		noErr(t, tx.InsertBlob(b))
-		corrupt := b
-		corrupt.Data = []byte("snapshot B2")
-		wantErr(t, tx.InsertBlob(corrupt), domain.ErrIntegrity)
-		malformed := NewBlob(sessA, []byte("x"))
-		malformed.Hash = "sha256:XYZ"
-		wantErr(t, tx.InsertBlob(malformed), domain.ErrInvalidRecord)
-		// Re-inserting identical bytes writes nothing, so this transaction
-		// needs no sequenced record.
-		return nil
-	})
+	// Re-inserting identical bytes writes nothing, so this transaction
+	// needs no sequenced record.
+	update(t, s, sessA, func(tx store.Tx) error { return tx.InsertBlob(b) })
+	corrupt := b
+	corrupt.Data = []byte("snapshot B2")
+	rejected(t, s, sessA, domain.ErrIntegrity, func(tx store.Tx) error { return tx.InsertBlob(corrupt) })
+	malformed := NewBlob(sessA, []byte("x"))
+	malformed.Hash = "sha256:XYZ"
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error { return tx.InsertBlob(malformed) })
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		got, err := tx.Blob(b.Hash)
 		noErr(t, err)
@@ -664,7 +662,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		p1 = NewDirective(sessA, "p1", "dep", tx.NextSeq(), "Use dependency v2.")
 		noErr(t, tx.InsertItem(p1))
-		noErr(t, tx.SetCurrentVersion("p1"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "p1"))
 		noErr(t, tx.InsertObligationVersion(NewObligation(sessA, "obl", 1, p1.Seq, "p1")))
 		return nil
 	})
@@ -673,7 +671,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		p2 = NewDirective(sessA, "p2", "dep", seq, "Use dependency v3.")
 		noErr(t, tx.InsertItem(p2))
 		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "p2-p1", domain.RelSupersedes, "p2", "p1", seq)))
-		noErr(t, tx.SetCurrentVersion("p2"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "p2"))
 		old, err := tx.Obligation("obl")
 		noErr(t, err)
 		old.Current, old.RetiredSeq = false, seq
@@ -709,10 +707,12 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		}
 		return nil
 	})
+	rejected(t, s, sessA, domain.ErrNotFound, func(tx store.Tx) error { return UncheckedSetCurrentVersion(tx, "missing") })
+	update(t, s, sessA, func(tx store.Tx) error {
+		return tx.InsertItem(NewItem(sessA, "plain", tx.NextSeq(), "no directive"))
+	})
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error { return UncheckedSetCurrentVersion(tx, "plain") })
 	err := s.Update(ctx, sessA, func(tx store.Tx) error {
-		wantErr(t, tx.SetCurrentVersion("missing"), domain.ErrNotFound)
-		noErr(t, tx.InsertItem(NewItem(sessA, "plain", tx.NextSeq(), "no directive")))
-		wantErr(t, tx.SetCurrentVersion("plain"), domain.ErrInvalidRecord)
 		// The key comes from the item, so an item is only ever current
 		// under its own task, directive ID, and boundary.
 		_, err := currentDirective(tx, "task", "other", DirectiveBoundary(sessA))
@@ -723,7 +723,7 @@ func testDirectiveReplacement(t *testing.T, s store.Store) {
 		wantErr(t, err, domain.ErrNotFound)
 		// Moving the pointer back is permitted; the store does not judge
 		// which version is current.
-		noErr(t, tx.SetCurrentVersion("p1"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "p1"))
 		cur, err := currentDirective(tx, "task", "dep", DirectiveBoundary(sessA))
 		noErr(t, err)
 		if cur != "p1" {
@@ -818,10 +818,10 @@ func testDirectiveBoundaries(t *testing.T, s store.Store) {
 		if err != nil || len(ids) != 0 {
 			t.Errorf("CurrentVersions(DIRECTIVE) before any is set = %v, %v; want empty and nil", ids, err)
 		}
-		noErr(t, tx.SetCurrentVersion("shared"))
-		noErr(t, tx.SetCurrentVersion("private"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "shared"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "private"))
 		// Replacing the agent-only version leaves the task-wide one alone.
-		noErr(t, tx.SetCurrentVersion("private2"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "private2"))
 		ids, err = currentDirectives(tx, "task", "dir")
 		noErr(t, err)
 		if want := []string{"private2", "shared"}; !slices.Equal(ids, want) {
@@ -888,7 +888,7 @@ func testCurrentDirectivesOrder(t *testing.T, s store.Store) {
 			it.AgentID = fmt.Sprintf("agent-%d", i)
 			it.Access.AgentID = it.AgentID
 			noErr(t, tx.InsertItem(it))
-			noErr(t, tx.SetCurrentVersion(it.ID))
+			noErr(t, UncheckedSetCurrentVersion(tx, it.ID))
 		}
 		for i := range n {
 			want = append(want, fmt.Sprintf("v%d", i))

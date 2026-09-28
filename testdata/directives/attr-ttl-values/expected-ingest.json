@@ -1,5 +1,5 @@
 {
-  "seq": 4,
+  "seq": 5,
   "opened_turn": 2,
   "items": [
     {
@@ -355,72 +355,56 @@
       "from": "event#1",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#2",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#3",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#4",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#5",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#6",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#7",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#8",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     }
   ],
   "obligations": [],

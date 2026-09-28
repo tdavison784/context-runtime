@@ -20,6 +20,18 @@ type tx struct {
 	// records a write of a record carrying a sequence number allocated in
 	// this transaction. Update enforces the semantic-write rule with them.
 	semantic, sequenced bool
+	// semSeqs are the sequences of Phase 3 companion writes, for the
+	// TargetCall sharing check; deferred are their commit-time reference
+	// checks (semantic.go).
+	semSeqs  []uint64
+	deferred []func() error
+	// pendingReports are this transaction's pending reports with the path
+	// writes that resolve them, applied to the pointers as a watermark:
+	// at the latest by commit, and before that whenever a K1 pointer read
+	// or the A5 guard needs them (XREV-5.1, semantic_k1.go).
+	pendingReports []pendingReport
+	pathWrites     []pathWrite
+	k1Applied      int
 }
 
 func (t *tx) markSemantic()  { t.semantic = true }
@@ -33,7 +45,7 @@ func (t *tx) commit(st *state) bool {
 	wrote := t.items.dirty() || t.rels.dirty() || t.events.dirty() || t.blobs.dirty() ||
 		t.directives.dirty() || t.obligations.dirty() || t.transitions.dirty() || t.grants.dirty() ||
 		t.tasks.dirty() || t.lifecycle.dirty() || t.convs.dirty() || t.calls.dirty() || t.attempts.dirty() ||
-		t.receipts.dirty() || t.envelopes.dirty() || t.references.dirty()
+		t.receipts.dirty() || t.envelopes.dirty() || t.references.dirty() || t.sem.dirty()
 	t.items.commit()
 	t.rels.commit()
 	t.supersedes.commit()
@@ -64,6 +76,7 @@ func (t *tx) commit(st *state) bool {
 	t.receipts.commit()
 	t.envelopes.commit()
 	t.references.commit()
+	t.sem.commit()
 	st.lastSeq = t.lastSeq
 	return wrote
 }
@@ -159,6 +172,7 @@ func (t *tx) InsertItem(it domain.ContextItem) error {
 	t.items.put(it.ID, it)
 	t.indexLookups(it)
 	t.itemsByTask.add(it.TaskID, it.ID)
+	t.noteItem(domain.ContextItem{}, it)
 	t.markSequenced()
 	return nil
 }
@@ -183,7 +197,8 @@ func (t *tx) UpdateItem(id string, expectedVersion uint64, change domain.ItemCha
 		return domain.ContextItem{}, err
 	}
 	t.items.put(id, next)
-	t.lifecycle.put(event.ID, event)
+	t.noteItem(cur, next)
+	t.putLifecycle(event)
 	t.markSequenced()
 	return next, nil
 }
@@ -203,6 +218,10 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	}
 	if !t.items.has(r.FromID) || !t.items.has(r.ToID) {
 		return fmt.Errorf("relationship %s: %w", r.ID, domain.ErrDanglingRelationship)
+	}
+	// Normalized coverage is referenced, never copied: it must be stored (P3-6).
+	if r.CoverageID != "" && !t.sem.coverages.has(r.CoverageID) {
+		return invalid("relationship %s: coverage %s is not stored", r.ID, r.CoverageID)
 	}
 	if r.Type == domain.RelSupersedes {
 		// A cycle through the new edge needs an existing edge into FromID;
@@ -230,14 +249,21 @@ func (t *tx) InsertRelationship(r domain.Relationship) error {
 	switch r.Type {
 	case domain.RelSupersedes:
 		t.retireLookups(r.ToID, false)
+		t.retireOpenGoal(r.ToID)
 	case domain.RelDuplicateOf:
 		t.retireLookups(r.FromID, true)
+		t.retireOpenGoal(r.FromID)
 	}
 	t.markSequenced()
 	return nil
 }
 
-func (t *tx) SetCurrentVersion(itemID string) error {
+// UncheckedSetCurrentVersion points the item's current-version key at it
+// with no expected-prior, duplicate, superseded or namespace check. It is
+// not part of store.Tx (SPEC-1.21): production writes use the semantic
+// facet's CAS. Only storetest fixtures reach it, to model legacy or
+// corrupted pointer states.
+func (t *tx) UncheckedSetCurrentVersion(itemID string) error {
 	if err := t.check(); err != nil {
 		return err
 	}
@@ -293,6 +319,7 @@ func (t *tx) InsertObligationVersion(o domain.ObligationVersion) error {
 			o.ObligationID, o.Version, latest+1, domain.ErrVersionConflict)
 	}
 	t.obligations.put(obligationKey{o.ObligationID, o.Version}, o)
+	t.noteObligation(domain.ObligationVersion{}, o)
 	t.latest.put(o.ObligationID, o.Version)
 	t.oblsBySource.add(o.SourceItemID, obligationKey{o.ObligationID, o.Version})
 	t.markSequenced()
@@ -334,6 +361,7 @@ func (t *tx) UpdateObligationVersion(o domain.ObligationVersion, expectedRevisio
 		return domain.ObligationVersion{}, err
 	}
 	t.obligations.put(key, next)
+	t.noteObligation(cur, next)
 	t.markSemantic()
 	return next, nil
 }
@@ -363,7 +391,8 @@ func (t *tx) RetireObligationVersion(obligationID string, version, expectedRevis
 		return domain.ObligationVersion{}, err
 	}
 	t.obligations.put(key, next)
-	t.lifecycle.put(event.ID, event)
+	t.noteObligation(cur, next)
+	t.putLifecycle(event)
 	t.markSequenced()
 	return next.Clone(), nil
 }
@@ -377,45 +406,24 @@ func sameObligation(a, b domain.ObligationVersion) bool {
 }
 
 func (t *tx) AppendObligationTransition(tr domain.ObligationTransition, expectedRevision uint64) (domain.ObligationVersion, error) {
-	if err := t.own(tr.SessionID); err != nil {
-		return domain.ObligationVersion{}, err
+	// Phase 3 transitions carry a cause and a detail and go through the
+	// semantic facet; a declared Phase 3 version never moves on this path.
+	if tr.Cause != "" {
+		return domain.ObligationVersion{}, invalid("obligation transition %s: a semantic transition requires its detail", tr.ID)
 	}
-	if err := tr.Validate(); err != nil {
-		return domain.ObligationVersion{}, err
-	}
-	if err := t.fresh("obligation transition "+tr.ID, tr.Seq); err != nil {
-		return domain.ObligationVersion{}, err
-	}
-	if t.transitions.has(tr.ID) {
-		return domain.ObligationVersion{}, fmt.Errorf("obligation transition %s: %w", tr.ID, domain.ErrImmutable)
-	}
-	key := obligationKey{tr.ObligationID, tr.Version}
-	cur, ok := t.obligations.peek(key)
-	if !ok {
-		return domain.ObligationVersion{}, notFound("obligation", fmt.Sprintf("%s/%d", tr.ObligationID, tr.Version))
-	}
-	if cur.Revision != expectedRevision {
-		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: revision %d, expected %d: %w",
-			tr.ObligationID, tr.Version, cur.Revision, expectedRevision, domain.ErrVersionConflict)
-	}
-	if !cur.Current {
-		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: retired versions do not transition: %w",
-			tr.ObligationID, tr.Version, domain.ErrInvalidTransition)
-	}
-	if cur.Status != tr.From {
-		return domain.ObligationVersion{}, fmt.Errorf("obligation %s/%d: transition from %s but status is %s: %w",
-			tr.ObligationID, tr.Version, tr.From, cur.Status, domain.ErrInvalidTransition)
-	}
-	next := cur.Clone()
-	next.Status = tr.To
-	next.EvidenceIDs = nil
+	// INV-16 (DUR-2.12): this path carries no proof or assertion, so it
+	// never satisfies; satisfaction is AppendSemanticObligationTransition's.
 	if tr.To == domain.ObligationSatisfied {
-		next.EvidenceIDs = slices.Clone(tr.EvidenceIDs)
+		return domain.ObligationVersion{}, invalid("obligation transition %s: SATISFIED requires a proof or assertion", tr.ID)
 	}
-	next.Revision++
-	t.transitions.put(tr.ID, tr)
-	t.obligations.put(key, next)
-	t.markSequenced()
+	if cur, ok := t.obligations.peek(obligationKey{tr.ObligationID, tr.Version}); ok && cur.DeclarationKind != "" {
+		return domain.ObligationVersion{}, invalid("obligation %s/%d: a declared version transitions only with its detail", tr.ObligationID, tr.Version)
+	}
+	cur, next, err := t.checkTransition(tr, expectedRevision)
+	if err != nil {
+		return domain.ObligationVersion{}, err
+	}
+	t.writeTransition(tr, cur, next)
 	return next, nil
 }
 
@@ -424,6 +432,9 @@ func (t *tx) InsertGrant(g domain.MutationGrant) error {
 		return err
 	}
 	if err := g.Validate(); err != nil {
+		return err
+	}
+	if err := store.DistinctGrantTargets(g); err != nil {
 		return err
 	}
 	if g.RevokedSeq != 0 {
@@ -436,6 +447,7 @@ func (t *tx) InsertGrant(g domain.MutationGrant) error {
 		return fmt.Errorf("grant %s: %w", g.ID, domain.ErrImmutable)
 	}
 	t.grants.put(g.ID, g)
+	t.indexGrant(g)
 	t.markSequenced()
 	return nil
 }
@@ -456,7 +468,7 @@ func (t *tx) RevokeGrant(id string, event domain.LifecycleEvent) (domain.Mutatio
 	}
 	g.RevokedSeq = event.Seq
 	t.grants.put(id, g)
-	t.lifecycle.put(event.ID, event)
+	t.putLifecycle(event)
 	t.markSequenced()
 	return g, nil
 }
@@ -480,7 +492,7 @@ func (t *tx) PutTask(ts domain.TaskState, expectedVersion uint64, event domain.L
 	if err := t.checkTargetEvent(event, domain.TargetTask, ts.TaskID); err != nil {
 		return domain.TaskState{}, err
 	}
-	t.lifecycle.put(event.ID, event)
+	t.putLifecycle(event)
 	t.tasks.put(ts.TaskID, ts)
 	t.markSequenced()
 	return ts, nil
@@ -519,7 +531,7 @@ func (t *tx) AppendLifecycleEvent(e domain.LifecycleEvent) error {
 	if err := t.checkLifecycleEvent(e); err != nil {
 		return err
 	}
-	t.lifecycle.put(e.ID, e)
+	t.putLifecycle(e)
 	// TargetCall events belong to the call ledger, which is not semantic
 	// state.
 	if e.TargetKind != domain.TargetCall {
@@ -575,6 +587,7 @@ func (t *tx) InsertCall(c domain.CallRecord) error {
 		}
 	}
 	t.calls.put(c.CallID, c)
+	t.noteReservation(domain.CallRecord{}, c)
 	return nil
 }
 
@@ -627,6 +640,7 @@ func (t *tx) UpdateCall(c domain.CallRecord, expectedRevision uint64) (domain.Ca
 		}
 	}
 	t.calls.put(c.CallID, c)
+	t.noteReservation(cur, c)
 	return c, nil
 }
 
@@ -744,7 +758,7 @@ func (t *tx) checkLedgerSeqs() error {
 	if len(ledger) == 0 {
 		return nil
 	}
-	var seqs []uint64
+	seqs := slices.Clone(t.semSeqs)
 	for _, it := range t.items.over {
 		seqs = append(seqs, it.Seq)
 	}

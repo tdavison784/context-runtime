@@ -135,8 +135,11 @@ func (d IDDomain) Valid() bool { return slices.Contains(idDomains, d) }
 // and lifecycle-audit ("evt") IDs, and internal/invocation derives call
 // lifecycle-event ("lce") IDs; all three are reserved here too because the
 // domain cannot import either package (SPEC-1.13: "lce" was missing).
+// "req_" is the runtime-derived operation request namespace (G3, SEC-1.2);
+// "gc_" and "gcq_" are the runtime GC collection-request and GC-request
+// namespaces (H5, SEC-2.6).
 var reservedIDPrefixes = func() []string {
-	out := []string{callerOccurrencePrefix, anonymousOccurrencePrefix + "_", "itm_", "call_", "turn_", "obl_", "rel_", "evt_", "lce_"}
+	out := []string{callerOccurrencePrefix, anonymousOccurrencePrefix + "_", "itm_", "call_", "turn_", "obl_", "rel_", "evt_", "lce_", operationRequestPrefix, gcTriggerRequestPrefix, gcRequestRecordPrefix}
 	for _, d := range idDomains {
 		out = append(out, string(d)+"_")
 	}
@@ -153,6 +156,16 @@ func ReservedIDPrefix(id string) bool {
 		}
 	}
 	return false
+}
+
+// ValidateCallerRequestID checks a request ID supplied by a caller of a
+// standalone intent: a bounded printable ID outside every reserved runtime
+// namespace, so no caller can name or squat a runtime-derived request.
+func ValidateCallerRequestID(id string) error {
+	if !semanticID(id) || ReservedIDPrefix(id) {
+		return invalid("request ID: caller IDs must be printable and outside reserved runtime namespaces")
+	}
+	return nil
 }
 
 // DerivedArtifactID is the deterministic ID of an occurrence artifact at the

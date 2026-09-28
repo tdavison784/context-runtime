@@ -29,6 +29,9 @@ const (
 // subtest gets a fresh, empty store, which the suite closes when the subtest
 // ends (Close is idempotent, so implementations may also close it).
 func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
+	for _, tc := range atomicSuite {
+		t.Run(tc.name, func(t *testing.T) { tc.fn(t, newStore) })
+	}
 	for _, tc := range suite {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newStore(t)
@@ -96,8 +99,79 @@ var suite = []testCase{
 	{"CurrentVersions(DIRECTIVE)Order", testCurrentDirectivesOrder},
 	{"CurrentNamespaces", testCurrentNamespaces},
 
+	// Phase 3 semantic facet (membership, coverage, receipts).
+	{"SemanticFacet", testSemanticFacet},
+	{"SemanticCoverage", testSemanticCoverage},
+	{"SemanticExchanges", testSemanticExchanges},
+	{"SemanticMembershipFrontier", testSemanticMembershipFrontier},
+	{"SemanticCheckpoints", testSemanticCheckpoints},
+	{"SemanticReceipts", testSemanticReceipts},
+	{"SemanticCreationDeclarations", testSemanticCreationDeclarations},
+	{"SemanticSnapshotDeclarations", testSemanticSnapshotDeclarations},
+	{"SemanticCurrentPointerCAS", testSemanticCurrentPointerCAS},
+	{"SemanticGrantsFor", testSemanticGrantsFor},
+	{"SemanticGrantDuplicateTargets", testSemanticGrantDuplicateTargets},
+	{"SemanticLiveGrantsFor", testSemanticLiveGrantsFor},
+	{"SemanticChanges", testSemanticChanges},
+	{"SemanticResources", testSemanticResources},
+	{"SemanticResourcePaths", testSemanticResourcePaths},
+	{"SemanticResourceUpdatesAffectingPath", testSemanticResourceUpdatesAffectingPath},
+	{"SemanticWorkspaceBindings", testSemanticWorkspaceBindings},
+	{"SemanticObservations", testSemanticObservations},
+	{"SemanticObservationEvidenceExecution", testSemanticObservationEvidenceExecution},
+	{"SemanticRunOrdinalUnique", testSemanticRunOrdinalUnique},
+	{"SemanticRunClosesOnce", testSemanticRunClosesOnce},
+	{"SemanticLiveSubjectStates", testSemanticLiveSubjectStates},
+	{"SemanticObligationTransitionByID", testSemanticObligationTransitionByID},
+	{"SemanticLatestUpdateAffectingPath", testSemanticLatestUpdateAffectingPath},
+	{"SemanticClosingObservation", testSemanticClosingObservation},
+	{"SemanticLifecycleEventByID", testSemanticLifecycleEventByID},
+	{"SemanticEarliestExchangeWithItem", testSemanticEarliestExchangeWithItem},
+	{"SemanticLiveGrantsMatchGrantLiveAt", testSemanticLiveGrantsMatchGrantLiveAt},
+	{"SemanticSubjectHighWater", testSemanticSubjectHighWater},
+	{"SemanticCurrentWorkspaceBindings", testSemanticCurrentWorkspaceBindings},
+	{"SemanticLatestWorkspaceBinding", testSemanticLatestWorkspaceBinding},
+	{"SemanticIndexedVersions", testSemanticIndexedVersions},
+	{"SemanticWorkspaceBindingCursor", testSemanticWorkspaceBindingCursor},
+	{"SemanticOwnerIDReuse", testSemanticOwnerIDReuse},
+	{"SemanticObligationDeclarations", testSemanticObligationDeclarations},
+	{"SemanticMatcherProof", testSemanticMatcherProof},
+	{"SemanticProofReferences", testSemanticProofReferences},
+	{"SemanticInvalidation", testSemanticInvalidation},
+	{"SemanticAttestation", testSemanticAttestation},
+	{"SemanticMaterialization", testSemanticMaterialization},
+	{"SemanticRetrieval", testSemanticRetrieval},
+	{"SemanticProjectionItemAccess", testSemanticProjectionItemAccess},
+	{"SemanticGCRequests", testSemanticGCRequests},
+	{"SemanticGCOutcomes", testSemanticGCOutcomes},
+	{"SemanticGCBatchReceipts", testSemanticGCBatchReceipts},
+	{"SemanticGCProgress", testSemanticGCProgress},
+	{"SemanticGCQueueCursor", testSemanticGCQueueCursor},
+	{"SemanticPendingGCByTrigger", testSemanticPendingGCByTrigger},
+	{"SemanticGCCandidates", testSemanticGCCandidates},
+	{"SemanticOpenGoalsByTaskOwner", testSemanticOpenGoalsByTaskOwner},
+	{"SemanticLedgerSeqIsolation", testSemanticLedgerSeqIsolation},
+	{"SemanticSatisfactionBacking", testSemanticSatisfactionBacking},
+	{"SemanticStaleProof", testSemanticStaleProof},
+	{"SemanticStaleProofWithoutState", testSemanticStaleProofWithoutState},
+	{"SemanticStaleProofPrivateFail", testSemanticStaleProofPrivateFail},
+	{"SemanticStaleProofPublishablePartition", testSemanticStaleProofPublishablePartition},
+	{"SemanticLiveProofsByPath", testSemanticLiveProofsByPath},
+	{"SemanticK1Pointers", testSemanticK1Pointers},
+	{"SemanticSettlementCursor", testSemanticSettlementCursor},
+	{"SemanticLiveProofs", testSemanticLiveProofs},
+	{"SemanticProofDerivedValid", testSemanticProofDerivedValid},
+	{"SemanticK1BroadConfirmations", testSemanticK1BroadConfirmations},
+	{"SemanticK1UnknownFreshnessGate", testSemanticK1UnknownFreshnessGate},
+	{"SemanticK1InTxVisibility", testSemanticK1InTxVisibility},
+	{"SemanticK1SettlementCause", testSemanticK1SettlementCause},
+	{"SemanticA5CommitGuard", testSemanticA5CommitGuard},
+	{"RawTransitionCannotSatisfy", testRawTransitionCannotSatisfy},
+
 	// Ingestion records.
 	{"IngestionRoundTrip", testIngestionRoundTrip},
+	{"IngestionV3RoundTrip", testIngestionV3RoundTrip},
+	{"IngestionV3BackfilledPolicyReplays", testIngestionV3BackfilledPolicyReplays},
 	{"ReceiptKeepsOriginalItems", testReceiptKeepsOriginalItems},
 	{"IngestionInsertRules", testIngestionInsertRules},
 	{"AnonymousIngestions", testAnonymousIngestions},
@@ -146,6 +220,17 @@ func view(t *testing.T, s store.Store, sess string, fn func(tx store.ReadTx) err
 	t.Helper()
 	if err := s.View(ctx, sess, fn); err != nil {
 		t.Fatalf("View(%s): %v", sess, err)
+	}
+}
+
+// rejected runs fn in its own transaction and fails the test unless Update
+// returns want. A write that fails after another write succeeded poisons its
+// transaction (P3-1), so a rejection case never shares a transaction with
+// setup writes it expects to commit.
+func rejected(t *testing.T, s store.Store, sess string, want error, fn func(tx store.Tx) error) {
+	t.Helper()
+	if err := s.Update(ctx, sess, fn); !errors.Is(err, want) {
+		t.Fatalf("error = %v, want %v", err, want)
 	}
 }
 

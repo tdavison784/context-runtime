@@ -64,10 +64,6 @@ type relKey struct {
 	id  string
 }
 
-// relationshipTypes lists every type, for endpoint reads without a type.
-var relationshipTypes = []domain.RelationshipType{domain.RelDerivedFrom, domain.RelSupersedes, domain.RelDependsOn,
-	domain.RelReferences, domain.RelSatisfies, domain.RelDuplicateOf}
-
 type obligationKey struct {
 	id      string
 	version uint64
@@ -117,6 +113,9 @@ type state struct {
 	// versions bound to each source item.
 	currentIDs   map[currentIDKey]map[domain.AccessBoundary]bool
 	oblsBySource map[string]map[obligationKey]bool
+
+	// sem holds the Phase 3 companion records (semantic.go).
+	sem *semState
 }
 
 func newState() *state {
@@ -151,6 +150,7 @@ func newState() *state {
 		oblsBySource: map[string]map[obligationKey]bool{},
 		refOwners:    map[sourceKey][]seqRef{},
 		itemsByTask:  map[string][]string{},
+		sem:          newSemState(),
 	}
 }
 
@@ -187,6 +187,7 @@ func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) 
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
 	t := &tx{readTx: newReadTx(sessionID, sess.st, true), baseSeq: sess.st.lastSeq}
+	t.writer = t
 	defer t.finish()
 	g := store.NewGuard(t)
 	err = fn(g)
@@ -194,6 +195,9 @@ func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) 
 		return p // the overlay is discarded: nothing commits (DUR-1.3)
 	}
 	if err != nil {
+		return err
+	}
+	if err := t.runDeferred(); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {

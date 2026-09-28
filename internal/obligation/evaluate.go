@@ -1,0 +1,340 @@
+package obligation
+
+import (
+	"errors"
+	"strconv"
+	"strings"
+
+	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/graph"
+	"github.com/tdavison784/context-runtime/internal/store"
+)
+
+// evaluate runs every current bound obligation's registered matcher against
+// a newly stored observation (P3-17). Matchers see only typed records and
+// authoritative state; positive results additionally need a live grant
+// naming the exact obligation version and matcher version at the mutation's
+// allocated sequence, and a publishable boundary. Missing authority leaves
+// the observation as evidence for later trusted reevaluation.
+func (s *Service) evaluate(tx store.Tx, sem store.SemanticTx, work *budget, actor domain.Principal, obs domain.ObservationRecord, run domain.ObservationRun) error {
+	var candidates []domain.ObligationVersion
+	err := s.eachPage(work, func(p store.Page) (int, store.Cursor, bool, error) {
+		pg, err := sem.CurrentBoundObligationsBySubject(run.SubjectKey, p)
+		if err != nil {
+			return 0, store.Cursor{}, false, err
+		}
+		candidates = append(candidates, pg.Records...)
+		return len(pg.Records), pg.Next, pg.More, nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, o := range candidates {
+		if _, err := s.evaluateOne(tx, sem, actor, o, obs, run, work); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// evaluateOne applies one matcher verdict to one obligation version and
+// returns the transitions it recorded.
+func (s *Service) evaluateOne(tx store.Tx, sem store.SemanticTx, actor domain.Principal, o domain.ObligationVersion, obs domain.ObservationRecord, run domain.ObservationRun, work *budget) ([]string, error) {
+	if !o.Current || o.BindingState != domain.BindingBound || o.Matcher == nil || o.TargetSpec == nil || o.TargetSubjectKey != run.SubjectKey {
+		return nil, nil
+	}
+	m, ok := s.reg.Lookup(*o.Matcher)
+	if !ok {
+		return nil, nil // an unavailable historical version is never replaced
+	}
+	// A pending version is settled first, so what follows starts from its
+	// effective state (K1 A3).
+	o, _, err := s.settle(tx, sem, work, o)
+	if err != nil {
+		return nil, err
+	}
+	status, _, err := EffectiveStatus(sem, o)
+	if err != nil {
+		return nil, err
+	}
+	cur, curOrdinal, err := s.currentMatcherProof(sem, o)
+	if err != nil {
+		return nil, err
+	}
+	// The watermark is the subject's run-order high-water mark, not just the
+	// current proof's run: an older run is stale whatever the obligation's
+	// status or the fingerprint the newer run observed (H1, G1, P3-16/22).
+	watermark, err := s.subjectWatermark(sem, work, run, o)
+	if err != nil {
+		return nil, err
+	}
+	in := EvalInput{Target: *o.TargetSpec, SubjectKey: o.TargetSubjectKey, Observation: obs, Ordinal: run.Ordinal, Watermark: max(curOrdinal, watermark)}
+	resource := targetResource(*o.TargetSpec)
+	if rs, err := sem.ResourceState(resource); err == nil {
+		in.Resource = &rs
+		if f := o.TargetSpec.File; f != nil && f.Mode == domain.FileCurrentContent {
+			ps, ok, err := s.currentPathState(sem, work, f.Locator, rs)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				in.Path = &ps
+			}
+		}
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+	// A newer complete FAIL of this subject and family rejects the current
+	// matcher or resource-bound satisfaction through the restricted path
+	// (P3-16, SPEC-1.10) whatever fingerprint or content it observed:
+	// ordering is by run ordinal only (H1). It must cover the proof's
+	// boundary, so a FAIL private to another agent never rejects a wider
+	// proof or has its ID recorded where the proof's readers see it
+	// (SEC-2.9). Attestations carry no proof and are untouched.
+	if obs.Family == m.Family() && obs.SubjectKey == o.TargetSubjectKey && obs.TerminalComplete() && obs.Outcome == domain.OutcomeFail {
+		if cur != nil && run.Ordinal > curOrdinal && failCovers(cur.Access, obs, run) {
+			inv := invalidation{cause: domain.CauseProofRejected, causeRecord: obs.ID, requestID: obs.ID, reason: domain.ReasonProofRejected, rule: ProofRejectionRule}
+			seq := tx.NextSeq()
+			if err := s.invalidateProof(tx, sem, work, actor, seq, *cur, inv); err != nil {
+				return nil, err
+			}
+			return []string{recordID("otr_", string(inv.cause), cur.Target.Target().AuthorizationKey, obs.ID)}, nil
+		}
+		return nil, nil
+	}
+	if v := m.Evaluate(in); v.Kind == VerdictPass {
+		switch {
+		case status == domain.ObligationUnresolved:
+			return s.satisfy(tx, sem, work, actor, o, obs, v, nil)
+		case cur != nil && cur.ObservationID != obs.ID && run.Ordinal > curOrdinal:
+			return s.satisfy(tx, sem, work, actor, o, obs, v, cur)
+		}
+	}
+	return nil, nil
+}
+
+// failCovers reports whether a FAIL observation's evidence and run
+// boundaries both cover the proof boundary, the same publication rule a PASS
+// must meet to satisfy it (P3-14).
+func failCovers(proof domain.AccessBoundary, obs domain.ObservationRecord, run domain.ObservationRun) bool {
+	return proof.Within(obs.Access) && proof.Within(run.Access)
+}
+
+// subjectWatermark is the subject's run-order high-water mark (H1, SEC-2.1,
+// SPEC-2.1, DUR-2.1): the highest ordinal of any complete PASS/FAIL run in
+// the run's own partition and in every partition whose evidence could back
+// the obligation, whatever fingerprint it observed and whatever its subject
+// state's applicability. The store maintains each mark at write time; each
+// is one keyed read, independent of run history.
+func (s *Service) subjectWatermark(r store.SemanticReader, work *budget, run domain.ObservationRun, o domain.ObligationVersion) (uint64, error) {
+	var high uint64
+	// The commit guard ranks proofs over exactly these partitions, so the
+	// matcher and the store share one rule (DUR-3.9).
+	for _, p := range store.ProofRankPartitions(run, o) {
+		if err := work.spend(1); err != nil {
+			return 0, err
+		}
+		mark, err := r.SubjectHighWater(run.SubjectKey, p.TaskID, p.Access)
+		if errors.Is(err, domain.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		high = max(high, mark)
+	}
+	return high, nil
+}
+
+// obligationPartitions lists the TASK partitions of the obligation's task
+// whose owners are a subset of the obligation's: evidence there is
+// publishable at the obligation's boundary (P3-14).
+func obligationPartitions(o domain.ObligationVersion) []domain.AccessBoundary {
+	if o.TaskID == "" {
+		return nil
+	}
+	var out []domain.AccessBoundary
+	for _, wf := range uniq("", o.Access.WorkflowID) {
+		for _, ag := range uniq("", o.Access.AgentID) {
+			out = append(out, domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: o.SessionID, TaskID: o.TaskID, WorkflowID: wf, AgentID: ag})
+		}
+	}
+	return out
+}
+
+func uniq(a, b string) []string {
+	if a == b {
+		return []string{a}
+	}
+	return []string{a, b}
+}
+
+// currentMatcherProof returns the version's current proof (nil for none or
+// an attestation) and its ordinal: the run ordinal of the observation behind
+// a matcher proof, or the sequence of a resource-bound assertion's proof.
+func (s *Service) currentMatcherProof(r store.SemanticReader, o domain.ObligationVersion) (*domain.ApplicabilityProof, uint64, error) {
+	// A current proof is recorded only while SATISFIED; callers settle a
+	// pending version first, so a remaining proof is valid (K1 A2/A3).
+	if o.CurrentProofID == "" {
+		return nil, 0, nil
+	}
+	p, err := r.ApplicabilityProof(o.CurrentProofID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if p.ObservationID == "" {
+		// A resource-bound assertion is ordered by its own sequence, which is
+		// comparable with pre-execution run ordinals (both session sequences):
+		// only runs registered after it are newer.
+		return &p, p.Seq, nil
+	}
+	prev, err := r.Observation(p.ObservationID)
+	if err != nil {
+		return nil, 0, err
+	}
+	run, err := r.ObservationRun(prev.RunID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return &p, run.Ordinal, nil
+}
+
+// satisfy records a matcher satisfaction, or replaces a still-valid proof
+// through an atomic SATISFIED->UNRESOLVED->SATISFIED PROOF_REFRESH pair
+// (P3-16). The positive step is authorized at its own allocated sequence
+// before anything is written: without a live exact grant, or when the
+// obligation's boundary is broader than the evidence or resource, nothing
+// changes and the old proof stands.
+func (s *Service) satisfy(tx store.Tx, sem store.SemanticTx, work *budget, actor domain.Principal, o domain.ObligationVersion, obs domain.ObservationRecord, v Verdict, old *domain.ApplicabilityProof) ([]string, error) {
+	ref := domain.ObligationRef{SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version}
+	target := ref.Target()
+	releaseSeq := uint64(0)
+	if old != nil {
+		releaseSeq = tx.NextSeq()
+	}
+	seq := tx.NextSeq()
+	auth, err := graph.AuthorizeAtSequence(tx, actor, domain.ActionAssertObligation, []domain.GrantTarget{target}, o.Matcher, seq, s.policy.MaxTargets)
+	if errors.Is(err, domain.ErrInvalidAuthorityPromotion) || errors.Is(err, domain.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	grantID := auth.GrantIDs[target.AuthorizationKey]
+	ev, err := tx.Item(obs.EvidenceItemID)
+	if err != nil {
+		return nil, err
+	}
+	bind, err := sem.ResourceBinding(v.Dependency.ResourceID)
+	if err != nil {
+		return nil, err
+	}
+	if !o.Access.Within(ev.Access) || !o.Access.Within(obs.Access) || !o.Access.Within(bind.Access) {
+		return nil, nil // never publish narrower evidence at a broader boundary (P3-14)
+	}
+	rule := ruleName(*o.Matcher)
+	cause, reason := domain.CauseMatcher, domain.ReasonAuthorizedTransition
+	if old != nil {
+		cause, reason = domain.CauseProofRefresh, domain.ReasonProofRefreshed
+	}
+	t := domain.ObligationTransition{
+		Cause: cause, AssertionMode: domain.AssertionResourceBound, RequestID: obs.ID, ReasonCode: reason,
+		// The evaluated revision is part of the identity (SPEC-1.9): the same
+		// observation may satisfy again after revalidation or a revert.
+		ID:        recordID("otr_", "matcher", target.AuthorizationKey, obs.ID, strconv.FormatUint(o.Revision, 10)),
+		SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version, Seq: seq,
+		From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation,
+		Actor: actor, GrantID: grantID, Matcher: o.Matcher, EvidenceIDs: []string{ev.ID},
+	}
+	proofID, err := domain.ApplicabilityProofID(ref, t.ID)
+	if err != nil {
+		return nil, err
+	}
+	cov, members, err := evidenceCoverage(proofID, seq, o.Access, ev)
+	if err != nil {
+		return nil, err
+	}
+	targetHash, err := o.TargetSpec.CanonicalHash()
+	if err != nil {
+		return nil, err
+	}
+	deps := dependencies(proofID, seq, o.Access, []domain.ResourceClaim{v.Dependency})
+	proof := domain.ApplicabilityProof{
+		EvidenceIDs:  []string{ev.ID},
+		SemanticMeta: domain.SemanticMeta{ID: proofID, SessionID: o.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
+		Target:       ref, TargetSpecHash: targetHash, TransitionID: t.ID, EvidenceCoverageID: cov.ID,
+		Matcher: o.Matcher, RuleVersion: rule, ObservationID: obs.ID, Access: o.Access,
+	}
+	primaryProof(&proof, deps)
+	t.ProofID = proofID
+
+	w := &writes{tx: tx}
+	w.start()
+	if err := sem.InsertCoverage(cov, members); err != nil {
+		return nil, w.fail(err)
+	}
+	if err := sem.InsertApplicabilityProof(proof, deps); err != nil {
+		return nil, w.fail(err)
+	}
+	expected := o.Revision
+	var ids []string
+	if old != nil {
+		release := domain.ObligationTransition{
+			Cause: domain.CauseProofRefresh, PriorProofID: old.ID, RequestID: obs.ID, ReasonCode: domain.ReasonProofRefreshed,
+			ID:        recordID("otr_", "proof-refresh-release", target.AuthorizationKey, obs.ID, strconv.FormatUint(o.Revision, 10)),
+			SessionID: o.SessionID, ObligationID: o.ObligationID, Version: o.Version, Seq: releaseSeq,
+			From: domain.ObligationSatisfied, To: domain.ObligationUnresolved, Action: domain.ActionAssertObligation,
+			Actor: actor, GrantID: grantID, Matcher: o.Matcher,
+		}
+		d := domain.TransitionDetail{
+			SemanticMeta: domain.SemanticMeta{ID: release.ID, SessionID: o.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: releaseSeq},
+			Target:       ref, TransitionID: release.ID, Cause: release.Cause, PreviousProofID: old.ID, ObservationID: obs.ID, RuleVersion: rule,
+		}
+		after, err := appendTransition(tx, sem, o, release, d, expected)
+		if err != nil {
+			return nil, w.fail(err)
+		}
+		expected = after.Revision
+		ids = append(ids, release.ID)
+	}
+	d := domain.TransitionDetail{
+		SemanticMeta: domain.SemanticMeta{ID: t.ID, SessionID: o.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
+		Target:       ref, TransitionID: t.ID, Cause: cause, ProofID: proofID, ObservationID: obs.ID, RuleVersion: rule,
+	}
+	if old != nil {
+		d.PreviousProofID = "" // the pair's release step records the replaced proof
+	}
+	if _, err := appendTransition(tx, sem, o, t, d, expected); err != nil {
+		return nil, w.fail(err)
+	}
+	return append(ids, t.ID), nil
+}
+
+// evidenceCoverage is the single-member EVIDENCE_SUPPORT coverage of a
+// matcher proof (P3-6): the exact evidence occurrence and content.
+func evidenceCoverage(proofID string, seq uint64, access domain.AccessBoundary, ev domain.ContextItem) (domain.CoverageRecord, []domain.CoverageMember, error) {
+	c := domain.CoverageRecord{
+		SemanticMeta: domain.SemanticMeta{ID: recordID("cov_", "proof-evidence", proofID), SessionID: access.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
+		Purpose:      domain.CoverageEvidenceSupport,
+		Access:       access,
+		MemberCount:  1,
+	}
+	m := domain.CoverageMember{
+		SemanticMeta: domain.SemanticMeta{SessionID: access.SessionID, SchemaVersion: domain.SemanticSchemaV1, Seq: seq},
+		CoverageID:   c.ID,
+		Source:       &domain.ItemContentRef{ItemID: ev.ID, ContentHash: ev.ContentHash},
+	}
+	key, err := m.Key()
+	if err != nil {
+		return c, nil, err
+	}
+	m.ID = key
+	members := []domain.CoverageMember{m}
+	if c.Signature, err = domain.CoverageSignature(c, members); err != nil {
+		return c, nil, err
+	}
+	return c, members, nil
+}
+
+// ruleName returns the recorded rule string of a matcher reference.
+func ruleName(m domain.MatcherRef) string { return strings.Join([]string{m.Name, m.Version}, "/") }

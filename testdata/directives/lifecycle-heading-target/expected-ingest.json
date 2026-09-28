@@ -1,5 +1,5 @@
 {
-  "seq": 4,
+  "seq": 5,
   "opened_turn": 2,
   "items": [
     {
@@ -34,7 +34,7 @@
       "target_id": "upgrade",
       "authority": "USER",
       "actor_authority": "USER",
-      "status": "PARSED_NOT_EXECUTED",
+      "status": "NOT_EXECUTED",
       "resolution": "NOT_FOUND",
       "range": [
         0,
@@ -46,7 +46,7 @@
       "target_id": "api",
       "authority": "USER",
       "actor_authority": "USER",
-      "status": "PARSED_NOT_EXECUTED",
+      "status": "NOT_EXECUTED",
       "resolution": "NOT_FOUND",
       "range": [
         22,

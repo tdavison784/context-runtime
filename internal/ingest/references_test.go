@@ -3,13 +3,13 @@ package ingest
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/sqlite"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 )
 
 func TestLocatorKey_M5(t *testing.T) {
@@ -91,7 +91,7 @@ func TestReferences_M5(t *testing.T) {
 // TestReferences_SurviveRestart: unresolved references are persisted, so a
 // source ingested after a restart still links.
 func TestReferences_SurviveRestart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "restart.db")
+	path := sqlitetest.Path(t)
 	user := principal(domain.AuthorityUser)
 	open := func() *fixture {
 		s, err := sqlite.Open(ctx, path)

@@ -118,3 +118,70 @@ func TestTurnOwnershipAndTTL(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyToolResultTranscriptsQualifyAsEvidenceSupport(t *testing.T) {
+	for _, tc := range []struct {
+		item ContextItem
+		want bool
+	}{
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityUser, Kind: KindEvidence}, true},
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityHarness, Kind: KindArtifact}, true},
+		{ContextItem{Role: RoleProjection, Authority: AuthorityTool, Kind: KindToolResult}, true},
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityUser, Kind: KindFact}, false},
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityAgent, Kind: KindEvidence}, false},
+		{ContextItem{Role: RoleSemantic, Authority: AuthorityRetrievedContent, Kind: KindEvidence}, false},
+		{ContextItem{Role: RoleCheckpoint, Authority: AuthorityHarness, Kind: KindEvidence}, false},
+		{ContextItem{Role: RoleProjection, Authority: AuthorityTool, Kind: KindFact}, false},
+	} {
+		if got := tc.item.QualifiesAsEvidenceSupport(); got != tc.want {
+			t.Errorf("%s %s %s: structural support = %v, want %v (SEC-1.3)", tc.item.Role, tc.item.Authority, tc.item.Kind, got, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		authority Authority
+		kind      Kind
+		want      bool
+	}{
+		{AuthorityTool, KindToolResult, true},
+		{AuthorityTool, KindEvidence, false},
+		{AuthorityUser, KindToolResult, false},
+		{AuthorityUser, KindUserMessage, false},
+		{AuthorityAgent, KindAssistantMessage, false},
+		{AuthoritySystem, KindConversation, false},
+		{AuthorityHarness, KindConversation, false},
+		{AuthorityRetrievedContent, KindEvidence, false},
+	} {
+		it := ContextItem{Role: RoleTranscript, Authority: tc.authority, Kind: tc.kind}
+		if got := it.QualifiesAsEvidenceSupport(); got != tc.want {
+			t.Errorf("%s %s transcript: support = %v, want %v", tc.authority, tc.kind, got, tc.want)
+		}
+	}
+}
+
+// SPEC-1.5: a pre-upgrade agent key (no explicit namespace) is superseded by
+// its exact owner only when the frozen legacy rule classifies it AGENT_KEY;
+// the superseding version must carry the explicit namespace.
+func TestAgentMaySupersedeOnlyItsOwnLegacyKey(t *testing.T) {
+	actor := Principal{SessionID: "s", WorkflowID: "w", TaskID: "t", AgentID: "a", Authority: AuthorityAgent}
+	key := ContextItem{ID: "old", SessionID: "s", WorkflowID: "w", TaskID: "t", AgentID: "a", DirectiveID: AgentKeyID("status"), Authority: AuthorityAgent, Kind: KindTaskState, Scope: ScopeTask,
+		Access: AccessBoundary{Scope: ScopeTask, SessionID: "s", WorkflowID: "w", TaskID: "t", AgentID: "a"}}
+	if err := authorizeAgentKeyPrior(actor, key); err != nil {
+		t.Fatalf("owner refused its legacy key: %v", err)
+	}
+	for name, change := range map[string]func(*ContextItem){
+		"directive section": func(it *ContextItem) { it.Section = SectionPinned },
+		"no directive ID":   func(it *ContextItem) { it.DirectiveID = "" },
+		"other agent":       func(it *ContextItem) { it.AgentID = "b" },
+		"user authority":    func(it *ContextItem) { it.Authority = AuthorityUser },
+		"other namespace":   func(it *ContextItem) { it.Namespace = NamespaceDirective },
+	} {
+		bad := key
+		change(&bad)
+		if authorizeAgentKeyPrior(actor, bad) == nil {
+			t.Errorf("%s: legacy prior accepted", name)
+		}
+	}
+	if AuthorizeAgentKeyWrite(actor, key) == nil {
+		t.Fatal("a new version without the explicit namespace was accepted")
+	}
+}

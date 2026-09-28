@@ -178,10 +178,10 @@ func (r *run) linkReference(actor domain.Principal, ref, target domain.ContextIt
 	if r.refLinks >= r.limits.MaxReferenceLinks {
 		return true, nil
 	}
+	// Every condition LinkReference rejects was checked above, and a
+	// failed graph mutation poisons the transaction (W1 1babf3c), so any
+	// error here aborts the event rather than skipping the link.
 	_, err = graph.LinkReference(r.tx, actor, ref.ID, target.ID, r.graphEventID(), domain.LocatorRuleVersion)
-	if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
-		return false, nil
-	}
 	if err == nil {
 		r.refLinks++
 	}

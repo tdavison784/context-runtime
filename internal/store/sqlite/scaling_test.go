@@ -60,3 +60,42 @@ func TestDerivedLinksLoadTranscriptOnce(t *testing.T) {
 		t.Errorf("item bytes loaded: 500 items %d, 4000 items %d (x%.1f); want about x8 (linear)", small, large, ratio)
 	}
 }
+
+// TestLargeTranscriptStaysCached_SPEC41 guards configured spans above the
+// former 16 MiB cache cap: derived links must decode the transcript once.
+func TestLargeTranscriptStaysCached_SPEC41(t *testing.T) {
+	const size = 17 << 20
+	s, _ := openTemp(t)
+	actor := storetest.NewPrincipal("s", domain.AuthoritySystem)
+	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		inner := tx.(*store.Guard).TxBase.(*transaction)
+		tr := storetest.NewTranscript("s", "tr", tx.NextSeq(), strings.Repeat("x", size))
+		tr.Authority = domain.AuthoritySystem
+		if err := tx.InsertItem(tr); err != nil {
+			return err
+		}
+		inner.itemBytesLoaded = 0
+		for i := range 8 {
+			d := storetest.NewDirective("s", fmt.Sprintf("d%d", i), fmt.Sprintf("d%d", i), tx.NextSeq(), "small")
+			d.Authority = domain.AuthoritySystem
+			if err := tx.InsertItem(d); err != nil {
+				return err
+			}
+			if _, err := graph.LinkDerived(tx, actor, d.ID, []string{"tr"}, &domain.Coverage{}, "evt"); err != nil {
+				return err
+			}
+		}
+		if inner.itemBytesLoaded > 2*uint64(size) {
+			t.Errorf("loaded %d item bytes for eight links to a %d-byte transcript; want one transcript decode", inner.itemBytesLoaded, size)
+		}
+		if _, bytes := inner.itemCacheFootprint(); bytes < size {
+			t.Errorf("large transcript not cached: footprint %d bytes", bytes)
+		}
+		if inner.itemCache.maxBytes != 2*size {
+			t.Errorf("transcript cache cap = %d, want %d", inner.itemCache.maxBytes, 2*size)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

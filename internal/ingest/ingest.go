@@ -18,6 +18,7 @@ import (
 
 	"github.com/tdavison784/context-runtime/internal/directive"
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/obligation"
 	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
@@ -38,6 +39,27 @@ type Ingester struct {
 	// bound is unreachable in routine use; exceeding it still rejects the
 	// event (store.ErrLimitExceeded) rather than deciding on a partial set.
 	LookupLimit int
+	// Semantic is the recorded Phase 3 policy (P3-40/42); nil means
+	// policy.DefaultPhase3Policy(). Every new event is identified by the v3
+	// request hash and may carry a typed operation stream; its receipt and
+	// envelope record the hash schema, limits and policy. Frozen v2 identity
+	// remains only for retries of events recorded under it.
+	Semantic *domain.Phase3Policy
+	// legacyV2 makes new events use the frozen Phase 2 identity and
+	// PARSED_NOT_EXECUTED commands. Tests only: it recreates Phase 2
+	// history for upgrade and retry coverage.
+	legacyV2 bool
+	// Operations executes typed operations by kind (P3-34). A kind with no
+	// handler fails closed with domain.ErrUnsupportedSchema.
+	Operations map[domain.SemanticOperationKind]OperationHandler
+	// Lifecycle executes Resolve/Unpin commands parsed from new events
+	// under a Phase 3 policy (P3-35); a resolved command with no executor
+	// fails closed.
+	Lifecycle LifecycleExecutor
+	// Obligations is the obligation service (W4) for Pinned declarations
+	// and W4 typed operations; nil builds one from the recorded policy and
+	// the frozen matcher registry.
+	Obligations *obligation.Service
 }
 
 // DefaultLookupLimit is the default bound on one indexed lookup.
@@ -53,7 +75,24 @@ func (g Ingester) lookupLimit() int {
 // Versions are the execution versions this ingester records in every
 // receipt (D14, M2).
 func (g Ingester) Versions() domain.ExecutionVersions {
-	return domain.ExecutionVersions{Parser: directive.ParserVersion, Policy: policy.Version, Limits: g.Limits.Effective()}
+	v := domain.ExecutionVersions{Parser: directive.ParserVersion, Policy: policy.Version, Limits: g.Limits.Effective()}
+	if pol := g.semantic(); pol != nil {
+		v.Semantic = pol
+	}
+	return v
+}
+
+// semantic is the effective Phase 3 policy for new events, a fresh copy,
+// or nil for frozen v2 identity (tests only).
+func (g Ingester) semantic() *domain.Phase3Policy {
+	if g.legacyV2 {
+		return nil
+	}
+	pol := policy.DefaultPhase3Policy()
+	if g.Semantic != nil {
+		pol = *g.Semantic
+	}
+	return &pol
 }
 
 func (g Ingester) now() time.Time {
@@ -76,11 +115,11 @@ func (g Ingester) now() time.Time {
 // problems, boundary conflicts (R13), and unresolved or mismatched
 // lifecycle targets (R7, R14) are diagnostics in the receipt.
 func (g Ingester) Ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event) (domain.IngestReceipt, error) {
-	r, err := g.ingest(ctx, s, p, e)
+	r, err := g.ingest(ctx, s, p, e, nil)
 	return r, sanitize(err)
 }
 
-func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event) (domain.IngestReceipt, error) {
+func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal, e domain.Event, o *outcome) (domain.IngestReceipt, error) {
 	// Admission (SEC-2.1), from lengths alone and outside any write
 	// transaction: the hard ceiling first, then the configured limits. An
 	// over-limit event is admitted only as the retry of a known EventID
@@ -91,7 +130,7 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	if err := checkSizes(e, hardSizes()); err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	if err := checkSizes(e, configuredSizes(g.Limits.Effective())); err != nil {
+	if err := checkSizes(e, configuredSizes(g.Limits.Effective(), g.semantic())); err != nil {
 		if e.EventID == "" || p.Validate() != nil {
 			return domain.IngestReceipt{}, err
 		}
@@ -108,8 +147,9 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	}
 	e = e.Clone()
 	// Structure and authority only: configured limits apply after the
-	// idempotency lookup, to new events (F3).
-	if err := e.ValidateFor(p, retryCeiling(g.Limits)); err != nil {
+	// idempotency lookup, to new events (F3). An EventID in a reserved
+	// namespace is checked in apply, after its receipt lookup (DUR-2.8).
+	if err := validateRequest(withoutEventID(e), p, retryCeiling(g.Limits), ceilingPolicy(g.semantic())); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	var anonymous string
@@ -122,7 +162,7 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 	}
 	var out domain.IngestReceipt
 	err := s.Update(ctx, p.SessionID, func(tx store.Tx) error {
-		r, err := g.apply(tx, p, e, anonymous)
+		r, err := g.apply(tx, p, e, anonymous, o)
 		if err != nil {
 			return err
 		}
@@ -146,11 +186,30 @@ func (g Ingester) ingest(ctx context.Context, s store.Store, p domain.Principal,
 // Every error Ingest and Apply return is a bare public sentinel (or a join
 // of them): never text naming an item or other record (R20.1).
 func (g Ingester) Apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
-	r, err := g.apply(tx, p, e, anonymousOccurrence)
+	r, err := g.apply(tx, p, e, anonymousOccurrence, nil)
 	return r, sanitize(err)
 }
 
-func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string) (domain.IngestReceipt, error) {
+func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymousOccurrence string, o *outcome) (domain.IngestReceipt, error) {
+
+	var b *domain.OutcomeBinding
+	var m *OutcomeMembership
+	if o != nil {
+		if err := checkOutcome(o.binding, e); err != nil {
+			return domain.IngestReceipt{}, err
+		}
+		b, m, p = &o.binding, o.membership, o.binding.Principal
+	}
+	// The outcome- namespace belongs to the outcome path (SEC-1.4, G3) and
+	// the runtime prefixes to the runtime (R20.1, H5): a plain event can
+	// never create a record under one. It may only replay its own principal's
+	// receipt of a plain event that Phase 2 accepted before the namespace was
+	// reserved, whatever its shape (DUR-2.8, SEC-4.9); anything else under a
+	// reserved EventID is one uniform ErrInvalidRecord (SEC-3.3, see
+	// lookupReceipt). Structure is validated without the EventID, which is a
+	// lookup key and never payload, and a reserved EventID with no receipt
+	// is rejected after the lookup, before anything is written.
+	reserved := o == nil && reservedEventID(e.EventID)
 	limits := g.Limits.Effective()
 	// Admission from lengths alone (SEC-2.1), as in Ingest: over the
 	// configured limits, only the retry of a known EventID may proceed, and
@@ -158,18 +217,22 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	if err := checkSizes(e, hardSizes()); err != nil {
 		return domain.IngestReceipt{}, err
 	}
-	validation := limits
-	if err := checkSizes(e, configuredSizes(limits)); err != nil {
+	validation, pol := limits, g.semantic()
+	if err := checkSizes(e, configuredSizes(limits, g.semantic())); err != nil {
 		if e.EventID == "" || p.Validate() != nil {
 			return domain.IngestReceipt{}, err
 		}
 		if admit := admitKnownRetry(tx, p, e, err); admit != nil {
 			return domain.IngestReceipt{}, admit
 		}
-		validation = retryCeiling(g.Limits)
+		validation, pol = retryCeiling(g.Limits), ceilingPolicy(g.semantic())
 	}
 	e = e.Clone()
-	if err := e.ValidateFor(p, validation); err != nil {
+	shape := e
+	if reserved {
+		shape = withoutEventID(e)
+	}
+	if err := validateRequest(shape, p, validation, pol); err != nil {
 		return domain.IngestReceipt{}, err
 	}
 	if tx.SessionID() != p.SessionID {
@@ -185,27 +248,38 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 	if !domain.OccurrenceMatchesEvent(p.SessionID, occurrence, e.EventID) {
 		return domain.IngestReceipt{}, domain.ErrInvalidRecord
 	}
-	payload, err := e.PayloadHash(p)
+
+	// An outcome's dispatcher is authorized before its receipt is looked
+	// up, so an untrusted dispatcher is refused on a retry too (DUR-1.7).
+	if m != nil {
+		if err := checkDispatcher(tx, *b, *m); err != nil {
+			return domain.IngestReceipt{}, err
+		}
+	}
+	// Idempotency first, before any sequence, turn, item, or diagnostic is
+	// allocated (D14): a retry returns the original receipt as stored,
+	// without reparsing or reading mutable state, canonicalized under the
+	// request schema, limits and policy its receipt recorded (P3-40).
+	if e.EventID != "" {
+		if r, found, err := lookupReceipt(tx, p, occurrence, e, o); found || err != nil {
+			return r, err
+		}
+	}
+	if reserved {
+		return domain.IngestReceipt{}, domain.ErrInvalidRecord
+	}
+	// Only a new occurrence is held to the currently configured limits and
+	// policy (F3, SPEC-1.7, DUR-1.2): a retry above replayed its receipt
+	// whatever they are now.
+	if err := validateRequest(e, p, limits, g.semantic()); err != nil {
+		return domain.IngestReceipt{}, err
+	}
+	payload, err := newRequestHash(e, p, limits, g.semantic())
 	if err != nil {
 		return domain.IngestReceipt{}, err
 	}
 
-	// Idempotency first, before any sequence, turn, item, or diagnostic is
-	// allocated (D14): a retry returns the original receipt as stored,
-	// without reparsing or reading mutable state.
-	if e.EventID != "" {
-		if r, found, err := lookupReceipt(tx, p, occurrence, e.EventID, payload); found || err != nil {
-			return r, err
-		}
-	}
-	// Only a new occurrence is held to the currently configured limits
-	// (F3, SPEC-1.7, DUR-1.2): a retry above replayed its receipt whatever
-	// the limits are now.
-	if err := e.ValidateFor(p, limits); err != nil {
-		return domain.IngestReceipt{}, err
-	}
-
-	r := &run{g: g, tx: tx, p: p, e: e, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
+	r := &run{g: g, pol: g.semantic(), tx: tx, p: p, e: e, binding: b, membership: m, limits: limits, occurrence: occurrence, payload: payload, now: g.now()}
 	rc, err := r.apply()
 	if err != nil {
 		// Everything above only read; from here the core has written. Any
@@ -224,24 +298,60 @@ func (g Ingester) apply(tx store.Tx, p domain.Principal, e domain.Event, anonymo
 // derived occurrence) if the request matches it, domain.ErrEventIDConflict
 // with no details if it does not, and found=false if the EventID is new. A
 // Phase 1 event record with no receipt cannot reproduce its original
-// result and is a conflict too.
-func lookupReceipt(tx store.Tx, p domain.Principal, occurrence, eventID, payload string) (domain.IngestReceipt, bool, error) {
+// result and is a conflict too. An outcome o replays only a receipt it
+// could have produced itself: its items carry the binding's turn and it
+// registered exactly o's membership (SEC-1.4, DUR-1.7).
+func lookupReceipt(tx store.Tx, p domain.Principal, occurrence string, e domain.Event, o *outcome) (domain.IngestReceipt, bool, error) {
 	r, err := tx.Receipt(occurrence)
 	switch {
 	case err == nil:
-		if r.Principal != p || r.PayloadHash != payload {
+		// Principal before detail: another principal's EventID is a bare
+		// conflict before anything of the request is canonicalized. Under a
+		// reserved EventID the plain path replays only its own principal's
+		// Phase 2 plain receipt: no Phase 3 plain event can hold one, so any
+		// other receipt there was written by the outcome (or runtime) path,
+		// and every probe of it, the owner's included, gets the same bare
+		// ErrInvalidRecord as an absent ID (SEC-3.3, SEC-4.9).
+		if o == nil && reservedEventID(e.EventID) && (r.Principal != p || !phase2Receipt(r)) {
+			return domain.IngestReceipt{}, true, domain.ErrInvalidRecord
+		}
+		if r.Principal != p {
+			if reservedEventID(e.EventID) {
+				return domain.IngestReceipt{}, true, domain.ErrInvalidRecord
+			}
 			return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
+		}
+		// The EventID is the lookup key, never payload, so the retry is
+		// canonicalized without it: a recorded EventID that a later phase
+		// reserved still replays (DUR-2.8).
+		if h, err := recordedHash(withoutEventID(e), p, r); err != nil || h != r.PayloadHash {
+			return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
+		}
+		if o != nil {
+			if err := checkOutcomeReplay(tx, r, e, *o); err != nil {
+				return domain.IngestReceipt{}, true, err
+			}
 		}
 		return r.Clone(), true, nil
 	case !isNotFound(err):
 		return domain.IngestReceipt{}, true, err
 	}
-	if _, err := tx.Event(eventID); err == nil {
+	if _, err := tx.Event(e.EventID); err == nil {
+		if reservedEventID(e.EventID) {
+			return domain.IngestReceipt{}, true, domain.ErrInvalidRecord
+		}
 		return domain.IngestReceipt{}, true, domain.ErrEventIDConflict
 	} else if !isNotFound(err) {
 		return domain.IngestReceipt{}, true, err
 	}
 	return domain.IngestReceipt{}, false, nil
+}
+
+// withoutEventID is e with its EventID cleared, for structural validation
+// and payload hashing, neither of which the EventID takes part in.
+func withoutEventID(e domain.Event) domain.Event {
+	e.EventID = ""
+	return e
 }
 
 // retryCeiling returns the version-independent limits an event is validated

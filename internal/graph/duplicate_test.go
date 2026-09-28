@@ -16,6 +16,7 @@ func goalLike(sess, id, dirID string, seq uint64, text string) domain.ContextIte
 	g := storetest.NewGoal(sess, id, seq, text)
 	g.DirectiveID = dirID
 	g.Section = domain.SectionGoal
+	g.Namespace = domain.NamespaceDirective
 	g.Scope = domain.ScopeTask
 	g.Access = storetest.DirectiveBoundary(sess)
 	return g
@@ -32,7 +33,7 @@ func TestLinkDuplicate_DirectiveDuplicate(t *testing.T) {
 		})
 		update(t, s, sess, func(tx store.Tx) error {
 			dup := goalLike(sess, "g2", dirID, tx.NextSeq(), "Ship it")
-			mustInsert(t, tx, dup)
+			mustCreate(t, tx, dup)
 			rel, err := LinkDuplicate(tx, actor, dup.ID, canonical.ID, "evt-g2", "dedup/v1", "")
 			if err != nil {
 				return err
@@ -71,9 +72,6 @@ func TestLinkDuplicate_RejectsNonDuplicates(t *testing.T) {
 	cases := []struct {
 		name   string
 		mutate func(canonical, dup *domain.ContextItem)
-		// prepare mutates the stored canonical before the duplicate is
-		// linked (for lifecycle state that changes after creation).
-		resolveCanonical bool
 	}{
 		{name: "Content", mutate: func(_, d *domain.ContextItem) { setText(d, "Ship it now") }},
 		{name: "LowerAuthorityAgainstHigher", mutate: func(c, _ *domain.ContextItem) { c.Authority = domain.AuthoritySystem }},
@@ -83,7 +81,7 @@ func TestLinkDuplicate_RejectsNonDuplicates(t *testing.T) {
 		}},
 		{name: "Retention", mutate: func(_, d *domain.ContextItem) { d.Retention = domain.RetentionHigh }},
 		{name: "Generation", mutate: func(_, d *domain.ContextItem) { d.Generation = domain.GenerationPinned }},
-		{name: "TTL", mutate: func(_, d *domain.ContextItem) { n := 3; d.TTLTurns = &n }},
+		{name: "TTL", mutate: func(_, d *domain.ContextItem) { n := 3; d.TTLTurns, d.CreatedTurn = &n, 1 }},
 		// R11: a TURN-bound item from another turn, or a TTL item with a
 		// different expiry origin, is not a semantic duplicate.
 		{name: "OtherTurnTurnScoped", mutate: func(c, d *domain.ContextItem) {
@@ -98,7 +96,6 @@ func TestLinkDuplicate_RejectsNonDuplicates(t *testing.T) {
 			c.CreatedTurn, d.CreatedTurn = 1, 2
 		}},
 		{name: "Section", mutate: func(_, d *domain.ContextItem) { d.Section = domain.SectionPinned }},
-		{name: "ResolvedCanonicalAbsorbsNoOpenGoal", resolveCanonical: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,25 +109,17 @@ func TestLinkDuplicate_RejectsNonDuplicates(t *testing.T) {
 					if tc.mutate != nil {
 						tc.mutate(&canonical, &dup)
 					}
-					mustInsert(t, tx, canonical)
+					mustCreate(t, tx, canonical)
 					_, err := ReplaceDirective(tx, actor, "task", dirID, canonical.ID, "evt-g1")
 					return err
 				})
-				if tc.resolveCanonical {
-					update(t, s, sess, func(tx store.Tx) error {
-						resolved := domain.GoalResolved
-						_, err := tx.UpdateItem(canonical.ID, 1, domain.ItemChange{GoalStatus: &resolved},
-							storetest.NewItemEvent(sess, "resolve-g1", tx.NextSeq(), canonical.ID))
-						return err
-					})
-				}
 				err := s.Update(ctx, sess, func(tx store.Tx) error {
 					dup := goalLike(sess, "g2", dirID, tx.NextSeq(), "Ship it")
 					if tc.mutate != nil {
 						c := canonical
 						tc.mutate(&c, &dup)
 					}
-					mustInsert(t, tx, dup)
+					mustCreate(t, tx, dup)
 					_, err := LinkDuplicate(tx, actor, dup.ID, canonical.ID, "evt-g2", "", "")
 					return err
 				})
@@ -140,6 +129,49 @@ func TestLinkDuplicate_RejectsNonDuplicates(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestLinkDuplicate_RestatementAfterResolveStaysResolved is P3-4/C-1: an
+// identical restatement compares immutable creation declarations, never the
+// canonical's current goal status. It is a noncurrent DUPLICATE_OF audit
+// occurrence and must not reopen, replace or re-file the resolved goal;
+// reopening requires an authorized ReplaceDirective.
+func TestLinkDuplicate_RestatementAfterResolveStaysResolved(t *testing.T) {
+	eachStore(t, func(t *testing.T, s store.Store) {
+		const sess, dirID = "sess-dup-resolved", "ship"
+		actor := principal(sess, domain.AuthoritySystem)
+		update(t, s, sess, func(tx store.Tx) error {
+			fileGoal(t, tx, actor, "g1", dirID, "Ship it")
+			return nil
+		})
+		update(t, s, sess, func(tx store.Tx) error {
+			resolved := domain.GoalResolved
+			_, err := tx.UpdateItem("g1", 1, domain.ItemChange{GoalStatus: &resolved},
+				storetest.NewItemEvent(sess, "resolve-g1", tx.NextSeq(), "g1"))
+			return err
+		})
+		update(t, s, sess, func(tx store.Tx) error {
+			dup := goalLike(sess, "g2", dirID, tx.NextSeq(), "Ship it")
+			mustCreate(t, tx, dup)
+			_, err := LinkDuplicate(tx, actor, dup.ID, "g1", "evt-g2", "", "")
+			return err
+		})
+		view(t, s, sess, func(tx store.ReadTx) error {
+			g1, err := tx.Item("g1")
+			if err != nil {
+				return err
+			}
+			if g1.GoalStatus == nil || *g1.GoalStatus != domain.GoalResolved {
+				t.Errorf("canonical goal status = %v, want RESOLVED (restatement never reopens)", g1.GoalStatus)
+			}
+			for id, want := range map[string]bool{"g1": true, "g2": false} {
+				if ok, err := IsCurrent(tx, id); err != nil || ok != want {
+					t.Errorf("IsCurrent(%s) = %v, %v; want %v", id, ok, err, want)
+				}
+			}
+			return nil
+		})
+	})
 }
 
 // TestLinkDuplicate_CannotRetireExistingItems: because a DUPLICATE_OF edge
@@ -158,7 +190,7 @@ func TestLinkDuplicate_CannotRetireExistingItems(t *testing.T) {
 		})
 		update(t, s, sess, func(tx store.Tx) error {
 			b = goalLike(sess, "b", "da", tx.NextSeq(), "Same text")
-			mustInsert(t, tx, b)
+			mustCreate(t, tx, b)
 			return nil
 		})
 		// Not the creation transaction of b.
@@ -175,7 +207,7 @@ func TestLinkDuplicate_CannotRetireExistingItems(t *testing.T) {
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
 			c := goalLike(sess, "c", "dc", tx.NextSeq(), "Same text")
 			c2 := goalLike(sess, "c2", "dc", tx.NextSeq(), "Same text")
-			mustInsert(t, tx, c, c2)
+			mustCreate(t, tx, c, c2)
 			if _, err := ReplaceDirective(tx, actor, "task", "dc", c2.ID, "evt-c"); err != nil {
 				return err
 			}
@@ -189,13 +221,13 @@ func TestLinkDuplicate_CannotRetireExistingItems(t *testing.T) {
 		// A retired canonical cannot stand in for a new write.
 		update(t, s, sess, func(tx store.Tx) error {
 			next := goalLike(sess, "a-next", "da", tx.NextSeq(), "Replacement")
-			mustInsert(t, tx, next)
+			mustCreate(t, tx, next)
 			_, err := ReplaceDirective(tx, actor, "task", "da", next.ID, "evt-next")
 			return err
 		})
 		err = s.Update(ctx, sess, func(tx store.Tx) error {
 			d := goalLike(sess, "d", "da", tx.NextSeq(), "Same text")
-			mustInsert(t, tx, d)
+			mustCreate(t, tx, d)
 			_, err := LinkDuplicate(tx, actor, d.ID, a.ID, "evt-d", "", "")
 			return err
 		})
@@ -204,22 +236,26 @@ func TestLinkDuplicate_CannotRetireExistingItems(t *testing.T) {
 		}
 
 		// An inaccessible canonical is indistinguishable from a missing one.
-		err = s.Update(ctx, sess, func(tx store.Tx) error {
-			hidden := agentScopedItem(sess, "hidden", tx.NextSeq(), "agent-b")
-			d := agentScopedItem(sess, "mine", tx.NextSeq(), "agent")
-			mustInsert(t, tx, hidden, d)
-			_, err := LinkDuplicate(tx, actor, d.ID, hidden.ID, "evt-h", "", "")
-			if err != domain.ErrNotFound {
-				t.Errorf("hidden canonical: err = %v, want bare ErrNotFound", err)
+		// A failed link poisons its transaction (P3-1), so each probe runs
+		// in its own.
+		for n, canonical := range []string{"hidden", "missing"} {
+			err = s.Update(ctx, sess, func(tx store.Tx) error {
+				hidden := agentScopedItem(sess, fmt.Sprintf("hidden-%d", n), tx.NextSeq(), "agent-b")
+				d := agentScopedItem(sess, fmt.Sprintf("mine-%d", n), tx.NextSeq(), "agent")
+				mustInsert(t, tx, hidden, d)
+				target := canonical
+				if canonical == "hidden" {
+					target = hidden.ID
+				}
+				_, err := LinkDuplicate(tx, actor, d.ID, target, "evt-h", "", "")
+				if err != domain.ErrNotFound {
+					t.Errorf("%s canonical: err = %v, want bare ErrNotFound", canonical, err)
+				}
+				return err
+			})
+			if !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("%s canonical: commit err = %v, want ErrNotFound", canonical, err)
 			}
-			_, err = LinkDuplicate(tx, actor, d.ID, "missing", "evt-h", "", "")
-			if err != domain.ErrNotFound {
-				t.Errorf("missing canonical: err = %v, want bare ErrNotFound", err)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
 		}
 	})
 }
@@ -288,14 +324,14 @@ func TestLinkDuplicate_RestatedAcrossTurns(t *testing.T) {
 		update(t, s, sess, func(tx store.Tx) error {
 			g := goalLike(sess, "g1", "ship", tx.NextSeq(), "Ship it")
 			g.CreatedTurn = 1
-			mustInsert(t, tx, g)
+			mustCreate(t, tx, g)
 			_, err := ReplaceDirective(tx, actor, "task", "ship", g.ID, "evt-1")
 			return err
 		})
 		update(t, s, sess, func(tx store.Tx) error {
 			g := goalLike(sess, "g2", "ship", tx.NextSeq(), "Ship it")
 			g.TurnID, g.CreatedTurn = "turn-5", 5
-			mustInsert(t, tx, g)
+			mustCreate(t, tx, g)
 			_, err := LinkDuplicate(tx, actor, g.ID, "g1", "evt-5", "", "")
 			return err
 		})
@@ -304,33 +340,36 @@ func TestLinkDuplicate_RestatedAcrossTurns(t *testing.T) {
 
 // TestLinkDuplicate_ComparesObligationClaim is SPEC-1.12 (R11): the one
 // duplicate comparison includes the obligation declaration, so a Pinned
-// item is never DUPLICATE_OF a canonical whose declared claim differs.
+// item is never DUPLICATE_OF a canonical whose declared obligation differs.
+// The declaration is the persisted creation declaration's obligation hash;
+// the legacy claim argument is not authority and cannot make a match (P3-4).
 func TestLinkDuplicate_ComparesObligationClaim(t *testing.T) {
 	eachStore(t, func(t *testing.T, s store.Store) {
 		const sess = "sess-dup-claim"
 		actor := principal(sess, domain.AuthorityUser)
+		declared := domain.HashBytes([]byte("tests_pass/1"))
 		update(t, s, sess, func(tx store.Tx) error {
-			p := storetest.NewDirective(sess, "p1", "tests", tx.NextSeq(), "All tests pass")
-			mustInsert(t, tx, p)
-			if _, err := ReplaceDirective(tx, actor, "task", "tests", p.ID, "evt-p1"); err != nil {
-				return err
-			}
-			o := storetest.NewObligation(sess, "o1", 1, tx.NextSeq(), p.ID)
-			o.Claim = "tests_pass"
-			return tx.InsertObligationVersion(o)
+			p := newDirective(sess, "p1", "tests", tx.NextSeq(), "All tests pass")
+			mustCreateWith(t, tx, CreationAcceptance{PolicyVersion: testDeclarationPolicy, ObligationDeclarationHash: declared}, p)
+			_, err := ReplaceDirective(tx, actor, "task", "tests", p.ID, "evt-p1")
+			return err
 		})
 		for i, c := range []struct {
-			claim string
-			want  error
-		}{{"other_claim", ErrNotDuplicate}, {"", ErrNotDuplicate}, {"tests_pass", nil}} {
+			obligation, claim string
+			want              error
+		}{
+			{domain.HashBytes([]byte("other_claim/1")), "tests_pass", ErrNotDuplicate},
+			{"", "tests_pass", ErrNotDuplicate},
+			{declared, "", nil},
+		} {
 			err := s.Update(ctx, sess, func(tx store.Tx) error {
-				d := storetest.NewDirective(sess, fmt.Sprintf("d%d", i), "tests", tx.NextSeq(), "All tests pass")
-				mustInsert(t, tx, d)
+				d := newDirective(sess, fmt.Sprintf("d%d", i), "tests", tx.NextSeq(), "All tests pass")
+				mustCreateWith(t, tx, CreationAcceptance{PolicyVersion: testDeclarationPolicy, ObligationDeclarationHash: c.obligation}, d)
 				_, err := LinkDuplicate(tx, actor, d.ID, "p1", "evt-d", "", c.claim)
 				return err
 			})
 			if !errors.Is(err, c.want) {
-				t.Errorf("claim %q: err = %v, want %v", c.claim, err, c.want)
+				t.Errorf("declaration %d: err = %v, want %v", i, err, c.want)
 			}
 		}
 	})

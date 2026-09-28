@@ -1,5 +1,5 @@
 {
-  "seq": 4,
+  "seq": 5,
   "opened_turn": 2,
   "items": [
     {
@@ -34,7 +34,7 @@
       "target_id": "api",
       "authority": "USER",
       "actor_authority": "USER",
-      "status": "PARSED_NOT_EXECUTED",
+      "status": "NOT_EXECUTED",
       "resolution": "NOT_FOUND",
       "range": [
         9,
@@ -46,7 +46,7 @@
       "target_id": "tests",
       "authority": "USER",
       "actor_authority": "USER",
-      "status": "PARSED_NOT_EXECUTED",
+      "status": "NOT_EXECUTED",
       "resolution": "NOT_FOUND",
       "range": [
         17,
@@ -58,7 +58,7 @@
       "target_id": "architecture",
       "authority": "USER",
       "actor_authority": "USER",
-      "status": "PARSED_NOT_EXECUTED",
+      "status": "NOT_EXECUTED",
       "resolution": "NOT_FOUND",
       "range": [
         30,

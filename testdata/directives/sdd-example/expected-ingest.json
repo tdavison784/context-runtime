@@ -1,5 +1,5 @@
 {
-  "seq": 4,
+  "seq": 5,
   "opened_turn": 2,
   "items": [
     {
@@ -152,7 +152,7 @@
       "kind": "constraint",
       "section": "PINNED",
       "directive_id": "architecture",
-      "generation": "PINNED",
+      "generation": "DURABLE",
       "authority": "USER",
       "scope": "TASK",
       "access": {
@@ -160,7 +160,7 @@
         "task_id": "T"
       },
       "residency": "RESIDENT",
-      "retention": "PROTECTED",
+      "retention": "HIGH",
       "created_turn": 2,
       "has_turn_id": true,
       "parts": [
@@ -474,102 +474,92 @@
       "from": "event#1",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#2",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#3",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#4",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#5",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#6",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#7",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#8",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#9",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#10",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     },
     {
       "type": "DERIVED_FROM",
       "from": "event#11",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     }
   ],
   "obligations": [
+    {
+      "source": "event#4",
+      "version": 1,
+      "claim": "file_read",
+      "status": "UNRESOLVED",
+      "current": true,
+      "source_authority": "USER",
+      "access": {
+        "scope": "TASK",
+        "task_id": "T"
+      }
+    },
     {
       "source": "event#3",
       "version": 1,
@@ -589,7 +579,7 @@
       "target_id": "architecture",
       "authority": "USER",
       "actor_authority": "USER",
-      "status": "PARSED_NOT_EXECUTED",
+      "status": "EXECUTED",
       "resolution": "RESOLVED",
       "resolved": "event#4",
       "range": [

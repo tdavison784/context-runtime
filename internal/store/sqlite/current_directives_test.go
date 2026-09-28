@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"github.com/tdavison784/context-runtime/internal/store/storetest"
 	"slices"
 	"testing"
 
@@ -26,7 +27,7 @@ func TestCurrentDirectivesAcrossBoundaries(t *testing.T) {
 			if err := tx.InsertItem(item); err != nil {
 				return err
 			}
-			if err := tx.SetCurrentVersion(spec.id); err != nil {
+			if err := storetest.UncheckedSetCurrentVersion(tx, spec.id); err != nil {
 				return err
 			}
 		}

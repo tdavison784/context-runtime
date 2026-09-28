@@ -111,12 +111,15 @@ func testObligationVersions(t *testing.T, s store.Store) {
 		stored, err := tx.ObligationVersions("o1")
 		noErr(t, err)
 		assertEqual(t, "stored version after update", stored[0], want)
-		_, err = tx.UpdateObligationVersion(next, 1)
-		wantErr(t, err, domain.ErrVersionConflict)
 
 		v2 = NewObligation(sessA, "o1", 2, seq, "src2")
 		noErr(t, tx.InsertObligationVersion(v2))
 		return nil
+	})
+	// The old revision now conflicts.
+	rejected(t, s, sessA, domain.ErrVersionConflict, func(tx store.Tx) error {
+		_, err := tx.UpdateObligationVersion(v1r2, 1)
+		return err
 	})
 	// Fields outside Current, RetiredSeq, and MaterializationDisabled are
 	// immutable.
@@ -194,10 +197,11 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 	}{
 		{"t1", domain.ObligationUnresolved, domain.ObligationBlocked},
 		{"t2", domain.ObligationBlocked, domain.ObligationUnresolved},
-		{"t3", domain.ObligationUnresolved, domain.ObligationSatisfied},
-		{"t4", domain.ObligationSatisfied, domain.ObligationUnresolved},
-		{"t5", domain.ObligationUnresolved, domain.ObligationSatisfied},
-		{"t6", domain.ObligationSatisfied, domain.ObligationWaived},
+		// The raw path never satisfies (INV-16, DUR-2.12).
+		{"t3", domain.ObligationUnresolved, domain.ObligationBlocked},
+		{"t4", domain.ObligationBlocked, domain.ObligationUnresolved},
+		{"t5", domain.ObligationUnresolved, domain.ObligationBlocked},
+		{"t6", domain.ObligationBlocked, domain.ObligationWaived},
 	}
 	var history []domain.ObligationTransition
 	for i, st := range steps {
@@ -231,7 +235,7 @@ func testObligationTransitions(t *testing.T, s store.Store) {
 			return NewTransition(sessA, "x", "o", 1, seq, domain.ObligationWaived, domain.ObligationUnresolved)
 		}, domain.ErrInvalidTransition},
 		{"from is not current status", func(seq uint64) domain.ObligationTransition {
-			return NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationSatisfied)
+			return NewTransition(sessA, "x", "o", 1, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
 		}, domain.ErrInvalidTransition},
 		{"missing version", func(seq uint64) domain.ObligationTransition {
 			return NewTransition(sessA, "x", "o", 2, seq, domain.ObligationUnresolved, domain.ObligationBlocked)
@@ -344,17 +348,31 @@ func testGrants(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		tx.NextSeq()
 		noErr(t, tx.InsertGrant(g2))
-		noErr(t, tx.InsertGrant(g1))
-		wantErr(t, tx.InsertGrant(g1), domain.ErrImmutable)
-		agent := NewGrant(sessA, "g3", 1, "i1")
-		agent.Issuer.Authority = domain.AuthorityAgent
-		wantErr(t, tx.InsertGrant(agent), domain.ErrInvalidAuthorityPromotion)
-		wantErr(t, tx.InsertGrant(NewGrant(sessA, "g4", 1)), domain.ErrInvalidRecord)
-		matcher := NewGrant(sessA, "g5", 1, "i1")
-		matcher.Grantee, matcher.Matcher = nil, &domain.MatcherRef{Name: "m", Version: "1"}
-		wantErr(t, tx.InsertGrant(matcher), domain.ErrInvalidRecord)
-		return nil
+		return tx.InsertGrant(g1)
 	})
+	for _, tc := range []struct {
+		name string
+		g    func(seq uint64) domain.MutationGrant
+		want error
+	}{
+		{"ID reused", func(seq uint64) domain.MutationGrant { g := g1.Clone(); g.IssuedSeq = seq; return g }, domain.ErrImmutable},
+		{"AGENT issuer", func(seq uint64) domain.MutationGrant {
+			g := NewGrant(sessA, "g3", seq, "i1")
+			g.Issuer.Authority = domain.AuthorityAgent
+			return g
+		}, domain.ErrInvalidAuthorityPromotion},
+		{"no targets", func(seq uint64) domain.MutationGrant { return NewGrant(sessA, "g4", seq) }, domain.ErrInvalidRecord},
+		{"matcher grant on an item action", func(seq uint64) domain.MutationGrant {
+			g := NewGrant(sessA, "g5", seq, "i1")
+			g.Grantee, g.Matcher = nil, &domain.MatcherRef{Name: "m", Version: "1"}
+			return g
+		}, domain.ErrInvalidRecord},
+	} {
+		err := s.Update(ctx, sessA, func(tx store.Tx) error { return tx.InsertGrant(tc.g(tx.NextSeq())) })
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: error = %v, want %v", tc.name, err, tc.want)
+		}
+	}
 	err := s.Update(ctx, sessA, func(tx store.Tx) error {
 		tx.NextSeq()
 		return tx.InsertGrant(NewGrant(sessA, "g6", 1, "i1"))
@@ -378,9 +396,10 @@ func testGrants(t *testing.T, s store.Store) {
 		want := g2.Clone()
 		want.RevokedSeq = seq
 		assertEqual(t, "RevokeGrant result", got, want)
-		wantErr(t, errOf(tx.RevokeGrant("g2", revocation("lr2", seq, "g2"))), domain.ErrInvalidTransition)
-		wantErr(t, errOf(tx.RevokeGrant("missing", revocation("lr3", seq, "missing"))), domain.ErrNotFound)
 		return nil
+	})
+	rejected(t, s, sessA, domain.ErrNotFound, func(tx store.Tx) error {
+		return errOf(tx.RevokeGrant("missing", revocation("lr3", tx.NextSeq(), "missing")))
 	})
 	err = s.Update(ctx, sessA, func(tx store.Tx) error { return errOf(tx.RevokeGrant("g2", revocation("lr4", tx.NextSeq(), "g2"))) })
 	wantErr(t, err, domain.ErrInvalidTransition)
@@ -514,11 +533,17 @@ func testLifecycleEvents(t *testing.T, s store.Store) {
 		for _, e := range slices.Backward(all) {
 			noErr(t, tx.AppendLifecycleEvent(e))
 		}
-		wantErr(t, tx.AppendLifecycleEvent(all[0]), domain.ErrImmutable)
-		bad := NewLifecycleEvent(sessA, "l5", n[3], domain.TargetItem, "i1")
-		bad.Action = ""
-		wantErr(t, tx.AppendLifecycleEvent(bad), domain.ErrInvalidRecord)
 		return nil
+	})
+	rejected(t, s, sessA, domain.ErrImmutable, func(tx store.Tx) error {
+		e := all[0]
+		e.Seq = tx.NextSeq()
+		return tx.AppendLifecycleEvent(e)
+	})
+	rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+		bad := NewLifecycleEvent(sessA, "l5", tx.NextSeq(), domain.TargetItem, "i1")
+		bad.Action = ""
+		return tx.AppendLifecycleEvent(bad)
 	})
 	err := s.Update(ctx, sessA, func(tx store.Tx) error {
 		tx.NextSeq()
@@ -609,30 +634,27 @@ func testConversations(t *testing.T, s store.Store) {
 	})
 }
 
-// testMatcherTransition checks that a matcher's satisfaction is stored
-// with the grant it acted under (AUTH-2.3); whether the grant is in force
-// is the caller's check.
+// testMatcherTransition checks that the raw Phase 2 path refuses a
+// matcher's satisfaction with or without its grant (INV-16, DUR-2.12): a
+// matcher satisfies only through AppendSemanticObligationTransition with
+// its proof (testSemanticMatcherProof).
 func testMatcherTransition(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		return tx.InsertObligationVersion(NewObligation(sessA, "o", 1, tx.NextSeq(), "src"))
 	})
-	var tr domain.ObligationTransition
-	update(t, s, sessA, func(tx store.Tx) error {
-		tr = NewTransition(sessA, "t", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied)
-		tr.Matcher = &domain.MatcherRef{Name: "tests_pass", Version: "1"}
-		wantErr(t, errOf(tx.AppendObligationTransition(tr, 1)), domain.ErrInvalidRecord)
-		tr.GrantID = "g1"
-		got, err := tx.AppendObligationTransition(tr, 1)
-		noErr(t, err)
-		if got.Status != domain.ObligationSatisfied || !slices.Equal(got.EvidenceIDs, tr.EvidenceIDs) {
-			t.Errorf("obligation after matcher transition = %+v", got)
-		}
-		return nil
-	})
+	for _, grant := range []string{"", "g1"} {
+		rejected(t, s, sessA, domain.ErrInvalidRecord, func(tx store.Tx) error {
+			tr := NewTransition(sessA, "t", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied)
+			tr.Matcher, tr.GrantID = &domain.MatcherRef{Name: "tests_pass", Version: "1"}, grant
+			return errOf(tx.AppendObligationTransition(tr, 1))
+		})
+	}
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		got, err := tx.ObligationTransitions("o")
 		noErr(t, err)
-		assertEqual(t, "matcher transition", got, []domain.ObligationTransition{tr})
+		if len(got) != 0 {
+			t.Errorf("a refused matcher transition was stored: %+v", got)
+		}
 		return nil
 	})
 }

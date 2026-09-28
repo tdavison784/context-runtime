@@ -1,0 +1,3 @@
+go test fuzz v1
+string("# Working\n0\n# Working\n1")
+bool(true)

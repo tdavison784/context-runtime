@@ -101,11 +101,7 @@ func authorizeFirstVersionDirective(actor domain.Principal, newItem domain.Conte
 	switch actor.Authority {
 	case domain.AuthoritySystem, domain.AuthorityHarness, domain.AuthorityUser:
 	case domain.AuthorityAgent:
-		ns, _ := newItem.DirectiveNamespace()
-		if newItem.Authority != domain.AuthorityAgent || ns != domain.NamespaceAgentKey ||
-			!strings.HasPrefix(newItem.DirectiveID, domain.AgentKeyID("")) {
-			return domain.ErrInvalidAuthorityPromotion
-		}
+		return domain.AuthorizeAgentKeyWrite(actor, newItem)
 	default:
 		return domain.ErrInvalidAuthorityPromotion
 	}
@@ -193,37 +189,50 @@ func CheckBoundaryConflict(tx store.ReadTx, actor domain.Principal, it domain.Co
 // ruleVersion names the deterministic rule that produced the edge (FR-REL-
 // 007); pass "" for an edge created directly from an authorized event, such
 // as a directive replacement.
-func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string) (domain.Relationship, error) {
-	newItem, err := loadAccessible(tx, actor, newID)
+func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string, opts ...Option) (rel domain.Relationship, err error) {
+	defer func() {
+		if err != nil {
+			tx.Poison(err)
+		}
+	}()
+	p, err := planSupersession(tx, actor, newID, oldID, eventID, ruleVersion, collectOptions(opts))
 	if err != nil {
 		return domain.Relationship{}, err
+	}
+	return applySupersession(tx, p)
+}
+
+type supersessionPlan struct {
+	rel         domain.Relationship
+	audit       domain.LifecycleEvent
+	obligations []obligationRetirement
+}
+
+// Reserve each actual audit/edge sequence once, before authorization and writes.
+// A Working snapshot plans every retirement before applying the first one.
+func planSupersession(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleVersion string, o options) (supersessionPlan, error) {
+	newItem, err := loadAccessible(tx, actor, newID)
+	if err != nil {
+		return supersessionPlan{}, err
 	}
 	oldItem, err := loadAccessible(tx, actor, oldID)
 	if err != nil {
-		return domain.Relationship{}, err
-	}
-	if err := domain.AuthorizeSupersession(actor, newItem, oldItem); err != nil {
-		return domain.Relationship{}, err
+		return supersessionPlan{}, err
 	}
 	dup, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDuplicateOf, FromID: newID})
 	if err != nil {
-		return domain.Relationship{}, err
+		return supersessionPlan{}, err
 	}
 	if len(dup) > 0 {
-		return domain.Relationship{}, ErrDuplicateSupersession
+		return supersessionPlan{}, ErrDuplicateSupersession
 	}
 	retired, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelSupersedes, ToID: oldID})
 	if err != nil {
-		return domain.Relationship{}, err
+		return supersessionPlan{}, err
 	}
 	if len(retired) > 0 {
-		return domain.Relationship{}, ErrAlreadySuperseded
+		return supersessionPlan{}, ErrAlreadySuperseded
 	}
-	obligations, err := planObligationRetirement(tx, actor, oldID)
-	if err != nil {
-		return domain.Relationship{}, err
-	}
-
 	rel := domain.Relationship{
 		ID:          relationshipID(actor.SessionID, domain.RelSupersedes, newID, oldID, eventID),
 		SessionID:   actor.SessionID,
@@ -235,10 +244,10 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 		EventID:     eventID,
 		RuleVersion: ruleVersion,
 	}
-	if err := tx.InsertRelationship(rel); err != nil {
-		return domain.Relationship{}, err
+	grantID, err := authorizeReplacement(tx, actor, newItem, oldItem, rel.Seq)
+	if err != nil {
+		return supersessionPlan{}, err
 	}
-
 	ev := domain.LifecycleEvent{
 		ID:         lifecycleEventID(actor.SessionID, oldID, "superseded", eventID, newID),
 		SessionID:  actor.SessionID,
@@ -249,15 +258,27 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 		From:       oldID,
 		To:         newID,
 		Actor:      actor,
+		GrantID:    grantID,
 		EventID:    eventID,
 	}
-	if err := tx.AppendLifecycleEvent(ev); err != nil {
+	obligations, err := planObligationRetirement(tx, actor, oldID, o.settler)
+	if err != nil {
+		return supersessionPlan{}, err
+	}
+	return supersessionPlan{rel: rel, audit: ev, obligations: obligations}, nil
+}
+
+func applySupersession(tx store.Tx, p supersessionPlan) (domain.Relationship, error) {
+	if err := tx.InsertRelationship(p.rel); err != nil {
 		return domain.Relationship{}, err
 	}
-	if err := retireObligations(tx, actor, obligations, oldID, newID, eventID); err != nil {
+	if err := tx.AppendLifecycleEvent(p.audit); err != nil {
 		return domain.Relationship{}, err
 	}
-	return rel, nil
+	if err := retireObligations(tx, p.audit.Actor, p.obligations, p.rel.ToID, p.rel.FromID, p.rel.EventID); err != nil {
+		return domain.Relationship{}, err
+	}
+	return p.rel, nil
 }
 
 // ReplaceDirective files newItemID as the current version of (taskID,
@@ -274,13 +295,32 @@ func Supersede(tx store.Tx, actor domain.Principal, newID, oldID, eventID, ruleV
 // a silent fork into two current versions. Both writes commit atomically
 // within the caller's transaction. previousID is "" when newItemID is the
 // directive's first version at that boundary.
-func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string) (string, error) {
+func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, newItemID, eventID string, opts ...Option) (result string, err error) {
+	defer poisonGraphError(tx, &err)
 	newItem, err := loadAccessible(tx, actor, newItemID)
 	if err != nil {
 		return "", err
 	}
 	if newItem.TaskID != taskID || newItem.DirectiveID != directiveID {
 		return "", ErrDirectiveMismatch
+	}
+	if err := newItem.ValidateSemantic(); err != nil {
+		return "", err
+	}
+	if !tx.Allocated(newItem.Seq) {
+		return "", ErrDerivedLinkNotAtCreation
+	}
+	if newItem.Namespace == domain.NamespaceObservation {
+		return "", domain.ErrInvalidAuthorityPromotion
+	}
+	sem, err := store.Semantic(tx)
+	if err != nil {
+		return "", err
+	}
+	key, _ := newItem.CurrentKey()
+	expectedPrior, err := tx.CurrentVersion(key)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return "", err
 	}
 
 	ns, _ := newItem.DirectiveNamespace()
@@ -302,12 +342,36 @@ func ReplaceDirective(tx store.Tx, actor domain.Principal, taskID, directiveID, 
 	case err != nil:
 		return "", err
 	default:
-		if _, err := Supersede(tx, actor, newItemID, previousID, eventID, ""); err != nil {
+		// An identical restatement of a version whose creation identity is
+		// unknown never replaces or rebinds it (SPEC-1.3): a directive line
+		// fails closed, and an attribute-free duplicate must be linked, not
+		// filed (SPEC-2.9/2.10). A distinct version, and explicit same-content
+		// replacement of a known version (C-1), still replace.
+		prior, err := tx.Item(previousID)
+		if err != nil {
+			return "", err
+		}
+		if SameDirectiveSemantics(newItem, prior) {
+			r, err := store.ReadSemantic(tx)
+			if err != nil {
+				return "", err
+			}
+			if _, err := knownDeclaration(r, prior); err != nil {
+				same, err2 := SameDirective(tx, newItem, "", prior)
+				if err2 != nil {
+					return "", err2
+				}
+				if same {
+					return "", err
+				}
+			}
+		}
+		if _, err := Supersede(tx, actor, newItemID, previousID, eventID, "", opts...); err != nil {
 			return "", err
 		}
 	}
 
-	if err := tx.SetCurrentVersion(newItemID); err != nil {
+	if err := sem.SetCurrentVersion(newItemID, expectedPrior); err != nil {
 		return "", err
 	}
 	return previousID, nil
@@ -609,103 +673,28 @@ func CheckDerivedBoundary(derived domain.AccessBoundary, sources []domain.Contex
 	return nil
 }
 
-// LinkDerived records that the item derivedID was derived from every item in
-// sourceIDs (FR-REL-008, FR-TOOL-002): every source must be accessible to
-// actor, or nothing is written and the call fails with domain.ErrNotFound;
-// derived's own access boundary must be within every source's boundary
-// (CheckDerivedBoundary); only then does it insert one DERIVED_FROM edge per
-// source, all carrying the same coverage. Run inside store.Store.Update so a
-// failure partway through (an inaccessible source, or a boundary violation)
-// leaves nothing committed.
-//
-// coverage's ItemIDs must be complete for dispatch to recheck eligibility
-// later (see domain.Coverage): if coverage is given with ItemIDs unset,
-// LinkDerived populates it with sourceIDs, sorted and deduplicated; if the
-// caller already set ItemIDs, they must name exactly the same set of sources
-// or the call fails with ErrCoverageMismatch and nothing is written.
-//
-// actor must be able to hold lifecycle authority (SYSTEM, HARNESS, or USER)
-// or be AGENT, and actor's authority must be at least derived's (AUTH-1.1):
-// otherwise a low-authority actor could attach DERIVED_FROM edges, and the
-// coverage that comes with them, to an item it does not own, rewriting that
-// item's provenance and, under ADR 6's eligibility recheck, later forcing it
-// out of context. TOOL and RETRIEVED_CONTENT actors are always rejected,
-// mirroring AuthorizeSupersession.
-//
-// derived.Seq must have been allocated by NextSeq in tx itself
-// (tx.Allocated, AUTH-3.1, ErrDerivedLinkNotAtCreation otherwise):
-// provenance may only be attached in the very transaction that inserted the
-// derived item, never post-hoc from a later transaction, even one that
-// supplies the item's own EventID (a string on the item, readable by
-// anyone who can access it, and not proof of when the caller is running).
-func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) ([]domain.Relationship, error) {
-	if err := actor.Validate(); err != nil {
-		return nil, err
+// LinkDerived is the compatibility entry point for automatic PROVENANCE only.
+// New semantic producers use LinkDerivedCoverage with an explicit purpose and
+// their recorded finite limit. Legacy range/frontier metadata remains readable
+// under its old schema, but cannot assert new membership or coverage semantics.
+func LinkDerived(tx store.Tx, actor domain.Principal, derivedID string, sourceIDs []string, coverage *domain.Coverage, eventID string) (result []domain.Relationship, err error) {
+	defer poisonGraphError(tx, &err)
+	const legacySourceLimit = 16384
+	if len(sourceIDs) > legacySourceLimit {
+		return nil, store.ErrLimitExceeded
 	}
-	derived, err := loadAccessible(tx, actor, derivedID)
-	if err != nil {
-		return nil, err
-	}
-	if !(actor.Authority.CanHoldLifecycleAuthority() || actor.Authority == domain.AuthorityAgent) ||
-		!actor.Authority.AtLeast(derived.Authority) {
-		return nil, domain.ErrInvalidAuthorityPromotion
-	}
-	if !tx.Allocated(derived.Seq) {
-		return nil, ErrDerivedLinkNotAtCreation
-	}
-
-	sources := make([]domain.ContextItem, 0, len(sourceIDs))
-	for _, id := range sourceIDs {
-		src, err := loadAccessible(tx, actor, id)
-		if err != nil {
-			return nil, err
-		}
-		sources = append(sources, src)
-	}
-	if err := CheckDerivedBoundary(derived.Access, sources); err != nil {
-		return nil, err
-	}
-
-	var covTemplate *domain.Coverage
 	if coverage != nil {
-		wantIDs := sortedUniqueIDs(sourceIDs)
-		c := *coverage
-		switch {
-		case len(c.ItemIDs) == 0:
-			c.ItemIDs = wantIDs
-		case !slices.Equal(sortedUniqueIDs(c.ItemIDs), wantIDs):
+		if coverage.ConversationID != "" || coverage.FromSeq != 0 || coverage.ToSeq != 0 {
+			return nil, domain.ErrUnsupportedSchema
+		}
+		if len(coverage.ItemIDs) > legacySourceLimit {
+			return nil, store.ErrLimitExceeded
+		}
+		if len(coverage.ItemIDs) > 0 && !slices.Equal(sortedUniqueIDs(coverage.ItemIDs), sortedUniqueIDs(sourceIDs)) {
 			return nil, ErrCoverageMismatch
-		default:
-			c.ItemIDs = wantIDs // canonicalize to the sorted/unique form Relationship.Validate requires
 		}
-		covTemplate = &c
 	}
-
-	rels := make([]domain.Relationship, 0, len(sources))
-	for _, src := range sources {
-		var cov *domain.Coverage
-		if covTemplate != nil {
-			c := *covTemplate
-			c.ItemIDs = slices.Clone(covTemplate.ItemIDs)
-			cov = &c
-		}
-		rel := domain.Relationship{
-			ID:        relationshipID(actor.SessionID, domain.RelDerivedFrom, derivedID, src.ID, eventID),
-			SessionID: actor.SessionID,
-			Type:      domain.RelDerivedFrom,
-			FromID:    derivedID,
-			ToID:      src.ID,
-			Seq:       tx.NextSeq(),
-			Authority: actor.Authority,
-			EventID:   eventID,
-			Coverage:  cov,
-		}
-		if err := tx.InsertRelationship(rel); err != nil {
-			return nil, err
-		}
-		rels = append(rels, rel.Clone())
-	}
-	return rels, nil
+	return LinkDerivedCoverage(tx, actor, derivedID, sourceIDs, domain.CoverageProvenance, eventID, legacySourceLimit)
 }
 
 // sortedUniqueIDs returns ids sorted and deduplicated, as

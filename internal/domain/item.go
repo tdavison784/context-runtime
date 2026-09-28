@@ -65,10 +65,14 @@ type ItemRole string
 const (
 	RoleSemantic   ItemRole = ""
 	RoleTranscript ItemRole = "TRANSCRIPT"
+	RoleCheckpoint ItemRole = "CHECKPOINT"
+	RoleProjection ItemRole = "PROJECTION"
 )
 
 // Valid reports whether r is a known role.
-func (r ItemRole) Valid() bool { return r == RoleSemantic || r == RoleTranscript }
+func (r ItemRole) Valid() bool {
+	return r == RoleSemantic || r == RoleTranscript || r == RoleCheckpoint || r == RoleProjection
+}
 
 // SourceKind says what a source locator names.
 type SourceKind string
@@ -99,6 +103,7 @@ type ContextItem struct {
 	ID          string
 	EventID     string
 	DirectiveID string
+	Namespace   DirectiveNamespace // empty only for frozen pre-Phase-3 records
 	// Section is the directive section that created the item, if any.
 	Section DirectiveSection
 	// Role is TRANSCRIPT for a span's verbatim snapshot (D8).
@@ -173,6 +178,11 @@ func (it ContextItem) Clone() ContextItem {
 // It verifies the content hash and SemanticBytes against the parts, so a
 // store never accepts an item whose identity disagrees with its content.
 func (it ContextItem) Validate() error {
+	if it.Namespace != "" {
+		if err := it.validateNamespace(); err != nil {
+			return err
+		}
+	}
 	if it.ID == "" {
 		return invalid("item: ID is required")
 	}
@@ -273,6 +283,27 @@ func (it ContextItem) Validate() error {
 		return invalid("item %s: version must start at 1", it.ID)
 	}
 	return nil
+}
+
+// QualifiesAsEvidenceSupport is the structural precondition for citing it
+// as evidence SUPPORT (keyed writes, completion claims, EVIDENCE_SUPPORT
+// coverage). It is necessary, not sufficient: internal/graph also requires
+// a projection's source to qualify and a TOOL tool_result transcript to
+// carry trusted provenance (SEC-1.3). It admits only evidence-category kinds
+// (FR-DOM-006), never AGENT or RETRIEVED_CONTENT authority, never a
+// checkpoint, and among transcripts only a TOOL tool_result; USER, AGENT,
+// SYSTEM and HARNESS conversation transcripts stay provenance-only.
+func (it ContextItem) QualifiesAsEvidenceSupport() bool {
+	if it.Kind.Category() != CategoryEvidence || it.Role == RoleCheckpoint || !it.Role.Valid() {
+		return false
+	}
+	if it.Authority == AuthorityAgent || it.Authority == AuthorityRetrievedContent || !it.Authority.Valid() {
+		return false
+	}
+	if it.Role == RoleTranscript {
+		return it.Authority == AuthorityTool && it.Kind == KindToolResult
+	}
+	return true
 }
 
 // validateRole fails closed on a transcript that could pose as a

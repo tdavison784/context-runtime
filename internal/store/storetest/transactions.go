@@ -75,7 +75,7 @@ func populate(tx store.Tx, sess string) error {
 		func() error {
 			return tx.InsertRelationship(NewRelationship(sess, "r1", domain.RelSupersedes, "i2", "i1", s[3]))
 		},
-		func() error { return tx.SetCurrentVersion("i2") },
+		func() error { return UncheckedSetCurrentVersion(tx, "i2") },
 		func() error { return tx.InsertBlob(NewBlob(sess, []byte("blob"))) },
 		func() error { return tx.InsertObligationVersion(NewObligation(sess, "o1", 1, s[4], "i2")) },
 		func() error {
@@ -209,23 +209,37 @@ func testRollbackOnStoreError(t *testing.T, s store.Store) {
 	})
 }
 
-// testFailedWriteLeavesNoTrace checks that a rejected write inside an
-// otherwise successful transaction leaves no partial state behind.
+// testFailedWriteLeavesNoTrace checks that a rejected write leaves no
+// partial state behind: a rejected leading write is atomic by itself, and a
+// rejected write after a successful one poisons the whole transaction (P3-1).
 func testFailedWriteLeavesNoTrace(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
-		n := seqs(tx, 4)
+		n := seqs(tx, 3)
 		noErr(t, tx.InsertItem(NewItem(sessA, "a", n[0], "a")))
 		noErr(t, tx.InsertItem(NewItem(sessA, "b", n[1], "b")))
-		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "r1", domain.RelSupersedes, "a", "b", n[2])))
+		return tx.InsertRelationship(NewRelationship(sessA, "r1", domain.RelSupersedes, "a", "b", n[2]))
+	})
+	resolved := domain.GoalResolved
+	update(t, s, sessA, func(tx store.Tx) error {
+		n := seqs(tx, 2)
 		// Rejected: closes a cycle.
-		wantErr(t, tx.InsertRelationship(NewRelationship(sessA, "r2", domain.RelSupersedes, "b", "a", n[2])),
+		wantErr(t, tx.InsertRelationship(NewRelationship(sessA, "r2", domain.RelSupersedes, "b", "a", n[0])),
 			domain.ErrSupersessionCycle)
-		// Rejected: goal status on a non-goal.
-		resolved := domain.GoalResolved
-		_, err := tx.UpdateItem("a", 1, domain.ItemChange{GoalStatus: &resolved}, NewItemEvent(sessA, "l1", n[3], "a"))
+		// Rejected: goal status on a non-goal. No write succeeded before, so
+		// the transaction is not poisoned and commits nothing.
+		_, err := tx.UpdateItem("a", 1, domain.ItemChange{GoalStatus: &resolved}, NewItemEvent(sessA, "l1", n[1], "a"))
 		wantErr(t, err, domain.ErrInvalidTransition)
 		return nil
 	})
+	// A rejected write after a successful one poisons the transaction even
+	// though fn ignores the error: the earlier item is rolled back too.
+	err := s.Update(ctx, sessA, func(tx store.Tx) error {
+		n := seqs(tx, 2)
+		noErr(t, tx.InsertItem(NewItem(sessA, "c", n[0], "c")))
+		_, _ = tx.UpdateItem("a", 1, domain.ItemChange{GoalStatus: &resolved}, NewItemEvent(sessA, "l2", n[1], "a"))
+		return nil
+	})
+	wantErr(t, err, domain.ErrInvalidTransition)
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		rels, err := tx.Relationships(store.RelationshipFilter{})
 		noErr(t, err)
@@ -237,6 +251,8 @@ func testFailedWriteLeavesNoTrace(t *testing.T, s store.Store) {
 		if len(rels) != 1 || rels[0].ID != "r1" {
 			t.Errorf("Relationships = %+v, want only r1", rels)
 		}
+		_, err = tx.Item("c")
+		wantErr(t, err, domain.ErrNotFound)
 		it, err := tx.Item("a")
 		noErr(t, err)
 		if it.Version != 1 {
@@ -436,7 +452,7 @@ func testSessionIsolation(t *testing.T, s store.Store) {
 		wantErr(t, tx.InsertRelationship(NewRelationship(sessB, "r1", domain.RelDerivedFrom, "i1", "i2", seq)),
 			domain.ErrDanglingRelationship)
 		// Directive targets must be items in this session.
-		wantErr(t, tx.SetCurrentVersion("i2"), domain.ErrNotFound)
+		wantErr(t, UncheckedSetCurrentVersion(tx, "i2"), domain.ErrNotFound)
 		// Obligation transitions and call attempts need records in this session.
 		wantErr(t, errOf(tx.AppendObligationTransition(NewTransition(sessB, "t1", "o1", 1, seq,
 			domain.ObligationUnresolved, domain.ObligationBlocked), 1)), domain.ErrNotFound)

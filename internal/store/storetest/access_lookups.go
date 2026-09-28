@@ -169,7 +169,7 @@ func testCurrentWorking(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		for _, id := range []string{"w0", "w1", "w2"} {
 			noErr(t, tx.InsertItem(workingItem(sessA, id, tx.NextSeq(), id)))
-			noErr(t, tx.SetCurrentVersion(id))
+			noErr(t, UncheckedSetCurrentVersion(tx, id))
 		}
 		// w0 replaced by w0b; the old version is retired.
 		noErr(t, tx.InsertItem(workingItem(sessA, "w0b", tx.NextSeq(), "w0 v2")))
@@ -177,20 +177,20 @@ func testCurrentWorking(t *testing.T, s store.Store) {
 		noErr(t, err)
 		_ = wb
 		noErr(t, tx.InsertRelationship(NewRelationship(sessA, "w0b-w0", domain.RelSupersedes, "w0b", "w0", tx.NextSeq())))
-		noErr(t, tx.SetCurrentVersion("w0b"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "w0b"))
 		// Inserted but never filed: not a version.
 		noErr(t, tx.InsertItem(workingItem(sessA, "unfiled", tx.NextSeq(), "x")))
 		// Other partitions: another authority and another task.
 		sys := workingItem(sessA, "sys", tx.NextSeq(), "sys")
 		sys.Authority = domain.AuthoritySystem
 		noErr(t, tx.InsertItem(sys))
-		noErr(t, tx.SetCurrentVersion("sys"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "sys"))
 		hidden := inTask2(workingItem(sessA, "hidden", tx.NextSeq(), "hidden"))
 		noErr(t, tx.InsertItem(hidden))
-		noErr(t, tx.SetCurrentVersion("hidden"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "hidden"))
 		// A non-Working directive in the same partition.
 		noErr(t, tx.InsertItem(NewDirective(sessA, "pin", "pin", tx.NextSeq(), "pinned")))
-		noErr(t, tx.SetCurrentVersion("pin"))
+		noErr(t, UncheckedSetCurrentVersion(tx, "pin"))
 		return nil
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {

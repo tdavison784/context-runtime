@@ -315,6 +315,24 @@ func TestRelationshipTypeValid(t *testing.T) {
 	}
 }
 
+func TestRelationshipTypesAreValidAndIndependent(t *testing.T) {
+	types := RelationshipTypes()
+	if len(types) == 0 {
+		t.Fatal("RelationshipTypes returned no types")
+	}
+	seen := map[RelationshipType]bool{}
+	for _, typ := range types {
+		if !typ.Valid() || seen[typ] {
+			t.Errorf("RelationshipTypes contains invalid or duplicate type %q", typ)
+		}
+		seen[typ] = true
+	}
+	types[0] = "CORRUPTED"
+	if RelationshipTypes()[0] == types[0] {
+		t.Error("caller mutation changed RelationshipTypes")
+	}
+}
+
 func TestTaskStatusValid(t *testing.T) {
 	if !TaskActive.Valid() || !TaskCompleted.Valid() {
 		t.Error("known task statuses must be valid")

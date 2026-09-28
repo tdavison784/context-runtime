@@ -101,7 +101,9 @@ func testPoisonBlocksEveryWrite(t *testing.T, s store.Store) {
 		return nil
 	})
 	wantErr(t, err, errPoisonA)
-	if checked < 20 {
-		t.Errorf("checked %d write methods, want every one (at least 20)", checked)
+	// A sanity floor, not the exact count; SPEC-1.21 removed the unchecked
+	// SetCurrentVersion(itemID) from store.Tx.
+	if checked < 19 {
+		t.Errorf("checked %d write methods, want every one (at least 19)", checked)
 	}
 }

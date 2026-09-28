@@ -20,6 +20,10 @@ type readTx struct {
 	sessionID string
 	lastSeq   uint64
 	done      bool
+	// writer names this view's own transaction when it is a writing one,
+	// so K1 pointer reads first make the transaction's applied reports'
+	// raises visible (XREV-5.1); nil in a View.
+	writer *tx
 
 	items        table[string, domain.ContextItem]
 	rels         table[string, domain.Relationship]
@@ -51,6 +55,7 @@ type readTx struct {
 	oblsBySource liveIndex[string, obligationKey]
 	refOwners    orderedIndex[sourceKey]
 	itemsByTask  index[string]
+	sem          semView
 }
 
 var _ store.ReadTx = (*readTx)(nil)
@@ -59,6 +64,7 @@ func newReadTx(sessionID string, st *state, writable bool) *readTx {
 	return &readTx{
 		sessionID:    sessionID,
 		lastSeq:      st.lastSeq,
+		sem:          newSemView(st.sem, writable),
 		items:        newTable(st.items, writable, domain.ContextItem.Clone),
 		rels:         newTable(st.rels, writable, domain.Relationship.Clone),
 		supersedes:   newIndex(st.supersedes, writable),
@@ -168,7 +174,7 @@ func (r *readTx) Relationships(f store.RelationshipFilter) ([]domain.Relationshi
 	// Scan the narrowest index the filter allows.
 	var ids iter.Seq[string]
 	endpoint := func(x *index[relKey], id string) iter.Seq[string] {
-		types := relationshipTypes
+		types := domain.RelationshipTypes()
 		if f.Type != "" {
 			types = []domain.RelationshipType{f.Type}
 		}

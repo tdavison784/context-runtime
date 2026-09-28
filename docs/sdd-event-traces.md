@@ -1,6 +1,6 @@
 # Context Runtime V1: normative event traces
 
-These traces are part of [SDD v0.9](../SDD.md). They specify semantic state and the next provider-visible representation. Implementations must turn them into fixtures and tests; this document does not claim those tests already exist.
+These traces are part of [SDD v0.10](../SDD.md). They specify semantic state and the next provider-visible representation. Implementations must turn them into fixtures and tests; this document does not claim those tests already exist.
 
 All examples use session S, task T, and agent A unless stated otherwise. U means USER content, S means SYSTEM policy, H means HARNESS policy, and E means explicitly labeled historical evidence in a non-privileged message or valid tool result. Provider adapters translate these logical roles under FR-RND-002. Every fixture must assert actual serialized role/content placement and the complete inherited manifest, not merely item metadata. Fake-counter figures include all framing, schemas, and reservations; real adapters must verify their own whole-request counts.
 
@@ -70,7 +70,7 @@ Requirements: FR-DIR-005, FR-DOM-005, FR-RET-006, INV-08.
 3. GC changes Residency to ARCHIVED.
 4. The owner retrieves G to explain earlier work.
 
-Expected state: G is RESOLVED throughout steps 2–4. Retrieval may set Residency=RESIDENT and create a lease; it never changes GoalStatus or currentness.
+Expected state: G is RESOLVED throughout steps 2–4. Retrieval leaves persisted Residency unchanged (ARCHIVED) and creates a holder-bound lease that admits G as historical evidence; it never changes GoalStatus or currentness (SDD v0.10 amends this trace's residency expectation: an earlier optional Residency=RESIDENT flip on retrieval is replaced by this explicit unchanged-residency rule, ADR 6/FR-RET-006).
 
 Expected request: E(G, status=RESOLVED), never G in the active-goal set. An explicit authorized replacement G2 is required to create an OPEN goal again.
 
@@ -219,7 +219,7 @@ Requirements: FR-TOOL-004, FR-PLN-004, FR-DOM-007, FR-RND-001, FR-ASM-011.
 2. A calls context_checkpoint with summary K1. Assemble (preview) then proposes REBASE under ALLOW_RESET because of soft pressure.
 3. Prepare and record the rebased inference.
 
-Expected state: K1 is an AGENT-authority summary whose coverage range spans X1–X12; F1 and F2 are current, DERIVED_FROM X3 and X9.
+Expected state: K1 is an AGENT-authority CHECKPOINT item whose source coverage is the admitted generation input of the issuing inference and whose separately recorded closed-exchange coverage is exactly X1–X12; F1 and F2 are current, DERIVED_FROM X3 and X9.
 
 Expected request: S policy, U goals/pins, then F1 and F2 as assistant content, then K1 as assistant content, then only uncovered exchanges and the pending input. X1–X12 are excluded with the covered reason code and remain retrievable; old reasoning is absent and a deliberate reset is recorded. A K1 larger than the policy limit is rejected at the tool call, and the rebase then renders without it, reporting the missing checkpoint.
 

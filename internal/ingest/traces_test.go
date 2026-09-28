@@ -56,22 +56,11 @@ func TestT02_ReplacementRetiresOldRequirement(t *testing.T) {
 		r1 := f.mustIngest(user, userEvent("p1", "## Pinned\n- [dep] {obligation=tests_pass} Use dependency v2.\n## Goal [g]\nShip v2.\n", true))
 		p1, _ := byDirective(r1, "dep")
 		g1, _ := byDirective(r1, "g")
-		var obID string
-		if err := f.s.Update(ctx, sess, func(tx store.Tx) error {
-			obs, err := tx.ObligationsBySource(p1.ID, 10)
-			if err != nil {
-				return err
-			}
-			obID = obs[0].ObligationID
-			_, err = tx.AppendObligationTransition(domain.ObligationTransition{
-				ID: "sat", SessionID: sess, ObligationID: obID, Version: 1, Seq: tx.NextSeq(),
-				From: domain.ObligationUnresolved, To: domain.ObligationSatisfied, Action: domain.ActionAssertObligation,
-				Actor: principal(domain.AuthorityHarness), EvidenceIDs: []string{r1.Items[0].ID},
-			}, 1)
-			return err
-		}); err != nil {
-			t.Fatal(err)
-		}
+		// SYSTEM attests v1 through the obligation service (P3-13/15); a
+		// raw status row is no longer a legal declared-version transition.
+		v1 := f.currentObligation(p1.ID)
+		obID := v1.ObligationID
+		f.mustIngest(principal(domain.AuthoritySystem), transitionEvent("sat", domain.EventSystem, v1, domain.ObligationSatisfied, domain.AssertionAttestation))
 
 		r2 := f.mustIngest(user, userEvent("p2", "## Pinned\n- [dep] {obligation=tests_pass} Use dependency v3.\n## Goal [g]\nShip v3.\n", true))
 		p2, _ := byDirective(r2, "dep")
@@ -110,7 +99,7 @@ func TestT02_ReplacementRetiresOldRequirement(t *testing.T) {
 			if err != nil || len(versions) != 2 {
 				t.Fatalf("obligation versions = %+v, %v", versions, err)
 			}
-			if v1 := versions[0]; v1.Current || v1.Status != domain.ObligationSatisfied || len(v1.EvidenceIDs) != 1 {
+			if v1 := versions[0]; v1.Current || v1.Status != domain.ObligationSatisfied || v1.CurrentAssertionID == "" || v1.RetiredSeq == 0 {
 				t.Errorf("retired version = %+v", v1)
 			}
 			if v2 := versions[1]; !v2.Current || v2.Status != domain.ObligationUnresolved || v2.SourceItemID != p2.ID {

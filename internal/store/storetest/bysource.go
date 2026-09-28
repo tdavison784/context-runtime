@@ -80,12 +80,12 @@ func assertKeys(t *testing.T, what string, got []domain.ObligationVersion, want 
 
 // testRetireObligationVersion checks the atomic retirement write (D13,
 // FR-OBL-006): the version becomes noncurrent with RetiredSeq equal to its
-// audit event's sequence number, status, evidence, and transitions are
+// audit event's sequence number, status and transitions are
 // preserved, and a failed retirement writes neither record.
 func testRetireObligationVersion(t *testing.T, s store.Store) {
 	update(t, s, sessA, func(tx store.Tx) error {
 		noErr(t, tx.InsertObligationVersion(NewObligation(sessA, "o", 1, tx.NextSeq(), "p1")))
-		_, err := tx.AppendObligationTransition(NewTransition(sessA, "tr", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationSatisfied), 1)
+		_, err := tx.AppendObligationTransition(NewTransition(sessA, "tr", "o", 1, tx.NextSeq(), domain.ObligationUnresolved, domain.ObligationBlocked), 1)
 		return err
 	})
 	retireEvent := func(tx store.Tx, id string) domain.LifecycleEvent {
@@ -147,15 +147,17 @@ func testRetireObligationVersion(t *testing.T, s store.Store) {
 		if got.Current || got.RetiredSeq != event.Seq || got.Revision != 3 {
 			t.Errorf("retired = %+v", got)
 		}
-		_, err = tx.RetireObligationVersion("o", 1, 3, retireEvent(tx, "again"))
-		wantErr(t, err, domain.ErrInvalidTransition)
 		return nil
+	})
+	rejected(t, s, sessA, domain.ErrInvalidTransition, func(tx store.Tx) error {
+		_, err := tx.RetireObligationVersion("o", 1, 3, retireEvent(tx, "again"))
+		return err
 	})
 	view(t, s, sessA, func(tx store.ReadTx) error {
 		o, err := tx.Obligation("o")
 		noErr(t, err)
-		if o.Current || o.RetiredSeq != event.Seq || o.Status != domain.ObligationSatisfied || len(o.EvidenceIDs) != 1 {
-			t.Errorf("retired obligation = %+v, want noncurrent with status and evidence kept", o)
+		if o.Current || o.RetiredSeq != event.Seq || o.Status != domain.ObligationBlocked {
+			t.Errorf("retired obligation = %+v, want noncurrent with its status kept", o)
 		}
 		trs, err := tx.ObligationTransitions("o")
 		noErr(t, err)

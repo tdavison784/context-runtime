@@ -21,19 +21,23 @@ func TestConformance(t *testing.T) {
 // change.
 func TestConversationOwnersImmutable(t *testing.T) {
 	s := memory.New()
+	c := storetest.NewConversation("s", "conv")
 	err := s.Update(context.Background(), "s", func(tx store.Tx) error {
-		c := storetest.NewConversation("s", "conv")
-		if _, err := tx.PutConversation(c, 0); err != nil {
-			return err
-		}
-		c.AgentID = "other"
-		if _, err := tx.PutConversation(c, 1); !errors.Is(err, domain.ErrImmutable) {
-			t.Errorf("PutConversation with a new agent: %v, want ErrImmutable", err)
-		}
-		return nil
+		_, err := tx.PutConversation(c, 0)
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Rejected in its own transaction: a failed write after a successful one
+	// would poison the setup (P3-1).
+	c.AgentID = "other"
+	err = s.Update(context.Background(), "s", func(tx store.Tx) error {
+		_, err := tx.PutConversation(c, 1)
+		return err
+	})
+	if !errors.Is(err, domain.ErrImmutable) {
+		t.Errorf("PutConversation with a new agent: %v, want ErrImmutable", err)
 	}
 }
 

@@ -3,6 +3,409 @@
 Status: Accepted (2026-09-26, Phase 1 exit; decision unchanged by review rounds 1-3 of PR #2)
 Date: 2026-09-25
 
+## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
+
+Phase 3 (worker W2, `internal/store`) adds thirty-three forward
+migrations, 0018 through 0050 (K1-api.3/SPEC-5.2 correct the prior
+"thirty-one ... 0018 through 0048" — by way of the interim "thirty-two
+... through 0050, 0049 reserved" that held while the two round-5
+branches merged — itself K1's correction of the "thirty ... 0018
+through 0047" and, before that, SPEC-4.4/DUR-4.10's correction of a
+stale "twenty-seven ... 0018 through 0044": 0018-0028 from the initial
+Phase 3 merge; 0029-0034 fixing PR #6 round-1 review findings;
+0035-0040 fixing round-2 findings; 0041-0044 fixing round-3 J1-J7
+findings; 0045-0047 fixing round-3 DUR-3.1/DUR-3.2 findings; 0048
+landing the commander's FROZEN K1 ruling in round 4; 0049-0050 landing
+round 5's K1-api.3 path confirmations and SPEC-5.2 candidate-viewer
+columns — 0050 merged first, having skipped 0049 as a reservation for
+the confirmation-record migration, which then merged ahead of it; the
+merge resolved `committedMigrations`' additive conflict by keeping both
+pins in migration order, and a reserved number is a reservation, never
+an edit of a committed migration), after this ADR's Phase 2 migrations
+(0001 unchanged, per this ADR's own rule). The full
+record/column/index manifest is
+`docs/phase3-schema-manifest.md` (P3-41); this section records the
+migration list itself and its upgrade-parity tests, matching how this ADR
+already tracks 0001-0017 above.
+
+**Pre-release exception, 0021 (SPEC-2.5, DUR-2.9).** `0021_phase3_declarations.sql`
+was edited in place at `d7e8c13` (DUR-1.10's `SELECT DISTINCT` fix), with its
+checksum pin updated in `durability_test.go` in the same commit. This is
+otherwise exactly what this ADR's own "never edit a committed migration"
+rule (below, enforced by `TestCommittedMigrationsUnchanged`'s pinned-checksum
+map, not only by `TestMigrationChecksumMismatch`'s runtime check) forbids; it
+is accepted only because no release has shipped Phase 3 migrations yet, per
+H6/DUR-2.9 below.
+
+**Unreleased-database exception (H6, DUR-2.9).** A SQLite database created
+against any pre-`914afef` Phase 3 development head cannot reopen against
+this migration list: 0021's edit above changes its checksum, and 0030's
+uniqueness index (`observation_run_closing`) can reject a database whose
+services (at the `c22a53c` PR #6 round-1 head) accepted more than one
+closing observation for a run before the G1 fix landed. Both are accepted,
+undocumented-until-now consequences of iterating on unreleased Phase 3
+migrations, not upgrade-path defects: **no Phase 3 database predating this
+head is supported.** `internal/tools/execute.go`'s `dispatchedRequest` hash
+input changed in this same window with no schema-version dispatch, so a
+tool receipt written before that change also conflicts on retry — the same
+exception covers it. None of this affects the frozen Phase 2 fixture
+(`TestPhase2FixtureReplay`), which predates every Phase 3 migration.
+W2's own `internal/store/sqlite/CONFORMANCE_NOTES.md` (PR #6 round 2)
+records this same exception, naming 0021's root cause precisely: its
+legacy grant backfill inserted duplicate `TargetIDs` twice and failed
+before any later migration could run. **One further consequence within
+the supported range (DUR-3.10, PR #6 round 3):** `lifecycle.replayReplacement`
+(`replace.go:247`) accepts either a 3-ID or a 4-ID replacement receipt and
+returns `GrantID=""` for a 3-ID one. A replacement receipt written exactly
+at `914afef`, before the 4-ID (grant-inclusive) receipt shape existed,
+replays correctly with no grant — this is the old format's honest
+absence of a grant, not data loss, and is unaffected by the unreleased-
+database exception above (`914afef` is the supported boundary, not
+excluded by it).
+
+- `0018_phase3_row_fields.sql` — Phase 3 fields on existing record tables
+  (P3-3/5/6/12/13/35/40/41): item `Namespace`, decoded grant `Targets`, and
+  the flattened lifecycle-command-result/obligation-binding columns. Every
+  new column reads NULL on a pre-Phase-3 row, decoded as that field's zero
+  value, which the domain treats as the frozen legacy form (namespace ""
+  is the pre-Phase-3 directive/agent-key fallback; nil `Targets` leaves the
+  legacy `TargetIDs` path in force).
+- `0019_command_execution_result.sql` — stores a lifecycle command's
+  execution result whole (P3-35), correcting 0018's per-field flattening,
+  which collided `Result.Before.Version` with `BeforeVersion` on one column
+  name.
+- `0020_phase3_membership.sql` — coverage, logical membership, checkpoint,
+  owner, and request-receipt companions (P3-2/6/7/24/27/32): one typed
+  `rec_*` table per companion, keyed `(session, ID)` like every earlier
+  record.
+- `0021_phase3_declarations.sql` — creation/snapshot declarations, semantic
+  change records, and the indexed grant/audit reads (P3-3/4/5/36/39/41). A
+  creation declaration is keyed by its item, one per item. **At 0021 alone,
+  absence was unknown identity, never backfilled; 0034 below reconciles a
+  known declaration for every pre-upgrade keyed item where the ingest
+  receipt snapshot establishes its creation identity, and records unknown
+  (non-executable) otherwise (SPEC-2.5, corrects P3-41's original text).**
+- `0022_phase3_resources.sql` — resource registration/reporting, per-path
+  content, workspace bindings, pre-execution runs, typed observations, and
+  subject state (P3-19..22/41). Nothing is backfilled: no migration guesses
+  a repository, baseline fingerprint, reporter, binding, or run order.
+- `0023_phase3_proofs.sql` — obligation declarations, applicability proofs
+  and their dependencies, assertions, and transition details, with the
+  indexed reads completion/invalidation need (P3-9/12..18/23/41). No legacy
+  obligation gains a declaration, proof, assertion mode, or dependency.
+- `0024_phase3_retrieval.sql` — retrieval leases, results, projections, and
+  events (P3-28..30/41). No legacy content gains a lease or admission, and
+  no item's residency changes.
+- `0025_phase3_gc.sql` — GC requests, collect receipts/results, and the
+  indexed reads collection/completion need (P3-9/38/39/41). No request,
+  receipt, or result is invented for earlier data.
+- `0026_reconcile_legacy_matcher_satisfaction.sql` — the checksum-pinned Go
+  step (`steps_0026.go`, `reconcileMatcherSatisfactionV1`) that returns each
+  Phase 2 obligation version SATISFIED by a matcher transition, with no
+  applicability proof a Phase 3 binary can establish, to UNRESOLVED exactly
+  once, through an audited SYSTEM `UPGRADE_RECONCILIATION` transition that
+  preserves original history (P3-41, ADR 8's residual-risk-adjacent
+  legacy-treatment rule). Tests:
+  `TestUpgradeReconcilesLegacyMatcherSatisfaction`,
+  `TestInterruptedReconciliationRollsBack`.
+- `0027_current_version_observation_namespace.sql` — admits every domain
+  namespace, including OBSERVATION, in the current-version key's CHECK
+  constraint (P3-3/22); SQLite cannot alter a CHECK, so the table is rebuilt
+  with the same columns/key and every existing pointer copied unchanged.
+- `0028_phase3_policy_gc_triggers.sql` — the explicit enabled GC-trigger set
+  of the recorded Phase 3 policy (P3-38/39, ADR 16's amendment): a row
+  without a recorded Phase 3 policy (every Phase 2 envelope/receipt) is
+  unaffected, and no trigger set is backfilled onto it.
+- `0029_observation_run_ordinal.sql` (PR #6 round 1, SEC-1.13) — a unique
+  index on `rec_observation_run(session_id, f_subject_key, f_ordinal)`: two
+  runs of one subject can never share an ordinal, which would make run
+  order, and so the subject watermark (ADR 8 §12), ambiguous. No Phase 2
+  database has runs, so the index builds over an empty or already-unique
+  table.
+- `0030_observation_run_closes_once.sql` (PR #6 round 1, G1/DUR-1.1) — a
+  unique index enforcing at most one closing observation (a complete
+  PASS/FAIL, or an ERROR/TIMEOUT/CANCELLED) per run, matching `store.ClosesRun`
+  (`internal/store/semantic_resource.go`; SQLite's SQL form is
+  `closingObservation`, `sqlite/semantic_resource.go:51` — not, as this
+  bullet previously said, a predicate in `internal/obligation`, PR #6
+  round 3, SPEC-3.8/DUR-3.10). **Consequence
+  (H6, DUR-2.9): a database that accepted more than one closing observation
+  per run under an earlier, pre-G1-fix service version cannot reopen
+  against this index; no Phase 3 database predating `914afef` is supported
+  (see the unreleased-database exception above).**
+- `0031_grant_target_liveness.sql` (PR #6 round 1, G2/SEC-1.5/DUR-1.4) —
+  each grant-target index row carries its grant's revocation and expiry
+  sequence (0 for none), backfilled from `rec_grant` and kept current by
+  `RevokeGrant`, so a live-grant read serves the unrevoked range without
+  visiting revoked or expired history.
+- `0032_subject_state_live_index.sql` (PR #6 round 1, G2/SEC-1.8/DUR-1.2) —
+  a partial index in first-filing order, originally meant to hold exactly
+  the CURRENT subject states so a resource report's invalidation work
+  never costs STALE/UNKNOWN history. **Stale since DUR-3.1 (B), corrected
+  here (DUR-4.7): `PutSubjectState` now only ever writes
+  `ApplicabilityCurrent` (`internal/obligation/subject_state.go`), so this
+  index holds every filed state, not exactly the current ones — "a state
+  enters and leaves the index as its applicability changes" no longer
+  happens.** Current applicability is instead read through
+  `store.SubjectApplicability`
+  (`internal/store/subject_applicability.go`, ruling L1; the round-3
+  `obligation.Service.SubjectApplicability` method this bullet named is
+  deleted), derived at read time from the authoritative resource state
+  and already consumed in production by retrieval's
+  `ItemHistorical`/`ItemCurrent` labeling (L1.2). The equivalent "only
+  CURRENT states" filter is likewise gone from
+  `store.SubjectStatesByResource` (L1.5/SEC-4.11/DUR-4.7, round 4):
+  every filed state pages in first-filing order whatever its
+  applicability, so this partial index bounds nothing and is stale
+  metadata. The read itself still has no production caller, and removing
+  the index remains an explicit Phase 4 deferral recorded in ADR 8, not
+  done here.
+- `0033_resource_update_paths.sql` (PR #6 round 1, G2/SEC-1.7/DUR-1.2) — an
+  index of resource updates by the paths they may affect (a path or one of
+  its ancestor directories, plus every ALL-paths/UNKNOWN update), so a
+  path's currency check never walks unrelated history. **Resolved (DUR-2.2 /
+  SEC-2.5 / XREV-2.2, PR #6 round 2, corrects a round-2 doc error repeated
+  in DUR-3.10):** `internal/obligation`'s `currentPathState` now calls
+  `LatestResourceUpdateAffectingPath` (`resource.go:266`, commit `5b96fce`),
+  the exact-key keyed form of this index, so the intended cost bound is
+  realized in production, not only in `storetest`. The *paged* form,
+  `ResourceUpdatesAffectingPath`, and the unrelated `LifecycleEvent(id)`
+  exact read are what still have no production caller as of this pass.
+- `0034_reconcile_legacy_creation.sql` (PR #6 round 1, G5/SPEC-1.3/FROZEN
+  C-1, P3-4/41) — the checksum-pinned Go step
+  (`steps_0034.go`, `reconcileLegacyCreationV1`) that reconciles a creation
+  declaration for every pre-upgrade keyed item stored without an explicit
+  namespace, exactly as the corrected 0021 bullet above describes; atomic
+  with its own version row, idempotent, and deterministic. Tests:
+  `internal/store/sqlite`'s `TestUpgradeReconcilesLegacyCreation`;
+  `internal/ingest`'s `TestLegacyRestatementDedupsAfterUpgrade` and
+  `TestUpgradeRestatesEveryCurrentDirective_G5`.
+- `0035_item_exchange_index.sql` (PR #6 round 2, H2/SPEC-2.7) — an item's
+  exchange within a conversation, by ordinal: `EarliestExchangeWithItem`
+  answers which exchange first holds an item with one keyed `LIMIT 1`
+  search, independent of the conversation's length (closing the
+  checkpoint-coverage-lookup cost growth SPEC-2.7 found). A member's
+  exchange row is written when the member is inserted; pre-migration rows
+  are backfilled from the member/exchange tables.
+- `0036_grant_target_liveness_ranges.sql` (PR #6 round 2, H2/DUR-2.10) —
+  replaces 0031's single OR-based index (which still scanned and sorted
+  every revoked/expired row) with three disjoint live-grant ranges
+  `LiveGrantsFor` reads directly, so the cost is the live grants, not the
+  target's whole history.
+- `0037_subject_high_water.sql` (PR #6 round 2, H1/SEC-2.1/SPEC-2.1/DUR-2.1)
+  — the per-`(subject, task, access)`-partition high-water mark (ADR 8 §6):
+  the highest run ordinal with a complete PASS or FAIL, raised by every
+  such observation whatever its fingerprint or applicability.
+- `0038_current_workspace_binding.sql` (PR #6 round 2, H2) — one row per
+  workspace binding ID at its latest version, in that version's context
+  (ADR 8 §10): a page counts live bindings, not historical versions, and a
+  rebind moves the row to the new context, retiring it from the old one.
+- `0039_gc_result_outcome.sql` (PR #6 round 2, H3/SEC-2.4/SPEC-2.4/DUR-2.7)
+  — `GCResult` gains a closed `Outcome` (`COLLECTED`/`FAILED`) and failure
+  `Reason`; every pre-migration result is backfilled `COLLECTED` with no
+  reason, since every such result already linked a collect receipt.
+- `0040_gc_progress.sql` (PR #6 round 2, H3) — one CAS-written row per GC
+  request holding the durable `(Seq, ID)` candidate cursor, completed
+  batches, and attempts; operational metadata only, never a substitute for
+  a batch's collect receipt or the request's result, and carries no
+  semantic sequence. **Correction (DUR-3.10, PR #6 round 3):** the row is
+  not removed once the request reaches a terminal outcome — it stays
+  alongside the request's result, not only "per pending" request as this
+  bullet previously said.
+- `0041_gc_snapshot.sql` (PR #6 round 3, J2/SPEC-3.6) — `GCProgress` gains
+  `SnapshotSeq`, the eligibility ceiling the request's first batch pins;
+  later batches traverse only candidates at or before it, so a moving
+  target set can never be re-evaluated mid-request.
+- `0042_gc_batch_size.sql` (PR #6 round 3, J3/XREV-3.2) — `GCProgress`
+  gains `BatchSize`, the durable adaptive item-count bound that halves
+  (floor one) on transaction-budget exhaustion, so a receipt is never
+  sized by an incomplete object.
+- `0043_gc_item_attempts.sql` (PR #6 round 3, J4/SEC-3.1/SPEC-3.3) —
+  `GCProgress` gains `ItemAttempts`, counting attempts against the
+  specific unprocessed next candidate, not the request as a whole.
+- `0044_gc_retry_item.sql` (PR #6 round 3, J4/SPEC-3.3) — `GCProgress`
+  gains `ItemAttemptID`, so a retry's attempt count is tied to the exact
+  candidate even if another operation archives the previously failing one
+  between batches.
+- `0045_live_proof_paths.sql` (PR #6 round 3, DUR-3.1; SPEC-4.4/DUR-4.10:
+  previously missing from this list) — `lookup_live_proof_path` files each
+  live proof's `CURRENT_PATH` dependency under its exact path plus the hex
+  of every ancestor directory, and each `WORKSPACE` dependency under
+  `"ws"`, so a resource report reads only the proofs it can actually
+  affect (ADR 8's DUR-3.1 (A)); `lookup_live_dependents` counts live
+  non-`FIXED_CONTENT` dependency rows per resource, the policy cap ADR 8's
+  DUR-3.1 (C) validated against (superseded by the commander's FROZEN K1
+  ruling, ADR 8 K1, which landed in round 4 and retired the cap outright).
+  The frozen Go step
+  `reconcileLiveProofPathsV1` (`steps_0045.go`, registered as
+  `"0045/proofs/reconcile-live-proof-paths-v1"` in `steps.go`) rebuilds
+  `lookup_live_dependency` and fills both new tables from the live proofs.
+- `0046_policy_max_live_proof_dependents.sql` (PR #6 round 3, DUR-3.1;
+  SPEC-4.4/DUR-4.10) — adds `Phase3Policy.MaxLiveProofDependents` to
+  `rec_envelope`/`rec_receipt`, backfilled with the largest value each
+  recorded policy's own work budget allows, capped at the default 256, so
+  historical envelopes and receipts still validate and replay verbatim
+  (P3-38). **DUR-4.6, resolved as a side effect of K1 A6 (round 4), not
+  by fixing the backfill:** a recorded policy with `MaxTransactionWork <
+  10` still backfills `MaxLiveProofDependents` to 0, but
+  `Phase3Policy.Validate` (`internal/domain/semantic.go`) no longer
+  validates that field at all under K1 (landed round 4, below), so the
+  previously-rejecting 0 value is never checked and the exact-retry
+  regression this bullet originally described cannot occur.
+- `0047_gc_queue.sql` (PR #6 round 3, DUR-3.2; SPEC-4.4/DUR-4.10) —
+  `lookup_pending_gc_trigger` indexes pending GC requests by trigger,
+  backfilled from `lookup_pending_gc`, so a collector reading its enabled
+  triggers never pages a disabled trigger's requests; `gc_queue_cursor` is
+  each session's CAS-written, durable scan position, replacing the
+  in-process `gcQueueCursors` `sync.Map` a new service instance or a
+  restart used to reset.
+- `0048_k1_pointers.sql` (PR #6 round 3 commander ruling K1, landed round
+  4) — the write-time validity pointers ADR 8's K1 section (A1) derives
+  proof validity from, an audit cursor, and a live-proof index:
+  `lookup_workspace_divergence` (per resource, each raise's revision and
+  causing update ID: lost freshness or a changed workspace fingerprint);
+  `lookup_affecting_raise` (per resource/key — the `"all"` key for
+  UNKNOWN/ALL-paths reports, else `"path:"` plus the hex of a changed
+  path, exactly migration 0033's keys); `lookup_live_proof` (every live
+  proof, in `(Seq, ID)` order, for the SYSTEM async settlement worker);
+  `settlement_cursor` (each session's CAS-written audit scan position,
+  unsequenced operational state like `gc_queue_cursor`, never evidence a
+  proof was settled). The frozen Go step
+  `reconcileK1PointersV1` (`steps_0048.go`, registered
+  `"0048/k1/reconcile-workspace-divergence-v1"`) backfills
+  `lookup_workspace_divergence` exactly, walking each resource's updates
+  in revision order and raising on `Freshness == UNKNOWN` or a changed
+  fingerprint from the previous report's (the first report's fingerprint
+  always counts as a change). The migration's own plain SQL backfills the
+  other two raise tables conservatively rather than exactly: **the ALL
+  key from every UNKNOWN or all-paths report, and every recorded
+  `ChangedPath` of every stored report** — reports' same-content history
+  is not reconstructible, so a backfilled raise can settle a proof a live
+  report would have spared (an accepted, one-time-upgrade
+  overapproximation). **A KNOWN report after UNKNOWN raises divergence**
+  through the same general rule as any fingerprint change: going UNKNOWN
+  clears the resource's stored fingerprint, so the next KNOWN report's
+  fingerprint (never empty) always differs from it, with no special-case
+  code needed. Migration 0045's `lookup_live_proof_path`/
+  `lookup_live_dependents` tables are unaffected and unused by any of
+  this: they stay maintained only as an unused write-time metric (K1d),
+  since 0048 introduces its own dedicated pointers rather than reusing
+  them. Tests: `TestK1ReportsNeverFanOut`, `TestK1ValidityIsMonotone`,
+  `TestK1DependencySemantics`, `TestConformance/SemanticProofDerivedValid`,
+  `TestConformance/SemanticA5CommitGuard` (storetest).
+  **`TestUpgradeK1Pointers_0048` (`internal/store/sqlite/upgrade_test.go`)
+  closes the upgrade-parity gap this bullet previously flagged as open,
+  against a real pre-0048 database:** the divergence chain backfills
+  exactly; the ALL/directory/exact-path affecting keys backfill equal to
+  the runtime raises, with the one path key whose content history is
+  genuinely ambiguous (two reports re-recording the same content)
+  carrying exactly the documented conservative superset a live report
+  would have spared, never fewer raises than the runtime rule requires;
+  `ProofDerivedValid` is false for every proof the runtime rule would
+  also derive invalid, and stays true for a `FIXED_CONTENT` proof and one
+  written after the last report; `LiveProofs` holds exactly the current
+  proofs of current SATISFIED versions (a superseded version's proof is
+  excluded) in `(Seq, ID)` order; `SettlementCursor` is absent before its
+  first `Put` and CAS-versioned after. A fresh database that lives the
+  same report history through the runtime path (never the backfill)
+  raises identically, cross-checking the backfill against real runtime
+  behavior rather than only against the test's own expectations. No case
+  fails open.
+- `0049_path_confirmations.sql` (PR #6 round 5, K1-api.3/XREV-5.2;
+  integration merge `5810578`) — the two confirmation lookup tables
+  K1-api.3's read rule (ADR 8, K1 A1) derives from.
+  `lookup_path_confirmation` (`session_id, resource_id, path_key,
+  affect_key, confirmed_rev, unconfirmed_rev`; PK the first four)
+  holds, per (resource, confirmed path, broad affect key), the latest
+  raise whose report explicitly recorded the path's prior content and
+  the latest unconfirmed raise it overtook; `lookup_unconfirmed_gap`
+  (same key plus `last_rev` in the PK) holds the immutable closed runs
+  of unconfirmed raises (first and last revision) the settlement cause
+  seeks. Affect/path key encodings are exactly 0048's (`'all'`, else
+  `'path:'` plus hex). **The backfill writes nothing** — reports'
+  same-content history is not reconstructible, the same reason 0048's
+  ALL-key backfill overapproximates — so pre-0049 raises keep
+  invalidating exactly as before (conservative over-invalidation,
+  never under), and a post-upgrade confirming report closes the legacy
+  raise it overtakes as an unconfirmed gap without sparing any
+  dependency below it. `TestUpgradePathConfirmations_0049`
+  (`internal/store/sqlite/upgrade_test.go`) pins this against a real
+  database migrated through 0048: both tables start empty, the legacy
+  ALL raise still counts as unconfirmed (a revision-1 proof stays
+  fallen, a revision-3 proof stays valid), a confirming ALL resync
+  accepted after the upgrade confirms the path at its revision with
+  the legacy raise as the unconfirmed gap, and the next unconfirmed
+  ALL raise — an UNKNOWN gap report, which carries no confirmations —
+  becomes the cause. The checksum is pinned in `durability_test.go`'s
+  `committedMigrations`, whose additive merge conflict with 0050's pin
+  was resolved keeping both in migration order.
+- `0050_gc_candidate_viewer.sql` (PR #6 round 5, SPEC-5.2; integration
+  merge `b8efc67`) — five `ALTER TABLE rec_gc_progress ADD COLUMN
+  f_viewer_{session_id, workflow_id, task_id, agent_id, authority}`
+  columns persisting `domain.GCProgress.Viewer`, the principal whose
+  visibility paged batch 1 (ADR 16's round-5 paragraph owns the behavior
+  and its tests). The numbering skips 0049 on purpose: it was reserved
+  for the K1-api.3 confirmation-record migration (the 0049 bullet
+  above), which merged ahead of this one in migration order. No
+  driver-code change
+  accompanied the migration: `semantic_gc_progress.go` persists the row
+  through the generic record encoder, so the new struct field maps to the
+  new columns automatically, and `storetest`'s `testSemanticGCProgress`
+  (`internal/store/storetest/semantic_gc_h3.go`) round-trips
+  `Viewer: HarnessPrincipal(sessA)` on both backends. **Pre-0050 rows
+  backfill lazily, never in SQL:** `gcProgress`
+  (`internal/lifecycle/gc_requests.go`) recovers a zero `Viewer` from
+  batch 1's committed collect receipt exactly as it already recovered a
+  zero `SnapshotSeq` (J2) — `firstBatchReceipt` tries
+  `domain.GCBatchRequestID(req.RequestID, 1)`, falling back to
+  `req.RequestID` itself for a manual first batch that kept the caller's
+  own request ID (SEC-4.8), the same fallback that closes the old
+  `ErrNotFound` gap a manual request's SnapshotSeq recovery had — so an
+  upgraded request keeps exactly the candidate set its first batch saw.
+  `TestGCProgressFreezesAndRecoversTheCandidateViewer_SPEC52`
+  (`internal/lifecycle/gc_round5_test.go`) pins the recovery against a
+  live progress row rewritten with `Viewer = domain.Principal{}`; the
+  file's checksum is pinned in `durability_test.go`'s
+  `committedMigrations` (`TestCommittedMigrationsUnchanged`).
+
+**Tests that lock this list (all in `internal/store/sqlite`, extending this
+ADR's existing migration-checksum/upgrade discipline):**
+`TestMigrationChecksumCoversStep`, `TestCommittedMigrationsUnchanged`,
+`TestMigratedSchemaMatchesTypes`, `TestMigrationChecksumMismatch`,
+`TestInterruptedMigrationReplays`, `TestUpgradePhase3RowFields`,
+`TestUpgradeGrantTargetIndex`, `TestUpgradeItemExchangeIndex`,
+`TestUpgradeSubjectHighWater`, `TestUpgradeCurrentWorkspaceBindings`,
+`TestUpgradeGCResultOutcome`, `TestH2LatestReadsAreKeyed`, and
+`TestLiveGrantRangesSkipDeadRows` (PR #6 round 3, DUR-3.10: these six were
+missing from this list). **`TestUpgradeLiveProofPaths`,
+`TestUpgradePolicyMaxLiveProofDependents`, and
+`TestUpgradePendingGCByTrigger` (0045-0047's own upgrade-parity fixtures),
+plus `TestCursorPagesSeekRange` and `TestLiveProofPathReadsSeek`
+(keyset-cursor seeks over the new indexes) and
+`TestLatestBindingVersionIsKeyed` (DUR-3.7) were also missing from this
+list (DUR-4.10).** `TestUpgradeK1Pointers_0048` (round 4, SPEC-4.4) is
+0048's own upgrade-parity fixture, landed after this list's prior pass;
+`TestUpgradePathConfirmations_0049` (round 5, K1-api.3) is 0049's own,
+same pattern. **`TestUpgradeGCCandidateViewer_0050` (round 7, SPEC-6.7,
+commit `d698cdb`) is 0050's own:** a `gc_progress` row a 49-binary left
+in flight has no viewer columns, so after the upgrade the frozen viewer
+is recovered from batch 1's committed receipt — a continuation by a
+DIFFERENT collector pages the first collector's frozen candidate set and
+decides every frozen candidate (each one it cannot access gets an
+explicit INELIGIBLE, P3-38), and the recovered viewer is what the next
+progress row records — asserts at
+`internal/store/sqlite/upgrade_test.go:1987` (the request finishes
+COLLECTED), `:2024` (every frozen candidate decided exactly once,
+`eph-001`/`eph-002` INELIGIBLE to the continuator at `:2028`), `:2038`
+(the recovered viewer, not the continuator, recorded), `:2055` (only
+batch 1's item archived); without batch 1's receipt the continuation
+fails closed — `ErrNotFound` at `:2076`, the request still pending at
+`:2086`, the legacy progress row untouched at `:2093`, nothing archived
+at `:2106`.
+`internal/obligation`'s own SQLite suite
+(50/50 subtests, 8/8 failure-injection scenarios, ADR 8) runs against these
+migrations through W2's `sqlitetest` template.
+
 ## Context
 
 FR-PER-001 requires in-memory and SQLite stores implementing the same
@@ -489,10 +892,18 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all seventeen migrations replay on a fresh database (SPEC-4.5:
-    corrected from a stale "fifteen" once 0016 and 0017 landed; SPEC-3.6
-    had already corrected that from a stale "fourteen" once 0015 landed,
-    itself correcting an earlier stale "eleven", itself
+    after all fifty migrations replay on a fresh database (SPEC-6.9,
+    PR #6 round 7: corrected from a stale "forty-eight," itself K1's
+    correction of a stale "forty-seven," itself PR #6 round 4's
+    SPEC-4.4/DUR-4.10 correction of a stale "forty-four," which
+    was this ADR's own count before 0045-0047 landed; PR #6 round 3,
+    SPEC-3.8/DUR-3.10 had corrected a stale "seventeen," which
+    was Phase 2's own count before Phase 3's 0018-0044 landed; PR #5
+    round 4's own SPEC-4.5 (a different PR's numbering, not to be confused
+    with PR #6's) had corrected that "seventeen" from a stale "fifteen" once 0016 and
+    0017 landed; SPEC-3.6 had already corrected that from a stale
+    "fourteen" once 0015 landed, itself correcting an earlier stale
+    "eleven", itself
     corrected from a
     stale "seven"), still matches every Go
     struct field exactly, locking the no-opaque-copy design above against

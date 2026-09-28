@@ -1,5 +1,5 @@
 {
-  "seq": 4,
+  "seq": 5,
   "opened_turn": 2,
   "items": [
     {
@@ -72,9 +72,7 @@
       "from": "event#1",
       "to": "event#0",
       "authority": "USER",
-      "coverage": [
-        "event#0"
-      ]
+      "rule_version": "derived-coverage/v1"
     }
   ],
   "obligations": [],
