@@ -106,3 +106,87 @@ func TestP3_17_ForgedUserProofPathIsInert(t *testing.T) {
 		}
 	})
 }
+
+// TestP3_17_ReevaluationSelectsDeterministicallyAndReplays: C-4/P3-17's
+// reevaluation selects existing observations in deterministic RUN order —
+// never report-arrival order — and an identical retry replays the same
+// receipt. Two complete PASS observations of the same subject are reported
+// with arrival order deliberately opposite to run order; the accepted state
+// and the reevaluation receipt must both name the newer RUN's observation,
+// the installed proof must name it with the matcher version, and retrying
+// the very same request after the revision moved returns the recorded
+// receipt without a new transition, while a different request at the stale
+// revision is a version conflict.
+func TestP3_17_ReevaluationSelectsDeterministicallyAndReplays(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newEvalFixture(t)
+		older, newer := f.newRun(t), f.newRun(t)
+		if older.Ordinal >= newer.Ordinal {
+			t.Fatalf("setup: run ordinals not increasing: %d then %d", older.Ordinal, newer.Ordinal)
+		}
+		// Arrival order disagrees with run order: the newer run's PASS is
+		// reported first, the older run's PASS second.
+		newerObs := f.report(t, newer, domain.OutcomePass, hashOf("W1"), nil)
+		olderObs := f.report(t, older, domain.OutcomePass, hashOf("W1"), nil)
+		if st, ok := f.subject(t, f.target); !ok || st.ObservationID != newerObs.ID {
+			t.Fatalf("accepted state = %+v (found=%v): arrival order beat run order (want %s)", st, ok, newerObs.ID)
+		}
+
+		f.matcherGrant(t, "g-det", f.sysTests, TestsPassV1, f.system)
+		in := domain.ReevaluateIntent{RequestID: "re-p17-det", Target: f.sysTests, ExpectedRevision: 1}
+		call := func(in domain.ReevaluateIntent) (domain.MutationResult, error) {
+			var res domain.MutationResult
+			err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+				var err error
+				res, err = f.s.ReevaluateTx(tx, f.harness, in, tx.NextSeq())
+				return err
+			})
+			return res, err
+		}
+		first, err := call(in)
+		if err != nil {
+			t.Fatalf("reevaluation: %v", err)
+		}
+		// The receipt records the selected observation in run order.
+		if len(first.Records.IDs) != 2 || first.Records.IDs[1] != newerObs.ID || first.Records.IDs[1] == olderObs.ID {
+			t.Fatalf("receipt did not record the run-ordered selection: %+v", first.Records)
+		}
+		o := f.status(t, f.sysTests)
+		if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
+			t.Fatalf("reevaluation did not satisfy: %+v", o)
+		}
+		var p domain.ApplicabilityProof
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			p, _ = r.ApplicabilityProof(o.CurrentProofID)
+			return nil
+		})
+		if p.ObservationID != newerObs.ID || p.RuleVersion != "tests_pass/1" {
+			t.Fatalf("proof = %+v: selected by arrival order or wrong matcher version (want %s)", p, newerObs.ID)
+		}
+		history := len(f.history(t, f.sysTests))
+
+		// The identical retry replays the recorded receipt, even though the
+		// revision it named has moved.
+		retry, err := call(in)
+		if err != nil {
+			t.Fatalf("identical retry: %v", err)
+		}
+		if retry.Records == nil || retry.Records.Kind != first.Records.Kind || len(retry.Records.IDs) != len(first.Records.IDs) ||
+			retry.Records.IDs[0] != first.Records.IDs[0] || retry.Records.IDs[1] != first.Records.IDs[1] {
+			t.Fatalf("retry receipt differs from the original: %+v vs %+v", retry.Records, first.Records)
+		}
+		if after := f.status(t, f.sysTests); after.Revision != o.Revision || after.Status != domain.ObligationSatisfied {
+			t.Fatalf("retry changed the obligation: %+v -> %+v", o, after)
+		}
+		if got := len(f.history(t, f.sysTests)); got != history {
+			t.Fatalf("retry appended history: %d -> %d", history, got)
+		}
+		// A different request at the stale revision is a conflict, not a replay.
+		other := in
+		other.RequestID = "re-p17-det-b"
+		if _, err := call(other); !errors.Is(err, domain.ErrVersionConflict) {
+			t.Fatalf("new request at a stale revision: %v, want ErrVersionConflict", err)
+		}
+	})
+}
