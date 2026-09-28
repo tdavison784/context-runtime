@@ -58,7 +58,7 @@ func TestP3_26_RetryWritesOneClaim(t *testing.T) {
 		}
 		before := lastSeq(t, st)
 		again, err := claim(i, "p26")
-		if err != nil || *again.Claim != *first.Claim {
+		if err != nil || again.Claim == nil || *again.Claim != *first.Claim {
 			t.Fatalf("retry: %+v, %v (want %+v)", again.Claim, err, first.Claim)
 		}
 		if after := lastSeq(t, st); after != before {

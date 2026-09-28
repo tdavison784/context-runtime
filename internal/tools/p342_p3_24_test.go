@@ -77,6 +77,7 @@ func TestP3_24_SameInvocationDifferentToolPrincipalOrArgsConflicts(t *testing.T)
 			var te *Error
 			if !errors.As(err, &te) || te.Code() != domain.ToolErrorConflict {
 				t.Errorf("%s: %v, want closed %s", name, err, domain.ToolErrorConflict)
+				continue
 			}
 			texts = append(texts, err.Error())
 		}
