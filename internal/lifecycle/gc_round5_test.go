@@ -207,3 +207,62 @@ func TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52(t *testing.T) {
 		})
 	}
 }
+
+// SPEC-5.2: the first batch records the frozen viewer in GCProgress, and a
+// pre-0050 progress row (no viewer column value) recovers it from batch
+// 1's committed receipt, so an upgraded request keeps exactly the
+// candidate set its first batch saw, whoever continues it.
+func TestGCProgressFreezesAndRecoversTheCandidateViewer_SPEC52(t *testing.T) {
+	ctx := context.Background()
+	eachStore(t, func(t *testing.T, db store.Store) {
+		pol := testPolicy()
+		pol.MaxGCDecisions = 1
+		s, _ := New(db, pol)
+		seedEphemeralLimited(t, db, "agent", "eph-001", "eph-002")
+		id := enqueueScratch(t, db, s)
+		first := storetest.NewPrincipal("s", domain.AuthorityHarness)
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			_, err := s.ExecuteGCRequest(tx, first, id, 0)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		readSemantic(t, db, func(sem store.SemanticReader) error {
+			p, err := sem.GCProgress(id)
+			if err != nil {
+				return err
+			}
+			if p.Batches != 1 || p.Viewer != first {
+				t.Fatalf("batch 1 froze viewer %+v (batches %d), want %v", p.Viewer, p.Batches, first)
+			}
+			return nil
+		})
+		// Rewrite the row as pre-0050 code left it: same cursor and batch
+		// count, no viewer.
+		if err := db.Update(ctx, "s", func(tx store.Tx) error {
+			sem, err := store.Semantic(tx)
+			if err != nil {
+				return err
+			}
+			p, err := sem.GCProgress(id)
+			if err != nil {
+				return err
+			}
+			p.Viewer = domain.Principal{}
+			_, err = sem.PutGCProgress(p, p.Revision)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		readSemantic(t, db, func(sem store.SemanticReader) error {
+			p, err := gcProgress(sem, id)
+			if err != nil {
+				return err
+			}
+			if p.Viewer != first {
+				t.Fatalf("legacy row recovered viewer %+v, want %v", p.Viewer, first)
+			}
+			return nil
+		})
+	})
+}

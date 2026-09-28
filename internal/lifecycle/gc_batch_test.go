@@ -53,7 +53,8 @@ func planOnce(t *testing.T, db store.Store, s *Service, after domain.GCCursor) b
 		if err != nil {
 			return err
 		}
-		plan, err = s.planBatch(tx, sem, storetest.NewPrincipal("s", domain.AuthoritySystem),
+		collector := storetest.NewPrincipal("s", domain.AuthoritySystem)
+		plan, err = s.planBatch(tx, sem, collector, collector,
 			domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual}, tx.NextSeq(), domain.GCProgress{Cursor: after})
 		if err != nil {
 			return err

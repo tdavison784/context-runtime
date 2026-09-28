@@ -64,7 +64,9 @@ const maxGCPagesPerCall = 64
 // principal supplied by the embedding; for task-scoped requests it must
 // belong to that task. Continuation binds to that authority class plus
 // task, never to the principal that ran an earlier batch: any authorized
-// collector may continue a pending request (SEC-4.5). A failure rolls back
+// collector may continue a pending request (SEC-4.5). The candidate viewer
+// stays the one batch 1 froze (SPEC-5.2); each batch's own collector keeps
+// per-target Archive authority (P3-38). A failure rolls back
 // only this batch: CollectPending
 // records the attempt or quarantine in its own transaction.
 func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRequestID string, seq uint64) (out MutationOutcome, err error) {
@@ -197,7 +199,11 @@ func (s *Service) RearmGCRequest(tx store.Tx, actor domain.Principal, failedID s
 }
 
 // gcProgress is the request's stored progress, or the zero progress
-// (Revision 0) before its first batch.
+// (Revision 0) before its first batch. A row from before the viewer freeze
+// (SPEC-5.2, migration 0050) recovers its frozen viewer — and a pre-J2 row
+// its snapshot ceiling — from batch 1's committed receipt, whose Principal
+// is the collector that paged that batch, so an upgraded request keeps
+// exactly the candidate set its first batch saw.
 func gcProgress(sem store.SemanticReader, id string) (domain.GCProgress, error) {
 	p, err := sem.GCProgress(id)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -207,22 +213,38 @@ func gcProgress(sem store.SemanticReader, id string) (domain.GCProgress, error) 
 		return p, err
 	}
 	// Pre-J2 progress recovers the ceiling from its first committed receipt.
-	if p.Batches > 0 && p.SnapshotSeq == 0 {
+	if p.Batches > 0 && (p.SnapshotSeq == 0 || p.Viewer == (domain.Principal{})) {
 		req, err := sem.GCRequest(id)
 		if err != nil {
 			return p, err
 		}
-		firstID, err := domain.GCBatchRequestID(req.RequestID, 1)
+		first, err := firstBatchReceipt(sem, req)
 		if err != nil {
 			return p, err
 		}
-		first, err := sem.CollectReceipt(collectReceiptID(req.SessionID, firstID))
-		if err != nil {
-			return p, err
+		if p.SnapshotSeq == 0 {
+			p.SnapshotSeq = first.SnapshotSeq
 		}
-		p.SnapshotSeq = first.SnapshotSeq
+		if p.Viewer == (domain.Principal{}) {
+			p.Viewer = first.Principal
+		}
 	}
 	return p, nil
+}
+
+// firstBatchReceipt reads a request's batch 1 receipt: a runtime root names
+// it "<root>/batch/1", while a manual first batch kept the caller's own
+// request ID for exact replay (SEC-4.8).
+func firstBatchReceipt(sem store.SemanticReader, req domain.GCRequest) (domain.CollectReceipt, error) {
+	firstID, err := domain.GCBatchRequestID(req.RequestID, 1)
+	if err != nil {
+		return domain.CollectReceipt{}, err
+	}
+	first, err := sem.CollectReceipt(collectReceiptID(req.SessionID, firstID))
+	if err == nil || !errors.Is(err, domain.ErrNotFound) {
+		return first, err
+	}
+	return sem.CollectReceipt(collectReceiptID(req.SessionID, req.RequestID))
 }
 
 // CollectPending executes up to max request batches, each in its own
