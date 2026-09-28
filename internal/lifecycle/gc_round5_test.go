@@ -147,7 +147,7 @@ func TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52(t *testing.T) {
 	// hidden — a ref, a decision target — and checks the projected copy still
 	// satisfies Validate's pairing invariants (SPEC-6.2 keeps the length
 	// equality).
-	assertReceiptProjected := func(who domain.Principal, r domain.CollectReceipt, hidden map[string]bool) {
+	assertReceiptProjected := func(t *testing.T, who domain.Principal, r domain.CollectReceipt, hidden map[string]bool) {
 		t.Helper()
 		if err := r.Validate(); err != nil {
 			t.Fatalf("%s's returned receipt does not validate: %v (%+v)", who.AgentID, err, r)
@@ -226,7 +226,7 @@ func TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52(t *testing.T) {
 					if _, ok := gcResult(t, db, id); ok {
 						break
 					}
-					assertReceiptProjected(tc.rest, step(tc.rest), hidden)
+					assertReceiptProjected(t, tc.rest, step(tc.rest), hidden)
 				}
 				res, found := gcResult(t, db, id)
 				if !found || res.Outcome != domain.GCCollected {
@@ -234,7 +234,7 @@ func TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52(t *testing.T) {
 				}
 				// The finished request replays its final batch to the collector
 				// that ran it: that replayed copy is access-projected too.
-				assertReceiptProjected(tc.rest, step(tc.rest), hidden)
+				assertReceiptProjected(t, tc.rest, step(tc.rest), hidden)
 				got := gcBatchDecisions(t, db, id)
 				if len(got) != len(tc.want) {
 					t.Fatalf("decisions = %v, want every frozen candidate decided: %v", got, tc.want)

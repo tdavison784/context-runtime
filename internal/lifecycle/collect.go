@@ -160,7 +160,14 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 			return out, err
 		}
 	}
-	out.Result.Collect = &receipt
+	// SPEC-6.2 / P3-38: the stored receipt keeps every frozen candidate; the
+	// copy this collector receives — the one its MutationReceipt stores and
+	// therefore replays — drops the pairs it cannot access.
+	projected, perr := projectCollectReceipt(receipt, plan.access)
+	if perr != nil {
+		return out, perr
+	}
+	out.Result.Collect = &projected
 	if err = s.finish(tx, sem, p, domain.MutationCollection, methodCollect, i.RequestID, args, out.Result); err != nil {
 		return out, err
 	}
@@ -178,6 +185,7 @@ type batchPlan struct {
 	receipt       domain.CollectReceipt
 	effects       []itemEffect
 	cursors       []domain.GCCursor // position of each decided candidate
+	access        []bool            // per frozen candidate: may the EXECUTING collector read it (SPEC-6.2)
 	spare         uint64
 	next          domain.GCCursor
 	more          bool
@@ -290,6 +298,7 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p, viewer dom
 			}
 			plan.receipt.CandidateRefs = append(plan.receipt.CandidateRefs, ref)
 			plan.receipt.Decisions = append(plan.receipt.Decisions, domain.GCDecision{Target: ref, Code: code})
+			plan.access = append(plan.access, it.Access.Permits(p))
 			plan.next = domain.GCCursor{Seq: it.Seq, ID: it.ID}
 			plan.cursors = append(plan.cursors, plan.next)
 			cursor = store.Cursor{Seq: it.Seq, ID: it.ID}
@@ -355,6 +364,40 @@ func (s *Service) decideCandidate(tx store.Tx, sem store.SemanticReader, p domai
 		To: string(domain.ResidencyArchived), Actor: p, GrantID: auth.GrantIDs[target.AuthorizationKey]}}, nil
 }
 
+// projectCollectReceipt returns the copy of a batch receipt the EXECUTING
+// collector receives (SPEC-6.2, P3-38): access records, per frozen candidate
+// in order, whether that collector may read the item, and each pair it
+// cannot access is removed — ref and decision together, so the receipt still
+// satisfies Validate's candidate/decision pairing. An inaccessible candidate
+// is never ARCHIVE (a collector that cannot read an item cannot archive it),
+// so the archived results stay paired with the kept ARCHIVE decisions. The
+// stored CollectReceipt keeps every frozen candidate; only this returned and
+// replayed copy is projected.
+func projectCollectReceipt(r domain.CollectReceipt, access []bool) (domain.CollectReceipt, error) {
+	if len(access) != len(r.CandidateRefs) {
+		return domain.CollectReceipt{}, domain.ErrIntegrity // fail closed: a misaligned plan may only under-report
+	}
+	out := r.Clone()
+	kept := 0
+	for _, ok := range access {
+		if ok {
+			kept++
+		}
+	}
+	if kept == len(access) {
+		return out, nil // the collector reads every frozen candidate: identity
+	}
+	refs, decisions := make([]domain.ItemRevisionRef, 0, kept), make([]domain.GCDecision, 0, kept)
+	for n, ok := range access {
+		if ok {
+			refs = append(refs, out.CandidateRefs[n])
+			decisions = append(decisions, out.Decisions[n])
+		}
+	}
+	out.CandidateRefs, out.Decisions = refs, decisions
+	return out, nil
+}
+
 // fitCollectionPlan sizes the complete eventual MutationReceipt before effects.
 // Conservative sequence values cover allocations made while applying the plan.
 func (s *Service) fitCollectionPlan(tx store.Tx, p domain.Principal, i domain.CollectIntent, args []byte, requestID string, plan batchPlan) (batchPlan, error) {
@@ -400,7 +443,7 @@ func (s *Service) fitCollectionPlan(tx store.Tx, p domain.Principal, i domain.Co
 				effects = append(effects, e)
 			}
 		}
-		plan.receipt.CandidateRefs, plan.receipt.Decisions, plan.effects = plan.receipt.CandidateRefs[:n], plan.receipt.Decisions[:n], effects
+		plan.receipt.CandidateRefs, plan.receipt.Decisions, plan.access, plan.effects = plan.receipt.CandidateRefs[:n], plan.receipt.Decisions[:n], plan.access[:n], effects
 		plan.cursors, plan.next, plan.more = plan.cursors[:n], plan.cursors[n-1], true
 		plan.itemAttempts, plan.itemAttemptID = 0, "" // trimming changed the next candidate
 	}
