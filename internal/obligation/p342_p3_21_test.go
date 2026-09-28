@@ -27,13 +27,13 @@ func TestP3_21_RawEnvironmentValuesRejected(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			if name == "sqlite" {
-				// Mirror TestSQLiteSuite's probe: this store family may be
-				// unpublished on a backend that has not received W2's facet.
+				// Mirror TestSQLiteSuite's probe: the facet is published, so
+				// a missing family here is a regression, not pending work.
 				if !familySupported(t, backend(t), func(r store.SemanticReader) error {
 					_, err := r.ResourceBinding("probe")
 					return err
 				}) {
-					t.Skip("resource/workspace family unpublished on this backend")
+					t.Fatal("resource/workspace family unpublished on this backend")
 				}
 			}
 			prev := backendFactory

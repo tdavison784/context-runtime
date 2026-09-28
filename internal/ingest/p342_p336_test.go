@@ -103,6 +103,16 @@ func p336Verify(t *testing.T, f *fixture, p1, p2, p3 domain.ContextItem) {
 	})
 }
 
+// requireObligations fails the test when the backend lacks the
+// obligation/proof/workspace facet: P3-36 expects it on every store, so a
+// missing facet is a regression, not pending work.
+func requireObligations(t *testing.T, f *fixture) {
+	t.Helper()
+	if !hasObligations(f.s) {
+		t.Fatal("backend lacks the obligation/proof/workspace facet records P3-36 expects")
+	}
+}
+
 // TestP336_HistoryReconstructibleAfterFurtherMutationsAndRestart (P3-36):
 // replacements by old (USER) and new (SYSTEM) authority, the obligation
 // invalidations they cause, and a later lifecycle change all remain
@@ -112,7 +122,7 @@ func p336Verify(t *testing.T, f *fixture, p1, p2, p3 domain.ContextItem) {
 // store.
 func TestP336_HistoryReconstructibleAfterFurtherMutationsAndRestart(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
-		needsObligations(t, f)
+		requireObligations(t, f)
 		p1, p2, p3 := p336Mutate(t, f)
 		p336Verify(t, f, p1, p2, p3)
 	})
@@ -127,7 +137,7 @@ func TestP336_HistoryReconstructibleAfterFurtherMutationsAndRestart(t *testing.T
 		}
 		f := newFixture(t, s)
 		f.usePolicy(testPolicy())
-		needsObligations(t, f)
+		requireObligations(t, f)
 		p1, p2, p3 := p336Mutate(t, f)
 		p336Verify(t, f, p1, p2, p3)
 		// Restart: reopen the same file and reconstruct the identical
@@ -158,7 +168,7 @@ func TestP336_HistoryReconstructibleAfterFurtherMutationsAndRestart(t *testing.T
 // (coverage does not suppress authority-preserving semantic deltas).
 func TestP336_CheckpointNeverRetiresRequirementBySourceCoverage(t *testing.T) {
 	semanticStores(t, func(t *testing.T, f *fixture) {
-		needsObligations(t, f)
+		requireObligations(t, f)
 		c := newT16(t, f)
 		sys := principal(domain.AuthoritySystem)
 		rp := f.mustIngest(sys, sysEvent("p336-pin", "## Pinned\n- [dep] {obligation=tests_pass} Use dependency v2.\n"))

@@ -28,7 +28,7 @@ func p3_14BothStores(t *testing.T, exercise func(*testing.T)) {
 					_, err := r.ExactObligation(domain.ObligationRef{SessionID: testSession, ObligationID: "probe", Version: 1})
 					return err
 				}) || !observationNamespaceSupported(t, st) {
-					t.Skip("obligation/observation family unpublished on this backend")
+					t.Fatal("obligation/observation family unpublished on this backend")
 				}
 			}
 			prev := backendFactory
