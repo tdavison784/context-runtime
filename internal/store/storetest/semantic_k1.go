@@ -1,6 +1,8 @@
 package storetest
 
 import (
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -27,7 +29,10 @@ func report(t *testing.T, s store.Store, id string, from uint64, fp string, path
 }
 
 // reportInTx is report's write inside a caller's transaction, for the A5
-// guard's same-transaction cases.
+// guard's same-transaction cases. Like the service, ChangedPaths and the
+// recorded contents are independent: every entry of contents is written,
+// whether or not its path is also a changed path (K1-api.3's confirmations
+// ride on exactly those writes).
 func reportInTx(t *testing.T, tx store.Tx, id string, from uint64, fp string, paths []string, contents map[string]string) domain.ResourceUpdate {
 	t.Helper()
 	sem := semantic(t, tx)
@@ -35,7 +40,14 @@ func reportInTx(t *testing.T, tx store.Tx, id string, from uint64, fp string, pa
 	noErr(t, sem.InsertResourceUpdate(u))
 	_, err := sem.PutResourceState(StateAfter(u, tx.NextSeq()), from)
 	noErr(t, err)
-	for _, p := range paths {
+	written := make([]string, 0, len(paths)+len(contents))
+	written = append(written, paths...)
+	for _, p := range slices.Sorted(maps.Keys(contents)) {
+		if !slices.Contains(written, p) {
+			written = append(written, p)
+		}
+	}
+	for _, p := range written {
 		h, ok := contents[p]
 		if !ok {
 			continue

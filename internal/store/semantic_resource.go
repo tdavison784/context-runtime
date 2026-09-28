@@ -51,6 +51,24 @@ type ResourceReader interface {
 	// seek over that exact key, never a prefix scan; ErrNotFound when
 	// none.
 	FirstAffectingUpdateAfter(resourceID, key string, rev uint64) (domain.ResourceUpdate, error)
+	// LastConfirmedRev is K1-api.3's confirmation pointer for (resourceID,
+	// path, key): the latest revision of a broad raise of key — "" for
+	// ALL, else a canonical path — whose report explicitly recorded path's
+	// content unchanged. Records exist only for keys that are ALL or an
+	// ancestor of path; 0 when never confirmed (never an error).
+	LastConfirmedRev(resourceID, path, key string) (uint64, error)
+	// LastUnconfirmedRev is K1-api.3's companion of LastConfirmedRev: the
+	// latest unconfirmed raise of key at or before LastConfirmedRev(path,
+	// key) — the raise the confirmation overtook without confirming path.
+	// 0 when every raise up to the confirmation confirmed it (never an
+	// error).
+	LastUnconfirmedRev(resourceID, path, key string) (uint64, error)
+	// FirstUnconfirmedAffectingUpdateAfter is the settlement cause's
+	// gap-seek (K1-api.3 SPEC-2): the earliest raise of broad key — "" for
+	// ALL, else a canonical ancestor path — past rev that did NOT confirm
+	// path. ErrNotFound when every raise of the key past rev confirmed the
+	// path, or none is past rev.
+	FirstUnconfirmedAffectingUpdateAfter(resourceID, path, key string, rev uint64) (domain.ResourceUpdate, error)
 	WorkspaceBinding(ref domain.WorkspaceBindingRef) (domain.WorkspaceBinding, error)
 	WorkspaceBindingsByContext(sourceItemID, taskID, conversationID string, page Page) (ResultPage[domain.WorkspaceBinding], error)
 	// CurrentWorkspaceBindingsByContext lists each binding ID once, at its

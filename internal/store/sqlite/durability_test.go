@@ -312,6 +312,7 @@ var committedMigrations = map[string]string{
 	"0046_policy_max_live_proof_dependents.sql":      "2c920abd1a7a23af573d63161ccc7dd358602499647943fb328cd88e02464d05",
 	"0047_gc_queue.sql":                              "a33b61afa750bd86de7c46032888f5777c93f3b168314a6a4f1304dc4804c263",
 	"0048_k1_pointers.sql":                           "f3dc1891e7045345cdc5fc85c0af62c293bdd81d8f5df1b004d833d96eaacddb",
+	"0049_path_confirmations.sql":                    "c77eece670cb5d6d9116b027ad5a774c9ccd508088fbc0a3d7f7b9981335fedb",
 	"0050_gc_candidate_viewer.sql":                   "bafbb61f0a52b0e9b74eb6f6d4f823f9d6038210bc4c9527c8dda8f4120793b7",
 }
 

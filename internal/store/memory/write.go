@@ -25,13 +25,13 @@ type tx struct {
 	// checks (semantic.go).
 	semSeqs  []uint64
 	deferred []func() error
-	// pathRaises are this transaction's pending K1 A1 path-key raises with
-	// the path writes that may spare them, resolved once at commit — after
-	// the report's content writes, before any deferred check that reads
-	// the pointers (semantic_k1.go).
-	pathRaises    []pathRaise
-	pathWrites    []pathWrite
-	pathRaiseDone bool
+	// pendingReports are this transaction's pending reports with the path
+	// writes that resolve them, applied to the pointers as a watermark:
+	// at the latest by commit, and before that whenever a K1 pointer read
+	// or the A5 guard needs them (XREV-5.1, semantic_k1.go).
+	pendingReports []pendingReport
+	pathWrites     []pathWrite
+	k1Applied      int
 }
 
 func (t *tx) markSemantic()  { t.semantic = true }

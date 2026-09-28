@@ -1621,3 +1621,217 @@ func TestUpgradeK1Pointers_0048(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpgradePathConfirmations_0049 checks migration 0049 on a database
+// migrated through 0048 (K1-api.3): its lookup tables start empty — the
+// same-content history of old reports is not reconstructible, so nothing is
+// backfilled and pre-0049 raises keep invalidating exactly as before
+// (conservative over-invalidation, never under) — while reports accepted
+// after the upgrade write their confirmation records against those legacy
+// raises: a confirming ALL resync closes the legacy raise it overtakes as
+// an unconfirmed gap and spares the path, and the next unconfirmed report
+// becomes the cause.
+func TestUpgradePathConfirmations_0049(t *testing.T) {
+	l := openLegacy(t, 48)
+	l.insert("resource_binding", storetest.NewResourceBinding("s", "repo", 1), nil)
+	// The history as the version-48 binary stored it: u1 establishes
+	// src/a.go at v1, u2 is an ALL-paths resync that recorded the path's
+	// content unchanged, and u3 changes it to v2, with the resource state,
+	// path states and raises its runtime wrote — exact raises at 1 and 3,
+	// an ALL raise at 2 (u2's exact key was spared, but a 48 binary wrote
+	// no confirmation records, so its ALL raise stands).
+	loc := domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: "src/a.go"}
+	locKey, err := loc.Key()
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := []struct {
+		id      string
+		seq     uint64
+		all     bool
+		content string
+	}{
+		{"u1", 2, false, "v1"},
+		{"u2", 3, true, "v1"},
+		{"u3", 4, false, "v2"},
+	}
+	var last domain.ResourceUpdate
+	final := steps[len(steps)-1]
+	for i, st := range steps {
+		var u domain.ResourceUpdate
+		if st.all {
+			u = storetest.NewResourceUpdate("s", st.id, "repo", st.seq, uint64(i), k1FpA)
+		} else {
+			u = storetest.NewResourceUpdate("s", st.id, "repo", st.seq, uint64(i), k1FpA, "src/a.go")
+		}
+		l.insert("resource_update", u, nil)
+		last = u
+	}
+	// The path table holds one row per locator: the final state the history
+	// produced (u3's content, at the third write).
+	l.insert("path_state", pathStateRow{SessionID: "s", LocatorKey: locKey, State: domain.ResourcePathState{
+		SemanticMeta: storetest.Meta("s", "ps-"+final.id, final.seq), Locator: loc, ContentHash: domain.HashBytes([]byte(final.content)),
+		ResourceUpdateID: last.ID, ResourceRevision: last.ResultingAuthoritativeRevision, Revision: uint64(len(steps)), Freshness: domain.ResourceKnown}}, nil)
+	state := storetest.StateAfter(last, 5)
+	state.Revision = uint64(len(steps))
+	l.insert("resource_state", state, nil)
+	raise := func(key, id string, rev uint64) {
+		t.Helper()
+		if _, err := l.db.Exec("INSERT INTO lookup_affecting_raise(session_id,resource_id,path_key,revision,update_id) VALUES('s','repo',?,?,?)", key, rev, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raise(updatePathKey("src/a.go"), "u1", 1)
+	raise("all", "u2", 2)
+	raise(updatePathKey("src/a.go"), "u3", 3)
+	if _, err := l.db.Exec("INSERT INTO lookup_workspace_divergence(session_id,resource_id,revision,update_id) VALUES('s','repo',1,'u1')"); err != nil {
+		t.Fatal(err)
+	}
+	// Two satisfied proofs on the path: one established at revision 1,
+	// below the legacy ALL raise, and one at revision 3, on the current
+	// content.
+	satisfy := func(obID, proofID, depID string, seq, depRev uint64) {
+		o := storetest.BoundObligation(t, "s", obID, 1, seq, "src")
+		o.Status, o.CurrentProofID, o.Revision = domain.ObligationSatisfied, proofID, 2
+		d := domain.ProofDependency{SemanticMeta: storetest.Meta("s", depID, seq), ProofID: proofID, ResourceID: "repo",
+			Kind: domain.DependencyCurrentPath, ResourceRevision: depRev, Fingerprint: k1FpA, Locator: &loc}
+		l.insert("proof_dependency", d, nil)
+		l.insert("proof", domain.ApplicabilityProof{ResourceID: "repo", Fingerprint: k1FpA, ResourceRevision: depRev,
+			SemanticMeta: storetest.Meta("s", proofID, seq), Target: storetest.Ref(o), TransitionID: "tr-" + obID,
+			RuleVersion: "rule/1", AssertionID: "asr-" + obID, DependencyIDs: []string{depID}, Access: o.Access}, nil)
+		l.insert("obligation", o, nil)
+	}
+	satisfy("o-old", "prf-old", "d-old", 20, 1)
+	satisfy("o-new", "prf-new", "d-new", 21, 3)
+
+	s := l.upgrade()
+	ctx := context.Background()
+	// 0049 creates its tables and backfills nothing (SPEC: conservative,
+	// no invented history).
+	for _, table := range []string{"lookup_path_confirmation", "lookup_unconfirmed_gap"} {
+		var n int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil || n != 0 {
+			t.Errorf("%s after 0049 holds %d rows (%v), want 0: no backfill", table, n, err)
+		}
+	}
+	read := func(fn func(r store.SemanticReader)) {
+		t.Helper()
+		if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+			r, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			fn(r)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	valid := func(r store.SemanticReader, id string) bool {
+		ok, err := store.ProofDerivedValid(r, id)
+		if err != nil {
+			t.Fatalf("ProofDerivedValid(%s): %v", id, err)
+		}
+		return ok
+	}
+	cause := func(r store.SemanticReader, rev uint64) string {
+		u, err := r.FirstUnconfirmedAffectingUpdateAfter("repo", "src/a.go", "", rev)
+		if errors.Is(err, domain.ErrNotFound) {
+			return ""
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.ID
+	}
+	read(func(r store.SemanticReader) {
+		if rev, err := r.LastConfirmedRev("repo", "src/a.go", ""); err != nil || rev != 0 {
+			t.Errorf("LastConfirmedRev after 0049 = %d (%v), want 0", rev, err)
+		}
+		if rev, err := r.LastUnconfirmedRev("repo", "src/a.go", ""); err != nil || rev != 0 {
+			t.Errorf("LastUnconfirmedRev after 0049 = %d (%v), want 0", rev, err)
+		}
+		// The legacy ALL raise still counts as unconfirmed, so the old
+		// history keeps invalidating exactly as before.
+		if got := cause(r, 0); got != "u2" {
+			t.Errorf("unconfirmed ALL raise after 0049 = %q, want the legacy u2", got)
+		}
+		if got := cause(r, 2); got != "" {
+			t.Errorf("unconfirmed ALL raise past 2 after 0049 = %q, want none", got)
+		}
+		if valid(r, "prf-old") {
+			t.Errorf("revision-1 proof derived valid after 0049, want the legacy over-invalidation")
+		}
+		if !valid(r, "prf-new") {
+			t.Errorf("revision-3 proof derived invalid after 0049, want valid")
+		}
+	})
+	// A confirming ALL resync accepted after the upgrade: the write rule
+	// sees the legacy ALL raise pointer (2) as the L it overtakes, closes
+	// that raise as an unconfirmed gap and confirms the path at 4.
+	confirming := func(id string, from uint64, content string) {
+		t.Helper()
+		if err := s.Update(ctx, "s", func(tx store.Tx) error {
+			sem, err := store.Semantic(tx)
+			if err != nil {
+				return err
+			}
+			u := storetest.NewResourceUpdate("s", id, "repo", tx.NextSeq(), from, k1FpA)
+			if err := sem.InsertResourceUpdate(u); err != nil {
+				return err
+			}
+			if _, err := sem.PutResourceState(storetest.StateAfter(u, tx.NextSeq()), from); err != nil {
+				return err
+			}
+			cur, err := sem.ResourcePathState(loc)
+			if err != nil {
+				return err
+			}
+			// One immutable row per locator: the write keeps its ID and
+			// advances its sequence, the way the runtime's reports do.
+			meta := cur.SemanticMeta
+			meta.Seq = tx.NextSeq()
+			_, err = sem.PutResourcePathState(domain.ResourcePathState{SemanticMeta: meta, Locator: loc,
+				ContentHash: domain.HashBytes([]byte(content)), ResourceUpdateID: u.ID, ResourceRevision: u.ResultingAuthoritativeRevision,
+				Revision: cur.Revision + 1, Freshness: domain.ResourceKnown}, cur.Revision)
+			return err
+		}); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+	}
+	confirming("u4", 3, "v2")
+	read(func(r store.SemanticReader) {
+		if rev, err := r.LastConfirmedRev("repo", "src/a.go", ""); err != nil || rev != 4 {
+			t.Errorf("LastConfirmedRev after u4 = %d (%v), want 4", rev, err)
+		}
+		if rev, err := r.LastUnconfirmedRev("repo", "src/a.go", ""); err != nil || rev != 2 {
+			t.Errorf("LastUnconfirmedRev after u4 = %d (%v), want the legacy raise 2", rev, err)
+		}
+		if got := cause(r, 0); got != "u2" {
+			t.Errorf("unconfirmed ALL raise after u4 = %q, want the legacy u2 through the closed gap", got)
+		}
+		if got := cause(r, 2); got != "" {
+			t.Errorf("unconfirmed ALL raise past 2 after u4 = %q, want none: u4 confirmed the path", got)
+		}
+		if !valid(r, "prf-new") {
+			t.Errorf("revision-3 proof derived invalid after u4, want valid: the resync confirmed the path")
+		}
+	})
+	// The next unconfirmed ALL raise — an UNKNOWN gap report carries no
+	// confirmations — fires past the confirmation and becomes the cause.
+	k1ReplayReport(t, s, k1Report{id: "u5", unknown: true}, 4)
+	read(func(r store.SemanticReader) {
+		if got := cause(r, 4); got != "u5" {
+			t.Errorf("unconfirmed ALL raise past 4 after u5 = %q, want u5", got)
+		}
+		if valid(r, "prf-new") {
+			t.Errorf("revision-3 proof derived valid after u5, want invalid")
+		}
+		if rev, err := r.LastUnconfirmedRev("repo", "src/a.go", ""); err != nil || rev != 2 {
+			t.Errorf("LastUnconfirmedRev after u5 = %d (%v), want 2: gap reports carry no confirmations", rev, err)
+		}
+		if rev, err := r.LastAffectingRev("repo", ""); err != nil || rev != 5 {
+			t.Errorf("LastAffectingRev(ALL) after u5 = %d (%v), want 5", rev, err)
+		}
+	})
+}

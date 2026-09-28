@@ -20,6 +20,10 @@ type readTx struct {
 	sessionID string
 	lastSeq   uint64
 	done      bool
+	// writer names this view's own transaction when it is a writing one,
+	// so K1 pointer reads first make the transaction's applied reports'
+	// raises visible (XREV-5.1); nil in a View.
+	writer *tx
 
 	items        table[string, domain.ContextItem]
 	rels         table[string, domain.Relationship]
