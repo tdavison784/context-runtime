@@ -565,9 +565,14 @@ lifecycle requests (`*Standalone`, manual `Collect`):** it also runs at
 the semantic-tool handlers (`internal/tools`), retrieval
 (`internal/retrieve`), graph membership (`internal/graph`), obligation
 mutations (`internal/obligation`), and the harness checkpoint path.
-Tests: `*RefuseReservedRequestIDs_SEC37` in `internal/tools`,
-`internal/graph`, `internal/obligation`, `internal/retrieve`, and
-`internal/ingest`. Stores derive keys with
+Tests: `TestToolsRefuseReservedRequestIDs_SEC37` (`internal/tools`),
+`TestMembershipRefusesReservedRequestIDs_SEC37` (`internal/graph`),
+`TestObligationEntriesRefuseReservedRequestIDs_SEC37`
+(`internal/obligation`), `TestRetrievalRefusesReservedRequestIDs_SEC37`
+(`internal/retrieve`), and `TestLifecycleTxEntriesRefuseReserved
+RequestIDs_SEC37` (`internal/ingest`) — all five named, because the
+`*RefuseReservedRequestIDs_SEC37` glob this sentence used missed the two
+spelled `Refuses`. Stores derive keys with
 `MutationReceiptKey(session, family, requestID)` and check ownership with
 `RuntimeRequestOwnedBy`. Receipt ID values stay a hash of (session, family,
 requestID). `operation-request-id/v1..v2` and `operation-request-binding/v1`

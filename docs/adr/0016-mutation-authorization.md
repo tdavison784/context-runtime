@@ -200,8 +200,9 @@ both forms share.
   can raise it is enabled by default (`FR-GC-004` permits a disabled
   trigger); `POLICY` has no producer yet, so it stays off. **SPEC-2.3
   (PR #6 round 2): this rule was violated for SUPERSESSION on two paths;
-  one is now fixed in this reconciliation, one is fixed but not yet merged
-  here.** Observation-state supersession
+  both were fixed by the round-2/round-4 integrations (an earlier pass of
+  this section wrongly recorded one of the two as fixed-but-not-merged).**
+  Observation-state supersession
   (`graph.FileObservationState`, via `internal/obligation/subject_state.go`'s
   `deriveState`) now enqueues through `gcqueue.Enqueue`, keyed by the new
   state occurrence, under the service's own recorded policy — a first state
@@ -221,14 +222,23 @@ both forms share.
   the executor must share a Phase 3 policy version: since SPEC-2.11, a
   request carries its producer's recorded policy version, so a version
   mismatch affects every attempt from the first pass, not an occasional
-  one. **A stale `PolicyVersion`, a disabled trigger, and a missing
-  authorized collector are all J5 "configuration errors": the attempt
-  fails closed and the request stays pending, uncharged, never
-  quarantined** (`classifyGCFailure`, `internal/lifecycle/gc_failure.go`,
-  maps `ErrUnsupportedSchema` to `gcNotCharged`; `domain.GCFailurePolicyMismatch`
-  remains a defined reason code but is not produced by this path). This
+  one. **A version-mismatched request no longer strands (ruling M1,
+  DUR-4.9, fixed round 4 — amending this section's round-3 text, which
+  said such a request "stays pending, never quarantined"):** the first
+  `CollectPending` pass under the current policy settles it
+  `FAILED`/`POLICY_MISMATCH` (`ErrGCPolicyVersion`,
+  `domain.GCFailurePolicyMismatch`) — uncharged, nothing archived — so
+  the normal re-arm path applies under the current policy and the same
+  authorization; a *direct* `ExecuteGCRequest` on a version-mismatched
+  request still returns `ErrUnsupportedSchema` and leaves it pending,
+  uncharged (`classifyGCFailure`, `internal/lifecycle/gc_failure.go`,
+  maps it to `gcNotCharged`). A disabled trigger keeps returning
+  `ErrGCTriggerDisabled` (callers test it with `errors.Is`), and a
+  missing authorized collector is still the closed `ErrGCConfiguration`
+  — both J5 "configuration errors" that fail closed, charge nothing,
+  and never quarantine on their own. This
   is J5's rule exactly ("a misconfigured collector … returns an error to
-  the caller and leaves the request pending — never quarantined"), which
+  the caller"), which
   is stricter than, and supersedes, SPEC-3.4's originally suggested
   "quarantines at once as `POLICY_MISMATCH`" text — that text described
   round-2 code J1–J7's redesign has since replaced.
@@ -238,8 +248,13 @@ both forms share.
   that ceiling in `(item.Seq, item.ID)` order. `GCProgress` CAS persists
   the last fully decided candidate, completed batch count, adaptive
   item-count limit, and attempts for the next candidate. Later insertions
-  cannot extend the request. Continuations require the first batch's
-  collector principal, preserving its access boundary.
+  cannot extend the request. Continuations bind to the collector's
+  *authority class* (SYSTEM/HARNESS) plus, for task-scoped requests, the
+  task — any authorized same-task collector may run a later batch, not
+  only the principal that ran batch 1 (SEC-4.5, fixed round 4; the
+  round-3 text here wrongly required the first batch's exact principal).
+  Per-target `Archive` authorization always stays under the principal
+  executing that batch.
   **Regression, fixed round 4 (SEC-4.2/SPEC-4.2, introduced by
   `920e9e8`): freezing the candidate set at `SnapshotSeq` did not also
   freeze protection decisions.** `gc_snapshot.go` evaluated lease
@@ -267,14 +282,21 @@ both forms share.
   preserve the item and let later candidates proceed. A result becomes
   `COLLECTED` only when the bounded candidate traversal is exhausted.
   Only request-level `INVALID_REQUEST` and `INTEGRITY` failures quarantine.
-  Collector policy/trigger mismatch or missing capability returns an error
-  and leaves the request pending without charging attempts. Infrastructure
+  A disabled trigger or missing collector capability returns an error
+  (`ErrGCTriggerDisabled`/`ErrGCConfiguration`) and leaves the request
+  pending without charging attempts; a policy-version mismatch settles
+  `FAILED`/`POLICY_MISMATCH` through `CollectPending` under ruling M1
+  (above), while a direct `ExecuteGCRequest` still refuses it with
+  `ErrUnsupportedSchema`, pending and uncharged. Infrastructure
   failures also leave it pending; historical terminal reason codes remain
   readable. Terminal results remove requests from the pending index in the
-  same transaction. Each service keeps a concurrency-safe, per-session
-  scan continuation across calls and wraps at the end, so a disabled or
-  declined prefix cannot permanently hide runnable requests within that
-  service's lifetime; a new service begins at the queue head.
+  same transaction. The scan continuation is durable, not per-service:
+  the CAS-written, per-session `gc_queue_cursor` (migration 0047, below)
+  carries the scan position across calls, restarts, and service
+  replacement, and wraps at the end, so a disabled or declined prefix
+  cannot permanently hide runnable requests; a new service instance
+  resumes at the cursor, never restarting from the queue head (the
+  round-3 text here described the replaced in-process continuation).
   Direct `Collect`, including SESSION scope, uses the same durable path.
   Its receipt exposes `GCRequestID`; callers use `ExecuteGCRequest` or
   `CollectPending` to continue. Retrying the original manual intent replays
@@ -299,7 +321,7 @@ both forms share.
   `TestJ7ManualSessionCollectionResumesAndReplays` run on both stores.
   **DUR round 3 strengthens three of these rulings, all now landed
   (DUR-3.2/3.3/3.4, PR #6 round 3, reconciled at head `4ff6ca1`; SPEC-4.3
-  corrects the prior "not yet merged" text).** J6's queue continuation is
+  corrects the prior pending-merge wording).** J6's queue continuation is
   durable: `gc_queue_cursor` (migration 0047) is a CAS-written, per-session
   cursor position, and `lookup_pending_gc_trigger` (migration 0047,
   backfilled from `lookup_pending_gc`) indexes pending requests by trigger
@@ -311,7 +333,10 @@ both forms share.
   `FAILED` request becomes re-armable only through SYSTEM/HARNESS calling
   `lifecycle.Service.RearmGCRequest` (`internal/lifecycle/gc_requests.go`),
   which derives a new deterministic request identity from the failed
-  request's own scope/task/trigger (`gcqueue.Enqueue(..., "rearm/"+req.ID)`)
+  request alone — `domain.GCRearmRequestID(failed.ID)` filed through
+  `gcqueue.EnqueueRearm` (`internal/gcqueue`), the form SEC-4.4/DUR-4.8's
+  paragraph below describes; the `Enqueue(..., "rearm/"+req.ID)` shape this
+  sentence originally recorded no longer exists —
   and leaves the original `FAILED` record immutable (DUR-3.3). J4's attempt
   counter resets whenever a batch makes any progress, not only on full
   success: every successful batch write carries `Attempts: 0`
@@ -323,9 +348,11 @@ both forms share.
   fixed as of the round-4 integration (`p3-int`, head `dc07666`):**
   `RearmGCRequest` (`internal/lifecycle/gc_requests.go`) now binds a
   task-scoped request's re-arm to `actor.TaskID == req.TaskID` (SYSTEM
-  exempt), checked before any outcome lookup so a foreign principal sees
-  the identical `ErrNotFound` for a pending, failed, or absent request
-  alike — no existence oracle (SEC-4.4). The re-arm identity,
+  exempt — until round 5's SPEC-5.6 removed the exemption; see the
+  round-5 paragraph below), checked before any outcome lookup so a
+  foreign principal sees the identical `ErrNotFound` for a pending,
+  failed, or absent request alike — no existence oracle (SEC-4.4). The
+  re-arm identity,
   `domain.GCRearmRequestID(failed.ID)`, derives from the failed request
   alone, never the actor, so repeating a re-arm is idempotent regardless
   of who calls it. MANUAL and session-scope requests can now re-arm too
@@ -389,9 +416,53 @@ both forms share.
   nor a re-arm can alias a runtime trigger's identity or one another's.
   Test: `TestManualCollectDoesNotWedgeTaskCompletion_SEC48`
   (`internal/lifecycle/gc_round4b_test.go`).
+  **Round 5 (SPEC-5.2/SPEC-5.6, merged at integration head `b8efc67`;
+  SPEC-5.6's commits `7c18a8e`/`f8949aa`).** The candidate set a request
+  decides is frozen to the principal whose visibility produced batch 1:
+  `domain.GCProgress.Viewer` (`internal/domain/collect.go`) is recorded
+  by the first batch, and every later batch — including a continuation by
+  a different authorized same-task collector under SEC-4.5 above — pages
+  `GCCandidates` under that frozen viewer (`planBatch`'s `viewer := p;
+  if progress.Batches > 0 { viewer = progress.Viewer }`, with the
+  candidate-integrity check `it.Access.Permits(viewer)`,
+  `internal/lifecycle/collect.go`), alongside the J1/J2 snapshot and
+  cursor, so swapping collectors mid-request can neither grow nor shrink
+  the set the request will decide. Two authorities stay deliberately
+  split (P3-38): *which* candidates exist follows the frozen viewer's
+  visibility, while *what may be archived* is authorized per target by
+  each batch's executing collector. A frozen candidate the executing
+  collector cannot read therefore never silently vanishes or wedges the
+  request: `decideCandidate` returns an explicit `GCIneligible` decision
+  for it, its access check running before `gcBase` reads any protection
+  state (SEC-1.6's fail-closed ordering). The freeze is durable across
+  the upgrade: `gcProgress` (`internal/lifecycle/gc_requests.go`)
+  recovers a zero `Viewer` from batch 1's committed collect receipt
+  exactly as it already recovered a zero `SnapshotSeq` (J2), so an
+  upgraded request keeps exactly the candidate set its first batch saw;
+  migration `0050_gc_candidate_viewer.sql` persists the viewer columns
+  on `rec_gc_progress` (ADR 3, checksum pinned). Tests
+  (`internal/lifecycle/gc_round5_test.go`, both stores):
+  `TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52` — with
+  `MaxGCDecisions=1` forcing multi-batch continuation, in both
+  directions (the continuator sees less than the first viewer, and the
+  same shape with the two collectors' identities swapped): every frozen
+  candidate is decided, an item the executing collector cannot read
+  getting `GCIneligible` and never archiving while the readable ones
+  archive, per-item residency asserted — and
+  `TestGCProgressFreezesAndRecoversTheCandidateViewer_SPEC52` (freezes
+  at batch 1; a live progress row rewritten with
+  `Viewer = domain.Principal{}` recovers the viewer from batch 1's
+  receipt). **SPEC-5.6: `RearmGCRequest` no longer exempts SYSTEM from
+  the SEC-4.4 task binding above** — a task-scoped request is refused
+  whenever `actor.TaskID != req.TaskID`, authority class notwithstanding,
+  so a foreign-task SYSTEM caller gets the identical `ErrNotFound` for an
+  absent, pending, and failed request alike and creates nothing.
+  `TestRearmBindsSYSTEMToTheRequestTask_SPEC56` (both stores; the
+  same-task SYSTEM principal still re-arms, as the test's positive
+  control).
   **Grant issuance room is tiered by authority, not a flat quarter-share
   (SEC-2.7, superseded by SEC-3.8/DUR-3.6, landed at `4a00b06`; SPEC-4.3
-  corrects the prior "not yet merged" text).** `liveGrantRoom`
+  corrects the prior pending-merge wording).** `liveGrantRoom`
   (`internal/lifecycle/grants.go`) limits any one issuer's authority class:
   USER issuers together hold at most half of `MaxTargets` live grants per
   `(action, target)`; USER+HARNESS together at most three quarters; SYSTEM
@@ -400,7 +471,9 @@ both forms share.
   identity holds at most half the tier's slots (SEC-4.6, fixed round 4):**
   no single issuer, however many grants it issues, can starve its own
   class's peers. Tests: `TestGrantRoomIsTieredByAuthority`,
-  `TestSmallGrantRoomHasNoReserves` (`internal/lifecycle/grants_test.go`)
+  `TestSmallGrantRoomHasNoReserves`,
+  `TestOneIdentityCannotTakeItsWholeGrantTier_SEC46`
+  (`internal/lifecycle/grants_test.go`)
   — `TestLiveGrantCapIsSharedFairly`, the flat-quarter-share test this
   text previously cited, no longer exists.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request

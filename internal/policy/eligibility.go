@@ -26,10 +26,13 @@ type EligibilitySnapshot struct {
 	Item           domain.ItemRevisionRef
 	Currentness    domain.ItemCurrentness
 	Representation domain.ExpiryState
-	Applicability  domain.ApplicabilityState // required for OBSERVATION state
-	DispatchTask   *domain.TaskState
-	Conversation   *domain.Conversation
-	Leases         []domain.RetrievalLease
+	// Applicability is required for OBSERVATION state. Any builder MUST
+	// fill this from store.SubjectApplicability (L1.3/SEC-4.10): it is the
+	// one derived-at-read rule, so a hand-assumed CURRENT here fails open.
+	Applicability domain.ApplicabilityState
+	DispatchTask  *domain.TaskState
+	Conversation  *domain.Conversation
+	Leases        []domain.RetrievalLease
 }
 
 type EligibilityResult struct {

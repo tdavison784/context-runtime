@@ -5,15 +5,25 @@ Date: 2026-09-25
 
 ## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
 
-Phase 3 (worker W2, `internal/store`) adds thirty-one forward migrations,
-0018 through 0048 (K1 corrects the prior "thirty ... 0018 through 0047",
-itself SPEC-4.4/DUR-4.10's correction of a stale "twenty-seven ... 0018
-through 0044": 0018-0028 from the initial Phase 3 merge; 0029-0034 fixing
-PR #6 round-1 review findings; 0035-0040 fixing round-2 findings;
-0041-0044 fixing round-3 J1-J7 findings; 0045-0047 fixing round-3
-DUR-3.1/DUR-3.2 findings; 0048 landing the commander's FROZEN K1 ruling
-in round 4), after this ADR's Phase 2 migrations (0001 unchanged, per
-this ADR's own rule). The full record/column/index manifest is
+Phase 3 (worker W2, `internal/store`) adds thirty-three forward
+migrations, 0018 through 0050 (K1-api.3/SPEC-5.2 correct the prior
+"thirty-one ... 0018 through 0048" — by way of the interim "thirty-two
+... through 0050, 0049 reserved" that held while the two round-5
+branches merged — itself K1's correction of the "thirty ... 0018
+through 0047" and, before that, SPEC-4.4/DUR-4.10's correction of a
+stale "twenty-seven ... 0018 through 0044": 0018-0028 from the initial
+Phase 3 merge; 0029-0034 fixing PR #6 round-1 review findings;
+0035-0040 fixing round-2 findings; 0041-0044 fixing round-3 J1-J7
+findings; 0045-0047 fixing round-3 DUR-3.1/DUR-3.2 findings; 0048
+landing the commander's FROZEN K1 ruling in round 4; 0049-0050 landing
+round 5's K1-api.3 path confirmations and SPEC-5.2 candidate-viewer
+columns — 0050 merged first, having skipped 0049 as a reservation for
+the confirmation-record migration, which then merged ahead of it; the
+merge resolved `committedMigrations`' additive conflict by keeping both
+pins in migration order, and a reserved number is a reservation, never
+an edit of a committed migration), after this ADR's Phase 2 migrations
+(0001 unchanged, per this ADR's own rule). The full
+record/column/index manifest is
 `docs/phase3-schema-manifest.md` (P3-41); this section records the
 migration list itself and its upgrade-parity tests, matching how this ADR
 already tracks 0001-0017 above.
@@ -137,11 +147,19 @@ excluded by it).
   index holds every filed state, not exactly the current ones — "a state
   enters and leaves the index as its applicability changes" no longer
   happens.** Current applicability is instead read through
-  `obligation.Service.SubjectApplicability` (ADR 8's DUR-3.1 (B)), derived
-  at read time from the authoritative resource state; neither this index
-  nor `store.SubjectStatesByResource`'s equivalent "only CURRENT states"
-  filter has a production caller today (SEC-4.11/SPEC-4.10/DUR-4.7) — both
-  are recorded as an explicit Phase 4 deferral in ADR 8, not removed here.
+  `store.SubjectApplicability`
+  (`internal/store/subject_applicability.go`, ruling L1; the round-3
+  `obligation.Service.SubjectApplicability` method this bullet named is
+  deleted), derived at read time from the authoritative resource state
+  and already consumed in production by retrieval's
+  `ItemHistorical`/`ItemCurrent` labeling (L1.2). The equivalent "only
+  CURRENT states" filter is likewise gone from
+  `store.SubjectStatesByResource` (L1.5/SEC-4.11/DUR-4.7, round 4):
+  every filed state pages in first-filing order whatever its
+  applicability, so this partial index bounds nothing and is stale
+  metadata. The read itself still has no production caller, and removing
+  the index remains an explicit Phase 4 deferral recorded in ADR 8, not
+  done here.
 - `0033_resource_update_paths.sql` (PR #6 round 1, G2/SEC-1.7/DUR-1.2) — an
   index of resource updates by the paths they may affect (a path or one of
   its ancestor directories, plus every ALL-paths/UNKNOWN update), so a
@@ -216,8 +234,9 @@ excluded by it).
   `"ws"`, so a resource report reads only the proofs it can actually
   affect (ADR 8's DUR-3.1 (A)); `lookup_live_dependents` counts live
   non-`FIXED_CONTENT` dependency rows per resource, the policy cap ADR 8's
-  DUR-3.1 (C) validates against (superseded by the commander's FROZEN K1
-  ruling, ADR 8 K1e, once K1 lands). The frozen Go step
+  DUR-3.1 (C) validated against (superseded by the commander's FROZEN K1
+  ruling, ADR 8 K1, which landed in round 4 and retired the cap outright).
+  The frozen Go step
   `reconcileLiveProofPathsV1` (`steps_0045.go`, registered as
   `"0045/proofs/reconcile-live-proof-paths-v1"` in `steps.go`) rebuilds
   `lookup_live_dependency` and fills both new tables from the live proofs.
@@ -230,7 +249,7 @@ excluded by it).
   by fixing the backfill:** a recorded policy with `MaxTransactionWork <
   10` still backfills `MaxLiveProofDependents` to 0, but
   `Phase3Policy.Validate` (`internal/domain/semantic.go`) no longer
-  validates that field at all once K1 lands (below), so the
+  validates that field at all under K1 (landed round 4, below), so the
   previously-rejecting 0 value is never checked and the exact-retry
   regression this bullet originally described cannot occur.
 - `0047_gc_queue.sql` (PR #6 round 3, DUR-3.2; SPEC-4.4/DUR-4.10) —
@@ -292,6 +311,62 @@ excluded by it).
   raises identically, cross-checking the backfill against real runtime
   behavior rather than only against the test's own expectations. No case
   fails open.
+- `0049_path_confirmations.sql` (PR #6 round 5, K1-api.3/XREV-5.2;
+  integration merge `5810578`) — the two confirmation lookup tables
+  K1-api.3's read rule (ADR 8, K1 A1) derives from.
+  `lookup_path_confirmation` (`session_id, resource_id, path_key,
+  affect_key, confirmed_rev, unconfirmed_rev`; PK the first four)
+  holds, per (resource, confirmed path, broad affect key), the latest
+  raise whose report explicitly recorded the path's prior content and
+  the latest unconfirmed raise it overtook; `lookup_unconfirmed_gap`
+  (same key plus `last_rev` in the PK) holds the immutable closed runs
+  of unconfirmed raises (first and last revision) the settlement cause
+  seeks. Affect/path key encodings are exactly 0048's (`'all'`, else
+  `'path:'` plus hex). **The backfill writes nothing** — reports'
+  same-content history is not reconstructible, the same reason 0048's
+  ALL-key backfill overapproximates — so pre-0049 raises keep
+  invalidating exactly as before (conservative over-invalidation,
+  never under), and a post-upgrade confirming report closes the legacy
+  raise it overtakes as an unconfirmed gap without sparing any
+  dependency below it. `TestUpgradePathConfirmations_0049`
+  (`internal/store/sqlite/upgrade_test.go`) pins this against a real
+  database migrated through 0048: both tables start empty, the legacy
+  ALL raise still counts as unconfirmed (a revision-1 proof stays
+  fallen, a revision-3 proof stays valid), a confirming ALL resync
+  accepted after the upgrade confirms the path at its revision with
+  the legacy raise as the unconfirmed gap, and the next unconfirmed
+  ALL raise — an UNKNOWN gap report, which carries no confirmations —
+  becomes the cause. The checksum is pinned in `durability_test.go`'s
+  `committedMigrations`, whose additive merge conflict with 0050's pin
+  was resolved keeping both in migration order.
+- `0050_gc_candidate_viewer.sql` (PR #6 round 5, SPEC-5.2; integration
+  merge `b8efc67`) — five `ALTER TABLE rec_gc_progress ADD COLUMN
+  f_viewer_{session_id, workflow_id, task_id, agent_id, authority}`
+  columns persisting `domain.GCProgress.Viewer`, the principal whose
+  visibility paged batch 1 (ADR 16's round-5 paragraph owns the behavior
+  and its tests). The numbering skips 0049 on purpose: it was reserved
+  for the K1-api.3 confirmation-record migration (the 0049 bullet
+  above), which merged ahead of this one in migration order. No
+  driver-code change
+  accompanied the migration: `semantic_gc_progress.go` persists the row
+  through the generic record encoder, so the new struct field maps to the
+  new columns automatically, and `storetest`'s `testSemanticGCProgress`
+  (`internal/store/storetest/semantic_gc_h3.go`) round-trips
+  `Viewer: HarnessPrincipal(sessA)` on both backends. **Pre-0050 rows
+  backfill lazily, never in SQL:** `gcProgress`
+  (`internal/lifecycle/gc_requests.go`) recovers a zero `Viewer` from
+  batch 1's committed collect receipt exactly as it already recovered a
+  zero `SnapshotSeq` (J2) — `firstBatchReceipt` tries
+  `domain.GCBatchRequestID(req.RequestID, 1)`, falling back to
+  `req.RequestID` itself for a manual first batch that kept the caller's
+  own request ID (SEC-4.8), the same fallback that closes the old
+  `ErrNotFound` gap a manual request's SnapshotSeq recovery had — so an
+  upgraded request keeps exactly the candidate set its first batch saw.
+  `TestGCProgressFreezesAndRecoversTheCandidateViewer_SPEC52`
+  (`internal/lifecycle/gc_round5_test.go`) pins the recovery against a
+  live progress row rewritten with `Viewer = domain.Principal{}`; the
+  file's checksum is pinned in `durability_test.go`'s
+  `committedMigrations` (`TestCommittedMigrationsUnchanged`).
 
 **Tests that lock this list (all in `internal/store/sqlite`, extending this
 ADR's existing migration-checksum/upgrade discipline):**
@@ -309,7 +384,9 @@ plus `TestCursorPagesSeekRange` and `TestLiveProofPathReadsSeek`
 (keyset-cursor seeks over the new indexes) and
 `TestLatestBindingVersionIsKeyed` (DUR-3.7) were also missing from this
 list (DUR-4.10).** `TestUpgradeK1Pointers_0048` (round 4, SPEC-4.4) is
-0048's own upgrade-parity fixture, landed after this list's prior pass.
+0048's own upgrade-parity fixture, landed after this list's prior pass;
+`TestUpgradePathConfirmations_0049` (round 5, K1-api.3) is 0049's own,
+same pattern.
 `internal/obligation`'s own SQLite suite
 (50/50 subtests, 8/8 failure-injection scenarios, ADR 8) runs against these
 migrations through W2's `sqlitetest` template.
