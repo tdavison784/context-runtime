@@ -142,6 +142,7 @@ func (r semRead) LastConfirmedRev(resourceID, path, key string) (uint64, error) 
 	if err := r.r.check(); err != nil {
 		return 0, err
 	}
+	r.r.advanceK1()
 	ck, err := confirmKey(resourceID, path, key)
 	if err != nil {
 		return 0, err
@@ -157,6 +158,7 @@ func (r semRead) LastUnconfirmedRev(resourceID, path, key string) (uint64, error
 	if err := r.r.check(); err != nil {
 		return 0, err
 	}
+	r.r.advanceK1()
 	ck, err := confirmKey(resourceID, path, key)
 	if err != nil {
 		return 0, err

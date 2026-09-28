@@ -17,8 +17,9 @@ import (
 // pendingReport is one report of this transaction whose K1 A1 pointer writes
 // are pending, registered at PutResourceState time: the divergence and
 // ALL-key raise decisions, and the per-changed-path raises, all resolved
-// together at commit — after the report's content writes, so a write
-// naming the same update at the same revision that records the path's
+// together — at the latest at commit, and before that whenever a K1 pointer
+// read needs them (XREV-5.1) — after the report's content writes, so a
+// write naming the same update at the same revision that records the path's
 // prior content spares the raise (K1-api) and one that changes it, or no
 // write at all, lets it stand. Deferring every raise of a report together
 // is what makes K1-api.3's confirmations correct: each report's broad keys
@@ -42,9 +43,9 @@ type pathWrite struct {
 // addK1Report defers one report's pending pointer writes and, once per
 // transaction, registers their commit-time resolution.
 func (t *tx) addK1Report(rep pendingReport) {
-	if !t.k1Done && len(t.pendingReports) == 0 {
+	if len(t.pendingReports) == 0 {
 		t.deferCheck(func() error {
-			t.resolveK1Reports()
+			t.advanceK1Reports()
 			return nil
 		})
 	}
@@ -56,18 +57,26 @@ func (t *tx) recordPathWrite(w pathWrite) {
 	t.pathWrites = append(t.pathWrites, w)
 }
 
-// resolveK1Reports applies the pending reports' pointer writes exactly
-// once, in report order. A matching write that changed content outranks
-// one that recorded the prior content, so the outcome never depends on the
-// writes' order inside the transaction; the A5 commit guard also calls
-// this before reading the pointers.
-func (t *tx) resolveK1Reports() {
-	if t.k1Done {
-		return
+// advanceK1Reports applies every pending report not yet applied, in
+// registration order — a watermark, not a once-flag, so reports registered
+// after an earlier advance also become visible (XREV-5.1). A matching write
+// that changed content outranks one that recorded the prior content, so the
+// outcome never depends on the writes' order inside the transaction.
+func (t *tx) advanceK1Reports() {
+	for ; t.k1Applied < len(t.pendingReports); t.k1Applied++ {
+		t.applyK1Report(t.pendingReports[t.k1Applied])
 	}
-	t.k1Done = true
-	for _, rep := range t.pendingReports {
-		t.applyK1Report(rep)
+}
+
+// advanceK1 makes the transaction's applied reports' raises visible before
+// a K1 pointer read (XREV-5.1): pending reports are applied with the path
+// writes recorded so far, so a report whose content writes are still under
+// way can only over-invalidate — fail closed — never spare a raise; applied
+// raises are immutable, so a value a read has seen stays true whatever is
+// written later. A View has no writer and reads only committed raises.
+func (r *readTx) advanceK1() {
+	if r.writer != nil {
+		r.writer.advanceK1Reports()
 	}
 }
 
@@ -132,7 +141,7 @@ func (t *tx) checkProofDerivedValid(r *readTx, ref domain.ObligationRef, proofID
 	if !ok || o.Status != domain.ObligationSatisfied || o.CurrentProofID != proofID {
 		return nil
 	}
-	t.resolveK1Reports()
+	t.advanceK1Reports()
 	ok, err := store.ProofDerivedValid(r.SemanticReadBackend(), proofID)
 	if err != nil {
 		return fmt.Errorf("proof %s: derived validity unreadable: %w", proofID, err)
@@ -175,6 +184,7 @@ func (r semRead) LastWorkspaceDivergenceRev(resourceID string) (uint64, error) {
 	if err := r.r.check(); err != nil {
 		return 0, err
 	}
+	r.r.advanceK1()
 	for ref := range r.r.sem.res.divRaises.before(resourceID, seqRef{}) {
 		return ref.seq, nil
 	}
@@ -188,6 +198,7 @@ func (r semRead) LastAffectingRev(resourceID, key string) (uint64, error) {
 	if err := r.r.check(); err != nil {
 		return 0, err
 	}
+	r.r.advanceK1()
 	k, err := affectKey(resourceID, key)
 	if err != nil {
 		return 0, err
@@ -204,6 +215,7 @@ func (r semRead) FirstWorkspaceDivergenceAfter(resourceID string, rev uint64) (d
 	if err := r.r.check(); err != nil {
 		return domain.ResourceUpdate{}, err
 	}
+	r.r.advanceK1()
 	for ref := range r.r.sem.res.divRaises.after(resourceID, seqRef{rev, raiseAfterID}) {
 		return r.raisedUpdate(ref, "workspace divergence", resourceID)
 	}
@@ -217,6 +229,7 @@ func (r semRead) FirstAffectingUpdateAfter(resourceID, key string, rev uint64) (
 	if err := r.r.check(); err != nil {
 		return domain.ResourceUpdate{}, err
 	}
+	r.r.advanceK1()
 	k, err := affectKey(resourceID, key)
 	if err != nil {
 		return domain.ResourceUpdate{}, err

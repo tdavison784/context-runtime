@@ -187,6 +187,7 @@ func (s *Store) Update(ctx context.Context, sessionID string, fn func(store.Tx) 
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
 	t := &tx{readTx: newReadTx(sessionID, sess.st, true), baseSeq: sess.st.lastSeq}
+	t.writer = t
 	defer t.finish()
 	g := store.NewGuard(t)
 	err = fn(g)

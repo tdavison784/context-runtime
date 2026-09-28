@@ -20,8 +20,9 @@ import (
 // pendingReport is one report of this transaction whose K1 A1 pointer writes
 // are pending, registered at PutResourceState time: the divergence and
 // ALL-key raise decisions, and the per-changed-path raises, all resolved
-// together at commit — after the report's content writes, so a write
-// naming the same update at the same revision that records the path's
+// together — at the latest at commit, and before that whenever a K1 pointer
+// read needs them (XREV-5.1) — after the report's content writes, so a
+// write naming the same update at the same revision that records the path's
 // prior content spares the raise (K1-api) and one that changes it, or no
 // write at all, lets it stand. Deferring every raise of a report together
 // is what makes K1-api.3's confirmations correct: each report's broad keys
@@ -45,8 +46,8 @@ type pathWrite struct {
 // addK1Report defers one report's pending pointer writes and, once per
 // transaction, registers their commit-time resolution.
 func (t *transaction) addK1Report(rep pendingReport) {
-	if !t.k1Done && len(t.pendingReports) == 0 {
-		t.deferCheck(t.resolveK1Reports)
+	if len(t.pendingReports) == 0 {
+		t.deferCheck(t.advanceK1Reports)
 	}
 	t.pendingReports = append(t.pendingReports, rep)
 }
@@ -56,18 +57,15 @@ func (t *transaction) recordPathWrite(w pathWrite) {
 	t.pathWrites = append(t.pathWrites, w)
 }
 
-// resolveK1Reports applies the pending reports' pointer writes exactly
-// once, in report order. A matching write that changed content outranks
-// one that recorded the prior content, so the outcome never depends on the
-// writes' order inside the transaction; the A5 commit guard also calls
-// this before reading the pointers.
-func (t *transaction) resolveK1Reports() error {
-	if t.k1Done {
-		return nil
-	}
-	t.k1Done = true
-	for _, rep := range t.pendingReports {
-		if err := t.applyK1Report(rep); err != nil {
+// advanceK1Reports applies every pending report not yet applied, in
+// registration order — a watermark, not a once-flag, so reports registered
+// after an earlier advance also become visible (XREV-5.1). A matching write
+// that changed content outranks one that recorded the prior content, so the
+// outcome never depends on the writes' order inside the transaction; a
+// read-only transaction has no pending reports and reads committed raises.
+func (t *transaction) advanceK1Reports() error {
+	for ; t.k1Applied < len(t.pendingReports); t.k1Applied++ {
+		if err := t.applyK1Report(t.pendingReports[t.k1Applied]); err != nil {
 			return err
 		}
 	}
@@ -144,7 +142,7 @@ func (t *transaction) checkProofDerivedValid(ref domain.ObligationRef, proofID s
 	if o.Status != domain.ObligationSatisfied || o.CurrentProofID != proofID {
 		return nil
 	}
-	if err := t.resolveK1Reports(); err != nil {
+	if err := t.advanceK1Reports(); err != nil {
 		return err
 	}
 	ok, err := store.ProofDerivedValid(semRead{t}, proofID)
@@ -202,6 +200,9 @@ func affectKeySql(key string) (string, error) {
 // LastWorkspaceDivergenceRev implements store.ResourceReader (K1 A1): the
 // newest divergence raise's revision, 0 when never raised.
 func (s semRead) LastWorkspaceDivergenceRev(resourceID string) (uint64, error) {
+	if err := s.t.advanceK1Reports(); err != nil {
+		return 0, err
+	}
 	var rev uint64
 	err := s.t.conn.QueryRowContext(s.t.ctx, "SELECT revision FROM lookup_workspace_divergence WHERE session_id=? AND resource_id=? ORDER BY revision DESC LIMIT 1",
 		s.t.session, resourceID).Scan(&rev)
@@ -215,6 +216,9 @@ func (s semRead) LastWorkspaceDivergenceRev(resourceID string) (uint64, error) {
 // raise of one exact key — "" for ALL, else a canonical path — 0 when never
 // raised. Ancestor keys are the caller's composition, never scanned here.
 func (s semRead) LastAffectingRev(resourceID, key string) (uint64, error) {
+	if err := s.t.advanceK1Reports(); err != nil {
+		return 0, err
+	}
 	k, err := affectKeySql(key)
 	if err != nil {
 		return 0, err
@@ -231,6 +235,9 @@ func (s semRead) LastAffectingRev(resourceID, key string) (uint64, error) {
 // FirstWorkspaceDivergenceAfter implements store.ResourceReader (K1 A1):
 // the earliest divergence raise past rev, one exact-key seek.
 func (s semRead) FirstWorkspaceDivergenceAfter(resourceID string, rev uint64) (domain.ResourceUpdate, error) {
+	if err := s.t.advanceK1Reports(); err != nil {
+		return domain.ResourceUpdate{}, err
+	}
 	var id string
 	err := s.t.conn.QueryRowContext(s.t.ctx, "SELECT update_id FROM lookup_workspace_divergence WHERE session_id=? AND resource_id=? AND revision > ? ORDER BY revision LIMIT 1",
 		s.t.session, resourceID, rev).Scan(&id)
@@ -251,6 +258,9 @@ func (s semRead) FirstWorkspaceDivergenceAfter(resourceID string, rev uint64) (d
 // earliest raise of one exact key past rev, one exact-key seek, never a
 // prefix scan.
 func (s semRead) FirstAffectingUpdateAfter(resourceID, key string, rev uint64) (domain.ResourceUpdate, error) {
+	if err := s.t.advanceK1Reports(); err != nil {
+		return domain.ResourceUpdate{}, err
+	}
 	k, err := affectKeySql(key)
 	if err != nil {
 		return domain.ResourceUpdate{}, err

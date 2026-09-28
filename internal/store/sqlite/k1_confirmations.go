@@ -77,6 +77,9 @@ ON CONFLICT(session_id,resource_id,path_key,affect_key) DO UPDATE SET confirmed_
 // broad raise of key that explicitly confirmed path's content unchanged,
 // 0 when never.
 func (s semRead) LastConfirmedRev(resourceID, path, key string) (uint64, error) {
+	if err := s.t.advanceK1Reports(); err != nil {
+		return 0, err
+	}
 	if _, err := store.PathAffectKeys(path); err != nil {
 		return 0, err
 	}
@@ -97,6 +100,9 @@ func (s semRead) LastConfirmedRev(resourceID, path, key string) (uint64, error) 
 // latest unconfirmed raise of key at or before the confirmation pointer,
 // 0 when none.
 func (s semRead) LastUnconfirmedRev(resourceID, path, key string) (uint64, error) {
+	if err := s.t.advanceK1Reports(); err != nil {
+		return 0, err
+	}
 	if _, err := store.PathAffectKeys(path); err != nil {
 		return 0, err
 	}
