@@ -108,3 +108,73 @@ func TestP3_21_ForgedPassTextIsInert(t *testing.T) {
 		}
 	})
 }
+
+// TestP3_21_WrongOrMissingSpanReferencesRefused: the observation service
+// accepts only an exact TOOL occurrence — span references are resolved to
+// occurrences by ingestion before it runs (P3-21; the cited test covers only
+// the span-versus-item exclusivity rule). Every wrong or missing span form is
+// one uniform invalid-record refusal that writes nothing: a bare span index
+// (even a plausible in-range one), an out-of-range index, a span alongside
+// the genuine item, no evidence reference at all, and a reference to an item
+// that does not exist. The genuine occurrence alone is accepted.
+func TestP3_21_WrongOrMissingSpanReferencesRefused(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newEvalFixture(t)
+		run := f.newRun(t)
+		f.matcherGrant(t, "g-f21s", f.sysTests, TestsPassV1, f.system)
+		ev := evidenceFor(t, f.st, run)
+		seeded := f.lastSeqIs(t)
+
+		inRange, outOfRange := 0, 99
+		probes := []struct {
+			name  string
+			fixed func(in *domain.ObservationIntent)
+		}{
+			{"bare in-range span index", func(in *domain.ObservationIntent) { in.EvidenceItemID, in.EvidenceSpanIndex = "", &inRange }},
+			{"out-of-range span index", func(in *domain.ObservationIntent) { in.EvidenceItemID, in.EvidenceSpanIndex = "", &outOfRange }},
+			{"span index alongside the genuine item", func(in *domain.ObservationIntent) { in.EvidenceSpanIndex = &inRange }},
+			{"no evidence reference at all", func(in *domain.ObservationIntent) { in.EvidenceItemID = "" }},
+			{"evidence item that does not exist", func(in *domain.ObservationIntent) { in.EvidenceItemID = "no-such-evidence" }},
+		}
+		for i, probe := range probes {
+			in := obsIntent(fmt.Sprintf("span21-%d", i), run, ev.ID, domain.OutcomePass, hashOf("W1"))
+			probe.fixed(&in)
+			if _, err := f.observe(t, f.harness, in); !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Fatalf("%s: %v, want a uniform invalid-record refusal", probe.name, err)
+			}
+		}
+		// Nothing persisted: no observation under any probe, the run never
+		// closed, the obligation is untouched, no state moved.
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			for i := range probes {
+				if _, err := r.Observation(recordID("obs_", "observation", fmt.Sprintf("span21-%d", i))); !errors.Is(err, domain.ErrNotFound) {
+					t.Errorf("refused span probe persisted: %v", err)
+				}
+			}
+			if _, err := r.ClosingObservation(run.ID); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("refused span probes closed the run: %v", err)
+			}
+			return nil
+		})
+		if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved || o.Revision != 1 {
+			t.Fatalf("refused span probes changed the obligation: %+v", o)
+		}
+		if ls := f.lastSeqIs(t); ls != seeded {
+			t.Fatalf("refused span probes wrote state: seq %d -> %d", seeded, ls)
+		}
+
+		// Positive control: the resolved occurrence alone is accepted and
+		// closes the run.
+		if _, err := f.observe(t, f.harness, obsIntent("span21-ok", run, ev.ID, domain.OutcomePass, hashOf("W1"))); err != nil {
+			t.Fatalf("genuine occurrence: %v", err)
+		}
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			if _, err := r.ClosingObservation(run.ID); err != nil {
+				t.Errorf("genuine occurrence did not close the run: %v", err)
+			}
+			return nil
+		})
+	})
+}
