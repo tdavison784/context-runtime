@@ -462,6 +462,8 @@ Lifecycle, grant and GC audit/receipt identities (W3):
 
 - `context-runtime/collect-audit/v1`
 - `context-runtime/collect-receipt/v1`
+- `context-runtime/gc-manual/v1`
+- `context-runtime/gc-rearm/v1`
 - `context-runtime/gc-request/v1`
 - `context-runtime/gc-result/v1`
 - `context-runtime/gc-trigger/v1`
@@ -575,6 +577,23 @@ GC runtime IDs (SEC-2.6): `GCTriggerRequestID(origin, trigger, triggerID)`
 (`gc-trigger/v2`) binds the authenticated origin that raised the trigger.
 `GCRequestRecordID(session, requestID)` (`gc-request/v1`, `gcq_`) names
 the queued request. `gc-trigger/v1` remains registered.
+
+**Manual collection and re-arm each get their own encoder domain (SEC-4.8,
+round 4).** Before this, both derived their durable request identity
+through `GCTriggerRequestID` itself, sharing its domain with every runtime
+trigger: a manual `Collect{RequestID: <taskID>, Trigger: TASK_COMPLETION}`
+could precompute the same `gcq_` record its own later `CompleteTask` would
+try to create, wedging the completion with `ErrEventIDConflict`, and a
+`"rearm/"+failedID` request ID could self-collide the same way.
+`GCManualRequestID(origin, requestID)` (`gc-manual/v1`) derives a manual
+collection's identity from the collector and its caller-named request ID;
+`GCRearmRequestID(failedID)` (`gc-rearm/v1`) derives a re-arm's identity
+from the failed request alone, in its own domain, so it is idempotent
+under whichever authorized actor re-arms it. Neither domain is shared with
+`gc-trigger/v1`/`v2` or with each other, so no runtime trigger, manual
+collection, or re-arm can alias or squat another's identity; both stay in
+the reserved `gc_` namespace, so no caller can name them either. Golden
+list: `internal/domain/canonical_domains_test.go`.
 
 ### Tool-outcome EventID format (W7)
 

@@ -351,6 +351,44 @@ both forms share.
   (`internal/lifecycle/gc_quarantine_test.go`, DUR-4.5: a batch that
   always fails its receipt commit is quarantined after exactly
   `maxGCAttempts` calls, never retried again).
+  **SEC-4.5: continuing a pending request no longer binds to the exact
+  principal that ran batch 1.** `ExecuteGCRequest`
+  (`internal/lifecycle/gc_requests.go`) binds continuation to the
+  collector's *authority class* (SYSTEM/HARNESS) plus task, never to the
+  full principal tuple: any authorized collector — not only the one that
+  happened to run the first batch — may continue a pending request, so a
+  same-task HARNESS with a different `AgentID` no longer wedges it
+  forever. Test: `TestContinuationIsNotBoundToTheFirstCollector_SEC45`
+  (`internal/lifecycle/gc_round4b_test.go`).
+  **SEC-4.7/DUR-4.4: batch size recovers, and an item's own read bound
+  skips without halving.** `collect.go`'s batch loop now distinguishes
+  two failure shapes a heavy candidate can produce: the *shared*
+  transaction-work budget running out mid-item (`errBudget`) still halves
+  the batch size and retries the item in a smaller one, but an item's own
+  deterministic read-bound failure (`domain.ErrResourceLimit`/
+  `store.ErrLimitExceeded` — no batch size could ever fit it) now records
+  `SKIP_RESOURCE_LIMIT` immediately, with no halving at all. Separately, a
+  batch that completes fully with room to spare doubles the size back
+  toward the policy ceiling (`min(2*plan.batchSize, MaxGCDecisions)`) on
+  its *next* batch, so one heavy item early in a request no longer pins
+  `BatchSize` at 1 for its remaining lifetime. Tests:
+  `TestHeavyItemSkipsWithoutShrinkingEveryBatch_DUR44`,
+  `TestBatchSizeRecoversAfterAWorkHalving_SEC47` (`internal/lifecycle/gc_round4b_test.go`).
+  **SEC-4.8: manual collection and re-arm no longer share the runtime
+  trigger's ID domain.** Before this, both derived their durable request
+  identity through `GCTriggerRequestID` itself, so a SYSTEM/HARNESS
+  principal running a manual `Collect{RequestID: <taskID>, Trigger:
+  TASK_COMPLETION}` could precompute its own later task-completion
+  `gcq_` record and wedge that later `CompleteTask` with
+  `ErrEventIDConflict` — self-inflicted, but still a way to break one's
+  own GC. `domain.GCManualRequestID(origin, requestID)`
+  (`context-runtime/gc-manual/v1`, registered in ADR 4) and
+  `domain.GCRearmRequestID(failedID)` (`context-runtime/gc-rearm/v1`,
+  ADR 4) each get their own encoder domain, disjoint from
+  `gc-trigger/v1`/`v2` and from each other, so neither a manual collection
+  nor a re-arm can alias a runtime trigger's identity or one another's.
+  Test: `TestManualCollectDoesNotWedgeTaskCompletion_SEC48`
+  (`internal/lifecycle/gc_round4b_test.go`).
   **Grant issuance room is tiered by authority, not a flat quarter-share
   (SEC-2.7, superseded by SEC-3.8/DUR-3.6, landed at `4a00b06`; SPEC-4.3
   corrects the prior "not yet merged" text).** `liveGrantRoom`
