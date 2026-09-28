@@ -1,6 +1,7 @@
 package obligation
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -138,5 +139,62 @@ func TestP3_23_InvalidationFansOutAcrossTasksAndPrivateProofs(t *testing.T) {
 		if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
 			t.Fatalf("no re-satisfaction after fan-out: %+v", o)
 		}
+	})
+}
+
+// TestP3_23_ReportAliasesRefusedAndDirectoriesHitContainedProofs: a report's
+// changed paths are canonical or refused, and a changed path that names no
+// known file still hits every live proof it conservatively contains (P3-23 —
+// the cited tests bound update history and unrelated edits, never aliases or
+// unknown paths). Every alias spelling of docs/a.md — interior dot segment,
+// doubled slash, leading dot, absolute form, parent hop, trailing slash, the
+// empty path, and a duplicate entry — is one uniform invalid-record refusal
+// that consumes no revision and leaves the live proof untouched. A changed
+// DIRECTORY ("docs", which names no recorded file content) then invalidates
+// the CURRENT_PATH proof of docs/a.md conservatively: containment, not
+// equality, is the rule.
+func TestP3_23_ReportAliasesRefusedAndDirectoriesHitContainedProofs(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newEvalFixture(t)
+		ref := f.fileObligation(t, "23")
+		f.matcherGrant(t, "g-23pa", ref, FileReadV1, f.userP)
+		f.resourceReport(t, "W-a", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+		if err := f.assertPath(t, ref, f.r.auth, "H1"); err != nil {
+			t.Fatalf("live current-path proof not established: %v", err)
+		}
+		if st, _ := f.effective(t, ref); st != domain.ObligationSatisfied {
+			t.Fatalf("setup: effective %s", st)
+		}
+
+		aliases := [][]string{
+			{"docs/./a.md"},
+			{"docs//a.md"},
+			{"./docs/a.md"},
+			{"/docs/a.md"},
+			{"docs/sub/../a.md"},
+			{"docs/a.md/"},
+			{""},
+			{"docs/a.md", "docs/a.md"},
+		}
+		for _, alias := range aliases {
+			f.r.n++
+			in := domain.ReportResourceChangeIntent{RequestID: fmt.Sprintf("rr-%d", f.r.n), ResourceID: "repo1", ExpectedRevision: f.r.rev,
+				ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf("W-alias"),
+				ChangedPaths: alias}
+			if _, err := f.s.report(t, f.st, f.harness, in); !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Fatalf("alias %q accepted: %v", alias, err)
+			}
+		}
+		// The refusals consumed nothing: the same expected revision still
+		// lands, and the proof never moved.
+		f.resourceReport(t, "W-ok", false, false, []string{"docs/b.md"})
+		if st, _ := f.effective(t, ref); st != domain.ObligationSatisfied {
+			t.Fatalf("alias refusals disturbed the live proof: %s", st)
+		}
+
+		// The conservative direction: a changed directory naming no known
+		// file still contains docs/a.md.
+		f.resourceReport(t, "W-dir", false, false, []string{"docs"})
+		f.wantInvalidated(t, ref, "repo1", "changed directory left the contained file's proof live")
 	})
 }
