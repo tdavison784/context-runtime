@@ -88,3 +88,64 @@ func TestP3_16_RefreshWithExpiredGrantRetainsOldProof(t *testing.T) {
 		}
 	})
 }
+
+// TestP3_16_BlockedWaitsForUnblockAndWaivedIsTerminal: BLOCKED evidence
+// waits for an authorized unblock — a PASS that would satisfy an UNRESOLVED
+// obligation leaves a BLOCKED one untouched, and only the unblock
+// (itself authority-checked) reopens it — while WAIVED is terminal: no
+// later proof, matcher run, or transition leaves the waived state (P3-16).
+func TestP3_16_BlockedWaitsForUnblockAndWaivedIsTerminal(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newEvalFixture(t)
+		f.matcherGrant(t, "g-sys", f.sysTests, TestsPassV1, f.system)
+
+		// BLOCKED: the block itself is an authorized transition.
+		if _, err := f.s.transition(t, f.st, f.system, intent(f.sysTests, 1, domain.ObligationBlocked)); err != nil {
+			t.Fatalf("block: %v", err)
+		}
+		// A complete applicable PASS under a live grant arrives while
+		// blocked: recorded as evidence, but it cannot satisfy.
+		_, blockedPASS := f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
+		if blockedPASS.ID == "" {
+			t.Fatal("PASS while blocked not recorded")
+		}
+		o := f.status(t, f.sysTests)
+		if o.Status != domain.ObligationBlocked || o.CurrentProofID != "" || o.Revision != 2 {
+			t.Fatalf("evidence satisfied a BLOCKED obligation: %+v", o)
+		}
+		// A lower-authority actor cannot unblock a SYSTEM-sourced obligation.
+		if _, err := f.s.transition(t, f.st, f.userP, intent(f.sysTests, 2, domain.ObligationUnresolved)); err == nil {
+			t.Fatal("USER unblocked a SYSTEM obligation")
+		}
+		// The authorized unblock reopens the obligation, and only then does
+		// a further PASS satisfy it.
+		if _, err := f.s.transition(t, f.st, f.system, intent(f.sysTests, 2, domain.ObligationUnresolved)); err != nil {
+			t.Fatalf("unblock: %v", err)
+		}
+		f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
+		if o = f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
+			t.Fatalf("unblocked obligation not satisfiable by later evidence: %+v", o)
+		}
+
+		// WAIVED: terminal. Waive the satisfied version, then feed a fresh
+		// PASS and a direct satisfy transition: neither resurrects it.
+		if _, err := f.s.transition(t, f.st, f.system, intent(f.sysTests, o.Revision, domain.ObligationWaived)); err != nil {
+			t.Fatalf("waive: %v", err)
+		}
+		waived := f.status(t, f.sysTests)
+		atWaive := len(f.history(t, f.sysTests))
+		if waived.Status != domain.ObligationWaived || waived.CurrentProofID != "" {
+			t.Fatalf("waived = %+v", waived)
+		}
+		f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
+		if _, err := f.s.transition(t, f.st, f.system, intent(f.sysTests, waived.Revision, domain.ObligationSatisfied)); err == nil {
+			t.Fatal("direct satisfy accepted on a waived obligation")
+		}
+		if o = f.status(t, f.sysTests); o.Status != domain.ObligationWaived || o.Revision != waived.Revision {
+			t.Fatalf("waived obligation changed after waiver: %+v (was %+v)", o, waived)
+		}
+		if got := len(f.history(t, f.sysTests)); got != atWaive {
+			t.Fatalf("history grew after waiver: %d -> %d", atWaive, got)
+		}
+	})
+}
