@@ -256,10 +256,11 @@ func ValidGCTriggerSet(ts []GCTrigger) bool {
 // completed batches and attempts. It is CAS-written on Revision and is never
 // a substitute for a batch's CollectReceipt or the request's GCResult.
 type GCProgress struct {
-	ItemAttemptID               string // identity whose transient reads are counted
-	ItemAttempts                uint64 // transient attempts for the next candidate after Cursor
-	BatchSize                   int    // adaptive item-count ceiling; zero uses policy default
-	SnapshotSeq                 uint64 // fixed eligibility ceiling, ordered by (item Seq, ID)
+	ItemAttemptID               string    // identity whose transient reads are counted
+	ItemAttempts                uint64    // transient attempts for the next candidate after Cursor
+	BatchSize                   int       // adaptive item-count ceiling; zero uses policy default
+	SnapshotSeq                 uint64    // fixed eligibility ceiling, ordered by (item Seq, ID)
+	Viewer                      Principal // whose visibility froze the candidate set (SPEC-5.2); zero before batch 1
 	SessionID, GCRequestID      string
 	Cursor                      GCCursor
 	Batches, Attempts, Revision uint64
