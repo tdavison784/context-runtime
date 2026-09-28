@@ -76,4 +76,35 @@ func testSemanticK1InTxVisibility(t *testing.T, s store.Store) {
 		}
 		return nil
 	})
+	// SPEC-6.3: a later report of the SAME transaction must also become
+	// visible, after an earlier report has already been advanced once. An
+	// unrelated report first (docs/b.md raises nothing o-c rests on), a read
+	// that advances the pending-report watermark, then a CHANGE to
+	// docs/a.md: its raise must be visible to the second in-transaction read
+	// and in the committed state. Finalizing the reports only once per
+	// transaction loses the second report's raise everywhere, validity
+	// included — the implementation K1-api.3 XREV-5.1 forbids.
+	update(t, s, sessA, func(tx store.Tx) error {
+		reportInTx(t, tx, "u5", 4, fpA, []string{"docs/b.md"}, map[string]string{"docs/b.md": "B1"})
+		if !validInTx(tx, "o-c") {
+			t.Error("in transaction after the unrelated u5: o-c derived invalid, want valid")
+		}
+		reportInTx(t, tx, "u6", 5, fpA, []string{"docs/a.md"}, map[string]string{"docs/a.md": "H2"})
+		if validInTx(tx, "o-c") {
+			t.Error("in transaction after the changing u6: o-c derived valid, want invalid")
+		}
+		return nil
+	})
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		for _, id := range []string{"o-a", "o-c"} {
+			o, err := readSemantic(t, tx).ExactObligation(domain.ObligationRef{SessionID: sessA, ObligationID: id, Version: 1})
+			noErr(t, err)
+			ok, err := store.ProofDerivedValid(readSemantic(t, tx), o.CurrentProofID)
+			noErr(t, err)
+			if ok {
+				t.Errorf("after the u5/u6 transaction commits: proof %s derived valid, want invalid", id)
+			}
+		}
+		return nil
+	})
 }
