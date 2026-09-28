@@ -16,12 +16,24 @@ import (
 // mandatory status — the obligation stays current and unresolved, still
 // blocks task completion, and still protects the unpinned source from
 // collection.
+//
+// TEST-6.1: the seed puts the task three turns past the directive's expired
+// 2-turn TTL window (item turn "turn-1", task turn 3 "turn-3"), so after the
+// unpin the item is collectible by the cheap facts alone (EXPIRED_TTL) and
+// the ActiveTurn protection cannot fire. The open-obligation-source
+// protection (policy.MayArchive's ARCHIVE keeps gcProtection's
+// OpenObligationSource read in play; gc.go's ExpiryLive&&OpenObligationSource
+// case) is therefore the ONLY protection making the decision PROTECTED —
+// removing either its flag-setter or its policy case must fail this test.
 func TestP3_33_UnpinWithUnresolvedObligation(t *testing.T) {
 	ctx := context.Background()
 	eachStore(t, func(t *testing.T, db store.Store) {
 		f := newFacets("dir")
 		if err := db.Update(ctx, "s", func(tx store.Tx) error {
-			if err := tx.InsertItem(storetest.NewDirective("s", "dir", "d", tx.NextSeq(), "pinned instruction")); err != nil {
+			it := storetest.NewDirective("s", "dir", "d", tx.NextSeq(), "pinned instruction")
+			two := 2
+			it.TTLTurns, it.CreatedTurn = &two, 1
+			if err := tx.InsertItem(it); err != nil {
 				return err
 			}
 			if err := tx.InsertObligationVersion(storetest.NewObligation("s", "o", 1, tx.NextSeq(), "dir")); err != nil {
@@ -30,7 +42,9 @@ func TestP3_33_UnpinWithUnresolvedObligation(t *testing.T) {
 			if err := storetest.UncheckedSetCurrentVersion(tx, "dir"); err != nil {
 				return err
 			}
-			_, err := tx.PutTask(storetest.NewTask("s", "task"), 0, storetest.NewLifecycleEvent("s", "created", tx.NextSeq(), domain.TargetTask, "task"))
+			task := storetest.NewTask("s", "task")
+			task.Turn, task.TurnID = 3, "turn-3"
+			_, err := tx.PutTask(task, 0, storetest.NewLifecycleEvent("s", "created", tx.NextSeq(), domain.TargetTask, "task"))
 			return err
 		}); err != nil {
 			t.Fatal(err)
