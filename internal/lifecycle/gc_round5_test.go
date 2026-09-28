@@ -57,8 +57,10 @@ func TestRearmBindsSYSTEMToTheRequestTask_SPEC56(t *testing.T) {
 }
 
 // seedEphemeralLimited seeds task "task" at turn 2 and three ended-turn
-// ephemeral items; the named items get an agent-limited access boundary
-// (ScopeAgent, the private-item shape of collect_test).
+// ephemeral items; the named items get an agent-limited TASK-scope access
+// boundary. The shape matters: gc/v1 judges them ARCHIVE from lifetime
+// alone (ended-turn ephemeral of a live task), so only the executing
+// collector's access check can keep them out of the archive.
 func seedEphemeralLimited(t *testing.T, db store.Store, agent string, ids ...string) {
 	t.Helper()
 	limited := map[string]bool{}
@@ -75,7 +77,8 @@ func seedEphemeralLimited(t *testing.T, db store.Store, agent string, ids ...str
 			it := storetest.NewItem("s", fmt.Sprintf("eph-%03d", i), tx.NextSeq(), "scratch")
 			it.Generation = domain.GenerationEphemeral
 			if limited[it.ID] {
-				it.Scope, it.AgentID, it.Access = domain.ScopeAgent, agent, domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: "s", AgentID: agent}
+				it.Scope, it.AgentID = domain.ScopeTask, agent
+				it.Access = domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task", AgentID: agent}
 			}
 			if err := tx.InsertItem(it); err != nil {
 				return err
