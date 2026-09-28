@@ -317,3 +317,129 @@ func TestP3_21_EnvelopeImmutableAcrossRestart(t *testing.T) {
 		t.Fatalf("new envelope wrote nothing: %d -> %d", before, after)
 	}
 }
+
+// TestP3_21_MalformedCountsAndCompletenessRejectedAtomically: a malformed
+// counts or completeness envelope is rejected atomically (P3-21, C-7 — the
+// cited test exercises RecordResult kinds only). Every malformed form — an
+// unknown completeness, counts that exceed or disagree with the total, a
+// PASS carrying failures, and (through the record gate the intent rules
+// cannot see) a complete terminal result missing the observed identity its
+// family requires — is one uniform invalid-record refusal that writes no
+// record, closes no run, satisfies nothing, and moves no sequence. The
+// well-formed neighbours on both sides land: a PARTIAL result stores as
+// evidence with the run still open, and the complete PASS with its observed
+// identity closes the run and satisfies under the live grant.
+func TestP3_21_MalformedCountsAndCompletenessRejectedAtomically(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newEvalFixture(t)
+		run := f.newRun(t)
+		f.matcherGrant(t, "g-21mc", f.sysTests, TestsPassV1, f.system)
+		ev := evidenceFor(t, f.st, run)
+		// A file-read run of the same workspace for the record gate's
+		// family-specific identity rule.
+		fr := runIntent("fr21", "exec-fr21", testsTarget(nil))
+		fr.Subject = domain.ObservationSubject{Family: domain.ObservationFileRead,
+			Target: fileTarget("repo1", "docs/a.md", domain.FileCurrentContent, "")}
+		frRun, err := f.registerRun(t, f.harness, fr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frEv := evidenceFor(t, f.st, frRun)
+		seeded := f.lastSeqIs(t)
+
+		report := func(in domain.ObservationIntent) error {
+			return f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+				_, err := f.s.ReportObservationTx(tx, f.harness, in, 0)
+				return err
+			})
+		}
+		probes := []struct {
+			name string
+			in   domain.ObservationIntent
+		}{
+			{"unknown completeness", func() domain.ObservationIntent {
+				in := obsIntent("mc21-0", run, ev.ID, domain.OutcomePass, hashOf("W1"))
+				in.Completeness = "MOSTLY"
+				return in
+			}()},
+			{"passed exceeds total", func() domain.ObservationIntent {
+				in := obsIntent("mc21-1", run, ev.ID, domain.OutcomePass, hashOf("W1"))
+				in.Passed = 4
+				return in
+			}()},
+			{"passed plus failed exceeds total", func() domain.ObservationIntent {
+				in := obsIntent("mc21-2", run, ev.ID, domain.OutcomePass, hashOf("W1"))
+				in.Passed, in.Failed = 3, 1
+				return in
+			}()},
+			{"skipped disagrees with the remainder", func() domain.ObservationIntent {
+				in := obsIntent("mc21-3", run, ev.ID, domain.OutcomePass, hashOf("W1"))
+				in.Passed, in.Failed, in.Skipped = 2, 1, 1
+				return in
+			}()},
+			{"PASS carrying failures", func() domain.ObservationIntent {
+				in := obsIntent("mc21-4", run, ev.ID, domain.OutcomePass, hashOf("W1"))
+				in.Passed, in.Failed = 2, 1
+				return in
+			}()},
+			{"complete terminal tests result without the observed workspace identity", func() domain.ObservationIntent {
+				in := obsIntent("mc21-5", run, ev.ID, domain.OutcomePass, hashOf("W1"))
+				in.ObservedWorkspaceFingerprint = ""
+				return in
+			}()},
+			{"complete terminal file-read result without the observed content identity", func() domain.ObservationIntent {
+				in := obsIntent("mc21-6", frRun, frEv.ID, domain.OutcomePass, hashOf("W1"))
+				in.ObservedContentHash = ""
+				return in
+			}()},
+		}
+		for _, probe := range probes {
+			if err := report(probe.in); !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Fatalf("%s: %v, want a uniform invalid-record refusal", probe.name, err)
+			}
+		}
+		// Atomic rejection: no record under any probe, no run closed, the
+		// obligation untouched, nothing moved.
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			for i := range probes {
+				if _, err := r.Observation(recordID("obs_", "observation", fmt.Sprintf("mc21-%d", i))); !errors.Is(err, domain.ErrNotFound) {
+					t.Errorf("malformed envelope persisted: %v", err)
+				}
+			}
+			for _, run := range []domain.ObservationRun{run, frRun} {
+				if _, err := r.ClosingObservation(run.ID); !errors.Is(err, domain.ErrNotFound) {
+					t.Errorf("malformed envelope closed run %s: %v", run.ID, err)
+				}
+			}
+			return nil
+		})
+		if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved || o.Revision != 1 {
+			t.Fatalf("malformed envelopes changed the obligation: %+v", o)
+		}
+		if ls := f.lastSeqIs(t); ls != seeded {
+			t.Fatalf("malformed envelopes wrote state: seq %d -> %d", seeded, ls)
+		}
+
+		// A well-formed PARTIAL result stores as evidence with the run open.
+		partial := obsIntent("mc21-partial", run, ev.ID, domain.OutcomePass, "")
+		partial.Completeness, partial.Passed, partial.Skipped = domain.ObservationPartial, 2, 1
+		if _, err := f.observe(t, f.harness, partial); err != nil {
+			t.Fatalf("well-formed PARTIAL result: %v", err)
+		}
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			if _, err := r.ClosingObservation(run.ID); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("PARTIAL result closed the run: %v", err)
+			}
+			return nil
+		})
+
+		// The complete PASS with its observed identity closes the run and
+		// satisfies under the live grant.
+		f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
+		if o := f.status(t, f.sysTests); o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
+			t.Fatalf("well-formed complete PASS did not satisfy: %+v", o)
+		}
+	})
+}
