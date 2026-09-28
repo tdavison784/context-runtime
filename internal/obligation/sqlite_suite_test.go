@@ -115,6 +115,7 @@ func TestSQLiteSuite(t *testing.T) {
 		{"XREV11StalePathClaim", TestXREV11StalePathClaim, false},
 		{"XREV5SameContentAllPaths", TestXREV5SameContentAllPaths, false},
 		{"XREV5PathReadAndWaiverInReportTx", TestXREV5PathReadAndWaiverInReportTx, false},
+		{"K1Api3SettlementCauseSkipsConfirmations", TestK1Api3SettlementCauseSkipsConfirmations, false},
 		{"SPEC19ReevaluateAfterRevalidation", TestSPEC19ReevaluateAfterRevalidation, true},
 		{"SPEC110FailRejectsResourceBoundAssertion", TestSPEC110FailRejectsResourceBoundAssertion, true},
 		{"SPEC111ClaimsMustCoverTarget", TestSPEC111ClaimsMustCoverTarget, false},
