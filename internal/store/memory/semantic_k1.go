@@ -14,55 +14,73 @@ import (
 // ID); a resource's revisions are dense and strictly increasing, so the
 // ordering is the raises' revision order.
 
-// pathRaise is a pending K1 A1 raise of one changed path's exact key. It
-// resolves at commit, when the report's content writes are known: a write
-// naming the same update at the same revision that records the path's prior
-// content spares the raise (K1-api: same-content path reports do not raise
-// it); one that changes it, or no write at all, lets it stand.
-type pathRaise struct {
-	resource, path, updateID string
-	revision                 uint64
+// pendingReport is one report of this transaction whose K1 A1 pointer writes
+// are pending, registered at PutResourceState time: the divergence and
+// ALL-key raise decisions, and the per-changed-path raises, all resolved
+// together at commit — after the report's content writes, so a write
+// naming the same update at the same revision that records the path's
+// prior content spares the raise (K1-api) and one that changes it, or no
+// write at all, lets it stand. Deferring every raise of a report together
+// is what makes K1-api.3's confirmations correct: each report's broad keys
+// are raised only after its confirmed paths' records are written against
+// the key's pointer as it stood before the report.
+type pendingReport struct {
+	resource, updateID string
+	revision           uint64
+	divergence, all    bool
+	paths              []string
 }
 
 // pathWrite records one PutResourcePathState of this transaction, by the
-// locator's resource-relative path, for pathRaise resolution.
+// locator's resource-relative path, for report resolution.
 type pathWrite struct {
 	resource, path, updateID string
 	revision                 uint64
 	same                     bool // the write recorded the row's prior content
 }
 
-// addPathRaise defers a pending raise and, once per transaction, registers
-// its commit-time resolution.
-func (t *tx) addPathRaise(r pathRaise) {
-	if !t.pathRaiseDone && len(t.pathRaises) == 0 {
+// addK1Report defers one report's pending pointer writes and, once per
+// transaction, registers their commit-time resolution.
+func (t *tx) addK1Report(rep pendingReport) {
+	if !t.k1Done && len(t.pendingReports) == 0 {
 		t.deferCheck(func() error {
-			t.resolvePathRaises()
+			t.resolveK1Reports()
 			return nil
 		})
 	}
-	t.pathRaises = append(t.pathRaises, r)
+	t.pendingReports = append(t.pendingReports, rep)
 }
 
-// recordPathWrite remembers a path content write for raise resolution.
+// recordPathWrite remembers a path content write for report resolution.
 func (t *tx) recordPathWrite(w pathWrite) {
 	t.pathWrites = append(t.pathWrites, w)
 }
 
-// resolvePathRaises applies the surviving pending raises exactly once. A
-// matching write that changed content outranks one that recorded the prior
-// content, so the outcome never depends on the writes' order inside the
-// transaction; the A5 commit guard also calls this before reading the
-// pointers.
-func (t *tx) resolvePathRaises() {
-	if t.pathRaiseDone {
+// resolveK1Reports applies the pending reports' pointer writes exactly
+// once, in report order. A matching write that changed content outranks
+// one that recorded the prior content, so the outcome never depends on the
+// writes' order inside the transaction; the A5 commit guard also calls
+// this before reading the pointers.
+func (t *tx) resolveK1Reports() {
+	if t.k1Done {
 		return
 	}
-	t.pathRaiseDone = true
-	for _, r := range t.pathRaises {
+	t.k1Done = true
+	for _, rep := range t.pendingReports {
+		t.applyK1Report(rep)
+	}
+}
+
+// applyK1Report resolves one report: the surviving exact-key raises, then
+// the K1-api.3 confirmation records for every path whose content the
+// report explicitly recorded unchanged — written under each raised broad
+// key covering the path, before this report's raises move the pointers.
+func (t *tx) applyK1Report(rep pendingReport) {
+	stand := make(map[string]bool, len(rep.paths))
+	for _, q := range rep.paths {
 		same, changed := false, false
 		for _, w := range t.pathWrites {
-			if w.resource == r.resource && w.path == r.path && w.updateID == r.updateID && w.revision == r.revision {
+			if w.resource == rep.resource && w.path == q && w.updateID == rep.updateID && w.revision == rep.revision {
 				if w.same {
 					same = true
 				} else {
@@ -71,15 +89,41 @@ func (t *tx) resolvePathRaises() {
 			}
 		}
 		if changed || !same {
-			t.sem.res.affectRaises.add(resPath{r.resource, r.path}, seqRef{r.revision, r.updateID})
+			stand[q] = true
 		}
+	}
+	// The broad keys this report raises: "" for ALL plus each standing
+	// path, in the confirmation rule's key form.
+	broad := make([]string, 0, len(stand)+1)
+	if rep.all {
+		broad = append(broad, "")
+	}
+	for q := range stand {
+		broad = append(broad, q)
+	}
+	for _, w := range t.pathWrites {
+		if w.resource != rep.resource || w.updateID != rep.updateID || w.revision != rep.revision || !w.same {
+			continue
+		}
+		for _, K := range broad {
+			if broadKeyCovers(K, w.path) {
+				t.confirmPath(rep.resource, rep.updateID, rep.revision, w.path, K)
+			}
+		}
+	}
+	if rep.divergence {
+		t.sem.res.divRaises.add(rep.resource, seqRef{rep.revision, rep.updateID})
+	}
+	for _, K := range broad {
+		k, _ := affectKey(rep.resource, K)
+		t.sem.res.affectRaises.add(k, seqRef{rep.revision, rep.updateID})
 	}
 }
 
 // checkProofDerivedValid is the A5 commit guard: a committed SATISFIED
 // version may not rest on a proof the monotone pointers have already felled
-// (K1 A5). Pending path raises resolve first, so this transaction's own
-// raises are visible whatever their write order.
+// (K1 A5). Pending reports resolve first, so this transaction's own raises
+// are visible whatever their write order.
 func (t *tx) checkProofDerivedValid(r *readTx, ref domain.ObligationRef, proofID string) error {
 	if proofID == "" {
 		return nil
@@ -88,7 +132,7 @@ func (t *tx) checkProofDerivedValid(r *readTx, ref domain.ObligationRef, proofID
 	if !ok || o.Status != domain.ObligationSatisfied || o.CurrentProofID != proofID {
 		return nil
 	}
-	t.resolvePathRaises()
+	t.resolveK1Reports()
 	ok, err := store.ProofDerivedValid(r.SemanticReadBackend(), proofID)
 	if err != nil {
 		return fmt.Errorf("proof %s: derived validity unreadable: %w", proofID, err)

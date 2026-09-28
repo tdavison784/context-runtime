@@ -65,8 +65,14 @@ type resState struct {
 	// divergence by resource, affecting raises by resource and key (the
 	// allPathsKey entry is the ALL key). Entries are
 	// (ResultingAuthoritativeRevision, update ID), so revisions order them.
+	// K1-api.3 confirmation records (XREV-5.2): per (resource, confirmed
+	// path, broad key), the latest confirming and overtaken-unconfirmed
+	// raise, and the immutable unconfirmed-run rows the cause seeks.
 	divRaises    map[string][]seqRef
 	affectRaises map[resPath][]seqRef
+	confirms     map[confKey]uint64
+	unconfirms   map[confKey]uint64
+	gaps         map[confKey][]gapRow
 }
 
 func newResState() resState {
@@ -78,6 +84,7 @@ func newResState() resState {
 		observations: map[string]domain.ObservationRecord{}, obsByRun: map[string][]seqRef{}, runClosing: map[string]string{}, highWater: map[subjectKey]uint64{}, subjects: map[subjectKey]domain.SubjectState{},
 		subjByRes: map[string][]seqRef{}, subjIDs: map[string]subjectKey{},
 		divRaises: map[string][]seqRef{}, affectRaises: map[resPath][]seqRef{},
+		confirms: map[confKey]uint64{}, unconfirms: map[confKey]uint64{}, gaps: map[confKey][]gapRow{},
 	}
 }
 
@@ -105,6 +112,9 @@ type resView struct {
 	subjIDs      table[string, subjectKey]
 	divRaises    orderedIndex[string]
 	affectRaises orderedIndex[resPath]
+	confirms     table[confKey, uint64]
+	unconfirms   table[confKey, uint64]
+	gaps         gapIndex
 }
 
 func newResView(st *resState, w bool) resView {
@@ -123,12 +133,14 @@ func newResView(st *resState, w bool) resView {
 		subjects:   newTable(st.subjects, w, domain.SubjectState.Clone), subjByRes: newOrderedIndex(st.subjByRes, w),
 		subjIDs:   newTable(st.subjIDs, w, same[subjectKey]),
 		divRaises: newOrderedIndex(st.divRaises, w), affectRaises: newOrderedIndex(st.affectRaises, w),
+		confirms: newTable(st.confirms, w, same[uint64]), unconfirms: newTable(st.unconfirms, w, same[uint64]),
+		gaps: newGapIndex(st.gaps, w),
 	}
 }
 
 func (v *resView) dirty() bool {
 	return v.bindings.dirty() || v.updates.dirty() || v.states.dirty() || v.paths.dirty() || v.wbindings.dirty() ||
-		v.runs.dirty() || v.observations.dirty() || v.subjects.dirty()
+		v.runs.dirty() || v.observations.dirty() || v.subjects.dirty() || v.gaps.dirty()
 }
 
 func (v *resView) commit() {
@@ -155,6 +167,9 @@ func (v *resView) commit() {
 	v.subjIDs.commit()
 	v.divRaises.commit()
 	v.affectRaises.commit()
+	v.confirms.commit()
+	v.unconfirms.commit()
+	v.gaps.commit()
 }
 
 func conflict(format string, args ...any) error {
@@ -278,17 +293,12 @@ func (t *semTx) PutResourceState(s domain.ResourceState, expectedRevision uint64
 	// freshness or a changed fingerprint (the first report's fingerprint is
 	// a change), the ALL affecting key rises on UNKNOWN and ALL-paths
 	// reports, and each changed path's exact key rises unless this
-	// transaction records the path's prior content for this update. The
-	// path keys resolve at commit, after the report's content writes.
-	if u.Freshness == domain.ResourceUnknown || u.WorkspaceFingerprint != cur.WorkspaceFingerprint {
-		t.r.sem.res.divRaises.add(u.ResourceID, seqRef{u.ResultingAuthoritativeRevision, u.ID})
-	}
-	if u.Freshness == domain.ResourceUnknown || u.AllPaths {
-		t.r.sem.res.affectRaises.add(resPath{u.ResourceID, allPathsKey}, seqRef{u.ResultingAuthoritativeRevision, u.ID})
-	}
-	for _, q := range u.ChangedPaths {
-		t.t.addPathRaise(pathRaise{resource: u.ResourceID, path: q, updateID: u.ID, revision: u.ResultingAuthoritativeRevision})
-	}
+	// transaction records the path's prior content for this update. Every
+	// raise resolves at commit, after the report's content writes, together
+	// with the K1-api.3 confirmation records those writes carry.
+	t.t.addK1Report(pendingReport{resource: u.ResourceID, updateID: u.ID, revision: u.ResultingAuthoritativeRevision,
+		divergence: u.Freshness == domain.ResourceUnknown || u.WorkspaceFingerprint != cur.WorkspaceFingerprint,
+		all:        u.Freshness == domain.ResourceUnknown || u.AllPaths, paths: u.ChangedPaths})
 	s.Revision = expectedRevision + 1
 	t.r.sem.res.states.put(s.ResourceID, s)
 	t.t.sequencedWrite(s.Seq)

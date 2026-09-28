@@ -55,6 +55,7 @@ func testSemanticK1BroadConfirmations(t *testing.T, s store.Store) {
 	if valid("o-x") {
 		t.Error("after u2: o-x (src/b.go, not confirmed) derived valid, want invalid")
 	}
+
 	// A broad report that omits the path does not confirm it.
 	report(t, s, "u3", 2, fpA, nil, nil)
 	if valid("o-a") {

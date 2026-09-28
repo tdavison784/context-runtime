@@ -17,16 +17,20 @@ const (
 )
 
 // ProofDerivedValid is THE single shared proof-validity rule (K1 A1,
-// K1-api): validity is derived at read from the stores' monotone write-time
-// pointers, never stored nor fan-out computed. A proof is valid iff every
-// dependency of it is:
+// K1-api, K1-api.3): validity is derived at read from the stores' monotone
+// write-time pointers, never stored nor fan-out computed. A proof is valid
+// iff every dependency of it is:
 //
 //   - FIXED_CONTENT: never invalid (P3-12).
 //   - WORKSPACE: valid while LastWorkspaceDivergenceRev is at most
 //     dep.ResourceRevision.
-//   - CURRENT_PATH: valid while every affecting key — the canonical path,
-//     each ancestor directory and the ALL key "" — has LastAffectingRev at
-//     most dep.ResourceRevision.
+//   - CURRENT_PATH: valid while the exact path's LastAffectingRev is at
+//     most dep.ResourceRevision, and for every broad key — each ancestor
+//     directory and the ALL key "" — the latest raise that did NOT confirm
+//     the path (K1-api.3's unconf) is at most dep.ResourceRevision. A
+//     broad report that explicitly records the path's prior content
+//     confirms it, so the raise spares the path; every earlier
+//     invalidation stays irreversible because unconf only grows.
 //
 // Any unreadable record, dependency or pointer, or an exceeded read bound,
 // returns false with the error: fail closed. Both stores' A5 commit guard
@@ -78,12 +82,37 @@ func dependencyDerivedValid(r SemanticReader, d domain.ProofDependency) (bool, e
 		if err != nil {
 			return false, err
 		}
-		for _, k := range append(keys, "") { // "" is the ALL key.
-			rev, err := r.LastAffectingRev(d.ResourceID, k)
+		p := keys[len(keys)-1]
+		// The exact key keeps the unchanged rule: only a real content
+		// change raises it, and a same-content report spares it.
+		rev, err := r.LastAffectingRev(d.ResourceID, p)
+		if err != nil {
+			return false, err
+		}
+		if rev > d.ResourceRevision {
+			return false, nil
+		}
+		// Broad keys — each ancestor directory and "" for ALL — apply
+		// K1-api.3's read rule: the latest raise counts against the path
+		// unless that same raise confirmed it, in which case the latest
+		// unconfirmed raise does. unconf only grows, so a confirmation can
+		// never resurrect an earlier invalidation.
+		for _, k := range append(keys[:len(keys)-1], "") {
+			last, err := r.LastAffectingRev(d.ResourceID, k)
 			if err != nil {
 				return false, err
 			}
-			if rev > d.ResourceRevision {
+			var unconf uint64
+			if conf, err := r.LastConfirmedRev(d.ResourceID, p, k); err != nil {
+				return false, err
+			} else if conf == last {
+				if unconf, err = r.LastUnconfirmedRev(d.ResourceID, p, k); err != nil {
+					return false, err
+				}
+			} else {
+				unconf = last
+			}
+			if unconf > d.ResourceRevision {
 				return false, nil
 			}
 		}

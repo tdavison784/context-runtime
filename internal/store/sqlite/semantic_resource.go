@@ -161,21 +161,12 @@ func (s semTx) PutResourceState(st domain.ResourceState, expectedRevision uint64
 	// freshness or a changed fingerprint (the first report's fingerprint is
 	// a change), the ALL affecting key rises on UNKNOWN and ALL-paths
 	// reports, and each changed path's exact key rises unless this
-	// transaction records the path's prior content for this update. The
-	// path keys resolve at commit, after the report's content writes.
-	if u.Freshness == domain.ResourceUnknown || u.WorkspaceFingerprint != cur.WorkspaceFingerprint {
-		if err := t.raiseDivergence(u); err != nil {
-			return domain.ResourceState{}, err
-		}
-	}
-	if u.Freshness == domain.ResourceUnknown || u.AllPaths {
-		if err := t.raiseAffectingAll(u); err != nil {
-			return domain.ResourceState{}, err
-		}
-	}
-	for _, q := range u.ChangedPaths {
-		t.addPathRaise(pathRaise{resource: u.ResourceID, path: q, updateID: u.ID, revision: u.ResultingAuthoritativeRevision})
-	}
+	// transaction records the path's prior content for this update. Every
+	// raise resolves at commit, after the report's content writes, together
+	// with the K1-api.3 confirmation records those writes carry.
+	t.addK1Report(pendingReport{resource: u.ResourceID, updateID: u.ID, revision: u.ResultingAuthoritativeRevision,
+		divergence: u.Freshness == domain.ResourceUnknown || u.WorkspaceFingerprint != cur.WorkspaceFingerprint,
+		all:        u.Freshness == domain.ResourceUnknown || u.AllPaths, paths: u.ChangedPaths})
 	st.Revision = expectedRevision + 1
 	if err := t.put("resource_state", st.ResourceID, 0, st, found); err != nil {
 		return domain.ResourceState{}, err

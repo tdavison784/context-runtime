@@ -17,52 +17,73 @@ import (
 // (session, resource[, path_key], revision) with the update's resulting
 // authoritative revision, so every read is one exact-key query.
 
-// pathRaise is a pending K1 A1 raise of one changed path's exact key. It
-// resolves at commit, when the report's content writes are known: a write
-// naming the same update at the same revision that records the path's prior
-// content spares the raise (K1-api: same-content path reports do not raise
-// it); one that changes it, or no write at all, lets it stand.
-type pathRaise struct {
-	resource, path, updateID string
-	revision                 uint64
+// pendingReport is one report of this transaction whose K1 A1 pointer writes
+// are pending, registered at PutResourceState time: the divergence and
+// ALL-key raise decisions, and the per-changed-path raises, all resolved
+// together at commit — after the report's content writes, so a write
+// naming the same update at the same revision that records the path's
+// prior content spares the raise (K1-api) and one that changes it, or no
+// write at all, lets it stand. Deferring every raise of a report together
+// is what makes K1-api.3's confirmations correct: each report's broad keys
+// are raised only after its confirmed paths' records are written against
+// the key's pointer as it stood before the report.
+type pendingReport struct {
+	resource, updateID string
+	revision           uint64
+	divergence, all    bool
+	paths              []string
 }
 
 // pathWrite records one PutResourcePathState of this transaction, by the
-// locator's resource-relative path, for pathRaise resolution.
+// locator's resource-relative path, for report resolution.
 type pathWrite struct {
 	resource, path, updateID string
 	revision                 uint64
 	same                     bool // the write recorded the row's prior content
 }
 
-// addPathRaise defers a pending raise and, once per transaction, registers
-// its commit-time resolution.
-func (t *transaction) addPathRaise(r pathRaise) {
-	if !t.pathRaiseDone && len(t.pathRaises) == 0 {
-		t.deferCheck(t.resolvePathRaises)
+// addK1Report defers one report's pending pointer writes and, once per
+// transaction, registers their commit-time resolution.
+func (t *transaction) addK1Report(rep pendingReport) {
+	if !t.k1Done && len(t.pendingReports) == 0 {
+		t.deferCheck(t.resolveK1Reports)
 	}
-	t.pathRaises = append(t.pathRaises, r)
+	t.pendingReports = append(t.pendingReports, rep)
 }
 
-// recordPathWrite remembers a path content write for raise resolution.
+// recordPathWrite remembers a path content write for report resolution.
 func (t *transaction) recordPathWrite(w pathWrite) {
 	t.pathWrites = append(t.pathWrites, w)
 }
 
-// resolvePathRaises applies the surviving pending raises exactly once. A
-// matching write that changed content outranks one that recorded the prior
-// content, so the outcome never depends on the writes' order inside the
-// transaction; the A5 commit guard also calls this before reading the
-// pointers.
-func (t *transaction) resolvePathRaises() error {
-	if t.pathRaiseDone {
+// resolveK1Reports applies the pending reports' pointer writes exactly
+// once, in report order. A matching write that changed content outranks
+// one that recorded the prior content, so the outcome never depends on the
+// writes' order inside the transaction; the A5 commit guard also calls
+// this before reading the pointers.
+func (t *transaction) resolveK1Reports() error {
+	if t.k1Done {
 		return nil
 	}
-	t.pathRaiseDone = true
-	for _, r := range t.pathRaises {
+	t.k1Done = true
+	for _, rep := range t.pendingReports {
+		if err := t.applyK1Report(rep); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyK1Report resolves one report: the surviving exact-key raises, then
+// the K1-api.3 confirmation records for every path whose content the
+// report explicitly recorded unchanged — written under each raised broad
+// key covering the path, before this report's raises move the pointers.
+func (t *transaction) applyK1Report(rep pendingReport) error {
+	stand := make(map[string]bool, len(rep.paths))
+	for _, q := range rep.paths {
 		same, changed := false, false
 		for _, w := range t.pathWrites {
-			if w.resource == r.resource && w.path == r.path && w.updateID == r.updateID && w.revision == r.revision {
+			if w.resource == rep.resource && w.path == q && w.updateID == rep.updateID && w.revision == rep.revision {
 				if w.same {
 					same = true
 				} else {
@@ -71,10 +92,38 @@ func (t *transaction) resolvePathRaises() error {
 			}
 		}
 		if changed || !same {
-			if _, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_affecting_raise(session_id,resource_id,path_key,revision,update_id) VALUES(?,?,?,?,?)",
-				t.session, r.resource, updatePathKey(r.path), r.revision, r.updateID); err != nil {
-				return err
+			stand[q] = true
+		}
+	}
+	// The broad keys this report raises: "" for ALL plus each standing
+	// path, in the confirmation rule's key form.
+	broad := make([]string, 0, len(stand)+1)
+	if rep.all {
+		broad = append(broad, "")
+	}
+	for q := range stand {
+		broad = append(broad, q)
+	}
+	for _, w := range t.pathWrites {
+		if w.resource != rep.resource || w.updateID != rep.updateID || w.revision != rep.revision || !w.same {
+			continue
+		}
+		for _, K := range broad {
+			if broadKeyCovers(K, w.path) {
+				if err := t.confirmPath(rep.resource, rep.revision, w.path, K); err != nil {
+					return err
+				}
 			}
+		}
+	}
+	if rep.divergence {
+		if err := t.raiseDivergence(rep.resource, rep.updateID, rep.revision); err != nil {
+			return err
+		}
+	}
+	for _, K := range broad {
+		if err := t.raiseAffectingKey(rep.resource, rep.updateID, rep.revision, K); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -82,8 +131,8 @@ func (t *transaction) resolvePathRaises() error {
 
 // checkProofDerivedValid is the A5 commit guard: a committed SATISFIED
 // version may not rest on a proof the monotone pointers have already felled
-// (K1 A5). Pending path raises resolve first, so this transaction's own
-// raises are visible whatever their write order.
+// (K1 A5). Pending reports resolve first, so this transaction's own raises
+// are visible whatever their write order.
 func (t *transaction) checkProofDerivedValid(ref domain.ObligationRef, proofID string) error {
 	if proofID == "" {
 		return nil
@@ -95,7 +144,7 @@ func (t *transaction) checkProofDerivedValid(ref domain.ObligationRef, proofID s
 	if o.Status != domain.ObligationSatisfied || o.CurrentProofID != proofID {
 		return nil
 	}
-	if err := t.resolvePathRaises(); err != nil {
+	if err := t.resolveK1Reports(); err != nil {
 		return err
 	}
 	ok, err := store.ProofDerivedValid(semRead{t}, proofID)
@@ -108,17 +157,22 @@ func (t *transaction) checkProofDerivedValid(ref domain.ObligationRef, proofID s
 	return nil
 }
 
-// raiseAffectingAll inserts the ALL-key raise of one update (K1 A1).
-func (t *transaction) raiseAffectingAll(u domain.ResourceUpdate) error {
-	_, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_affecting_raise(session_id,resource_id,path_key,revision,update_id) VALUES(?,?,?,?,?)",
-		t.session, u.ResourceID, "all", u.ResultingAuthoritativeRevision, u.ID)
+// raiseAffectingKey inserts one raise of one affecting key — "" for ALL,
+// else a canonical path — (K1 A1).
+func (t *transaction) raiseAffectingKey(resource, updateID string, revision uint64, key string) error {
+	k, err := affectKeySql(key)
+	if err != nil {
+		return err
+	}
+	_, err = t.conn.ExecContext(t.ctx, "INSERT INTO lookup_affecting_raise(session_id,resource_id,path_key,revision,update_id) VALUES(?,?,?,?,?)",
+		t.session, resource, k, revision, updateID)
 	return err
 }
 
 // raiseDivergence inserts one update's divergence raise (K1 A1).
-func (t *transaction) raiseDivergence(u domain.ResourceUpdate) error {
+func (t *transaction) raiseDivergence(resource, updateID string, revision uint64) error {
 	_, err := t.conn.ExecContext(t.ctx, "INSERT INTO lookup_workspace_divergence(session_id,resource_id,revision,update_id) VALUES(?,?,?,?)",
-		t.session, u.ResourceID, u.ResultingAuthoritativeRevision, u.ID)
+		t.session, resource, revision, updateID)
 	return err
 }
 
