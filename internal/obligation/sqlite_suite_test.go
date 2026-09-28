@@ -177,6 +177,8 @@ func TestSQLiteSuite(t *testing.T) {
 		{"K1StableLiveProofsNeverBlockSatisfaction_DUR43", TestK1StableLiveProofsNeverBlockSatisfaction_DUR43, true},
 		{"K1PropertyEffectiveSatisfactionIsValid", TestK1PropertyEffectiveSatisfactionIsValid, true},
 		{"K1SettlementWorker", TestK1SettlementWorker, false},
+		{"XREV5SettlementWorkerMakesProgressWithSmallBudget", TestXREV5SettlementWorkerMakesProgressWithSmallBudget, false},
+		{"XREV5SettlementWorkerSkipsOversizedProofWithoutStalling", TestXREV5SettlementWorkerSkipsOversizedProofWithoutStalling, false},
 		{"K1SettleBeforeRetire", TestK1SettleBeforeRetire, true},
 		{"K1ReplacementSettlesPendingBeforeRetirement", TestK1ReplacementSettlesPendingBeforeRetirement, true},
 	} {
