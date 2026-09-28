@@ -3,6 +3,8 @@ package obligation
 import (
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
@@ -451,6 +453,148 @@ func TestP3_23_UnrelatedResourceEditsLeaveOtherResourceProofsUntouched(t *testin
 		untouched(ref1, snap1, hist1, "repo2 edit disturbed repo1's obligation")
 		if st, _ := f.effective(t, ref1); st != domain.ObligationSatisfied {
 			t.Fatalf("repo1 effective %s after repo2 edit", st)
+		}
+	})
+}
+
+// TestP3_23_ReportersReceiptCarriesNoHiddenIDsOrCounts: the resource
+// reporter's receipt names only their own update — never the fan-out's
+// targets or counts (P3-23; the adjacent TestXREV11StalePathClaim never
+// inspects the receipt, so nothing of what the reporter learns is
+// asserted). Four live proofs hang off repo1 — three CURRENT_PATH proofs of
+// docs/a.md and a tests-pass observation proof of the workspace
+// fingerprint. One changed-path report invalidates all four, and the
+// reporter sees exactly one RESOURCE_UPDATE reference: the result carries
+// no other arm (no obligation or item payload), no proof, obligation,
+// declaration, or settlement ID, and no count of anything affected — one
+// reference for four invalidated proofs. The stored receipt's Result is
+// byte-identical to the returned one, the exact retry replays it, and the
+// invalidation itself is nowhere in the receipt: it is only visible
+// downstream, as derivation and settlement record it apart from the report.
+func TestP3_23_ReportersReceiptCarriesNoHiddenIDsOrCounts(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newEvalFixture(t)
+
+		// Authoritative content first, so every proof lands on the same
+		// revision.
+		f.resourceReport(t, "W-a", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+		f.matcherGrant(t, "g-23q", f.sysTests, TestsPassV1, f.system)
+		f.observeTests(t, f.target, domain.OutcomePass, hashOf("W-a"), nil)
+		var refs []domain.ObligationRef
+		for i, slot := range []string{"50", "51", "52"} {
+			ref := f.fileObligation(t, slot)
+			refs = append(refs, ref)
+			f.matcherGrant(t, fmt.Sprintf("g-23q%d", i), ref, FileReadV1, f.userP)
+		}
+		for _, ref := range refs {
+			if err := f.assertPath(t, ref, f.r.auth, "H1"); err != nil {
+				t.Fatalf("path proof for %s: %v", ref.ObligationID, err)
+			}
+		}
+		dependents := append(refs, f.sysTests)
+		hidden := map[string]bool{}
+		for _, ref := range dependents {
+			o := f.status(t, ref)
+			if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
+				t.Fatalf("setup: %s = %+v", ref.ObligationID, o)
+			}
+			hidden[o.CurrentProofID] = true
+			hidden[ref.ObligationID] = true
+			hidden[o.DeclarationID] = true
+		}
+		if len(hidden) != 3*len(dependents) {
+			t.Fatalf("setup: dependent IDs collide: %v", hidden)
+		}
+
+		// The report under inspection: one edit that invalidates all four.
+		seeded := f.lastSeqIs(t)
+		in := domain.ReportResourceChangeIntent{RequestID: "rr-quiet", ResourceID: "repo1", ExpectedRevision: f.r.rev,
+			ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1, WorkspaceFingerprint: hashOf("W-b"),
+			ChangedPaths: []string{"docs/a.md"}}
+		res, err := f.s.report(t, f.st, f.harness, in)
+		if err != nil {
+			t.Fatalf("report: %v", err)
+		}
+		f.r.rev++
+		f.r.auth++
+
+		// The result has exactly one arm: the update's own reference.
+		if res.Item != nil || res.Obligation != nil || res.Completion != nil || res.Collect != nil || res.Tool != nil {
+			t.Fatalf("report result carries a payload arm: %+v", res)
+		}
+		if res.Records == nil || res.Records.Kind != "RESOURCE_UPDATE" || len(res.Records.IDs) != 1 {
+			t.Fatalf("report result = %+v, want exactly one RESOURCE_UPDATE reference", res.Records)
+		}
+		got := res.Records.IDs[0]
+		if !strings.HasPrefix(got, "ru_") {
+			t.Fatalf("report names %q, want the resource update", got)
+		}
+		if hidden[got] {
+			t.Fatalf("report names a dependent's ID: %q", got)
+		}
+		// The one reference is this request's update — the reporter's own
+		// record, nothing of the fan-out.
+		var upd domain.ResourceUpdate
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			upd, _ = r.ResourceUpdate(got)
+			return nil
+		})
+		if upd.ID != got || upd.RequestID != "rr-quiet" || upd.ResourceID != "repo1" {
+			t.Fatalf("report names %+v, want this request's update", upd)
+		}
+
+		// The stored receipt's Result is identical, and its arguments are the
+		// reporter's own intent — no IDs or counts smuggled in either place.
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			rec, err := r.MutationReceipt(domain.MutationResourceReport, "rr-quiet")
+			if err != nil {
+				t.Errorf("receipt: %v", err)
+				return nil
+			}
+			if !reflect.DeepEqual(rec.Result, res) {
+				t.Errorf("receipt result = %+v, want the returned one", rec.Result)
+			}
+			for id := range hidden {
+				if strings.Contains(string(rec.CanonicalArguments), id) {
+					t.Errorf("receipt arguments leak %q", id)
+				}
+			}
+			return nil
+		})
+
+		// The exact retry replays the same single reference and writes
+		// nothing.
+		after := f.lastSeqIs(t)
+		if after == seeded {
+			t.Fatalf("setup: the report wrote nothing: seq %d", seeded)
+		}
+		// A deferred sequence: an exact replay allocates none (DUR-2.14).
+		var again domain.MutationResult
+		err = f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+			var err error
+			again, err = f.s.ReportResourceChangeTx(tx, f.harness, in, 0)
+			return err
+		})
+		if err != nil || again.Records == nil || len(again.Records.IDs) != 1 || again.Records.IDs[0] != got {
+			t.Fatalf("retry = %+v %v, want the same single reference", again.Records, err)
+		}
+		if ls := f.lastSeqIs(t); ls != after {
+			t.Fatalf("replay wrote state: seq %d -> %d", after, ls)
+		}
+
+		// The fan-out the reporter never saw: all four dependents are
+		// effectively invalidated, and settlement records it apart from the
+		// report.
+		for _, ref := range dependents {
+			if st, _ := f.effective(t, ref); st != domain.ObligationUnresolved {
+				t.Fatalf("%s still effective %s", ref.ObligationID, st)
+			}
+		}
+		f.wantInvalidated(t, f.sysTests, "repo1", "quiet report left the observation proof live")
+		for _, ref := range refs {
+			f.wantSettled(t, ref, "repo1", "quiet report left a path proof live")
 		}
 	})
 }
