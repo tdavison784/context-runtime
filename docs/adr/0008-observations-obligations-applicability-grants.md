@@ -1106,7 +1106,7 @@ first time it appears in a row when not already obvious from context.
 | P3-5 | revision changes do not invalidate a still-live version grant | `TestP3_5_RevisionChangeDoesNotInvalidateLiveVersionGrant` (`internal/graph/p342_p3_5_test.go`) |
 | P3-5 | item/key-string collision | `TestGrantTargetCanonicalIsolation` |
 | P3-5 | exact target-set validation | `TestAuthorizeGrantIssuance` (`internal/domain/authz_test.go`) |
-| P3-5 | legacy grant inertness | `TestLegacyObligationCannotAcquireExecutableTarget` (`internal/domain/obligation_target_test.go`) |
+| P3-5 | legacy grant inertness | `TestTypedGrantNeverFollowsLatestVersion` (legacy half: a `TargetIDs`-only grant never authorizes a typed obligation target, `internal/domain/grant_target_test.go`) |
 | P3-5 | revocation after retirement | `TestP3_5_RevocationAfterRetirement` (`internal/lifecycle/p342_p3_5_test.go`) |
 | P3-5 | expiry at each indirect write | `TestRetirementAuthorizesAndWritesSameExactSequence` (expired-grant half — an obligation retirement is refused when the grant's sequence boundary has passed, `internal/graph/retirement_sequence_test.go`) |
 | P3-6 | N sources produce O(N) members/edges | `TestDerivedCoverageWritesOneSetAndLinearEdges` (`internal/graph/coverage_link_test.go`) |
@@ -1136,10 +1136,10 @@ first time it appears in a row when not already obvious from context.
 | P3-9 | grant expires between goals | `TestCompletionGrantExpiringBetweenGoalsFailsWhole` |
 | P3-9 | crash at each goal/task/GC write | `TestCompletionGCFailureRollsBackGoalsAndTask` |
 | P3-9 | completed retry versus new request | `TestCompleteTaskResolvesOwnedGoalsAndReplaysFrozenReceipt` |
-| P3-10 | each allowed/forbidden pair | `TestGenerationPairsFollowClosedPolicy` (`internal/lifecycle`) |
+| P3-10 | each allowed/forbidden pair | `TestGenerationChangeClosedPairs` (`internal/policy/generation_test.go`, the closed pair table itself) |
 | P3-10 | authority/grant/access | `TestGenerationExcludesObligationSourceAndNeedsAuthority` |
 | P3-10 | retention derivation | `TestGenerationPairsFollowClosedPolicy` (same test, retention assertions) |
-| P3-10 | excluded roles/source types | `TestGenerationExcludesObligationSourceAndNeedsAuthority` |
+| P3-10 | excluded roles/source types | `TestGenerationChangeRequirementAndKnowledgeGuards` (role/currentness/obligation-source exclusions, `internal/policy/generation_test.go`); `TestGenerationExcludesObligationSourceAndNeedsAuthority` (authority half) |
 | P3-10 | expired origin unchanged | `TestP3_10_ExpiredOriginUnchangedByPromotion` (`internal/lifecycle/p342_p3_10_test.go`) |
 | P3-10 | replay and CAS conflict | `TestP3_10_PromoteReplayAndCASConflict` (`internal/lifecycle/p342_p3_10_test.go`) |
 | P3-11 | forged SYSTEM issuer rejected | `TestIssueGrantFailsClosed` (`internal/lifecycle/grants_test.go`) |
@@ -1149,17 +1149,17 @@ first time it appears in a row when not already obvious from context.
 | P3-11 | lower-authority grant/revoke denial | `TestRevokeGrantNeedsDirectAuthorityAndEndsAuthorization` |
 | P3-11 | no implicit grant from text | `TestP3_11_NoImplicitGrantFromText` (`internal/ingest/p342_p3_11_test.go`) |
 | P3-11 | changed grant payload conflicts on retry | `TestP3_11_ChangedGrantPayloadConflictsOnRetry` (`internal/lifecycle/p342_p3_11_test.go`) |
-| P3-12 | SDD punctuation examples | `TestDeclarePinnedCases` (`internal/obligation/declare_test.go`) |
+| P3-12 | SDD punctuation examples | `TestMatchClaim` (`internal/obligation/claim_test.go`, the SDD's own punctuation cases; `TestDeclarePinnedCases` carries none) |
 | P3-12 | ASCII anchoring and fuzz | `FuzzMatchClaim` (`internal/obligation`) |
-| P3-12 | explicit precedence | `TestDeclarePinnedBound` |
-| P3-12 | unknown/missing workspace | `TestDeclarePinnedRejects` |
-| P3-12 | wrong suite/repository/environment/subset | `TestSubjectIdentityTracksDeclaredSuite` |
+| P3-12 | explicit precedence | `TestBindPinned` (`internal/obligation/target_test.go`, explicit-attribute precedence) |
+| P3-12 | unknown/missing workspace | `TestBindPinnedUnbound` (`internal/obligation/target_test.go`) |
+| P3-12 | wrong suite/repository/environment/subset | `TestSubjectIdentity` (`internal/obligation/subject_test.go`, every identity field varied) |
 | P3-12 | fixed/current file mode | `TestSPEC111FixedHashTarget`; `TestSPEC111ClaimsMustCoverTarget` (`internal/obligation/round1_test.go`) |
 | P3-12 | duplicates do not create obligations | `TestD13_DuplicateLeavesObligations` (`internal/graph`) |
 | P3-12 | legacy claims remain unbound | `TestP3_12_LegacyClaimsRemainUnbound` (`internal/obligation/p342_p3_12_test.go`) |
 | P3-13 | full status matrix | `TestValidObligationTransitionMatrix` (`internal/domain/obligation_test.go`) |
 | P3-13 | forged persisted-row fields | `TestP3_13_ForgedPersistedRowFields` (`internal/obligation/p342_p3_13_test.go`) |
-| P3-13 | retired/WAIVED versions | `TestValidObligationTransition_WaivedIsTerminal` |
+| P3-13 | retired/WAIVED versions | `TestValidObligationTransition_WaivedIsTerminal` (WAIVED); `TestTransitionRetiredVersion` (retired, `internal/obligation/transition_test.go`) |
 | P3-13 | ABA revision race | `TestConformance/ObligationTransitions` (storetest) |
 | P3-13 | absent/future/private evidence | `TestObservationIntentEvidenceReferenceIsExclusive` (partial) |
 | P3-13 | matcher name without grant | `TestAuthorizeMutation_T06_HarnessCannotAssertWithoutGrant` |
@@ -1172,21 +1172,21 @@ first time it appears in a row when not already obvious from context.
 | P3-14 | dangling proof rejected by both stores | `TestProofRequiresBackedDependencyIdentity` |
 | P3-15 | bare attestation | `TestAssertionModeIsExplicit` (`internal/obligation`) |
 | P3-15 | attestation with citations | `TestAssertionModeIsExplicit` (same test, citation subtests) |
-| P3-15 | resource-bound assertion invalidated | `TestSPEC110FailRejectsResourceBoundAssertion` |
+| P3-15 | resource-bound assertion invalidated | `TestK1InlineSettleBeforeTransition`; `TestK1DependencySemantics` (`internal/obligation/k1_test.go` — invalidation via the derived-at-read dependency state, not a stored status flag) |
 | P3-15 | unauthorized assertion | `TestAuthorizeMutation_T06_HarnessCannotAssertWithoutGrant` |
 | P3-15 | mode-conflicting retry | `TestP3_15_ModeConflictingRetry` (`internal/obligation/p342_p3_15_test.go`) |
 | P3-15 | explicit revalidation | `TestReevaluateAfterGrant` |
 | P3-15 | migration without invented exemption/proof | `TestP3_15_MigrationInventsNoExemptionOrProof` (`internal/obligation/p342_p3_15_test.go`) |
-| P3-16 | PASS→FAIL on same fingerprint | `TestH1NewerFailAtOtherFingerprintRejects` |
+| P3-16 | PASS→FAIL on same fingerprint | `TestProofRejection` (`internal/obligation/evaluate_test.go`) |
 | P3-16 | reversed run arrival | `TestH1StalePassAfterRevert` |
-| P3-16 | partial failure does not invalidate unrelated valid proof | `TestH1StalePassAfterInapplicableFail` |
+| P3-16 | partial failure does not invalidate unrelated valid proof | `TestProofRejection` (partial-failure case, `internal/obligation/evaluate_test.go`) |
 | P3-16 | refresh with expired grant | `TestProofRefresh` |
 | P3-16 | crash between pair writes leaves neither partial effect | `TestFailureInjectionAtomicity` |
 | P3-16 | blocked/waived behavior | `TestProofRejection` |
 | P3-17 | forged USER proof path | `TestObservationCannotFabricateEvidenceOrPass` |
 | P3-17 | observation before grant | `TestSEC19ReevaluateIgnoresHiddenObservation` (adjacent) |
-| P3-17 | unblock then reevaluate | `TestReevaluateAfterGrant` |
-| P3-17 | replacement revalidation without inherited grant | `TestDeclareForReplacementFailsClosed` |
+| P3-17 | unblock then reevaluate | `TestReevaluateStaleEvidenceAndUnblock` (`internal/obligation/reevaluate_test.go`) |
+| P3-17 | replacement revalidation without inherited grant | `TestDeclareForReplacement` (`internal/obligation/replacement_test.go`); `TestGateT02_ReplacementRetiresOldRequirement`'s `t02Reevaluation` (`internal/ingest/gate_traces_test.go`, the satisfied-obligation repeat through ingest) |
 | P3-17 | unavailable matcher version stays unresolved | `TestP3_17_UnavailableMatcherVersionStaysUnresolved` (`internal/obligation/p342_p3_17_test.go`) |
 | P3-17 | deterministic selection and retry | `TestCanonicalRunSubject` |
 | P3-18 | HARNESS declaration | `TestDeclareHarness` (`internal/obligation`) |
@@ -1197,11 +1197,11 @@ first time it appears in a row when not already obvious from context.
 | P3-18 | audit/CAS/rollback | `TestFailureInjectionAtomicity` |
 | P3-18 | no tool-created obligation | `TestToolAcknowledgmentIsNeverEvidenceSupport` (adjacent) |
 | P3-19 | initial delayed W1 PASS cannot establish baseline | `TestP3_19_InitialDelayedW1PassCannotEstablishBaseline` (`internal/obligation/p342_p319_test.go`) |
-| P3-19 | W2 update then delayed W1 update | `TestGateT07_Repeats` (`internal/ingest`, out-of-order-runs subtest) |
+| P3-19 | W2 update then delayed W1 update | `TestResourceBaselineAndOrdering` (`internal/obligation/resource_test.go`) |
 | P3-19 | gap→UNKNOWN | `TestGateT07_Repeats` (revision-gap subtest) |
 | P3-19 | authoritative resync | `TestGateT07_Repeats` (resync subtest) |
 | P3-19 | wrong reporter/resource | `TestResourceBaselineAndOrdering` |
-| P3-19 | same-content state at a new revision | `TestGateT07_Repeats` (same-fingerprint subtest) |
+| P3-19 | same-content state at a new revision | `TestResourceInvalidationT07` (`internal/obligation/resource_test.go`) |
 | P3-19 | current/fixed file mode | `TestSPEC111FixedHashTarget` |
 | P3-19 | restart and request replay | `TestRunAndObservationReceipts` |
 | P3-20 | `./a.go`, `a.go`, `src/../a.go` equivalence within one base/resource | `TestFrozenLocatorKeyMatchesLiveRuleV1`; `TestResourceLocatorIsScopedAndLexical` |
@@ -1231,7 +1231,7 @@ first time it appears in a row when not already obvious from context.
 | P3-23 | limit/crash at final page rolls back state and every status | `TestFailureInjectionAtomicity` |
 | P3-23 | unrelated resource unaffected | `TestSEC18DeadSubjectStatesDoNotWedgeReports` |
 | P3-23 | reporter receives no hidden IDs/counts | `TestXREV11StalePathClaim` (adjacent) |
-| P3-23 | UNKNOWN cannot retain resource-derived satisfaction | `TestObservationStateGating` |
+| P3-23 | UNKNOWN cannot retain resource-derived satisfaction | `TestResourceGapBecomesUnknown` (`internal/obligation/resource_test.go`); `TestGateT07_Repeats` (gap subtest, `internal/ingest`) |
 | P3-24 | same `call_1` spelling in different outputs | `TestToolCallSpellingIsScopedToOutput` (`internal/tools`) |
 | P3-24 | same invocation with different tool/principal/args conflicts | `TestP3_24_SameInvocationDifferentToolPrincipalOrArgsConflicts` (`internal/tools/p342_p3_24_test.go`) |
 | P3-24 | no execution from partial assistant output | `TestExecuteDistinguishesToolCallsOfOneOutput` |
