@@ -138,7 +138,8 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 // failed request alone, so repeating the re-arm — by any authorized actor —
 // returns the same request. The failed record stays immutable. Only
 // SYSTEM/HARNESS may re-arm, and a task-scoped request re-arms only from
-// its own task (SYSTEM exempt); that binding is checked before any outcome
+// its own task — SYSTEM included, exactly as ExecuteGCRequest binds its
+// collector (SPEC-5.6); that binding is checked before any outcome
 // check and is indistinguishable from an absent request, so a foreign
 // principal learns nothing about whether a predictable gcq_ ID exists
 // (SEC-4.4). MANUAL and session-scope requests re-arm (DUR-4.8); a trigger
@@ -172,9 +173,10 @@ func (s *Service) RearmGCRequest(tx store.Tx, actor domain.Principal, failedID s
 		return "", err
 	}
 	// Task scope binds the re-arm to the request's task before any outcome
-	// check: a foreign principal sees ErrNotFound for pending, failed and
-	// absent requests alike (SEC-4.4: no existence oracle).
-	if req.Scope == domain.CollectTask && actor.Authority != domain.AuthoritySystem && actor.TaskID != req.TaskID {
+	// check, for SYSTEM and HARNESS alike (SPEC-5.6): a foreign principal
+	// sees ErrNotFound for pending, failed and absent requests alike
+	// (SEC-4.4: no existence oracle).
+	if req.Scope == domain.CollectTask && actor.TaskID != req.TaskID {
 		return "", domain.ErrNotFound
 	}
 	res, err := sem.GCResult(req.ID)
