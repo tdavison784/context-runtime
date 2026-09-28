@@ -240,18 +240,22 @@ both forms share.
   item-count limit, and attempts for the next candidate. Later insertions
   cannot extend the request. Continuations require the first batch's
   collector principal, preserving its access boundary.
-  **Known regression, not yet fixed as of this pass (SEC-4.2/SPEC-4.2,
-  round 4, introduced by `920e9e8`; assigned to W3c): freezing the
-  candidate set at `SnapshotSeq` does not also freeze protection
-  decisions.** `gc_snapshot.go` evaluates lease liveness against the
+  **Regression, fixed round 4 (SEC-4.2/SPEC-4.2, introduced by
+  `920e9e8`): freezing the candidate set at `SnapshotSeq` did not also
+  freeze protection decisions.** `gc_snapshot.go` evaluated lease
+  liveness against the
   frozen `SnapshotSeq` rather than the current sequence, so a lease taken
-  on an item after batch 1 is invisible to a later batch and that item is
-  archived despite P3-38's "active lease contents" protection; every other
-  protection (open exchange, obligations, currentness, task) is already
-  read from current state and is unaffected. J2 freezes the candidate
-  *set*, not the protection decisions made about it — this ADR will need
-  a further correction once the fix (evaluating lease liveness at each
-  batch's own sequence) lands.
+  on an item after batch 1 was invisible to a later batch and that item
+  was archived despite P3-38's "active lease contents" protection; every
+  other protection (open exchange, obligations, currentness, task) was
+  already read from current state and was unaffected. J2 freezes the
+  candidate *set*, not the protection decisions made about it. **Fixed,
+  round 4 (SEC-4.2/SPEC-4.2/DUR-4.1):** `gcProtection`
+  (`internal/lifecycle/gc_snapshot.go`) now evaluates lease liveness at
+  `tx.LastSeq()`, the batch's own current sequence, not the frozen
+  snapshot ceiling — every protection is now read from current state,
+  none from the frozen snapshot. Test:
+  `TestLeaseTakenAfterFirstBatchProtects_SEC42` (`internal/lifecycle/gc_round4_test.go`).
   Shared transaction-budget exhaustion commits only the completed prefix
   and halves the item-count limit (floor one). Receipt sizing includes
   the complete enclosing mutation receipt, archive results, request link,
@@ -315,11 +319,76 @@ both forms share.
   `TestGCQueueContinuesDurablyPastSkippedPrefix`,
   `TestJ5ConfigurationErrorsLeaveRequestsPending`,
   `TestFailedGCRequestCanBeRearmed`, `TestAttemptsResetWhenABatchProgresses`.
-  **Round 4 review (SEC-4.4/4.5/4.6) found further gaps in this landed
-  re-arm/continuation code — cross-task re-arm, an actor-dependent re-arm
-  identity, and a re-arm that cannot target a MANUAL request — assigned to
-  W3c and not yet fixed as of this pass; this ADR will need a further
-  correction once they land.**
+  **Round 4 findings (SEC-4.4/DUR-4.8, DUR-4.9/ruling M1, DUR-4.5), all
+  fixed as of the round-4 integration (`p3-int`, head `dc07666`):**
+  `RearmGCRequest` (`internal/lifecycle/gc_requests.go`) now binds a
+  task-scoped request's re-arm to `actor.TaskID == req.TaskID` (SYSTEM
+  exempt), checked before any outcome lookup so a foreign principal sees
+  the identical `ErrNotFound` for a pending, failed, or absent request
+  alike — no existence oracle (SEC-4.4). The re-arm identity,
+  `domain.GCRearmRequestID(failed.ID)`, derives from the failed request
+  alone, never the actor, so repeating a re-arm is idempotent regardless
+  of who calls it. MANUAL and session-scope requests can now re-arm too
+  (DUR-4.8), through `gcqueue.EnqueueRearm`; a disabled trigger returns
+  `ErrGCTriggerDisabled` rather than a silent empty ID. **Ruling M1
+  (DUR-4.9): a pending request recorded under another policy version no
+  longer strands forever.** `CollectPending` (`gc_requests.go`) now
+  settles it `FAILED`/`POLICY_MISMATCH` (`domain.GCFailurePolicyMismatch`,
+  `ErrGCPolicyVersion`) — uncharged, nothing archived — the first time a
+  collector under the current policy encounters it, so the normal re-arm
+  path applies afterward instead of the request silently never running.
+  **DUR-4.5 (a regression of H3): the request-level retry bound, lost
+  when J4's per-item attempt counter was strengthened to reset on
+  progress, is restored** — `maxGCAttempts` (3) now bounds *consecutive
+  failed batches*, quarantining `ATTEMPTS_EXHAUSTED` after that many, so a
+  batch transaction that never progresses no longer retries forever; the
+  counter still resets to 0 whenever a batch makes any progress (DUR-3.4,
+  unchanged). Tests (`internal/lifecycle/gc_round4b_test.go` unless
+  noted): `TestRearmBindsToTheRequestTaskAndIsNoOracle_SEC44` (SEC-4.4),
+  `TestRearmSupportsManualAndReportsDisabledTriggers_SEC44` (DUR-4.8),
+  `TestPolicyMismatchSettlesAndRearms_DUR49` (M1/DUR-4.9);
+  `TestFailingGCRequestsAreQuarantined`'s `gcBatchFaultStore` subtest
+  (`internal/lifecycle/gc_quarantine_test.go`, DUR-4.5: a batch that
+  always fails its receipt commit is quarantined after exactly
+  `maxGCAttempts` calls, never retried again).
+  **SEC-4.5: continuing a pending request no longer binds to the exact
+  principal that ran batch 1.** `ExecuteGCRequest`
+  (`internal/lifecycle/gc_requests.go`) binds continuation to the
+  collector's *authority class* (SYSTEM/HARNESS) plus task, never to the
+  full principal tuple: any authorized collector — not only the one that
+  happened to run the first batch — may continue a pending request, so a
+  same-task HARNESS with a different `AgentID` no longer wedges it
+  forever. Test: `TestContinuationIsNotBoundToTheFirstCollector_SEC45`
+  (`internal/lifecycle/gc_round4b_test.go`).
+  **SEC-4.7/DUR-4.4: batch size recovers, and an item's own read bound
+  skips without halving.** `collect.go`'s batch loop now distinguishes
+  two failure shapes a heavy candidate can produce: the *shared*
+  transaction-work budget running out mid-item (`errBudget`) still halves
+  the batch size and retries the item in a smaller one, but an item's own
+  deterministic read-bound failure (`domain.ErrResourceLimit`/
+  `store.ErrLimitExceeded` — no batch size could ever fit it) now records
+  `SKIP_RESOURCE_LIMIT` immediately, with no halving at all. Separately, a
+  batch that completes fully with room to spare doubles the size back
+  toward the policy ceiling (`min(2*plan.batchSize, MaxGCDecisions)`) on
+  its *next* batch, so one heavy item early in a request no longer pins
+  `BatchSize` at 1 for its remaining lifetime. Tests:
+  `TestHeavyItemSkipsWithoutShrinkingEveryBatch_DUR44`,
+  `TestBatchSizeRecoversAfterAWorkHalving_SEC47` (`internal/lifecycle/gc_round4b_test.go`).
+  **SEC-4.8: manual collection and re-arm no longer share the runtime
+  trigger's ID domain.** Before this, both derived their durable request
+  identity through `GCTriggerRequestID` itself, so a SYSTEM/HARNESS
+  principal running a manual `Collect{RequestID: <taskID>, Trigger:
+  TASK_COMPLETION}` could precompute its own later task-completion
+  `gcq_` record and wedge that later `CompleteTask` with
+  `ErrEventIDConflict` — self-inflicted, but still a way to break one's
+  own GC. `domain.GCManualRequestID(origin, requestID)`
+  (`context-runtime/gc-manual/v1`, registered in ADR 4) and
+  `domain.GCRearmRequestID(failedID)` (`context-runtime/gc-rearm/v1`,
+  ADR 4) each get their own encoder domain, disjoint from
+  `gc-trigger/v1`/`v2` and from each other, so neither a manual collection
+  nor a re-arm can alias a runtime trigger's identity or one another's.
+  Test: `TestManualCollectDoesNotWedgeTaskCompletion_SEC48`
+  (`internal/lifecycle/gc_round4b_test.go`).
   **Grant issuance room is tiered by authority, not a flat quarter-share
   (SEC-2.7, superseded by SEC-3.8/DUR-3.6, landed at `4a00b06`; SPEC-4.3
   corrects the prior "not yet merged" text).** `liveGrantRoom`
@@ -327,13 +396,13 @@ both forms share.
   USER issuers together hold at most half of `MaxTargets` live grants per
   `(action, target)`; USER+HARNESS together at most three quarters; SYSTEM
   may use all of it; no reserve applies when `MaxTargets < 4`, so a valid
-  small cap never makes issuance impossible. Tests:
-  `TestGrantRoomIsTieredByAuthority`, `TestSmallGrantRoomHasNoReserves`
-  (`internal/lifecycle/grants_test.go`) — `TestLiveGrantCapIsSharedFairly`,
-  the flat-quarter-share test this text previously cited, no longer exists.
-  **Round 4 review (SEC-4.6) found the tiered rule still lets one
-  authenticated identity take its whole tier — no per-issuer sub-share
-  within a tier — assigned to W3c and not yet fixed as of this pass.**
+  small cap never makes issuance impossible. **Within its tier, one
+  identity holds at most half the tier's slots (SEC-4.6, fixed round 4):**
+  no single issuer, however many grants it issues, can starve its own
+  class's peers. Tests: `TestGrantRoomIsTieredByAuthority`,
+  `TestSmallGrantRoomHasNoReserves` (`internal/lifecycle/grants_test.go`)
+  — `TestLiveGrantCapIsSharedFairly`, the flat-quarter-share test this
+  text previously cited, no longer exists.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request
   idempotently after producer commit, never inline with it. Tests:
   `TestCollectDecisionMatrix`, `TestCollectDecisionRejectsIncompleteSnapshot`,

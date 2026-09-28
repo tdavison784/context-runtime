@@ -5,14 +5,15 @@ Date: 2026-09-25
 
 ## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
 
-Phase 3 (worker W2, `internal/store`) adds thirty forward migrations,
-0018 through 0047 (SPEC-4.4/DUR-4.10 correct the prior "twenty-seven ...
-0018 through 0044": 0018-0028 from the initial Phase 3 merge; 0029-0034
-fixing PR #6 round-1 review findings; 0035-0040 fixing round-2 findings;
+Phase 3 (worker W2, `internal/store`) adds thirty-one forward migrations,
+0018 through 0048 (K1 corrects the prior "thirty ... 0018 through 0047",
+itself SPEC-4.4/DUR-4.10's correction of a stale "twenty-seven ... 0018
+through 0044": 0018-0028 from the initial Phase 3 merge; 0029-0034 fixing
+PR #6 round-1 review findings; 0035-0040 fixing round-2 findings;
 0041-0044 fixing round-3 J1-J7 findings; 0045-0047 fixing round-3
-DUR-3.1/DUR-3.2 findings), after this ADR's Phase 2 migrations (0001
-unchanged, per this ADR's own rule). The full record/column/index
-manifest is
+DUR-3.1/DUR-3.2 findings; 0048 landing the commander's FROZEN K1 ruling
+in round 4), after this ADR's Phase 2 migrations (0001 unchanged, per
+this ADR's own rule). The full record/column/index manifest is
 `docs/phase3-schema-manifest.md` (P3-41); this section records the
 migration list itself and its upgrade-parity tests, matching how this ADR
 already tracks 0001-0017 above.
@@ -225,11 +226,13 @@ excluded by it).
   `rec_envelope`/`rec_receipt`, backfilled with the largest value each
   recorded policy's own work budget allows, capped at the default 256, so
   historical envelopes and receipts still validate and replay verbatim
-  (P3-38). **DUR-4.6 (round 4, unfixed as of this pass): a recorded policy
-  with `MaxTransactionWork < 10` backfills to 0, which `Validate` then
-  rejects, so an exact retry of that policy's receipt fails instead of
-  replaying — a regression of P3-40's "an exact admitted historical retry
-  is never reinterpreted."**
+  (P3-38). **DUR-4.6, resolved as a side effect of K1 A6 (round 4), not
+  by fixing the backfill:** a recorded policy with `MaxTransactionWork <
+  10` still backfills `MaxLiveProofDependents` to 0, but
+  `Phase3Policy.Validate` (`internal/domain/semantic.go`) no longer
+  validates that field at all once K1 lands (below), so the
+  previously-rejecting 0 value is never checked and the exact-retry
+  regression this bullet originally described cannot occur.
 - `0047_gc_queue.sql` (PR #6 round 3, DUR-3.2; SPEC-4.4/DUR-4.10) —
   `lookup_pending_gc_trigger` indexes pending GC requests by trigger,
   backfilled from `lookup_pending_gc`, so a collector reading its enabled
@@ -237,6 +240,58 @@ excluded by it).
   each session's CAS-written, durable scan position, replacing the
   in-process `gcQueueCursors` `sync.Map` a new service instance or a
   restart used to reset.
+- `0048_k1_pointers.sql` (PR #6 round 3 commander ruling K1, landed round
+  4) — the write-time validity pointers ADR 8's K1 section (A1) derives
+  proof validity from, an audit cursor, and a live-proof index:
+  `lookup_workspace_divergence` (per resource, each raise's revision and
+  causing update ID: lost freshness or a changed workspace fingerprint);
+  `lookup_affecting_raise` (per resource/key — the `"all"` key for
+  UNKNOWN/ALL-paths reports, else `"path:"` plus the hex of a changed
+  path, exactly migration 0033's keys); `lookup_live_proof` (every live
+  proof, in `(Seq, ID)` order, for the SYSTEM async settlement worker);
+  `settlement_cursor` (each session's CAS-written audit scan position,
+  unsequenced operational state like `gc_queue_cursor`, never evidence a
+  proof was settled). The frozen Go step
+  `reconcileK1PointersV1` (`steps_0048.go`, registered
+  `"0048/k1/reconcile-workspace-divergence-v1"`) backfills
+  `lookup_workspace_divergence` exactly, walking each resource's updates
+  in revision order and raising on `Freshness == UNKNOWN` or a changed
+  fingerprint from the previous report's (the first report's fingerprint
+  always counts as a change). The migration's own plain SQL backfills the
+  other two raise tables conservatively rather than exactly: **the ALL
+  key from every UNKNOWN or all-paths report, and every recorded
+  `ChangedPath` of every stored report** — reports' same-content history
+  is not reconstructible, so a backfilled raise can settle a proof a live
+  report would have spared (an accepted, one-time-upgrade
+  overapproximation). **A KNOWN report after UNKNOWN raises divergence**
+  through the same general rule as any fingerprint change: going UNKNOWN
+  clears the resource's stored fingerprint, so the next KNOWN report's
+  fingerprint (never empty) always differs from it, with no special-case
+  code needed. Migration 0045's `lookup_live_proof_path`/
+  `lookup_live_dependents` tables are unaffected and unused by any of
+  this: they stay maintained only as an unused write-time metric (K1d),
+  since 0048 introduces its own dedicated pointers rather than reusing
+  them. Tests: `TestK1ReportsNeverFanOut`, `TestK1ValidityIsMonotone`,
+  `TestK1DependencySemantics`, `TestConformance/SemanticProofDerivedValid`,
+  `TestConformance/SemanticA5CommitGuard` (storetest).
+  **`TestUpgradeK1Pointers_0048` (`internal/store/sqlite/upgrade_test.go`)
+  closes the upgrade-parity gap this bullet previously flagged as open,
+  against a real pre-0048 database:** the divergence chain backfills
+  exactly; the ALL/directory/exact-path affecting keys backfill equal to
+  the runtime raises, with the one path key whose content history is
+  genuinely ambiguous (two reports re-recording the same content)
+  carrying exactly the documented conservative superset a live report
+  would have spared, never fewer raises than the runtime rule requires;
+  `ProofDerivedValid` is false for every proof the runtime rule would
+  also derive invalid, and stays true for a `FIXED_CONTENT` proof and one
+  written after the last report; `LiveProofs` holds exactly the current
+  proofs of current SATISFIED versions (a superseded version's proof is
+  excluded) in `(Seq, ID)` order; `SettlementCursor` is absent before its
+  first `Put` and CAS-versioned after. A fresh database that lives the
+  same report history through the runtime path (never the backfill)
+  raises identically, cross-checking the backfill against real runtime
+  behavior rather than only against the test's own expectations. No case
+  fails open.
 
 **Tests that lock this list (all in `internal/store/sqlite`, extending this
 ADR's existing migration-checksum/upgrade discipline):**
@@ -253,7 +308,9 @@ missing from this list). **`TestUpgradeLiveProofPaths`,
 plus `TestCursorPagesSeekRange` and `TestLiveProofPathReadsSeek`
 (keyset-cursor seeks over the new indexes) and
 `TestLatestBindingVersionIsKeyed` (DUR-3.7) were also missing from this
-list (DUR-4.10).** `internal/obligation`'s own SQLite suite
+list (DUR-4.10).** `TestUpgradeK1Pointers_0048` (round 4, SPEC-4.4) is
+0048's own upgrade-parity fixture, landed after this list's prior pass.
+`internal/obligation`'s own SQLite suite
 (50/50 subtests, 8/8 failure-injection scenarios, ADR 8) runs against these
 migrations through W2's `sqlitetest` template.
 
@@ -743,8 +800,9 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all forty-seven migrations replay on a fresh database (PR #6
-    round 4, SPEC-4.4/DUR-4.10: corrected from a stale "forty-four," which
+    after all forty-eight migrations replay on a fresh database (K1:
+    corrected from a stale "forty-seven," itself PR #6 round 4's
+    SPEC-4.4/DUR-4.10 correction of a stale "forty-four," which
     was this ADR's own count before 0045-0047 landed; PR #6 round 3,
     SPEC-3.8/DUR-3.10 had corrected a stale "seventeen," which
     was Phase 2's own count before Phase 3's 0018-0044 landed; PR #5

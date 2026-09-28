@@ -135,12 +135,17 @@ the "Persisted record manifest" above either:
   proofs it can affect.
 - `lookup_live_dependents` (`session_id, resource_id, dependents`) —
   the live non-`FIXED_CONTENT` dependency-row count per resource, the
-  cap `Phase3Policy.MaxLiveProofDependents` validates against (retired by
-  the commander's FROZEN K1 ruling once K1 itself lands, ADR 8 K1e).
+  cap `Phase3Policy.MaxLiveProofDependents` used to validate against.
+  **K1 (round 4, landed) retires that validation entirely** (below): the
+  table is kept only as an unused write-time metric, not read by any
+  correctness path.
 - `Phase3Policy.MaxLiveProofDependents` (int; default 256) — an added
   field on the recorded policy, persisted on `rec_envelope`/`rec_receipt`
   (migration 0046) so P3-40's exact historical retry keeps validating
-  under the policy it was recorded with.
+  under the policy it was recorded with. **K1 (round 4) stops validating
+  or using this field at all** (`Phase3Policy.Validate`,
+  `internal/domain/semantic.go`); it stays recorded for that same replay
+  reason, never re-added to any check.
 - `lookup_pending_gc_trigger` (`session_id, trigger, seq, request_id`) —
   DUR-3.2: pending `GCRequest`s indexed by trigger, so a collector never
   pages a disabled trigger's requests.
@@ -148,3 +153,27 @@ the "Persisted record manifest" above either:
   — DUR-3.2: each session's CAS-written, durable scan position,
   replacing an earlier in-process cursor that a restart or a new service
   instance used to reset.
+
+## PR #6 round 4 addition (K1; migration 0048, landed — same exception as
+above, ADR 3's own 0048 bullet remains authoritative)
+
+Internal lookup/index tables implementing ADR 8's K1 A1/A4 (derived-at-read
+proof validity), replacing the round-3 cap mechanism above rather than
+building on it:
+
+- `lookup_workspace_divergence` (`session_id, resource_id, revision,
+  update_id`) — K1 A1: each resource's monotone divergence raises (lost
+  freshness or a changed workspace fingerprint), read as
+  `LastWorkspaceDivergenceRev`/`FirstWorkspaceDivergenceAfter`.
+- `lookup_affecting_raise` (`session_id, resource_id, path_key, revision,
+  update_id`) — K1 A1: the `(resource, key)` raises, `path_key` `"all"`
+  for UNKNOWN/all-paths reports or `"path:"` plus the hex of a changed
+  path (migration 0033's keys), read as
+  `LastAffectingRev`/`FirstAffectingUpdateAfter`.
+- `lookup_live_proof` (`session_id, seq, proof_id`) — K1 A4: every live
+  proof (the current proof of a current obligation version) in `(Seq,
+  ID)` order, the SYSTEM async settlement worker's scan input.
+- `settlement_cursor` (`session_id` PK, `cursor_seq, cursor_id,
+  revision`) — K1 A4: the session's CAS-written audit scan position,
+  unsequenced operational state like `gc_queue_cursor` above, never
+  evidence a proof was settled.
