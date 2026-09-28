@@ -790,19 +790,19 @@ and its refusal path entirely (K1a, K1d):
   actually processed — never to the page end — while a proof that alone
   exceeds a whole fresh pass's budget is left pending and skipped past,
   so the cursor never stalls on it (K1-api.3 §4) and inline settlement
-  (A3) still settles it at its next transition. Nothing in production
-  calls the worker (its only current callers are tests): the embedder
-  schedules the passes (SPEC-5.12, round 5) — alongside draining the GC
-  queue is the intended cadence — and a scheduler that never fires
-  costs only the timeliness of the recorded state, never a guarantee,
-  since inline settlement settles every pending version at its next
-  transition; the audit is a disclosure/completeness concern, never a
-  validity one. The settlement's actor is always the session SYSTEM
-  runtime; the causing
-  update's own `Reporter` field (unchanged from P3-19/ADR 8 §9) is the
-  record of who actually reported the change, kept separate from the
-  settlement's own actor. Tests (`internal/obligation/k1_test.go`
-  unless noted): `TestK1InlineSettleBeforeTransition`,
+  (A3) still settles it at its next transition. Nothing in production calls the worker (its only current callers are
+  tests): the embedder schedules the passes (SPEC-5.12, round 5) — alongside draining the GC queue is the intended
+  cadence — and a scheduler that never fires costs only the timeliness of the recorded state, never a guarantee,
+  since inline settlement settles every pending version at its next transition; the audit is a disclosure/
+  completeness concern, never a validity one. **K1-api.md's original XREV-5.3 sentence — that a configuration where
+  not even one settlement fits "is rejected by policy validation (MaxTransactionWork must be enough for one
+  settlement)" — is superseded by that same document's binding amendment list, items 4 and 5 (SEC-6.2, round 7):
+  no minimum-budget check ever validates a recorded policy (`Phase3Policy.Validate` requires only positive limits,
+  `internal/domain/semantic.go:131`), and the worker never refuses — it skips the oversized proof past the cursor
+  and leaves it pending for inline settlement (`TestXREV5SettlementWorkerSkipsOversizedProofWithoutStalling`).**
+  The settlement's actor is always the session SYSTEM runtime; the causing update's own `Reporter` field (unchanged
+  from P3-19/ADR 8 §9) is the record of who actually reported the change, kept separate from the settlement's own
+  actor. Tests (`internal/obligation/k1_test.go` unless noted): `TestK1InlineSettleBeforeTransition`,
   `TestK1SettlementWorker`, `TestK1SettleBeforeRetire`,
   `TestK1ReplacementSettlesPendingBeforeRetirement`;
   `TestPendingSatisfiedVersionIsUnfinishedAndProtected_K1`
