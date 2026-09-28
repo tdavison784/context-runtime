@@ -38,91 +38,95 @@ func insertEvidence(t *testing.T, st store.Store, ids ...string) {
 
 // T16 state: twelve closed exchanges, F1/F2 from X3/X9 evidence, then K1
 // issued in X13 covers exactly X1–X12 with separate source provenance.
+// Runs on both stores (P3-27, ADR 8 :1372): the frontier arithmetic and the
+// checkpoint/coverage records are store contracts.
 func TestT16CheckpointCoversTwelveClosedExchanges(t *testing.T) {
-	st, i := toolFixture(t)
-	s := testService(t)
-	insertEvidence(t, st, "E3", "E9")
-	state := func(inv domain.ToolInvocation, n int) {
-		runTool(t, st, func(tx store.Tx) (domain.ToolResult, error) {
-			return s.UpdateState(tx, dispatcher(inv), Request[domain.KeyedWriteIntent]{inv, domain.KeyedWriteIntent{RequestID: "state-" + strconv.Itoa(n), Key: "progress", Kind: domain.KindTaskState, Parts: keyed("", "", "step "+strconv.Itoa(n)).Parts}}, tx.NextSeq())
-		})
-	}
-	facts := map[string]domain.KeyedWriteResult{}
-	exchanges := []string{i.ExchangeID}
-	cur := i
-	state(cur, 1)
-	for n := 2; n <= 13; n++ {
-		var extra []string
-		switch n {
-		case 3:
-			extra = []string{"E3"}
-		case 9:
-			extra = []string{"E9"}
-		}
-		cur, _ = nextRound(t, st, cur, strconv.Itoa(n), true, extra...)
-		if n == 13 {
-			break
-		}
-		exchanges = append(exchanges, cur.ExchangeID)
-		switch n {
-		case 4, 10:
-			fact, evidence := "F1", "E3"
-			if n == 10 {
-				fact, evidence = "F2", "E9"
-			}
-			r := runTool(t, st, func(tx store.Tx) (domain.ToolResult, error) {
-				return s.Remember(tx, dispatcher(cur), Request[domain.KeyedWriteIntent]{cur, keyed("fact-"+fact, fact, fact+" holds", evidence)}, tx.NextSeq())
+	p342bEachStore(t, func(t *testing.T, st store.Store) {
+		i := seedToolFixture(t, st)
+		s := testService(t)
+		insertEvidence(t, st, "E3", "E9")
+		state := func(inv domain.ToolInvocation, n int) {
+			runTool(t, st, func(tx store.Tx) (domain.ToolResult, error) {
+				return s.UpdateState(tx, dispatcher(inv), Request[domain.KeyedWriteIntent]{inv, domain.KeyedWriteIntent{RequestID: "state-" + strconv.Itoa(n), Key: "progress", Kind: domain.KindTaskState, Parts: keyed("", "", "step "+strconv.Itoa(n)).Parts}}, tx.NextSeq())
 			})
-			facts[fact] = *r.Keyed
-		default:
-			state(cur, n)
 		}
-	}
-	var manifest string
-	update(t, st, func(tx store.Tx) error {
-		sem, _ := store.Semantic(tx)
-		page, err := sem.AdmissionsByExchange(exchanges[11], store.Page{Limit: 4})
-		if err != nil || len(page.Records) != 1 {
-			t.Fatalf("X12 admission: %+v, %v", page, err)
-		}
-		manifest = page.Records[0].ID
-		return nil
-	})
-	k1 := runTool(t, st, func(tx store.Tx) (domain.ToolResult, error) {
-		return s.CreateCheckpoint(tx, dispatcher(cur), Request[domain.CheckpointIntent]{cur, summary("k1", manifest, "K1: F1 and F2 hold; steps 1-12 done.")}, tx.NextSeq())
-	})
-	update(t, st, func(tx store.Tx) error {
-		sem, _ := store.Semantic(tx)
-		c, err := sem.Checkpoint(k1.CheckpointID)
-		if err != nil || c.CoveredFrontier != 12 {
-			t.Fatalf("K1: %+v, %v", c, err)
-		}
-		item, _ := tx.Item(c.ItemID)
-		if item.Authority != domain.AuthorityAgent || item.Kind != domain.KindSummary || item.Role != domain.RoleCheckpoint {
-			t.Fatalf("K1 item: %+v", item)
-		}
-		covered, _ := sem.CoverageMembers(c.CoveredExchangesID, store.Page{Limit: 32})
-		got := map[string]bool{}
-		for _, m := range covered.Records {
-			got[m.ExchangeID] = true
-		}
-		if len(covered.Records) != 12 || got[cur.ExchangeID] {
-			t.Fatalf("K1 covers %d exchanges (issuing included: %v)", len(covered.Records), got[cur.ExchangeID])
-		}
-		for _, x := range exchanges {
-			if !got[x] {
-				t.Fatalf("K1 misses exchange %s", x)
+		facts := map[string]domain.KeyedWriteResult{}
+		exchanges := []string{i.ExchangeID}
+		cur := i
+		state(cur, 1)
+		for n := 2; n <= 13; n++ {
+			var extra []string
+			switch n {
+			case 3:
+				extra = []string{"E3"}
+			case 9:
+				extra = []string{"E9"}
+			}
+			cur, _ = nextRound(t, st, cur, strconv.Itoa(n), true, extra...)
+			if n == 13 {
+				break
+			}
+			exchanges = append(exchanges, cur.ExchangeID)
+			switch n {
+			case 4, 10:
+				fact, evidence := "F1", "E3"
+				if n == 10 {
+					fact, evidence = "F2", "E9"
+				}
+				r := runTool(t, st, func(tx store.Tx) (domain.ToolResult, error) {
+					return s.Remember(tx, dispatcher(cur), Request[domain.KeyedWriteIntent]{cur, keyed("fact-"+fact, fact, fact+" holds", evidence)}, tx.NextSeq())
+				})
+				facts[fact] = *r.Keyed
+			default:
+				state(cur, n)
 			}
 		}
-		for fact, evidence := range map[string]string{"F1": "E3", "F2": "E9"} {
-			id := facts[fact].ItemID
-			current, err := graph.IsCurrent(tx, id)
-			d, _ := sem.CreationDeclaration(id)
-			if err != nil || !current || len(d.AcceptedSemantics.SupportIDs) != 1 || d.AcceptedSemantics.SupportIDs[0] != evidence {
-				t.Fatalf("%s: current=%v support=%v, %v", fact, current, d.AcceptedSemantics.SupportIDs, err)
+		var manifest string
+		update(t, st, func(tx store.Tx) error {
+			sem, _ := store.Semantic(tx)
+			page, err := sem.AdmissionsByExchange(exchanges[11], store.Page{Limit: 4})
+			if err != nil || len(page.Records) != 1 {
+				t.Fatalf("X12 admission: %+v, %v", page, err)
 			}
-		}
-		return nil
+			manifest = page.Records[0].ID
+			return nil
+		})
+		k1 := runTool(t, st, func(tx store.Tx) (domain.ToolResult, error) {
+			return s.CreateCheckpoint(tx, dispatcher(cur), Request[domain.CheckpointIntent]{cur, summary("k1", manifest, "K1: F1 and F2 hold; steps 1-12 done.")}, tx.NextSeq())
+		})
+		update(t, st, func(tx store.Tx) error {
+			sem, _ := store.Semantic(tx)
+			c, err := sem.Checkpoint(k1.CheckpointID)
+			if err != nil || c.CoveredFrontier != 12 {
+				t.Fatalf("K1: %+v, %v", c, err)
+			}
+			item, _ := tx.Item(c.ItemID)
+			if item.Authority != domain.AuthorityAgent || item.Kind != domain.KindSummary || item.Role != domain.RoleCheckpoint {
+				t.Fatalf("K1 item: %+v", item)
+			}
+			covered, _ := sem.CoverageMembers(c.CoveredExchangesID, store.Page{Limit: 32})
+			got := map[string]bool{}
+			for _, m := range covered.Records {
+				got[m.ExchangeID] = true
+			}
+			if len(covered.Records) != 12 || got[cur.ExchangeID] {
+				t.Fatalf("K1 covers %d exchanges (issuing included: %v)", len(covered.Records), got[cur.ExchangeID])
+			}
+			for _, x := range exchanges {
+				if !got[x] {
+					t.Fatalf("K1 misses exchange %s", x)
+				}
+			}
+			for fact, evidence := range map[string]string{"F1": "E3", "F2": "E9"} {
+				id := facts[fact].ItemID
+				current, err := graph.IsCurrent(tx, id)
+				d, _ := sem.CreationDeclaration(id)
+				if err != nil || !current || len(d.AcceptedSemantics.SupportIDs) != 1 || d.AcceptedSemantics.SupportIDs[0] != evidence {
+					t.Fatalf("%s: current=%v support=%v, %v", fact, current, d.AcceptedSemantics.SupportIDs, err)
+				}
+			}
+			return nil
+		})
 	})
 }
 
