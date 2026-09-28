@@ -17,10 +17,17 @@ evidenced per row — after the round-5 SPEC-5.1 remap (whose closing
 "read and confirmed before citing" claim the round-7 SPEC-6.1 re-audit
 found overstated; see the method note below the coverage table), the
 round-7 pass re-opened every cited test body and appended the exact
-asserting `file:line` to each row, marking the clauses with no asserting
-line MISSING in-row (pending the round-7 test writers, p7-ta/p7-tb) and
-labeling memory-only, pure-function, and adjacent-test coverage inline
-(see "Outstanding required tests" below), and K1 has fully landed, but
+asserting `file:line` to each row; the round-7 test writers
+(p7-ta/p7-tb/p7-tc/p7-td) then landed every clause that pass marked
+MISSING or memory-only-gapped, and the final round-7 docs pass
+(p7-docsc) flipped all fourteen pending rows to Resolved, re-labeled the
+memory-only rows that gained SQLite coverage, re-verified every citation
+it touched against the code opened in its worktree, and documented the
+round's code changes (SEC-6.1, SPEC-6.2 through SPEC-6.8, GC-7.1,
+TEST-6.1/TEST-6.2) — the table now has no MISSING row, and every
+remaining memory-only, pure-function, or adjacent-test label carries its
+companion or justification in-row (see "Outstanding required tests"
+below); K1 has fully landed, but
 the commander has not yet
 ruled this ADR Accepted at the Phase 3 gate — that ruling is explicitly
 outside this docs pass's authority.)
@@ -1534,6 +1541,8 @@ first time it appears in a row when not already obvious from context.
 
 **Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. **Update (commander ruling M3, round 4):** this table originally found 52 genuinely MISSING clauses beyond the 21 the "Outstanding required tests" section below had already tracked (that section's 21 were always a subset, scoped to bullets a prior round had already flagged, not every clause in phase3-decisions.md). M3 ruled none of the 52 deferred; two GLM test writers wrote all of them as `p342_p3<N>_test.go` files, and every MISSING row above has been flipped to that real citation. **(SPEC-5.1, round 5) a remap pass then re-examined the rows whose citation was a wrong, partial, or adjacent test and moved each to a better existing test; the round-5 t3 and t2 test passes closed the two clauses that pass had left MISSING (the open-exchange half of P3-38, then P3-20's filesystem/network-read clause).** **(SPEC-6.1, round 7) the round-5 pass's closing claims — that each moved citation was "read and confirmed to assert its clause before citing" and that "the table now has no MISSING row" — were false: the round-7 re-audit found rows citing tests whose bodies do not assert the cited clause, memory-only coverage presented as both-store, and clauses with no asserting line at all. Round 7 re-opened every cited test body (P3-1..P3-20 by p7-docsa, P3-21..P3-42 by this pass) and appended the exact asserting `file:line` to each row — no line is cited that was not opened this round. A clause with no asserting line is now marked MISSING in-row with a pending p7-ta/p7-tb marker rather than left under a covering citation; memory-only, pure-function, and stub-fixture coverage is labeled per row where it applies; and the P3-42 rows whose clause is the table itself are labeled self-referential rather than forced onto an unrelated test.**
 
+**(Round 7 final, p7-docsc) the p7-ta/p7-tb test pass then wrote every clause the re-audit had marked MISSING — fourteen rows flipped to Resolved above, each citing the exact asserting `file:line` opened in the p7-docsc worktree (fixer-table line numbers were re-verified, never copied: p7-td's parametrization of the existing test files had shifted many) — and p7-tc/p7-td closed the memory-only gaps they targeted, including four rows whose "memory-only" label was stale because the test had been registered in the obligation SQLite suite all along. The table now greps clean of MISSING; every memory-only label that remains names its both-stores companion, its pure-function or stub-fixture nature, or its store-by-nature (SQLite-restart) justification in-row. Rows whose fixers reported layered defense or composite kills say so in-row: P3-26's private-evidence refusal and P3-13's future-evidence refusal hold as composites (single-layer breaks survive observably behind the deeper layer's identical refusal), and P3-9/P3-11/P3-25/P3-32/P3-41's ports are mutation-killed only through multi-layer breaks. One line per touched row is recorded in `.worktrees/_commander/p7-docsc-log.md`.**
+
 **(Round 7, SPEC-6.1 remediation — p7-docsa, docs only) every P3-1..P3-20
 row (the 136 rows at lines 1195-1330 above) was re-audited against the code:
 each cited test was opened and the exact asserting line(s) — a `t.Fatalf`/
@@ -1673,15 +1682,20 @@ unaffected by this pass and keep their existing citations, still real:
 **P3-42's own gate requirement — "every P3 decision maps to named
 required tests" — is now evidenced row by row, not claimed wholesale:
 every citation in the P3-42 table above carries the `file:line` of the
-assertion that proves its clause (round 7, SPEC-6.1), and the clauses
-where no asserting line exists are marked MISSING in-row with a pending
-p7-ta/p7-tb marker — the round-5 text's "the table marks no clause
-MISSING" claim was false, and SPEC-6.1's re-audit is what found it.** The
+assertion that proves its clause (round 7, SPEC-6.1), and the nine
+MISSING markers that re-audit found — plus the five clause (or
+clause-half) gaps its P3-1..P3-20 sibling pass (p7-docsa) carried — are
+all closed: the round-7
+p7-ta/p7-tb test pass wrote every pending clause, and the p7-docsc pass
+flipped each row to Resolved with an asserting line opened in its
+worktree, so the table now has no MISSING row at all.** The
 gate is therefore met to the exact extent the table records, gaps
 included: memory-only, pure-function, and stub-fixture coverage is
-labeled where it applies, and adjacent-test caveats still mark the rows
-a fresh reviewer should re-check. Whether the nine MISSING markers (as
-of this round) close before the Phase 3 gate rules this ADR Accepted is
+labeled where it applies — each with its both-stores companion or
+nature justified in-row — and adjacent-test caveats still mark the rows
+a fresh reviewer should re-check. Whether the remaining labeled
+(non-MISSING) caveats suffice for the Phase 3 gate to rule this ADR
+Accepted is
 the commander's call, not this docs pass's; flagged for that ruling
 separately.
 
