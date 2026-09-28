@@ -14,18 +14,26 @@ import (
 
 // TestP3_23_InvalidationFansOutAcrossTasksAndPrivateProofs: one resource edit
 // reaches every live proof bound to that resource — across task partitions and
-// into proofs resting on TURN-private evidence (P3-23 — the cited
+// into a proof resting on TURN-scoped evidence (P3-23 — the cited
 // TestConcurrency_InvalidationVsObservation runs one task, one obligation, and
-// no private proof, so nothing of the fan-out's reach is asserted). Three live
-// proofs of one session share resource repo1: task one's public proof, task
-// two's own proof in its own partition (own source, binding, declaration,
-// grant, run, and report), and a proof of task one resting on TURN-scoped
-// evidence narrower than its obligation's TASK boundary (§11's residual: turn
-// lifetime never widens or shields a proof — only a resource change
-// invalidates it). One edit to W2 invalidates all three in the same
-// transaction: every obligation is UNRESOLVED with no current proof, every
-// proof non-live. And the fan-out is not a wedge: task one re-satisfies at
-// the new authoritative content.
+// no narrower-evidence proof, so nothing of the fan-out's reach is asserted).
+// Three proofs of one session share resource repo1: task one's public proof,
+// task two's own proof in its own partition (own source, binding,
+// declaration, grant, run, and report), and a proof of task one resting on
+// TURN-scoped evidence narrower than its obligation's TASK boundary (§11's
+// residual: turn lifetime never widens or shields a proof — only a resource
+// change invalidates it). The TURN-evidenced observation supersedes task
+// one's earlier public proof as that obligation's current proof, so TWO
+// proofs are live when the edit fires — this test does not claim three live
+// proofs, and its TURN scope is narrower than TASK, not another agent's
+// partition (no ownership-mismatch refusal is asserted here). The genuine
+// three-live-proofs fan-out, including an AGENT-scoped proof another agent
+// of the same task cannot read, is
+// TestP3_23_ThreeLiveProofsAcrossTasksAndAgentPartitions
+// (p342c_p3_23_test.go). One edit to W2 invalidates both live proofs in the
+// same transaction: every obligation is UNRESOLVED with no current proof.
+// And the fan-out is not a wedge: task one re-satisfies at the new
+// authoritative content.
 func TestP3_23_InvalidationFansOutAcrossTasksAndPrivateProofs(t *testing.T) {
 	p342BothStores(t, func(t *testing.T) {
 		f := newEvalFixture(t)
@@ -86,7 +94,7 @@ func TestP3_23_InvalidationFansOutAcrossTasksAndPrivateProofs(t *testing.T) {
 			t.Fatalf("task-two proof not established: %+v", o)
 		}
 
-		// Task one again, this time on TURN-private evidence: same run
+		// Task one again, this time on TURN-scoped evidence: same run
 		// discipline, evidence narrower than the obligation's boundary.
 		in3 := runIntent(fmt.Sprintf("run-23p-%d", runN+1), fmt.Sprintf("exec-23p-%d", runN+1), f.target)
 		run3, err := f.registerRun(t, f.harness, in3)
@@ -110,7 +118,7 @@ func TestP3_23_InvalidationFansOutAcrossTasksAndPrivateProofs(t *testing.T) {
 			t.Fatalf("TURN-evidenced proof not established: %+v", private)
 		}
 
-		// One edit. The fan-out must reach all three proofs.
+		// One edit. The fan-out must reach every live proof — both of them.
 		f.r.set(t, f.fixture, hashOf("W2"), false)
 		f.wantInvalidated(t, f.sysTests, "repo1", "edit left task one's public proof live")
 		// The TURN-evidenced proof and task two's proof settle through the
