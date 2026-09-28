@@ -730,16 +730,30 @@ and its refusal path entirely (K1a, K1d):
   (`internal/plan`, SDD §6) that does not exist yet — A2's requirement
   there is necessarily deferred, not landed, and this ADR records it as
   such rather than claiming coverage a nonexistent package can't have.**
-  A repo-wide AST enforcement test,
+  A repo-wide enforcement test,
   `TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2`
-  (`internal/domain/effective_status_boundary_test.go`), parses every
-  non-test `.go` file outside `internal/domain`/`internal/store` and
-  fails if any function other than `obligation.EffectiveStatus` and
-  `graph.settleBeforeRetirement` (M2's settlement pre-check, itself
-  settlement machinery) compares or switches on a stored
-  `ObligationStatus` constant; its `effectiveStatusPending` allowlist,
-  for comparisons predating K1 that still needed migrating, is empty —
-  nothing remains pending. Tests: `TestK1ReadsUseEffectiveStatus`,
+  (`internal/domain/effective_status_boundary_test.go`, rewritten
+  type-based in round 5's SPEC-5.9 — round 4's version was a syntactic
+  AST walk), parses and type-checks every production package outside
+  `internal/domain`/`internal/store` (test files, testdata, and nested
+  modules skipped) and fails on any read of the stored
+  `ObligationVersion.Status` field outside its allowlist — however the
+  read is used: compared, assigned to a local, a map key, converted, a
+  method value. Matching the type-checked field itself
+  (`types.Selections` against the resolved field object) is what makes
+  the check catch indirection, and a package that fails to type-check
+  fails the test closed rather than being skipped. The allowlist holds
+  exactly: `obligation.EffectiveStatus` (the one helper);
+  `obligation.Service.ApplyTransitionTx` (the write path's
+  transition-table check, recorded cause and history — a pending
+  version is settled first); `graph.settleBeforeRetirement` (M2's
+  settlement pre-check, itself settlement machinery); and
+  `lifecycle.completionBlockers` (`Status.Valid()` enum-shape
+  validation only — its selection goes through `openObligation` →
+  `effectiveStatus`). The `statusReadPending` list, for reads
+  predating K1 that still needed migrating, is empty — nothing remains
+  pending, and an entry that no longer occurs also fails, so the list
+  can only ever shrink. Tests: `TestK1ReadsUseEffectiveStatus`,
   `TestCompletionBlockersUseEffectiveStatus_K1A2`,
   `TestGCProtectionUsesEffectiveStatus_K1A2`,
   `TestStatusSelectorsReadStoredSatisfiedVersions_K1A2`,
@@ -768,12 +782,22 @@ and its refusal path entirely (K1a, K1d):
   page of live proofs after the cursor, settles each pending one through
   the same exact-keyed path as the inline settle (idempotent with it),
   skips settled/re-satisfied/waived/retired versions, and never blocks or
-  charges a report — correctness never depends on it having run. Nothing
-  in production schedules it yet (its only current callers are tests):
-  the embedding harness is the intended driver — it should call
-  `SettlePendingTx` periodically, as it drains the GC queue, since the
-  audit is a disclosure/completeness concern, never a validity one. The
-  settlement's actor is always the session SYSTEM runtime; the causing
+  charges a report — correctness never depends on it having run. Each
+  pass is sized by the remaining work budget (XREV-5.3, round 5): it
+  stops before a settlement that would exceed the budget, commits the
+  completed prefix, and advances the cursor only past the proofs it
+  actually processed — never to the page end — while a proof that alone
+  exceeds a whole fresh pass's budget is left pending and skipped past,
+  so the cursor never stalls on it (K1-api.3 §4) and inline settlement
+  (A3) still settles it at its next transition. Nothing in production
+  calls the worker (its only current callers are tests): the embedder
+  schedules the passes (SPEC-5.12, round 5) — alongside draining the GC
+  queue is the intended cadence — and a scheduler that never fires
+  costs only the timeliness of the recorded state, never a guarantee,
+  since inline settlement settles every pending version at its next
+  transition; the audit is a disclosure/completeness concern, never a
+  validity one. The settlement's actor is always the session SYSTEM
+  runtime; the causing
   update's own `Reporter` field (unchanged from P3-19/ADR 8 §9) is the
   record of who actually reported the change, kept separate from the
   settlement's own actor. Tests (`internal/obligation/k1_test.go`
@@ -782,6 +806,15 @@ and its refusal path entirely (K1a, K1d):
   `TestK1ReplacementSettlesPendingBeforeRetirement`;
   `TestPendingSatisfiedVersionIsUnfinishedAndProtected_K1`
   (`internal/lifecycle/k1_pending_test.go`); round 5 adds
+  `TestXREV5SettlementWorkerMakesProgressWithSmallBudget` and
+  `TestXREV5SettlementWorkerSkipsOversizedProofWithoutStalling`
+  (`internal/obligation/xrev53_worker_test.go`, both stores — the
+  latter's control: the cursor advances every silent pass until the
+  scan wraps, the oversized proofs stay stored SATISFIED and pending
+  with effective UNRESOLVED, and one still settles inline at its next
+  transition; `cf388e2` fixed a nested-view deadlock in the file's
+  `proofCursorOf` helper — it reads the version before opening its
+  view, because the SQLite store serves one view at a time);
   `TestK1Api3SettlementCauseSkipsConfirmations`
   (`internal/obligation/zz_xrev5_ports_test.go`, both backends — the
   recorded cause is the unconfirmed raise, never the confirming one,
@@ -798,8 +831,18 @@ and its refusal path entirely (K1a, K1d):
   derived invalid at commit, calling `store.ProofDerivedValid` directly.
   Tests: `TestConformance/SemanticA5CommitGuard` (storetest);
   `TestConcurrentINV16`, `TestK1PropertyEffectiveSatisfactionIsValid`
-  (property: stored SATISFIED ⇒ effective SATISFIED, or pending
-  settlement whose causing update is committed).
+  (`internal/obligation/k1_property_test.go`, both stores via the
+  SQLite suite; property: stored SATISFIED ⇒ effective SATISFIED, or
+  pending settlement whose causing update is committed — SPEC-5.10,
+  round 5, strengthens it on both sides of the guard: each pending
+  version's `settlementCause` must be a stored update the read can
+  itself see, read back by ID, identical, at or before the read point,
+  and a generated same-transaction satisfy-then-fell step — an
+  observation satisfies an obligation and a report fells its workspace
+  in one transaction — must be refused by the guard, with coverage
+  counters keeping both clauses non-vacuous and a mutation check that
+  neutering `checkProofDerivedValid` in either store fails the
+  property).
 - **A6 — the cap is retired, not narrowed.** `Phase3Policy.Validate`
   (`internal/domain/semantic.go`) no longer validates
   `MaxLiveProofDependents` at all (K1 A6, GLM-2, DUR-4.6): the field and
