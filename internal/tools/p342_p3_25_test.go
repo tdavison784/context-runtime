@@ -13,23 +13,49 @@ import (
 // TestP3_25_NarrowerCitationDoesNotChangeKeyBoundary: the keyed item's
 // boundary is frozen to the agent's TASK-scope conversation conjunction, and
 // its key partition to that agent's namespace identity, no matter what the
-// request cites. Citing evidence narrower than the task scope — the agent's
-// own conversation-private occurrence — files the write with the full frozen
-// boundary, the plain agent-key identity, and the citation recorded as
-// qualifying support; citing another agent's private occurrence aborts the
-// whole write with the same closed NOT_FOUND as a missing ID.
+// request cites. The cited evidence access deliberately DIFFERS from the
+// frozen boundary — one narrower (A's own TURN-scoped occurrence, inside the
+// conjunction), one broader (task-wide evidence readable by every agent of
+// the task) — and the precondition is asserted, so a filing that takes its
+// boundary from the citation, narrows or widens it, fails below. Either way
+// the write files with the full frozen boundary, the plain agent-key
+// identity, and the citation recorded as qualifying support; citing another
+// agent's private occurrence aborts the whole write with the same closed
+// NOT_FOUND as a missing ID.
 func TestP3_25_NarrowerCitationDoesNotChangeKeyBoundary(t *testing.T) {
 	p24Stores(t, func(t *testing.T, st store.Store) {
 		s := testService(t)
 		i := seedToolFixture(t, st)
 		b := seedAgentInvocation(t, st, "b")
+		frozen := conversationBoundary(i.Principal)
+		// A teammate of the same task: inside the broader citation, outside
+		// the frozen conjunction.
+		teammate := i.Principal
+		teammate.AgentID = "teammate"
 		update(t, st, func(tx store.Tx) error {
-			// Narrower than the task boundary: conversation-private to A.
+			// Narrower than the key's boundary: conversation-private to A and
+			// bound to one TURN of A's task.
 			narrow := storetest.NewItem("s", "narrow-a", tx.NextSeq(), "A saw it privately")
 			narrow.Kind = domain.KindEvidence
 			narrow.AgentID = i.Principal.AgentID
-			narrow.Scope, narrow.Access = domain.ScopeTask, conversationBoundary(i.Principal)
+			narrow.CreatedTurn = 1
+			narrow.Scope, narrow.Access = domain.ScopeTurn, domain.AccessBoundary{
+				Scope: domain.ScopeTurn, SessionID: i.Principal.SessionID, WorkflowID: i.Principal.WorkflowID,
+				TaskID: i.Principal.TaskID, AgentID: i.Principal.AgentID,
+			}
 			if err := tx.InsertItem(narrow); err != nil {
+				return err
+			}
+			// Broader than the key's boundary: task-wide, no agent
+			// constraint, so every agent of the task may read it.
+			broad := storetest.NewItem("s", "broad-a", tx.NextSeq(), "whole task observed")
+			broad.Kind = domain.KindEvidence
+			broad.AgentID = i.Principal.AgentID
+			broad.Scope, broad.Access = domain.ScopeTask, domain.AccessBoundary{
+				Scope: domain.ScopeTask, SessionID: i.Principal.SessionID, WorkflowID: i.Principal.WorkflowID,
+				TaskID: i.Principal.TaskID,
+			}
+			if err := tx.InsertItem(broad); err != nil {
 				return err
 			}
 			// Another agent's private occurrence: accessible to no one else.
@@ -39,38 +65,80 @@ func TestP3_25_NarrowerCitationDoesNotChangeKeyBoundary(t *testing.T) {
 			theirs.Scope, theirs.Access = domain.ScopeTask, conversationBoundary(b.Principal)
 			return tx.InsertItem(theirs)
 		})
-
-		filed := remember(t, st, s, i, keyed("p25", "db", "postgres", "narrow-a"))
+		// Precondition (SPEC-5.3): both citations are accessible to the
+		// writer, and each one's access differs from the frozen boundary in
+		// the direction it claims — narrow is a different boundary within it,
+		// broad admits a principal the frozen conjunction excludes.
 		update(t, st, func(tx store.Tx) error {
-			it, err := tx.Item(filed.ItemID)
+			narrow, err := tx.Item("narrow-a")
 			if err != nil {
 				return err
 			}
-			// The boundary is the frozen conversation conjunction — not the
-			// narrower citation's, not an intersection.
-			if it.Access != conversationBoundary(i.Principal) || it.Scope != domain.ScopeTask ||
-				it.Namespace != domain.NamespaceAgentKey || it.DirectiveID != domain.AgentKeyID("db") || it.Authority != domain.AuthorityAgent {
-				t.Fatalf("keyed item boundary/identity narrowed by its citation: %+v", it)
-			}
-			sem, err := store.Semantic(tx)
+			broad, err := tx.Item("broad-a")
 			if err != nil {
 				return err
 			}
-			decl, err := sem.CreationDeclaration(filed.ItemID)
-			if err != nil || len(decl.AcceptedSemantics.SupportIDs) != 1 || decl.AcceptedSemantics.SupportIDs[0] != "narrow-a" {
-				t.Fatalf("narrower citation not recorded as support: %+v %v", decl, err)
+			if narrow.Access == frozen || !narrow.Access.Within(frozen) || narrow.Scope != domain.ScopeTurn {
+				t.Fatalf("narrow citation is not a distinct boundary within the frozen one: %+v vs %+v", narrow.Access, frozen)
 			}
-			rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDerivedFrom, FromID: filed.ItemID})
-			if err != nil || len(rels) != 2 {
-				t.Fatalf("provenance edges for request and citation: %+v %v", rels, err)
+			if broad.Access == frozen || !frozen.Within(broad.Access) || !broad.Access.Permits(teammate) || frozen.Permits(teammate) {
+				t.Fatalf("broad citation is not broader than the frozen boundary: %+v vs %+v", broad.Access, frozen)
+			}
+			if !narrow.Access.Permits(i.Principal) || !broad.Access.Permits(i.Principal) {
+				t.Fatalf("citations not accessible to the writer: %+v", i.Principal)
 			}
 			return nil
 		})
+
 		// The key partition is unchanged: B's same key is an independent
-		// current occurrence in B's own boundary, and A's stays current.
+		// current occurrence in B's own boundary, and A's stay current.
+		iWide := addToolCall(t, st, i, "p25-wide")
+		var mine []string
+		for _, write := range []struct {
+			invocation domain.ToolInvocation
+			request    string
+			key        string
+			evidence   string
+		}{{i, "p25", "db", "narrow-a"}, {iWide, "p25w", "cfg", "broad-a"}} {
+			filed := remember(t, st, s, write.invocation, keyed(write.request, write.key, "postgres", write.evidence))
+			mine = append(mine, filed.ItemID)
+			update(t, st, func(tx store.Tx) error {
+				it, err := tx.Item(filed.ItemID)
+				if err != nil {
+					return err
+				}
+				// The boundary is the frozen conversation conjunction — not
+				// the citation's, narrower or broader, not an intersection.
+				if it.Access != conversationBoundary(i.Principal) || it.Scope != domain.ScopeTask ||
+					it.Namespace != domain.NamespaceAgentKey || it.DirectiveID != domain.AgentKeyID(write.key) || it.Authority != domain.AuthorityAgent {
+					t.Fatalf("keyed item boundary/identity moved onto its citation's: %+v", it)
+				}
+				if it.Access.Permits(teammate) {
+					t.Fatalf("keyed item escaped the conversation through its broader citation: %+v", it.Access)
+				}
+				sem, err := store.Semantic(tx)
+				if err != nil {
+					return err
+				}
+				decl, err := sem.CreationDeclaration(filed.ItemID)
+				if err != nil || len(decl.AcceptedSemantics.SupportIDs) != 1 || decl.AcceptedSemantics.SupportIDs[0] != write.evidence {
+					t.Fatalf("citation %s not recorded as support: %+v %v", write.evidence, decl, err)
+				}
+				rels, err := tx.Relationships(store.RelationshipFilter{Type: domain.RelDerivedFrom, FromID: filed.ItemID})
+				if err != nil || len(rels) != 2 {
+					t.Fatalf("provenance edges for request and citation: %+v %v", rels, err)
+				}
+				return nil
+			})
+		}
 		theirs := remember(t, st, s, b, keyed("p25b", "db", "postgres"))
-		if theirs.Duplicate || theirs.SupersededItemID != "" || !current(t, st, theirs.ItemID) || !current(t, st, filed.ItemID) {
+		if theirs.Duplicate || theirs.SupersededItemID != "" || !current(t, st, theirs.ItemID) {
 			t.Fatalf("per-agent key partition disturbed: %+v", theirs)
+		}
+		for _, id := range mine {
+			if !current(t, st, id) {
+				t.Fatalf("A's filing %s lost currency", id)
+			}
 		}
 		update(t, st, func(tx store.Tx) error {
 			it, err := tx.Item(theirs.ItemID)
