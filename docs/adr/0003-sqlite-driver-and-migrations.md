@@ -5,20 +5,24 @@ Date: 2026-09-25
 
 ## Amended in Phase 3 (ADR 8, 2026-09-26; reconciled against integration head `fc87199`)
 
-Phase 3 (worker W2, `internal/store`) adds thirty-two forward migrations,
-0018 through 0050 (SPEC-5.2 corrects the prior "thirty-one ... 0018
-through 0048", itself K1's correction of the "thirty ... 0018 through
-0047" and, before that, SPEC-4.4/DUR-4.10's correction of a stale
-"twenty-seven ... 0018 through 0044": 0018-0028 from the initial Phase 3
-merge; 0029-0034 fixing PR #6 round-1 review findings; 0035-0040 fixing
-round-2 findings; 0041-0044 fixing round-3 J1-J7 findings; 0045-0047
-fixing round-3 DUR-3.1/DUR-3.2 findings; 0048 landing the commander's
-FROZEN K1 ruling in round 4; 0050 landing round 5's SPEC-5.2
-candidate-viewer columns, its numbering skipping 0049 by reservation for
-the K1-api.3 confirmation-record migration landing on a sibling round-5
-branch — the two merge in ascending order, and a skipped number is a
-reservation, never an edit of a committed migration), after this ADR's
-Phase 2 migrations (0001 unchanged, per this ADR's own rule). The full
+Phase 3 (worker W2, `internal/store`) adds thirty-three forward
+migrations, 0018 through 0050 (K1-api.3/SPEC-5.2 correct the prior
+"thirty-one ... 0018 through 0048" — by way of the interim "thirty-two
+... through 0050, 0049 reserved" that held while the two round-5
+branches merged — itself K1's correction of the "thirty ... 0018
+through 0047" and, before that, SPEC-4.4/DUR-4.10's correction of a
+stale "twenty-seven ... 0018 through 0044": 0018-0028 from the initial
+Phase 3 merge; 0029-0034 fixing PR #6 round-1 review findings;
+0035-0040 fixing round-2 findings; 0041-0044 fixing round-3 J1-J7
+findings; 0045-0047 fixing round-3 DUR-3.1/DUR-3.2 findings; 0048
+landing the commander's FROZEN K1 ruling in round 4; 0049-0050 landing
+round 5's K1-api.3 path confirmations and SPEC-5.2 candidate-viewer
+columns — 0050 merged first, having skipped 0049 as a reservation for
+the confirmation-record migration, which then merged ahead of it; the
+merge resolved `committedMigrations`' additive conflict by keeping both
+pins in migration order, and a reserved number is a reservation, never
+an edit of a committed migration), after this ADR's Phase 2 migrations
+(0001 unchanged, per this ADR's own rule). The full
 record/column/index manifest is
 `docs/phase3-schema-manifest.md` (P3-41); this section records the
 migration list itself and its upgrade-parity tests, matching how this ADR
@@ -307,14 +311,43 @@ excluded by it).
   raises identically, cross-checking the backfill against real runtime
   behavior rather than only against the test's own expectations. No case
   fails open.
+- `0049_path_confirmations.sql` (PR #6 round 5, K1-api.3/XREV-5.2;
+  integration merge `5810578`) — the two confirmation lookup tables
+  K1-api.3's read rule (ADR 8, K1 A1) derives from.
+  `lookup_path_confirmation` (`session_id, resource_id, path_key,
+  affect_key, confirmed_rev, unconfirmed_rev`; PK the first four)
+  holds, per (resource, confirmed path, broad affect key), the latest
+  raise whose report explicitly recorded the path's prior content and
+  the latest unconfirmed raise it overtook; `lookup_unconfirmed_gap`
+  (same key plus `last_rev` in the PK) holds the immutable closed runs
+  of unconfirmed raises (first and last revision) the settlement cause
+  seeks. Affect/path key encodings are exactly 0048's (`'all'`, else
+  `'path:'` plus hex). **The backfill writes nothing** — reports'
+  same-content history is not reconstructible, the same reason 0048's
+  ALL-key backfill overapproximates — so pre-0049 raises keep
+  invalidating exactly as before (conservative over-invalidation,
+  never under), and a post-upgrade confirming report closes the legacy
+  raise it overtakes as an unconfirmed gap without sparing any
+  dependency below it. `TestUpgradePathConfirmations_0049`
+  (`internal/store/sqlite/upgrade_test.go`) pins this against a real
+  database migrated through 0048: both tables start empty, the legacy
+  ALL raise still counts as unconfirmed (a revision-1 proof stays
+  fallen, a revision-3 proof stays valid), a confirming ALL resync
+  accepted after the upgrade confirms the path at its revision with
+  the legacy raise as the unconfirmed gap, and the next unconfirmed
+  ALL raise — an UNKNOWN gap report, which carries no confirmations —
+  becomes the cause. The checksum is pinned in `durability_test.go`'s
+  `committedMigrations`, whose additive merge conflict with 0050's pin
+  was resolved keeping both in migration order.
 - `0050_gc_candidate_viewer.sql` (PR #6 round 5, SPEC-5.2; integration
   merge `b8efc67`) — five `ALTER TABLE rec_gc_progress ADD COLUMN
   f_viewer_{session_id, workflow_id, task_id, agent_id, authority}`
   columns persisting `domain.GCProgress.Viewer`, the principal whose
   visibility paged batch 1 (ADR 16's round-5 paragraph owns the behavior
-  and its tests). The numbering skips 0049 on purpose: reserved for the
-  K1-api.3 confirmation-record migration still landing on a sibling
-  round-5 branch, both merging in ascending order. No driver-code change
+  and its tests). The numbering skips 0049 on purpose: it was reserved
+  for the K1-api.3 confirmation-record migration (the 0049 bullet
+  above), which merged ahead of this one in migration order. No
+  driver-code change
   accompanied the migration: `semantic_gc_progress.go` persists the row
   through the generic record encoder, so the new struct field maps to the
   new columns automatically, and `storetest`'s `testSemanticGCProgress`
@@ -351,7 +384,9 @@ plus `TestCursorPagesSeekRange` and `TestLiveProofPathReadsSeek`
 (keyset-cursor seeks over the new indexes) and
 `TestLatestBindingVersionIsKeyed` (DUR-3.7) were also missing from this
 list (DUR-4.10).** `TestUpgradeK1Pointers_0048` (round 4, SPEC-4.4) is
-0048's own upgrade-parity fixture, landed after this list's prior pass.
+0048's own upgrade-parity fixture, landed after this list's prior pass;
+`TestUpgradePathConfirmations_0049` (round 5, K1-api.3) is 0049's own,
+same pattern.
 `internal/obligation`'s own SQLite suite
 (50/50 subtests, 8/8 failure-injection scenarios, ADR 8) runs against these
 migrations through W2's `sqlitetest` template.

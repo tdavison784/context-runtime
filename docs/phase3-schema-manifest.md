@@ -178,15 +178,45 @@ building on it:
   unsequenced operational state like `gc_queue_cursor` above, never
   evidence a proof was settled.
 
-## PR #6 round 5 addition (SPEC-5.2; migration 0050, landed at
-integration head `b8efc67` — same exception as above, ADR 3's own 0050
-bullet remains authoritative)
+## PR #6 round 5 additions (K1-api.3/SPEC-5.2; migrations 0049-0050,
+landed at integration heads `5810578`/`b8efc67` — same exception as
+above, ADR 3's own 0049/0050 bullets remain authoritative)
 
-`rec_gc_progress` is W3's internal GC batch-progress row — operational
-state like `gc_queue_cursor`/`settlement_cursor`, never a persisted
-domain record, which is why it does not appear in the "Persisted record
-manifest" above; migrations 0041-0044 added its J1-J7 cursor fields, and
-0050 is its first change since:
+K1-api.3 path confirmations (XREV-5.1/5.2, migration 0049) — internal
+lookup tables extending 0048's write-time pointers, excluded from the
+"Persisted record manifest" for the same reason those are:
+
+- `lookup_path_confirmation` (`session_id, resource_id, path_key,
+  affect_key, confirmed_rev, unconfirmed_rev`; PK the first four) —
+  K1-api.3: per (resource, confirmed path, broad affect key), the
+  latest raise whose report explicitly recorded the path's prior
+  content, and the latest unconfirmed raise it overtook. A broad raise
+  that confirmed the path does not invalidate a CURRENT_PATH dependency
+  on it; the unconfirmed pointer only grows, so monotonicity is
+  unchanged. Key encodings are exactly 0048's.
+- `lookup_unconfirmed_gap` (`session_id, resource_id, path_key,
+  affect_key, first_rev, last_rev`; PK adds `last_rev`) — K1-api.3
+  SPEC-2: the immutable closed runs of unconfirmed raises the
+  settlement cause seeks through `ResourceReader
+  .FirstUnconfirmedAffectingUpdateAfter`.
+- Both tables backfill nothing: pre-0049 history keeps its recorded
+  raises and behaves exactly as before (conservative over-invalidation,
+  never under); post-upgrade confirming reports write their
+  confirmation records against those legacy raises.
+- Same landing (XREV-5.1): both backends apply a transaction's pending
+  reports at every K1 pointer read and at the A5 commit guard
+  (`advanceK1Reports`, a watermark rather than a once-flag), so a
+  report's raises and confirmations are visible to reads inside the
+  writing transaction — with the accepted fail-closed residual that a
+  mid-report read, before the content writes are recorded, can only
+  over-invalidate.
+
+Migration 0050 (SPEC-5.2): `rec_gc_progress` is W3's internal GC
+batch-progress row — operational state like
+`gc_queue_cursor`/`settlement_cursor`, never a persisted domain record,
+which is why it does not appear in the "Persisted record manifest"
+above; migrations 0041-0044 added its J1-J7 cursor fields, and 0050 is
+its first change since:
 
 - `rec_gc_progress` adds `f_viewer_session_id`, `f_viewer_workflow_id`,
   `f_viewer_task_id`, `f_viewer_agent_id`, `f_viewer_authority` —
@@ -200,6 +230,6 @@ manifest" above; migrations 0041-0044 added its J1-J7 cursor fields, and
   backfill lazily from batch 1's committed collect receipt
   (`firstBatchReceipt`, `internal/lifecycle/gc_requests.go`) — no SQL
   backfill runs, and an upgraded request keeps exactly the candidate set
-  its first batch saw. 0050's numbering skips 0049, reserved for the
-  K1-api.3 confirmation-record migration on a sibling round-5 branch
+  its first batch saw. 0050's numbering skipped 0049 as a reservation for
+  the confirmation-record migration above, which merged ahead of it
   (ADR 3).

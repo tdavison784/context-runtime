@@ -619,7 +619,9 @@ and its refusal path entirely (K1a, K1d):
   UNKNOWN reports (a
   `WORKSPACE` dependency only on a fingerprint change or lost freshness;
   a `CURRENT_PATH` dependency only on a touch to its path, an ancestor
-  directory, `ALL`, or `UNKNOWN`, never on a same-content path report;
+  directory, `ALL`, or `UNKNOWN`, never on a same-content path report —
+  and, since round 5's K1-api.3 amendment below, not on a broad raise
+  whose report explicitly recorded the path's prior content either;
   `FIXED_CONTENT` never; the directory-intersection half of the old
   `change.affects` predicate also survives as `under`,
   `internal/obligation/invalidate.go`). This is decided from two write-time pointers,
@@ -656,6 +658,62 @@ and its refusal path entirely (K1a, K1d):
   `LiveProofs`/`SettlementCursor` are consistent, and a fresh database
   living the same history through the runtime path — never the
   backfill — raises identically; no case fails open).
+  **K1-api.3 amendment (round 5, XREV-5.1/5.2; integration merge
+  `5810578`, migration `0049_path_confirmations.sql`): a broad raise
+  whose report explicitly recorded the path's prior content *confirms*
+  the path and no longer falls a `CURRENT_PATH` dependency on it.** The
+  exact key keeps the unchanged rule above; for each broad key, the
+  latest raise counts against the path unless that same raise confirmed
+  it, in which case the latest *unconfirmed* raise does
+  (`dependencyDerivedValid`, `internal/store/semantic_validity.go`,
+  through two new `ResourceReader` pointers, `LastConfirmedRev` and
+  `LastUnconfirmedRev`). Confirmations are write-time records in the
+  report's own O(1) transaction — 0049's `lookup_path_confirmation`
+  (per resource/confirmed path/broad key: the latest confirming raise
+  and the latest unconfirmed raise it overtook) and
+  `lookup_unconfirmed_gap` (the immutable closed runs of unconfirmed
+  raises the settlement cause seeks, A3 below), key encodings exactly
+  0048's — and a report's write costs at most confirmed-paths × key
+  depth (`broadKeyCovers`): still no fan-out. Monotonicity is
+  unchanged: the unconfirmed pointer only grows, so a confirmation can
+  never resurrect an earlier invalidation — only a dependency asserted
+  at or after the confirming raise's own revision is spared, and
+  H1→H2→H1 on the exact key stays a change. **The migration backfills
+  nothing** (the same non-reconstructibility 0048's ALL-key backfill
+  accepted), so pre-0049 history keeps invalidating exactly as before
+  — conservative over-invalidation, never under — and a post-upgrade
+  confirming report closes the legacy raise it overtakes as an
+  unconfirmed gap without sparing any dependency below it
+  (`TestUpgradePathConfirmations_0049`,
+  `internal/store/sqlite/upgrade_test.go`, against a real database
+  migrated through 0048). **XREV-5.1, same landing: a report's raises
+  and confirmations are visible to K1 pointer reads inside the writing
+  transaction.** Both backends apply a transaction's pending reports in
+  registration order at every K1 pointer read and at the A5 commit
+  guard (`advanceK1Reports` — a watermark, not a once-flag, so reports
+  registered after an earlier advance also become visible), and a
+  matching write that changed content outranks one that recorded the
+  prior content, so the outcome never depends on the writes' order
+  inside the transaction. Accepted fail-closed residual: a read taken
+  between a report's registration and its content writes' recording
+  can only over-invalidate — the confirmation is not yet recorded, so
+  the raise stands — never spare one. Tests:
+  `TestConformance/SemanticK1BroadConfirmations` (the three broad
+  shapes — an ALL-paths report, a resync-shaped report with a changed
+  fingerprint, an ancestor-directory report naming the path — plus
+  changed-content and omitted-path controls, W1→W2→W1 fingerprint and
+  broad-key monotonicity, interleaved confirmed and unconfirmed raises,
+  and one path's confirmation never suppressing another path's
+  raises); `TestConformance/SemanticK1InTxVisibility` (an
+  in-transaction read is felled by the same transaction's change and
+  stays felled through an in-transaction H1→H2→H1; a confirming broad
+  report followed by a same-transaction satisfaction reads valid and
+  commits through the A5 guard); `TestXREV5SameContentAllPaths` and
+  `TestXREV5PathReadAndWaiverInReportTx` (`internal/obligation`
+  service level, `zz_xrev5_ports_test.go`, both backends — the latter:
+  a waiver appended after a same-transaction report settles first, so
+  the committed history is assertion, then RESOURCE_INVALIDATION, then
+  the waiver from UNRESOLVED).
 - **A2 — one effective-status helper, everywhere status is selected.**
   `obligation.EffectiveStatus(r, o)` (`internal/obligation/effective.go`)
   is the one helper: a stored SATISFIED version is effectively SATISFIED
@@ -692,7 +750,10 @@ and its refusal path entirely (K1a, K1d):
   the restricted `RESOURCE_INVALIDATION` transition before any transition
   on a pending version: cause is `settlementCause`'s earliest update, by
   session `(Seq, ID)`, that actually fired one of the proof's dependency
-  pointers (`FirstWorkspaceDivergenceAfter`/`FirstAffectingUpdateAfter`),
+  pointers (`FirstWorkspaceDivergenceAfter`/`FirstAffectingUpdateAfter`,
+  plus round 5's `FirstUnconfirmedAffectingUpdateAfter` for the broad
+  keys — K1-api.3 SPEC-2: a broad raise that confirmed the path never
+  fired the dependency, so only unconfirmed raises are candidates),
   keyed exactly `(proofID, causeID)` so every path settles a proof at
   most once. `graph.WithPendingSettler` (`internal/graph/settlement.go`)
   injects `obligation.Service.SettleBeforeRetireTx` as graph's
@@ -720,7 +781,15 @@ and its refusal path entirely (K1a, K1d):
   `TestK1SettlementWorker`, `TestK1SettleBeforeRetire`,
   `TestK1ReplacementSettlesPendingBeforeRetirement`;
   `TestPendingSatisfiedVersionIsUnfinishedAndProtected_K1`
-  (`internal/lifecycle/k1_pending_test.go`).
+  (`internal/lifecycle/k1_pending_test.go`); round 5 adds
+  `TestK1Api3SettlementCauseSkipsConfirmations`
+  (`internal/obligation/zz_xrev5_ports_test.go`, both backends — the
+  recorded cause is the unconfirmed raise, never the confirming one,
+  including the boundary where the dependency was asserted at the
+  confirming report's own revision) and storetest's
+  `TestConformance/SemanticK1SettlementCause` (the gap-seek read
+  itself: closed gap runs, the open run past the confirmation pointer,
+  a raise at exactly rev not past it, and canonical-argument checks).
 - **A5 — INV-16 and the commit guard.** SDD v0.11 (below) states INV-16 as
   "a current obligation's effective SATISFIED status is backed by an
   assertion or proof that is valid at read." Both stores' `checkProofDerivedValid`
