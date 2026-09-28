@@ -452,14 +452,74 @@ both forms share.
   `TestGCProgressFreezesAndRecoversTheCandidateViewer_SPEC52` (freezes
   at batch 1; a live progress row rewritten with
   `Viewer = domain.Principal{}` recovers the viewer from batch 1's
-  receipt). **SPEC-5.6: `RearmGCRequest` no longer exempts SYSTEM from
+  receipt). **SPEC-6.2, round 7 (commits `e2f1793` test, `2e4be40`
+  fix): the batch receipt each collector RECEIVES is access-projected
+  for the executing principal.** The stored `CollectReceipt` keeps every
+  frozen candidate and decision, but the copy handed to the executing
+  principal — `out.Result.Collect`, which is what its mutation receipt
+  stores and therefore what replays for it — drops the
+  `CandidateRefs`/`Decisions` pairs that principal cannot access
+  (`planBatch` records per-candidate access under the executing
+  collector, trimmed with the plan in `fitCollectionPlan`;
+  `projectCollectReceipt`, `internal/lifecycle/collect.go`). Pairs leave
+  ref+decision together, so `Validate`'s length equality and the
+  archived-results pairing hold, and an inaccessible candidate is never
+  ARCHIVE — a collector that cannot read an item cannot archive it; a
+  misaligned access vector fails closed with `ErrIntegrity`. A
+  continuing collector (SEC-4.5) that pages another viewer's frozen set
+  (SPEC-5.2) therefore no longer learns those items' IDs and versions
+  through its own outcome. Test:
+  `TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52`
+  (`internal/lifecycle/gc_round5_test.go`, both stores) now also asserts
+  the projection through its `assertReceiptProjected` helper
+  (`gc_round5_test.go:150-163`: the projected copy still `Validate`s at
+  `:153`, names no inaccessible candidate in `CandidateRefs` at `:157`
+  or `Decisions` at `:162`), applied to the fresh outcome (`:229`) and
+  to the replayed stored receipt after the request finishes (`:237`),
+  while the stored receipts keep deciding every frozen candidate
+  (`:240-244`, unchanged).
+  **SPEC-5.6: `RearmGCRequest` no longer exempts SYSTEM from
   the SEC-4.4 task binding above** — a task-scoped request is refused
   whenever `actor.TaskID != req.TaskID`, authority class notwithstanding,
   so a foreign-task SYSTEM caller gets the identical `ErrNotFound` for an
   absent, pending, and failed request alike and creates nothing.
   `TestRearmBindsSYSTEMToTheRequestTask_SPEC56` (both stores; the
   same-task SYSTEM principal still re-arms, as the test's positive
-  control).
+  control). **GC-7.1, round 7 (commits `fd05e51` test, `fde38ae` fix):
+  a FINISHED request replays the stored final-batch receipt for ANY
+  authorized collector, projected for the caller.** The finished branch
+  previously sent every caller through `collect`, whose replay lookup
+  found the final-batch runner's mutation receipt under the shared
+  (session, family, requestID) key and refused any other principal with
+  an event-ID conflict. It now gates the caller exactly as a pending
+  continuation (SEC-4.5: same session, SYSTEM/HARNESS, the request's own
+  task for a task-scoped request), then routes: the final-batch runner
+  still replays its recorded outcome (P3-2), and any other authorized
+  collector gets `replayFinishedCollect` — the STORED final-batch
+  receipt, projected for the calling principal through
+  `projectCollectReceipt` (SPEC-6.2), re-read from the candidate items'
+  current access boundaries and failing closed to hidden on an
+  unreadable item; the projected copy also drops an `ArchivedRefs` entry
+  whose ARCHIVE pair was removed, so a replay of a receipt whose runner
+  archived items the caller cannot read never names them (P3-38). No
+  re-plan, no receipt write, no sequence allocation: the outcome records
+  no mutation-receipt ID because nothing of the caller's was committed,
+  and the stored receipt cannot collide with itself. An unauthorized
+  caller gets the same uniform `ErrInvalidAuthorityPromotion` a pending
+  continuation gets. Test:
+  `TestGC71_FinishedRequestReplaysStoredReceiptForAnyAuthorizedCollector`
+  (`internal/lifecycle/gc71_replay_test.go`, both stores) — asserts at
+  `gc71_replay_test.go:149` (the sibling collector replays),
+  `:158` (the unreadable pair gone from the projected copy),
+  `:162`/`:167` (SPEC-6.2/P3-38: the hidden item named neither candidate
+  nor archived), `:173` (writeless: no receipt of its own), `:179`
+  (snapshot-identical: rows, items, events, and the sequence floor
+  unchanged), `:184` (a second replay is identical), `:194` (the runner
+  keeps its full recorded outcome), `:207`/`:212` (USER and foreign-task
+  callers get `ErrInvalidAuthorityPromotion`), `:215` (the refused
+  replays wrote nothing). `TestCompletionGCRequestExecutesOnceAfterProducerCommit`'s
+  different-collector step now expects this projected replay
+  (`internal/lifecycle/gc_requests_test.go:104`, writeless at `:107`).
   **Grant issuance room is tiered by authority, not a flat quarter-share
   (SEC-2.7, superseded by SEC-3.8/DUR-3.6, landed at `4a00b06`; SPEC-4.3
   corrects the prior pending-merge wording).** `liveGrantRoom`
