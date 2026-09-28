@@ -443,3 +443,128 @@ func TestP3_21_MalformedCountsAndCompletenessRejectedAtomically(t *testing.T) {
 		}
 	})
 }
+
+// TestP3_21_EvidenceBoundaryAndSessionMismatchRefused: evidence in the wrong
+// boundary or session never evidences a run (P3-21, SPEC-2.8's ownership
+// clause — the cited storetest conformance covers the execution axis only:
+// no producing call, or another call). Every forged occurrence here carries
+// the run's OWN execution identity, so the execution axis is held constant
+// and only the where varies. Two layers refuse: the store will not even
+// hold evidence boxed to an agent partition, TURN evidence of another
+// agent's turn, or evidence claiming another session (each insert is an
+// ErrInvalidRecord), and what it does hold — evidence of another task,
+// evidence of another workflow's ownership — the run refuses as its
+// evidence, writing nothing, closing nothing, satisfying nothing. The
+// occurrence in the run's own boundary still passes and satisfies.
+func TestP3_21_EvidenceBoundaryAndSessionMismatchRefused(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newEvalFixture(t)
+		run := f.newRun(t)
+		f.matcherGrant(t, "g-21b", f.sysTests, TestsPassV1, f.system)
+
+		// Held-and-refused: shapes the store accepts as items but the run
+		// refuses as evidence, each varying one ownership axis of the run's
+		// own boundary. Unholdable: shapes the store will not even hold
+		// (asserted below) — the clause's first layer.
+		misplaced := []struct {
+			name string
+			mut  func(it *domain.ContextItem)
+		}{
+			{"evidence of another task", func(it *domain.ContextItem) {
+				it.TaskID = "task2"
+				it.Access = domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: testSession, TaskID: "task2"}
+			}},
+			{"evidence of another workflow's ownership", func(it *domain.ContextItem) {
+				it.WorkflowID = "wf9"
+				it.Access = domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: testSession, TaskID: "task", WorkflowID: "wf9"}
+			}},
+		}
+		unholdable := []struct {
+			name string
+			mut  func(it *domain.ContextItem)
+		}{
+			{"evidence boxed to an agent partition", func(it *domain.ContextItem) {
+				it.Scope = domain.ScopeAgent
+				it.Access = domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: testSession, TaskID: "task", AgentID: "agent"}
+			}},
+			{"TURN evidence of another agent's turn", func(it *domain.ContextItem) {
+				it.Scope = domain.ScopeTurn
+				it.Access = domain.AccessBoundary{Scope: domain.ScopeTurn, SessionID: testSession, TaskID: "task", AgentID: "agent9"}
+			}},
+			{"evidence claiming another session", func(it *domain.ContextItem) {
+				it.SessionID = "sess-other"
+			}},
+		}
+		// Seed every forged occurrence first (each seed consumes a sequence,
+		// so the baseline comes after). Where the store itself refuses to
+		// even hold the occurrence, that refusal is itself the clause's
+		// first layer and the probe is vacuous.
+		for i, wrong := range misplaced {
+			id := fmt.Sprintf("mis21-%d", i)
+			var it domain.ContextItem
+			mustUpdate(t, f.st, func(tx store.Tx) error {
+				it = evidenceItem(tx.NextSeq(), run)
+				it.ID, it.EventID = id, "evt-"+id
+				wrong.mut(&it)
+				return tx.InsertItem(it)
+			})
+		}
+		for _, wrong := range unholdable {
+			var it domain.ContextItem
+			mustUpdate(t, f.st, func(tx store.Tx) error {
+				it = evidenceItem(tx.NextSeq(), run)
+				it.ID = "never-" + it.ID
+				wrong.mut(&it)
+				if err := tx.InsertItem(it); !errors.Is(err, domain.ErrInvalidRecord) {
+					return fmt.Errorf("%s: the store accepted an unholdable shape: %w", wrong.name, err)
+				}
+				return nil
+			})
+		}
+		seeded := f.lastSeqIs(t)
+		for i, wrong := range misplaced {
+			id := fmt.Sprintf("mis21-%d", i)
+			if _, err := f.observe(t, f.harness, obsIntent("obs-"+id, run, id, domain.OutcomePass, hashOf("W1"))); !errors.Is(err, domain.ErrInvalidRecord) {
+				t.Fatalf("%s accepted as run evidence: %v", wrong.name, err)
+			}
+		}
+		// Nothing the refusals touched persisted: no observation, no closed
+		// run, an untouched obligation, an unmoved sequence.
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			for i := range misplaced {
+				if _, err := r.Observation(recordID("obs_", "observation", fmt.Sprintf("obs-mis21-%d", i))); !errors.Is(err, domain.ErrNotFound) {
+					t.Errorf("boundary-mismatched evidence observation persisted: %v", err)
+				}
+			}
+			if _, err := r.ClosingObservation(run.ID); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("boundary-mismatched evidence closed the run: %v", err)
+			}
+			return nil
+		})
+		if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved || o.Revision != 1 {
+			t.Fatalf("boundary-mismatched evidence changed the obligation: %+v", o)
+		}
+		if ls := f.lastSeqIs(t); ls != seeded {
+			t.Fatalf("refused evidence probes wrote state: seq %d -> %d", seeded, ls)
+		}
+
+		// Positive control: the occurrence in the run's own boundary, same
+		// execution, is accepted and satisfies through a proof naming its
+		// typed observation; the probe run itself stays open.
+		_, obs := f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
+		o := f.status(t, f.sysTests)
+		if o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
+			t.Fatalf("genuine evidence did not satisfy: %+v", o)
+		}
+		var p domain.ApplicabilityProof
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			p, _ = r.ApplicabilityProof(o.CurrentProofID)
+			return nil
+		})
+		if p.ObservationID != obs.ID || p.RuleVersion != "tests_pass/1" {
+			t.Fatalf("proof = %+v, want the typed observation %s", p, obs.ID)
+		}
+	})
+}
