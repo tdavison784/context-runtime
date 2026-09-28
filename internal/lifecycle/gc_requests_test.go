@@ -92,10 +92,19 @@ func TestCompletionGCRequestExecutesOnceAfterProducerCommit(t *testing.T) {
 	if replay, err := executeGC(f, mem, s2, collector, id); err != nil || replay.Result.Collect.ID != r.ID {
 		t.Fatalf("replay under new policy: %+v %v", replay, err)
 	}
+	// GC-7.1: a different authorized collector replays the same stored final
+	// receipt — projected for it, which here (a task-shared candidate) is the
+	// identical copy — instead of an event-ID conflict on the runner's
+	// receipt. The replay writes nothing and allocates nothing: no receipt
+	// of that collector's own is recorded.
 	other := collector
 	other.AgentID = "other-agent"
-	if _, err := executeGC(f, mem, s, other, id); !errors.Is(err, domain.ErrEventIDConflict) {
-		t.Fatalf("different collector replayed: %v", err)
+	replayed, err := executeGC(f, mem, s, other, id)
+	if err != nil || replayed.Result.Collect == nil || replayed.Result.Collect.ID != r.ID {
+		t.Fatalf("different collector replayed: %+v %v", replayed, err)
+	}
+	if replayed.MutationReceiptID != "" {
+		t.Fatalf("different collector's replay recorded a receipt: %q", replayed.MutationReceiptID)
 	}
 	if err := mem.View(ctx, "s", func(tx store.ReadTx) error {
 		task, _ := tx.Task("task")

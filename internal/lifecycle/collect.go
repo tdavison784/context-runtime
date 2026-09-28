@@ -367,11 +367,15 @@ func (s *Service) decideCandidate(tx store.Tx, sem store.SemanticReader, p domai
 // projectCollectReceipt returns the copy of a batch receipt the EXECUTING
 // collector receives (SPEC-6.2, P3-38): access records, per frozen candidate
 // in order, whether that collector may read the item, and each pair it
-// cannot access is removed — ref and decision together, so the receipt still
-// satisfies Validate's candidate/decision pairing. An inaccessible candidate
-// is never ARCHIVE (a collector that cannot read an item cannot archive it),
-// so the archived results stay paired with the kept ARCHIVE decisions. The
-// stored CollectReceipt keeps every frozen candidate; only this returned and
+// cannot access is removed — ref and decision together, and the archived
+// result of a removed ARCHIVE decision with it, so the copy still satisfies
+// Validate's candidate/decision and archived-result pairing. At execution
+// time an inaccessible candidate is never ARCHIVE (a collector that cannot
+// read an item cannot archive it), but a replay by another authorized
+// collector projects a receipt whose runner archived items that caller
+// cannot read (GC-7.1): the archived results of removed pairs must go with
+// them, or the copy would name an item the caller has no business seeing.
+// The stored CollectReceipt keeps every frozen candidate; only the returned,
 // replayed copy is projected.
 func projectCollectReceipt(r domain.CollectReceipt, access []bool) (domain.CollectReceipt, error) {
 	if len(access) != len(r.CandidateRefs) {
@@ -388,14 +392,58 @@ func projectCollectReceipt(r domain.CollectReceipt, access []bool) (domain.Colle
 		return out, nil // the collector reads every frozen candidate: identity
 	}
 	refs, decisions := make([]domain.ItemRevisionRef, 0, kept), make([]domain.GCDecision, 0, kept)
+	archived := make([]domain.ItemRevisionRef, 0, len(out.ArchivedRefs))
+	// ARCHIVE decisions pair with archived results in order (Validate): walk
+	// both together, keeping each result only with its kept decision.
+	ai := 0
 	for n, ok := range access {
+		if out.Decisions[n].Code == domain.GCArchive {
+			if ai >= len(out.ArchivedRefs) {
+				return domain.CollectReceipt{}, domain.ErrIntegrity // an archived result without its decision
+			}
+			if ok {
+				archived = append(archived, out.ArchivedRefs[ai])
+			}
+			ai++
+		}
 		if ok {
 			refs = append(refs, out.CandidateRefs[n])
 			decisions = append(decisions, out.Decisions[n])
 		}
 	}
-	out.CandidateRefs, out.Decisions = refs, decisions
+	if ai != len(out.ArchivedRefs) {
+		return domain.CollectReceipt{}, domain.ErrIntegrity // extra archived results without decisions
+	}
+	out.CandidateRefs, out.Decisions, out.ArchivedRefs = refs, decisions, archived
 	return out, nil
+}
+
+// replayFinishedCollect answers an ExecuteGCRequest call on an
+// already-finished request by an authorized collector that did not run its
+// final batch (GC-7.1): the STORED final-batch receipt, projected for that
+// caller. The projection reads each candidate's current access boundary —
+// an unreadable item fails closed to hidden — so the copy names nothing the
+// caller cannot read: not the candidate, not its decision, not its archived
+// result. It re-plans nothing from a fresh snapshot, allocates no sequence,
+// and writes nothing; the outcome carries no mutation-receipt ID, because
+// nothing of the caller's was recorded.
+func replayFinishedCollect(tx store.Tx, collector domain.Principal, final domain.CollectReceipt) (MutationOutcome, error) {
+	access := make([]bool, len(final.CandidateRefs))
+	for n, ref := range final.CandidateRefs {
+		it, err := tx.Item(ref.ItemID)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				continue // unreadable: the pair stays hidden
+			}
+			return MutationOutcome{}, err
+		}
+		access[n] = it.Access.Permits(collector)
+	}
+	projected, err := projectCollectReceipt(final, access)
+	if err != nil {
+		return MutationOutcome{}, err
+	}
+	return MutationOutcome{Result: domain.MutationResult{Collect: &projected}}, nil
 }
 
 // fitCollectionPlan sizes the complete eventual MutationReceipt before effects.

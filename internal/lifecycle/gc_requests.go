@@ -58,8 +58,11 @@ const maxGCPagesPerCall = 64
 // its producer committed (H3). The batch starts at the request's durable
 // cursor, commits its own CollectReceipt (request ID GCBatchRequestID(n))
 // and either advances the cursor (CAS) or, when no candidates remain,
-// records the COLLECTED result. A finished request replays its final batch;
-// a quarantined one reports ErrGCRequestFailed. seq 0 allocates only after
+// records the COLLECTED result. A finished request replays its final batch
+// to the collector that ran it and, to any other authorized collector, the
+// stored final-batch receipt projected for that caller (GC-7.1) — never a
+// re-plan, never a write; a quarantined one reports ErrGCRequestFailed.
+// seq 0 allocates only after
 // the replay check. The collector is an authenticated SYSTEM/HARNESS
 // principal supplied by the embedding; for task-scoped requests it must
 // belong to that task. Continuation binds to that authority class plus
@@ -108,9 +111,29 @@ func (s *Service) ExecuteGCRequest(tx store.Tx, collector domain.Principal, gcRe
 		if err != nil {
 			return out, err
 		}
+		// GC-7.1: the replay is gated like a pending continuation (SEC-4.5)
+		// — SYSTEM or HARNESS, bound to the request's task. The final-batch
+		// runner passes as ever; an unauthorized caller gets the same
+		// ErrInvalidAuthorityPromotion a pending continuation gets, before
+		// the stored receipt can change the outcome.
+		if collector.Authority != domain.AuthoritySystem && collector.Authority != domain.AuthorityHarness ||
+			req.Scope == domain.CollectTask && collector.TaskID != req.TaskID {
+			return out, domain.ErrInvalidAuthorityPromotion
+		}
 		i := req.CollectIntent
 		i.RequestID = final.RequestID
-		return s.collect(tx, collector, i, &gcBatch{requestID: req.ID}, seq)
+		// GC-7.1: the collector that ran the final batch replays its recorded
+		// outcome (P3-2). Any other authorized collector gets the stored
+		// receipt projected for itself — no re-plan, no receipt write, no
+		// sequence — instead of an event-ID conflict on the runner's receipt.
+		if r, rerr := sem.MutationReceipt(domain.MutationCollection, i.RequestID); rerr == nil {
+			if r.Principal == collector {
+				return s.collect(tx, collector, i, &gcBatch{requestID: req.ID}, seq)
+			}
+		} else if !errors.Is(rerr, domain.ErrNotFound) {
+			return out, rerr
+		}
+		return replayFinishedCollect(tx, collector, final)
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return out, err
 	}
