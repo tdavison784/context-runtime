@@ -85,3 +85,111 @@ func TestP3_18_HarnessSlotStableAcrossSourceReplacement(t *testing.T) {
 		}
 	})
 }
+
+// p18MatSnapshot is the committed state an injected materialization failure
+// must leave untouched: the session sequence, the target version's disabled
+// flag and revision, and the obligation's audit-event count.
+type p18MatSnapshot struct {
+	lastSeq  uint64
+	disabled bool
+	revision uint64
+	events   int
+}
+
+func TestP3_18_MaterializationAuditCASAndRollback(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newFixture(t)
+		user := actorOf(domain.AuthorityUser)
+		matSnap := func(st *testStore, ref domain.ObligationRef) (out p18MatSnapshot) {
+			_ = st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+				out.lastSeq = tx.LastSeq()
+				r, err := store.ReadSemantic(tx)
+				if err != nil {
+					return err
+				}
+				o, err := r.ExactObligation(ref)
+				if err != nil {
+					return err
+				}
+				out.disabled, out.revision = o.MaterializationDisabled, o.Revision
+				evs, err := tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetObligation, TargetID: ref.ObligationID})
+				out.events = len(evs)
+				return err
+			})
+			return out
+		}
+		snap := func() p18MatSnapshot { return matSnap(f.st, f.user) }
+
+		// CAS: the first disable wins; a racing request that read the same
+		// revision conflicts and writes nothing.
+		first := domain.SetObligationMaterializationIntent{RequestID: "m18a", Target: f.user, ExpectedRevision: 1, Disabled: true}
+		res, err := f.s.setMat(t, f.st, user, first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		racing := domain.SetObligationMaterializationIntent{RequestID: "m18b", Target: f.user, ExpectedRevision: 1, Disabled: true}
+		if _, err := f.s.setMat(t, f.st, user, racing); !errors.Is(err, domain.ErrVersionConflict) {
+			t.Fatalf("racing disable at the same revision: %v", err)
+		}
+		after := snap()
+		if !after.disabled || after.revision != 2 || after.events != 1 {
+			t.Fatalf("after CAS race: %+v", after)
+		}
+
+		// Audit: the event names the transition, actor, and receipt; the
+		// trail is append-only across a re-enable under higher authority.
+		var events []domain.LifecycleEvent
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			events, _ = tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetObligation, TargetID: f.user.ObligationID})
+			return nil
+		})
+		if len(events) != 1 || events[0].ID != res.Records.IDs[0] || events[0].From != "enabled" || events[0].To != "disabled" ||
+			events[0].Actor != user || events[0].EventID != "m18a" || events[0].GrantID != "" || events[0].TargetID != f.user.ObligationID {
+			t.Fatalf("audit event = %+v", events)
+		}
+		if _, err := f.s.setMat(t, f.st, f.harness, domain.SetObligationMaterializationIntent{RequestID: "m18c", Target: f.user, ExpectedRevision: 2}); err != nil {
+			t.Fatalf("re-enable: %v", err)
+		}
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			events, _ = tx.LifecycleEvents(store.LifecycleFilter{TargetKind: domain.TargetObligation, TargetID: f.user.ObligationID})
+			return nil
+		})
+		if len(events) != 2 || events[0].To != "disabled" || events[1].From != "disabled" || events[1].To != "enabled" {
+			t.Fatalf("audit trail not append-only: %+v", events)
+		}
+
+		// Rollback: a failure injected at each constituent write, with the
+		// caller ignoring the error, commits nothing — no flip, no revision,
+		// no audit event, no sequence.
+		for k := 1; ; k++ {
+			if k > 16 {
+				t.Fatal("materialization never completed")
+			}
+			g := newFixture(t)
+			before := matSnap(g.st, g.user)
+			g.st.failAt.Store(int64(k))
+			err := g.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+				_, _ = g.s.SetMaterializationTx(tx, actorOf(domain.AuthorityUser), // error deliberately ignored
+					domain.SetObligationMaterializationIntent{RequestID: "m18z", Target: g.user, ExpectedRevision: 1, Disabled: true}, tx.NextSeq())
+				return nil
+			})
+			after := matSnap(g.st, g.user)
+			if err == nil {
+				if k == 1 {
+					t.Fatal("materialization made no constituent writes")
+				}
+				if after == before {
+					t.Fatal("successful materialization changed nothing")
+				}
+				if !after.disabled || after.revision != 2 || after.events != 1 {
+					t.Fatalf("materialization after last write = %+v", after)
+				}
+				t.Logf("rolled back at each of %d constituent writes", k-1)
+				return
+			}
+			if after != before {
+				t.Fatalf("failure at write %d committed a partial effect: %+v -> %+v", k, before, after)
+			}
+		}
+	})
+}
