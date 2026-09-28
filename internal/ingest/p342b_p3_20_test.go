@@ -1,6 +1,8 @@
 package ingest
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -8,6 +10,7 @@ import (
 	"io/fs"
 	neturl "net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -28,8 +31,20 @@ import (
 // and a URL in the RFC 6761 .invalid TLD that can never resolve — proving
 // ingest and replay still work byte-identically over the supplied snapshot.
 
-// p3_20Packages are the packages the replay and ingest-replay paths live in.
-var p3_20Packages = []string{".", "../obligation", "../graph"}
+// p3_20Module is this module's import path: the boundary of the in-repo
+// dependency closure the boundary check walks.
+const p3_20Module = "github.com/tdavison784/context-runtime"
+
+// p3_20Packages are the roots whose FULL in-repo dependency closure the
+// boundary check walks (SPEC-6.5): not just these packages' own files —
+// every module package their compiled (non-test) build reaches, because a
+// dereference smuggled into any helper on the replay path (domain's
+// SourceRef validation included) reads just as surely as one in ingest.
+var p3_20Packages = []string{
+	p3_20Module + "/internal/ingest",
+	p3_20Module + "/internal/obligation",
+	p3_20Module + "/internal/graph",
+}
 
 // p3_20Families are the stdlib import families that can read the outside
 // world: the os family (files, env, processes), io/fs (filesystem
@@ -42,7 +57,7 @@ func p3_20InFamily(path string) bool {
 }
 
 // p3_20Allowed is the explicit stdlib allowlist: the only members of the
-// reading families these packages may import, each with the reason it
+// reading families the closure may import, each with the reason it
 // cannot read. Anything else in a family fails the test; an entry that is
 // not in a family fails too, so the allowlist cannot rot into nonsense.
 var p3_20Allowed = map[string]string{
@@ -50,25 +65,42 @@ var p3_20Allowed = map[string]string{
 }
 
 // TestP3_20_ReplayPackagesImportNoFilesystemOrNetwork: every production
-// file of the replay and ingest-replay packages imports no os/net/io/fs
-// API beyond the allowlist above, and the packages' own replay entry
-// points are still the ones being parsed (so a rename cannot make the walk
-// vacuous).
+// file of the replay and ingest-replay closure (go list -deps of ingest,
+// obligation and graph, restricted to this module) imports no os/net/io/fs
+// API beyond the allowlist above, the closure really covers the packages
+// the replay path leans on, and the replay entry points are still the ones
+// being parsed (so a rename cannot make the walk vacuous).
 func TestP3_20_ReplayPackagesImportNoFilesystemOrNetwork(t *testing.T) {
+	args := append([]string{"list", "-deps", "-json"}, p3_20Packages...)
+	out, err := exec.Command("go", args...).Output()
+	if err != nil {
+		t.Fatalf("go list -deps: %v — the replay-boundary check fails closed without the closure", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(out))
 	funcs := map[string]bool{}
-	for _, dir := range p3_20Packages {
-		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
-		if err != nil || len(files) == 0 {
-			t.Fatalf("%s: no Go sources found (%v) — package moved?", dir, err)
+	pkgs := map[string]bool{}
+	files := 0
+	for dec.More() {
+		var pkg struct {
+			ImportPath string
+			Dir        string
+			GoFiles    []string
 		}
-		n := 0
-		for _, name := range files {
-			if strings.HasSuffix(name, "_test.go") {
-				continue
-			}
-			n++
+		if err := dec.Decode(&pkg); err != nil {
+			t.Fatalf("decode go list package: %v", err)
+		}
+		if pkg.ImportPath != p3_20Module && !strings.HasPrefix(pkg.ImportPath, p3_20Module+"/") {
+			continue // stdlib and third-party dependencies are out of scope
+		}
+		pkgs[pkg.ImportPath] = true
+		if len(pkg.GoFiles) == 0 {
+			t.Fatalf("%s: no Go sources found — package moved?", pkg.ImportPath)
+		}
+		for _, name := range pkg.GoFiles {
+			file := filepath.Join(pkg.Dir, name)
+			files++
 			fset := token.NewFileSet()
-			f, err := parser.ParseFile(fset, name, nil, 0)
+			f, err := parser.ParseFile(fset, file, nil, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,15 +127,22 @@ func TestP3_20_ReplayPackagesImportNoFilesystemOrNetwork(t *testing.T) {
 				t.Errorf("%s imports %s: the replay path must not read the filesystem or network", name, path)
 			}
 		}
-		if n == 0 {
-			t.Fatalf("%s: only test files found — boundary check is vacuous", dir)
+	}
+	if files == 0 {
+		t.Fatal("the in-repo replay closure is empty — boundary check is vacuous")
+	}
+	// The closure must actually reach the packages the replay path leans on
+	// (SPEC-6.5's probe lived in domain), not just the three roots.
+	for _, want := range append([]string{p3_20Module + "/internal/domain"}, p3_20Packages...) {
+		if !pkgs[want] {
+			t.Errorf("replay dependency %s not covered by the closure walk", want)
 		}
 	}
 	// The walk must have covered the code that actually replays: ingest's
 	// receipt lookup and the obligation service's replaying reevaluation.
 	for _, want := range []string{"lookupReceipt", "ReevaluateTx"} {
 		if !funcs[want] {
-			t.Errorf("replay entry point %s not found under the parsed packages — boundary check is vacuous", want)
+			t.Errorf("replay entry point %s not found under the parsed closure — boundary check is vacuous", want)
 		}
 	}
 	for path := range p3_20Allowed {
