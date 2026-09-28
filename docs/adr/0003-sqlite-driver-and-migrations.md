@@ -877,8 +877,9 @@ preserve valid state.
     itself pins.
   - `TestMigratedSchemaMatchesTypes` (Phase 2; renamed from
     `TestEmbeddedSchemaMatchesTypes`) asserts the typed-column schema,
-    after all forty-eight migrations replay on a fresh database (K1:
-    corrected from a stale "forty-seven," itself PR #6 round 4's
+    after all fifty migrations replay on a fresh database (SPEC-6.9,
+    PR #6 round 7: corrected from a stale "forty-eight," itself K1's
+    correction of a stale "forty-seven," itself PR #6 round 4's
     SPEC-4.4/DUR-4.10 correction of a stale "forty-four," which
     was this ADR's own count before 0045-0047 landed; PR #6 round 3,
     SPEC-3.8/DUR-3.10 had corrected a stale "seventeen," which

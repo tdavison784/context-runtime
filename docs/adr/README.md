@@ -166,11 +166,13 @@ reports (`final-p3-w4.md`, `final-p3-w5.md`, `final-p3-w7.md`) and the
 later commander rulings recorded there. New at this pass:
 
 - [0003](0003-sqlite-driver-and-migrations.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
-  Phase 3's thirty-one forward migrations, 0018 through 0048 (K1:
-  corrected from a stale "thirty ... 0018 through 0047", itself PR #6
-  round 4's SPEC-4.4/DUR-4.10 correction of a stale "twenty-seven ... 0018
-  through 0044," itself PR #6 round 3's correction of a stale
-  "eleven ... 0018 through 0028").
+  Phase 3's thirty-three forward migrations, 0018 through 0050 (SPEC-6.9,
+  PR #6 round 7: corrected from a stale "thirty-one ... 0018 through 0048,"
+  itself K1's correction of a stale "thirty ... 0018 through 0047", itself
+  PR #6 round 4's SPEC-4.4/DUR-4.10 correction of a stale "twenty-seven ...
+  0018 through 0044," itself PR #6 round 3's correction of a stale
+  "eleven ... 0018 through 0028"; 0049 is XREV-5.2's path confirmations and
+  0050 is SPEC-5.2's frozen GC candidate viewer).
 - [0017](0017-call-ledger.md#amended-in-phase-3-adr-8-2026-09-26-reconciled-against-integration-head-fc87199):
   `domain.OutcomeBinding`, exchange membership joined to a completed
   outcome through its trusted dispatcher, and confirmation that
