@@ -137,7 +137,7 @@ func TestP3_15_MigrationInventsNoExemptionOrProof(t *testing.T) {
 			_, err := r.ExactObligation(domain.ObligationRef{SessionID: "s1", ObligationID: "probe", Version: 1})
 			return err
 		}) {
-			t.Skip("obligation/proof facet unpublished on this backend")
+			t.Fatal("obligation/proof facet unpublished on this backend")
 		}
 		exerciseP3_15MigratedRows(t, st)
 		prev := backendFactory

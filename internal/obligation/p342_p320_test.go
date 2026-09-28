@@ -30,6 +30,7 @@ func testP3_20UncertainAliases(t *testing.T) {
 	if err := f.assertPath(t, ref, f.r.auth, "H1"); err != nil {
 		t.Fatalf("current path claim on recorded content: %v", err)
 	}
+	pathRev := f.r.auth // the revision the cached path state was recorded at
 
 	// Control: a KNOWN report at a new revision naming a lexically distinct
 	// path keeps the proof, and an observed read of the recorded content
@@ -61,6 +62,12 @@ func testP3_20UncertainAliases(t *testing.T) {
 	f.wantInvalidated(t, ref, "repo1", "uncertain coverage kept the path proof by assumed equality")
 	if st, ok := f.subject(t, file); !ok || st.Applicability != domain.ApplicabilityUnknown {
 		t.Fatalf("file state after the gap = %s (found %v), want UNKNOWN", st.Applicability, ok)
+	}
+	// While freshness is UNKNOWN, a new CURRENT_PATH claim is refused: the
+	// claim cannot manufacture the certainty the state does not have, not
+	// even by naming the cached path state's own recorded revision.
+	if err := f.assertPath(t, ref, pathRev, "H1"); err == nil {
+		t.Fatal("CURRENT_PATH claim accepted while resource freshness is UNKNOWN")
 	}
 
 	// Certainty restored recording the same content: a fresh read

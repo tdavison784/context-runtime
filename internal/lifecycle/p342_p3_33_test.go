@@ -75,10 +75,18 @@ func TestP3_33_UnpinWithUnresolvedObligation(t *testing.T) {
 		if err != nil || collected.Result.Collect == nil {
 			t.Fatalf("collect: %+v %v", collected, err)
 		}
+		protected := false
 		for _, d := range collected.Result.Collect.Decisions {
-			if d.Target.ItemID == "dir" && d.Code != domain.GCProtected {
+			if d.Target.ItemID != "dir" {
+				continue
+			}
+			if d.Code != domain.GCProtected {
 				t.Fatalf("unpinned obligation source collected: %+v", d)
 			}
+			protected = true
+		}
+		if !protected {
+			t.Fatal("no explicit PROTECTED decision for the unpinned obligation source")
 		}
 		if err := db.View(ctx, "s", func(tx store.ReadTx) error {
 			it, err := tx.Item("dir")

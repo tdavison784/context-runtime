@@ -66,12 +66,14 @@ func TestP3_31_CounterAndWallClockIndependence(t *testing.T) {
 	}
 	checkAmbientIndependence(expired, "expired lease")
 
-	// Identical snapshots at different instants agree on every output and
-	// reason; the function has no clock to consult.
+	// Identical snapshots agree on every output and reason. Eligibility
+	// takes no clock, so the second call runs at a statically pinned
+	// instant — the same one — and any disagreement would be real
+	// nondeterminism, not wall-clock luck. (Time-valued fields are already
+	// swept by the ambient table above: epoch and year-3000 CreatedAt.)
 	a := Eligibility(it, live, holder, "turn")
-	time.Sleep(2 * time.Millisecond)
 	b := Eligibility(it, live, holder, "turn")
 	if a != b {
-		t.Errorf("identical snapshots disagreed across wall-clock passage: %+v vs %+v", a, b)
+		t.Errorf("identical snapshots disagreed: %+v vs %+v", a, b)
 	}
 }

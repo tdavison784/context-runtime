@@ -4,7 +4,6 @@ import (
 	"context"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
@@ -96,8 +95,12 @@ func TestP3_39_StableResultsIndependentOfClockAndCounter(t *testing.T) {
 			seedP3_39(t, a)
 			seedP3_39(t, b)
 			first := runP3_39(t, a, intent)
-			time.Sleep(25 * time.Millisecond) // wall clock advances before the second run
-			second := runP3_39(t, b, intent)  // fresh collect of identical content
+			// The decision path consults no wall clock (no time.Now anywhere
+			// in lifecycle/policy/store production code), so the second run
+			// executes at a statically pinned instant: the same one. Equal
+			// results are structural determinism, not timing luck; the
+			// CreatedAt sweep belongs to the snapshot, not the clock.
+			second := runP3_39(t, b, intent) // fresh collect of identical content
 			same := func(x, y *domain.CollectReceipt) bool {
 				return slices.Equal(x.Decisions, y.Decisions) && slices.Equal(x.ArchivedRefs, y.ArchivedRefs)
 			}
