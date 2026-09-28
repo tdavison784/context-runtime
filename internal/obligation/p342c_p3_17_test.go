@@ -21,7 +21,9 @@ func TestP3_17_NewGrantAloneNeverSatisfies(t *testing.T) {
 	p342BothStores(t, func(t *testing.T) {
 		f := newEvalFixture(t)
 
-		// A trusted PASS observation before any grant stays unsatisfied.
+		// A trusted PASS observation before any grant stays unsatisfied. The
+		// no-grant-yet state is asserted explicitly, not implied by ordering:
+		// no live grant may authorize asserting this obligation.
 		_, obs := f.observeTests(t, f.target, domain.OutcomePass, hashOf("W1"), nil)
 		if o := f.status(t, f.sysTests); o.Status != domain.ObligationUnresolved || o.CurrentProofID != "" || o.Revision != 1 {
 			t.Fatalf("observation before any grant = %+v; evidence without matcher authority proved something", o)
@@ -29,6 +31,17 @@ func TestP3_17_NewGrantAloneNeverSatisfies(t *testing.T) {
 		if n := p17cMatcherCauses(f.history(t, f.sysTests)); n != 0 {
 			t.Fatalf("matcher transition without a grant: %d in %+v", n, f.history(t, f.sysTests))
 		}
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			live, err := r.LiveGrantsFor(domain.ActionAssertObligation, f.sysTests.Target(), tx.LastSeq(), 10)
+			if err != nil {
+				return err
+			}
+			if len(live) != 0 {
+				t.Fatalf("no grant may exist yet, found %d live for the obligation", len(live))
+			}
+			return nil
+		})
 
 		// A new live grant ALONE never satisfies: not at issuance, not
 		// silently afterwards.
