@@ -1478,6 +1478,26 @@ first time it appears in a row when not already obvious from context.
 
 **Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. **Update (commander ruling M3, round 4):** this table originally found 52 genuinely MISSING clauses beyond the 21 the "Outstanding required tests" section below had already tracked (that section's 21 were always a subset, scoped to bullets a prior round had already flagged, not every clause in phase3-decisions.md). M3 ruled none of the 52 deferred; two GLM test writers wrote all of them as `p342_p3<N>_test.go` files, and every MISSING row above has been flipped to that real citation. **(SPEC-5.1, round 5) a full remap pass then re-examined all 51 rows whose citation was a wrong, partial, or adjacent test and moved each to a better existing test, read and confirmed to assert its clause before citing; memory-only coverage is labeled in-row where it applies. Two clauses are MISSING as of this pass, both recorded in-row: P3-20 "no filesystem/network reads during replay" (the package-boundary guarantee is weaker than a direct assertion and does not count) and the open-exchange half of P3-38 "open exchange and leased historical content survive" (the lease half is covered by `TestLeaseTakenAfterFirstBatchProtects_SEC42`).** **(Round-5 t3 pass, same series) the open-exchange half of P3-38 is now covered — `TestP3_38_OpenExchangeMemberSurvivesCollectUntilClosed` (`internal/lifecycle/p342b_p3_38_test.go`, both stores) — leaving P3-20's filesystem/network-read clause the table's only MISSING row.**
 
+**SPEC-5.11 (round 5, P3-42 test hygiene of the `p342_*` files cited
+above) — fixed in six commits on the t3 test pass (branch `p3fix5/t3`,
+not yet merged at this writing).** `80a3a6e` turns the unpublished-facet
+gates of the P3-12/14/15/21 tests from `t.Skip` into `t.Fatal` and gives
+P3-36's ingest fixtures a local `requireObligations` failure helper in
+place of the shared skip — the obligation facet is published on both
+backends, so a missing record is a regression, not pending work
+(mutation-checked against a stubbed `ExactObligation`). `77f3c5e` adds
+nil guards to P3-24/P3-26's replay checks so a mismatched outcome fails
+the test instead of panicking past the SQLite subtests. `68ec6f2` has
+P3-20 assert a CURRENT_PATH claim is refused while resource freshness is
+UNKNOWN — even one naming the cached path state's own recorded revision.
+`a038d96` derives P3-10's TTL check from the item's own
+`CreatedTurn`/`TTLTurns` instead of fixture constants. `d4718ca` makes
+P3-33 assert an explicit PROTECTED decision exists for the unpinned
+source, not merely that no non-protected one appears. `fe63651` replaces
+P3-31/P3-39's millisecond sleeps with a statically pinned instant — the
+decision path consults no wall clock, and time-valued fields were
+already swept by the ambient table.
+
 ## Outstanding required tests (SPEC-1.23, SPEC-2.14, SPEC-3.9, SPEC-4.9) — closed, PR #6 round 4
 
 **All bullets this section tracked are now resolved, except one: the
