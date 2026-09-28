@@ -177,3 +177,29 @@ building on it:
   revision`) — K1 A4: the session's CAS-written audit scan position,
   unsequenced operational state like `gc_queue_cursor` above, never
   evidence a proof was settled.
+
+## PR #6 round 5 addition (SPEC-5.2; migration 0050, landed at
+integration head `b8efc67` — same exception as above, ADR 3's own 0050
+bullet remains authoritative)
+
+`rec_gc_progress` is W3's internal GC batch-progress row — operational
+state like `gc_queue_cursor`/`settlement_cursor`, never a persisted
+domain record, which is why it does not appear in the "Persisted record
+manifest" above; migrations 0041-0044 added its J1-J7 cursor fields, and
+0050 is its first change since:
+
+- `rec_gc_progress` adds `f_viewer_session_id`, `f_viewer_workflow_id`,
+  `f_viewer_task_id`, `f_viewer_agent_id`, `f_viewer_authority` —
+  `domain.GCProgress.Viewer`, the principal whose visibility paged batch
+  1 (SPEC-5.2). Every later batch of the same request, including a
+  continuation by a different authorized same-task collector (SEC-4.5),
+  pages the same frozen candidate set (J1/J2); per-target Archive
+  authorization stays with each batch's executing collector (P3-38), and
+  a frozen candidate that collector cannot read gets an explicit
+  INELIGIBLE decision rather than vanishing. Rows written before 0050
+  backfill lazily from batch 1's committed collect receipt
+  (`firstBatchReceipt`, `internal/lifecycle/gc_requests.go`) — no SQL
+  backfill runs, and an upgraded request keeps exactly the candidate set
+  its first batch saw. 0050's numbering skips 0049, reserved for the
+  K1-api.3 confirmation-record migration on a sibling round-5 branch
+  (ADR 3).

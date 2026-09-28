@@ -348,9 +348,11 @@ both forms share.
   fixed as of the round-4 integration (`p3-int`, head `dc07666`):**
   `RearmGCRequest` (`internal/lifecycle/gc_requests.go`) now binds a
   task-scoped request's re-arm to `actor.TaskID == req.TaskID` (SYSTEM
-  exempt), checked before any outcome lookup so a foreign principal sees
-  the identical `ErrNotFound` for a pending, failed, or absent request
-  alike — no existence oracle (SEC-4.4). The re-arm identity,
+  exempt — until round 5's SPEC-5.6 removed the exemption; see the
+  round-5 paragraph below), checked before any outcome lookup so a
+  foreign principal sees the identical `ErrNotFound` for a pending,
+  failed, or absent request alike — no existence oracle (SEC-4.4). The
+  re-arm identity,
   `domain.GCRearmRequestID(failed.ID)`, derives from the failed request
   alone, never the actor, so repeating a re-arm is idempotent regardless
   of who calls it. MANUAL and session-scope requests can now re-arm too
@@ -414,6 +416,50 @@ both forms share.
   nor a re-arm can alias a runtime trigger's identity or one another's.
   Test: `TestManualCollectDoesNotWedgeTaskCompletion_SEC48`
   (`internal/lifecycle/gc_round4b_test.go`).
+  **Round 5 (SPEC-5.2/SPEC-5.6, merged at integration head `b8efc67`;
+  SPEC-5.6's commits `7c18a8e`/`f8949aa`).** The candidate set a request
+  decides is frozen to the principal whose visibility produced batch 1:
+  `domain.GCProgress.Viewer` (`internal/domain/collect.go`) is recorded
+  by the first batch, and every later batch — including a continuation by
+  a different authorized same-task collector under SEC-4.5 above — pages
+  `GCCandidates` under that frozen viewer (`planBatch`'s `viewer := p;
+  if progress.Batches > 0 { viewer = progress.Viewer }`, with the
+  candidate-integrity check `it.Access.Permits(viewer)`,
+  `internal/lifecycle/collect.go`), alongside the J1/J2 snapshot and
+  cursor, so swapping collectors mid-request can neither grow nor shrink
+  the set the request will decide. Two authorities stay deliberately
+  split (P3-38): *which* candidates exist follows the frozen viewer's
+  visibility, while *what may be archived* is authorized per target by
+  each batch's executing collector. A frozen candidate the executing
+  collector cannot read therefore never silently vanishes or wedges the
+  request: `decideCandidate` returns an explicit `GCIneligible` decision
+  for it, its access check running before `gcBase` reads any protection
+  state (SEC-1.6's fail-closed ordering). The freeze is durable across
+  the upgrade: `gcProgress` (`internal/lifecycle/gc_requests.go`)
+  recovers a zero `Viewer` from batch 1's committed collect receipt
+  exactly as it already recovered a zero `SnapshotSeq` (J2), so an
+  upgraded request keeps exactly the candidate set its first batch saw;
+  migration `0050_gc_candidate_viewer.sql` persists the viewer columns
+  on `rec_gc_progress` (ADR 3, checksum pinned). Tests
+  (`internal/lifecycle/gc_round5_test.go`, both stores):
+  `TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52` — with
+  `MaxGCDecisions=1` forcing multi-batch continuation, in both
+  directions (the continuator sees less than the first viewer, and the
+  same shape with the two collectors' identities swapped): every frozen
+  candidate is decided, an item the executing collector cannot read
+  getting `GCIneligible` and never archiving while the readable ones
+  archive, per-item residency asserted — and
+  `TestGCProgressFreezesAndRecoversTheCandidateViewer_SPEC52` (freezes
+  at batch 1; a live progress row rewritten with
+  `Viewer = domain.Principal{}` recovers the viewer from batch 1's
+  receipt). **SPEC-5.6: `RearmGCRequest` no longer exempts SYSTEM from
+  the SEC-4.4 task binding above** — a task-scoped request is refused
+  whenever `actor.TaskID != req.TaskID`, authority class notwithstanding,
+  so a foreign-task SYSTEM caller gets the identical `ErrNotFound` for an
+  absent, pending, and failed request alike and creates nothing.
+  `TestRearmBindsSYSTEMToTheRequestTask_SPEC56` (both stores; the
+  same-task SYSTEM principal still re-arms, as the test's positive
+  control).
   **Grant issuance room is tiered by authority, not a flat quarter-share
   (SEC-2.7, superseded by SEC-3.8/DUR-3.6, landed at `4a00b06`; SPEC-4.3
   corrects the prior "not yet merged" text).** `liveGrantRoom`
