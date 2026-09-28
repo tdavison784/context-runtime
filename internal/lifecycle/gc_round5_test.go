@@ -184,7 +184,7 @@ func TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52(t *testing.T) {
 			archived: map[string]bool{"eph-000": true, "eph-001": false, "eph-002": false},
 		},
 		{
-			name:    "reverse: only the continuator can see the last candidate",
+			name:    "reverse: the continuator cannot see the last candidate",
 			agent:   "agent-2",
 			limited: []string{"eph-002"},
 			batch1:  mate,
