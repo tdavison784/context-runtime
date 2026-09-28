@@ -162,6 +162,7 @@ var suite = []testCase{
 	{"SemanticLiveProofs", testSemanticLiveProofs},
 	{"SemanticProofDerivedValid", testSemanticProofDerivedValid},
 	{"SemanticK1BroadConfirmations", testSemanticK1BroadConfirmations},
+	{"SemanticK1InTxVisibility", testSemanticK1InTxVisibility},
 	{"SemanticA5CommitGuard", testSemanticA5CommitGuard},
 	{"RawTransitionCannotSatisfy", testRawTransitionCannotSatisfy},
 

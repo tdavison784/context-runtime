@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/store"
 )
 
 // XREV-5.2 ports: the round-6 probes of r6-xrev5.md, service level, on both
@@ -55,4 +56,61 @@ func TestXREV5SameContentAllPaths(t *testing.T) {
 	}
 	f.resourceReport(t, "W2", false, true, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H2")})
 	f.wantInvalidated(t, ref, "repo1", "same-content exemption spared a changed content")
+}
+
+// TestXREV5PathReadAndWaiverInReportTx checks XREV-5.1: a report's raises
+// are visible to reads inside the writing transaction, so a waiver appended
+// after the report settles first. In one Store.Update: report the path
+// changed with no replacement content, read EffectiveStatus, then waive.
+// The read must be UNRESOLVED pending settlement, and the committed history
+// must be ASSERTION, then RESOURCE_INVALIDATION, then WAIVE From=UNRESOLVED.
+func TestXREV5PathReadAndWaiverInReportTx(t *testing.T) {
+	f := newEvalFixture(t)
+	ref := f.fileObligation(t, "7")
+	f.resourceReport(t, "W1b", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+	if err := f.assertPath(t, ref, f.r.auth, "H1"); err != nil {
+		t.Fatalf("current path claim on H1: %v", err)
+	}
+	o := f.status(t, ref)
+	rep := domain.ReportResourceChangeIntent{RequestID: "xrev51", ResourceID: "repo1", ExpectedRevision: f.r.rev,
+		ExpectedAuthoritativeRevision: f.r.auth, ResultingAuthoritativeRevision: f.r.auth + 1,
+		WorkspaceFingerprint: hashOf("W1b"), ChangedPaths: []string{"docs/a.md"}}
+	waive := intent(ref, o.Revision, domain.ObligationWaived)
+	var gotStatus domain.ObligationStatus
+	var gotPending bool
+	mustUpdate(t, f.st, func(tx store.Tx) error {
+		if _, err := f.s.ReportResourceChangeTx(tx, f.harness, rep, tx.NextSeq()); err != nil {
+			return err
+		}
+		sem, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		cur, err := sem.ExactObligation(ref)
+		if err != nil {
+			return err
+		}
+		gotStatus, gotPending, err = EffectiveStatus(sem, cur)
+		if err != nil {
+			return err
+		}
+		_, err = f.s.ApplyTransitionTx(tx, f.system, waive, tx.NextSeq())
+		return err
+	})
+	if gotStatus != domain.ObligationUnresolved || !gotPending {
+		t.Fatalf("in-transaction EffectiveStatus after the report = %s pending=%v, want UNRESOLVED pending", gotStatus, gotPending)
+	}
+	h := f.history(t, ref)
+	if len(h) != 3 {
+		t.Fatalf("history = %d transitions, want 3 (assertion, invalidation, waiver)", len(h))
+	}
+	if h[0].Cause != domain.CauseAssertion {
+		t.Errorf("history[0] cause = %s, want assertion", h[0].Cause)
+	}
+	if h[1].Cause != domain.CauseResourceInvalidation || h[1].From != domain.ObligationSatisfied || h[1].To != domain.ObligationUnresolved {
+		t.Errorf("history[1] = %+v, want RESOURCE_INVALIDATION from SATISFIED to UNRESOLVED", h[1])
+	}
+	if h[2].Cause != domain.CauseWaive || h[2].From != domain.ObligationUnresolved || h[2].To != domain.ObligationWaived {
+		t.Errorf("history[2] = %+v, want waiver from UNRESOLVED to WAIVED", h[2])
+	}
 }
