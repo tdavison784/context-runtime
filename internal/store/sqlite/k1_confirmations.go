@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -117,4 +118,70 @@ func (s semRead) LastUnconfirmedRev(resourceID, path, key string) (uint64, error
 		return 0, nil
 	}
 	return rev, err
+}
+
+// FirstUnconfirmedAffectingUpdateAfter implements store.ResourceReader
+// (K1-api.3 SPEC-2): the earliest raise of broad key K past rev that did
+// NOT confirm path — the settlement cause's gap-seek, one gap seek plus
+// one exact-key seek. The first closed unconfirmed run whose last
+// revision passes rev names the seek floor; failing that, the open run
+// after the confirmation pointer does; ErrNotFound when every raise of K
+// past rev confirmed the path (or none is past rev).
+func (s semRead) FirstUnconfirmedAffectingUpdateAfter(resourceID, path, key string, rev uint64) (domain.ResourceUpdate, error) {
+	if err := s.t.advanceK1Reports(); err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	if _, err := store.PathAffectKeys(path); err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	k, err := affectKeySql(key)
+	if err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	pk := updatePathKey(path)
+	notFound := func() (domain.ResourceUpdate, error) {
+		return domain.ResourceUpdate{}, fmt.Errorf("unconfirmed affecting update after %s/%s: %w", resourceID, path, domain.ErrNotFound)
+	}
+	from := rev
+	var first uint64
+	err = s.t.conn.QueryRowContext(s.t.ctx, "SELECT first_rev FROM lookup_unconfirmed_gap WHERE session_id=? AND resource_id=? AND path_key=? AND affect_key=? AND last_rev > ? ORDER BY last_rev LIMIT 1",
+		s.t.session, resourceID, pk, k, rev).Scan(&first)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		var last, conf uint64
+		if err := s.t.conn.QueryRowContext(s.t.ctx, "SELECT revision FROM lookup_affecting_raise WHERE session_id=? AND resource_id=? AND path_key=? ORDER BY revision DESC LIMIT 1",
+			s.t.session, resourceID, k).Scan(&last); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return domain.ResourceUpdate{}, err
+		}
+		if err := s.t.conn.QueryRowContext(s.t.ctx, "SELECT confirmed_rev FROM lookup_path_confirmation WHERE session_id=? AND resource_id=? AND path_key=? AND affect_key=?",
+			s.t.session, resourceID, pk, k).Scan(&conf); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return domain.ResourceUpdate{}, err
+		}
+		if last == conf {
+			return notFound()
+		}
+		if conf > from {
+			from = conf
+		}
+	case err != nil:
+		return domain.ResourceUpdate{}, err
+	default:
+		if first > 0 && first-1 > from {
+			from = first - 1
+		}
+	}
+	var id string
+	err = s.t.conn.QueryRowContext(s.t.ctx, "SELECT update_id FROM lookup_affecting_raise WHERE session_id=? AND resource_id=? AND path_key=? AND revision > ? ORDER BY revision LIMIT 1",
+		s.t.session, resourceID, k, from).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFound()
+	}
+	if err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	var u domain.ResourceUpdate
+	if err := s.t.get("resource_update", id, 0, &u); err != nil {
+		return domain.ResourceUpdate{}, fmt.Errorf("%w: affecting index names missing update %s", domain.ErrIntegrity, id)
+	}
+	return u, nil
 }

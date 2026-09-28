@@ -3,6 +3,7 @@ package memory
 import (
 	"sort"
 
+	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
 )
 
@@ -165,4 +166,49 @@ func (r semRead) LastUnconfirmedRev(resourceID, path, key string) (uint64, error
 	}
 	v, _ := r.r.sem.res.unconfirms.get(ck)
 	return v, nil
+}
+
+// FirstUnconfirmedAffectingUpdateAfter implements store.ResourceReader
+// (K1-api.3 SPEC-2): the earliest raise of broad key K past rev that did
+// NOT confirm path — the settlement cause's gap-seek. The first closed
+// unconfirmed run whose last revision passes rev names the seek floor;
+// failing that, the open run after the confirmation pointer does;
+// ErrNotFound when every raise of K past rev confirmed the path (or none
+// is past rev).
+func (r semRead) FirstUnconfirmedAffectingUpdateAfter(resourceID, path, key string, rev uint64) (domain.ResourceUpdate, error) {
+	if err := r.r.check(); err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	r.r.advanceK1()
+	ck, err := confirmKey(resourceID, path, key)
+	if err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	k, err := affectKey(resourceID, key)
+	if err != nil {
+		return domain.ResourceUpdate{}, err
+	}
+	from := rev
+	if gap, ok := r.r.sem.res.gaps.after(ck, rev); ok {
+		if gap.first-1 > from {
+			from = gap.first - 1
+		}
+	} else {
+		var last uint64
+		for ref := range r.r.sem.res.affectRaises.before(k, seqRef{}) {
+			last = ref.seq
+			break
+		}
+		conf, _ := r.r.sem.res.confirms.get(ck)
+		if last == conf {
+			return domain.ResourceUpdate{}, notFound("unconfirmed affecting update after", k.path)
+		}
+		if conf > from {
+			from = conf
+		}
+	}
+	for ref := range r.r.sem.res.affectRaises.after(k, seqRef{from, raiseAfterID}) {
+		return r.raisedUpdate(ref, "unconfirmed affecting raise", k.path)
+	}
+	return domain.ResourceUpdate{}, notFound("unconfirmed affecting update after", k.path)
 }

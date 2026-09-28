@@ -132,3 +132,68 @@ func testSemanticK1BroadConfirmations(t *testing.T, s store.Store) {
 		t.Error("after the fingerprint revert u12: o-w2 derived valid, want invalid")
 	}
 }
+
+// testSemanticK1SettlementCause checks the gap-seek cause read
+// (K1-api.3 SPEC-2): broad raises that confirmed the path are never
+// causes. The earliest unconfirmed raise past rev is, both inside closed
+// runs (gap rows) and in the open run after the confirmation pointer; a
+// raise at exactly rev is not past it.
+func testSemanticK1SettlementCause(t *testing.T, s store.Store) {
+	k1Setup(t, s)
+	// u1 establishes docs/a.md H1, raising ALL to 1 without confirming;
+	// u2 records the same content, confirming the path at 2 and closing
+	// the unconfirmed run [1, 1].
+	report(t, s, "u1", 0, fpA, nil, map[string]string{"docs/a.md": "H1"})
+	report(t, s, "u2", 1, fpA, nil, map[string]string{"docs/a.md": "H1"})
+	cause := func(rev uint64) (domain.ResourceUpdate, error) {
+		var u domain.ResourceUpdate
+		var err error
+		view(t, s, sessA, func(tx store.ReadTx) error {
+			u, err = readSemantic(t, tx).FirstUnconfirmedAffectingUpdateAfter("repo", "docs/a.md", "", rev)
+			return nil
+		})
+		return u, err
+	}
+	// At rev 0 the closed run names u1; at u1's own revision the raise is
+	// not past r, and past the confirmation every raise confirmed the
+	// path: no cause.
+	u, err := cause(0)
+	noErr(t, err)
+	if u.ID != "u1" {
+		t.Errorf("cause(repo, docs/a.md, ALL, 0) = %s, want u1", u.ID)
+	}
+	if u, err := cause(1); !errorsIs(err, domain.ErrNotFound) {
+		t.Errorf("cause(repo, docs/a.md, ALL, 1) = %s (%v), want ErrNotFound", u.ID, err)
+	}
+	// u3 records different content: an unconfirmed raise at 3 opens a run,
+	// the cause of any dependency below it.
+	report(t, s, "u3", 2, fpA, nil, map[string]string{"docs/a.md": "H2"})
+	u, err = cause(1)
+	noErr(t, err)
+	if u.ID != "u3" {
+		t.Errorf("after u3: cause(repo, docs/a.md, ALL, 1) = %s, want u3", u.ID)
+	}
+	// u4 confirms at 4, closing the run [3, 3]: a dependency at revision 2
+	// still takes u3 as its cause; at 3 or later, none.
+	report(t, s, "u4", 3, fpA, nil, map[string]string{"docs/a.md": "H2"})
+	u, err = cause(2)
+	noErr(t, err)
+	if u.ID != "u3" {
+		t.Errorf("after u4: cause(repo, docs/a.md, ALL, 2) = %s, want u3", u.ID)
+	}
+	for _, rev := range []uint64{3, 4} {
+		if u, err := cause(rev); !errorsIs(err, domain.ErrNotFound) {
+			t.Errorf("after u4: cause(repo, docs/a.md, ALL, %d) = %s (%v), want ErrNotFound", rev, u.ID, err)
+		}
+	}
+	// A key that never raised has no cause; the arguments stay canonical.
+	view(t, s, sessA, func(tx store.ReadTx) error {
+		if _, err := readSemantic(t, tx).FirstUnconfirmedAffectingUpdateAfter("repo", "docs/a.md", "src", 0); !errorsIs(err, domain.ErrNotFound) {
+			t.Errorf("never-raised key: error = %v, want ErrNotFound", err)
+		}
+		if _, err := readSemantic(t, tx).FirstUnconfirmedAffectingUpdateAfter("repo", "../x", "", 0); !errorsIs(err, domain.ErrInvalidRecord) {
+			t.Errorf("noncanonical path: error = %v, want ErrInvalidRecord", err)
+		}
+		return nil
+	})
+}

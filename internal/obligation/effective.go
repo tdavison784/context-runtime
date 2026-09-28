@@ -152,8 +152,10 @@ func (s *Service) settle(tx store.Tx, sem store.SemanticTx, work *budget, o doma
 
 // settlementCause is the earliest update, by session (Seq, ID), that fired
 // any of the proof's dependency pointers (K1-api.2): deterministic, so the
-// inline path and the worker agree. A derived-invalid proof with no fired
-// pointer is an integrity failure.
+// inline path and the worker agree. A broad key's confirming raises never
+// fired the dependency (K1-api.3 SPEC-2), so only its unconfirmed raises
+// are candidates. A derived-invalid proof with no fired pointer is an
+// integrity failure.
 func settlementCause(r store.SemanticReader, proofID string) (domain.ResourceUpdate, error) {
 	pr := r
 	var best *domain.ResourceUpdate
@@ -186,22 +188,30 @@ func settlementCause(r store.SemanticReader, proofID string) (domain.ResourceUpd
 				if d.Locator == nil {
 					return domain.ResourceUpdate{}, domain.ErrIntegrity
 				}
-				keys, err := store.PathAffectKeys(path.Join(d.Locator.BaseDir, d.Locator.Path))
+				p := path.Join(d.Locator.BaseDir, d.Locator.Path)
+				keys, err := store.PathAffectKeys(p)
 				if err != nil {
 					return domain.ResourceUpdate{}, err
 				}
-				for _, k := range append(keys, "") {
-					last, err := pr.LastAffectingRev(d.ResourceID, k)
+				// The exact key's raises are real content changes; every
+				// broad key — each ancestor directory and "" for ALL —
+				// contributes only the raises that did NOT confirm the
+				// path (K1-api.3 SPEC-2), so a confirming raise is never
+				// the cause.
+				if u, err := pr.FirstAffectingUpdateAfter(d.ResourceID, p, d.ResourceRevision); err == nil {
+					consider(u)
+				} else if !errors.Is(err, domain.ErrNotFound) {
+					return domain.ResourceUpdate{}, err
+				}
+				for _, k := range append(keys[:len(keys)-1], "") {
+					u, err := pr.FirstUnconfirmedAffectingUpdateAfter(d.ResourceID, p, k, d.ResourceRevision)
+					if errors.Is(err, domain.ErrNotFound) {
+						continue
+					}
 					if err != nil {
 						return domain.ResourceUpdate{}, err
 					}
-					if last > d.ResourceRevision {
-						u, err := pr.FirstAffectingUpdateAfter(d.ResourceID, k, d.ResourceRevision)
-						if err != nil {
-							return domain.ResourceUpdate{}, err
-						}
-						consider(u)
-					}
+					consider(u)
 				}
 			}
 		}
