@@ -131,11 +131,38 @@ func gcBatchDecisions(t *testing.T, db store.Store, id string) map[string]domain
 // pages the same frozen candidates and decides every one of them; a
 // candidate the executing collector cannot access gets an explicit
 // INELIGIBLE decision — it never vanishes and is never archived.
+//
+// SPEC-6.2: the receipt each executing principal RECEIVES (and that replays
+// for it) is access-projected — the stored receipt keeps every frozen
+// candidate, but the copy handed to a collector never names, in refs or
+// decisions, a candidate that collector cannot access (P3-38: detailed
+// results are access-filtered). The frozen set and its decisions live on
+// unchanged in the stored receipts, which this test still reads directly.
 func TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52(t *testing.T) {
 	ctx := context.Background()
 	first := storetest.NewPrincipal("s", domain.AuthorityHarness) // AgentID "agent"
 	mate := first
 	mate.AgentID = "agent-2"
+	// assertReceiptProjected fails when who's receipt names a candidate in
+	// hidden — a ref, a decision target — and checks the projected copy still
+	// satisfies Validate's pairing invariants (SPEC-6.2 keeps the length
+	// equality).
+	assertReceiptProjected := func(t *testing.T, who domain.Principal, r domain.CollectReceipt, hidden map[string]bool) {
+		t.Helper()
+		if err := r.Validate(); err != nil {
+			t.Fatalf("%s's returned receipt does not validate: %v (%+v)", who.AgentID, err, r)
+		}
+		for _, ref := range r.CandidateRefs {
+			if hidden[ref.ItemID] {
+				t.Errorf("%s's receipt names inaccessible candidate %s in CandidateRefs (SPEC-6.2)", who.AgentID, ref.ItemID)
+			}
+		}
+		for _, d := range r.Decisions {
+			if hidden[d.Target.ItemID] {
+				t.Errorf("%s's receipt names inaccessible candidate %s in Decisions (SPEC-6.2)", who.AgentID, d.Target.ItemID)
+			}
+		}
+	}
 	for _, tc := range []struct {
 		name     string
 		agent    string // agent whose access the limited items require
@@ -157,7 +184,7 @@ func TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52(t *testing.T) {
 			archived: map[string]bool{"eph-000": true, "eph-001": false, "eph-002": false},
 		},
 		{
-			name:    "reverse: only the continuator can see the last candidate",
+			name:    "reverse: the continuator cannot see the last candidate",
 			agent:   "agent-2",
 			limited: []string{"eph-002"},
 			batch1:  mate,
@@ -174,26 +201,40 @@ func TestMixedCollectorDecidesEveryFrozenCandidate_SPEC52(t *testing.T) {
 				pol.MaxGCDecisions = 1
 				s, _ := New(db, pol)
 				seedEphemeralLimited(t, db, tc.agent, tc.limited...)
+				// hidden are the frozen candidates tc.rest cannot access: the
+				// items limited to tc.agent, an agent tc.rest is not.
+				hidden := map[string]bool{}
+				for _, item := range tc.limited {
+					hidden[item] = true
+				}
 				id := enqueueScratch(t, db, s)
-				step := func(p domain.Principal) {
+				step := func(p domain.Principal) domain.CollectReceipt {
+					var got domain.CollectReceipt
 					if err := db.Update(ctx, "s", func(tx store.Tx) error {
-						_, err := s.ExecuteGCRequest(tx, p, id, 0)
+						out, err := s.ExecuteGCRequest(tx, p, id, 0)
+						if err == nil && out.Result.Collect != nil {
+							got = out.Result.Collect.Clone()
+						}
 						return err
 					}); err != nil {
 						t.Fatal(err)
 					}
+					return got
 				}
 				step(tc.batch1)
 				for range 8 {
 					if _, ok := gcResult(t, db, id); ok {
 						break
 					}
-					step(tc.rest)
+					assertReceiptProjected(t, tc.rest, step(tc.rest), hidden)
 				}
 				res, found := gcResult(t, db, id)
 				if !found || res.Outcome != domain.GCCollected {
 					t.Fatalf("request did not finish: %+v found=%v", res, found)
 				}
+				// The finished request replays its final batch to the collector
+				// that ran it: that replayed copy is access-projected too.
+				assertReceiptProjected(t, tc.rest, step(tc.rest), hidden)
 				got := gcBatchDecisions(t, db, id)
 				if len(got) != len(tc.want) {
 					t.Fatalf("decisions = %v, want every frozen candidate decided: %v", got, tc.want)

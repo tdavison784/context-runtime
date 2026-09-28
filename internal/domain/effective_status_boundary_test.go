@@ -20,22 +20,31 @@ import (
 // assigned to a local, a map key, converted, a method value — because a
 // stored SATISFIED resource-bound version may be effectively UNRESOLVED.
 // The check is type-based (SPEC-5.9), so an alias through a local variable
-// or any other indirection is caught. The domain package (record
-// validation), internal/store (guards and backends) and test files are
-// exempt; the transition table compares requested from/to values, not
-// stored status.
+// or any other indirection is caught. A read is attributed to the function
+// whose body contains it, and a read outside every function — a package-level
+// var or initializer — is '(top-level)' and always fails (SPEC-6.4). The
+// domain package (record validation), internal/store (guards and backends)
+// and test files are exempt; the transition table compares requested from/to
+// values, not stored status.
 
 const boundaryModule = "github.com/tdavison784/context-runtime"
 
+// statusAllowance is one allowlisted reader: why it may read the stored
+// status, and whether that permission covers only Status.Valid() enum-shape
+// probes (SPEC-6.4). A read that selects or branches on the status is NEVER
+// allowlisted; only the helper itself, the write-side transition machinery,
+// and mechanical copies that quote the status as data.
+type statusAllowance struct {
+	why            string
+	validProbeOnly bool // the allowance matches only reads of the form X.Status.Valid()
+}
+
 // statusReadAllowlist: functions allowed to read the stored status, and why.
-// A read that selects or branches on the status is NEVER allowlisted; only
-// the helper itself, the write-side transition machinery, and mechanical
-// copies that quote the status as data.
-var statusReadAllowlist = map[string]string{
-	"internal/obligation:EffectiveStatus":           "the one K1 A2 effective-status helper",
-	"internal/obligation:Service.ApplyTransitionTx": "the write path: transition-table check, recorded cause and history (K1 A2's transition-table exemption; a pending version is settled first)",
-	"internal/graph:settleBeforeRetirement":         "M2 settlement pre-check before retirement (settlement machinery, like the store guards)",
-	"internal/lifecycle:completionBlockers":         "Status.Valid() enum shape validation only; selection goes through openObligation -> effectiveStatus",
+var statusReadAllowlist = map[string]statusAllowance{
+	"internal/obligation:EffectiveStatus":           {why: "the one K1 A2 effective-status helper"},
+	"internal/obligation:Service.ApplyTransitionTx": {why: "the write path: transition-table check, recorded cause and history (K1 A2's transition-table exemption; a pending version is settled first)"},
+	"internal/graph:settleBeforeRetirement":         {why: "M2 settlement pre-check before retirement (settlement machinery, like the store guards)"},
+	"internal/lifecycle:completionBlockers":         {why: "Status.Valid() enum shape validation only; selection goes through openObligation -> effectiveStatus", validProbeOnly: true},
 }
 
 // statusReadPending lists stored-status reads that predate K1 and must move
@@ -112,7 +121,7 @@ func TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2(t *testing.T) {
 	}
 	sort.Strings(dirs)
 
-	found := map[string][]string{}
+	found := map[string][]statusRead{}
 	for _, dir := range dirs {
 		files := make([]*ast.File, len(pkgs[dir]))
 		for i, path := range pkgs[dir] {
@@ -132,33 +141,52 @@ func TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2(t *testing.T) {
 			// Fail closed: a package that does not type-check could hide a read.
 			t.Fatalf("%s: %v", pkgPath, err)
 		}
-		funcs := map[token.Pos]string{}
+		funcs := map[token.Pos]*ast.FuncDecl{}
+		parents := map[ast.Node]ast.Node{}
 		for _, f := range files {
+			var stack []ast.Node
+			ast.Inspect(f, func(n ast.Node) bool {
+				if n == nil {
+					stack = stack[:len(stack)-1] // leaving a node's children
+					return true
+				}
+				if len(stack) > 0 {
+					parents[n] = stack[len(stack)-1]
+				}
+				stack = append(stack, n)
+				return true
+			})
 			for _, decl := range f.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
 				if !ok {
 					continue
 				}
-				name := fn.Name.Name
-				if fn.Recv != nil && len(fn.Recv.List) == 1 {
-					name = receiverName(fn.Recv.List[0].Type) + "." + name
-				}
-				funcs[fn.Pos()] = name
+				funcs[fn.Pos()] = fn
 			}
 		}
 		for sel, selection := range info.Selections {
 			if selection.Kind() != types.FieldVal || selection.Obj() != statusField {
 				continue
 			}
+			// A read belongs to the function whose body contains it
+			// (SPEC-6.4): a stored-status read in a top-level declaration
+			// (a package var, an initializer) is '(top-level)', never the
+			// nearest preceding function.
 			name := "(top-level)"
-			var at token.Pos
 			for pos, fn := range funcs {
-				if pos <= sel.Pos() && (name == "(top-level)" || pos > at) {
-					name, at = fn, pos
+				if pos <= sel.Pos() && sel.Pos() < fn.End() {
+					name = funcLabel(fn)
+					break
 				}
 			}
 			key := dir + ":" + name
-			found[key] = append(found[key], fset.Position(sel.Pos()).String())
+			// The read's form: X.Status.Valid() is an enum-shape probe;
+			// anything else selects or branches on the value.
+			validProbe := false
+			if outer, ok := parents[sel].(*ast.SelectorExpr); ok && outer.Sel != nil && outer.Sel.Name == "Valid" {
+				validProbe = true
+			}
+			found[key] = append(found[key], statusRead{pos: fset.Position(sel.Pos()).String(), validProbe: validProbe})
 		}
 	}
 	var keys []string
@@ -167,13 +195,22 @@ func TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2(t *testing.T) {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		if _, ok := statusReadAllowlist[k]; ok {
-			continue
+		allowance, allowed := statusReadAllowlist[k]
+		if !allowed {
+			if _, ok := statusReadPending[k]; ok {
+				continue
+			}
 		}
-		if _, ok := statusReadPending[k]; ok {
-			continue
+		var offenders []statusRead
+		for _, read := range found[k] {
+			if allowed && (!allowance.validProbeOnly || read.validProbe) {
+				continue
+			}
+			offenders = append(offenders, read)
 		}
-		t.Errorf("%s reads the stored obligation status at %v; read it through obligation.EffectiveStatus (K1 A2)", k, found[k])
+		if len(offenders) > 0 {
+			t.Errorf("%s reads the stored obligation status at %v; read it through obligation.EffectiveStatus (K1 A2)", k, offenders)
+		}
 	}
 	for k, why := range statusReadPending {
 		if _, ok := found[k]; !ok {
@@ -181,6 +218,25 @@ func TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2(t *testing.T) {
 		}
 	}
 }
+
+// statusRead is one stored-status read: where, and whether it has the
+// X.Status.Valid() enum-shape-probe form.
+type statusRead struct {
+	pos        string
+	validProbe bool
+}
+
+// funcLabel is a declared function's allowlist label: receiver.Method or
+// plain function name.
+func funcLabel(fn *ast.FuncDecl) string {
+	name := fn.Name.Name
+	if fn.Recv != nil && len(fn.Recv.List) == 1 {
+		name = receiverName(fn.Recv.List[0].Type) + "." + name
+	}
+	return name
+}
+
+// childNodes was folded into the stack-based parent walk above.
 
 func receiverName(e ast.Expr) string {
 	switch x := e.(type) {
