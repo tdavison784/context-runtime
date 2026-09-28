@@ -344,9 +344,12 @@ func (t *semTx) PutResourcePathState(s domain.ResourcePathState, expectedRevisio
 	// K1 A1: the write settles whether this update's pending raise of the
 	// path stands — recording the row's prior content spares the raise,
 	// changing it forces it (resolved at commit, so write order inside the
-	// report's transaction does not matter).
+	// report's transaction does not matter). The prior-content claim is
+	// evidence only from a KNOWN report: a write citing an UNKNOWN update
+	// never spares a raise and never carries a K1-api.3 confirmation
+	// (SEC-6.1).
 	t.t.recordPathWrite(pathWrite{resource: s.Locator.ResourceID, path: path.Join(s.Locator.BaseDir, s.Locator.Path),
-		updateID: s.ResourceUpdateID, revision: s.ResourceRevision, same: found && cur.ContentHash == s.ContentHash})
+		updateID: s.ResourceUpdateID, revision: s.ResourceRevision, same: found && cur.ContentHash == s.ContentHash && u.Freshness == domain.ResourceKnown})
 	s.Revision = expectedRevision + 1
 	t.r.sem.res.paths.put(key, s)
 	t.t.sequencedWrite(s.Seq)
