@@ -33,48 +33,51 @@ func grantTo(t *testing.T, mem store.Store, id string, action domain.Action, ite
 	}
 }
 
+// TestArchiveRequiresTargetAuthorityOrExactGrant runs on both stores (P3-37,
+// ADR 8 :1437): a SYSTEM target is archivable only by its own authority or
+// an exact-action grant, and private/missing targets are one ErrNotFound.
 func TestArchiveRequiresTargetAuthorityOrExactGrant(t *testing.T) {
 	ctx := context.Background()
-	mem := memory.New()
-	t.Cleanup(func() { mem.Close() })
-	s, _ := New(mem, testPolicy())
-	sys := storetest.NewItem("s", "sys", 0, "system fact")
-	sys.Authority = domain.AuthoritySystem
-	seedItem(t, mem, sys)
-	intent := domain.ArchiveIntent{RequestID: "r", ItemID: "sys", ExpectedVersion: 1}
-	for _, a := range []domain.Authority{domain.AuthorityHarness, domain.AuthorityUser, domain.AuthorityAgent, domain.AuthorityTool} {
-		if _, err := s.ArchiveStandalone(ctx, storetest.NewPrincipal("s", a), intent); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
-			t.Fatalf("%s archived SYSTEM target: %v", a, err)
+	eachStore(t, func(t *testing.T, mem store.Store) {
+		s, _ := New(mem, testPolicy())
+		sys := storetest.NewItem("s", "sys", 0, "system fact")
+		sys.Authority = domain.AuthoritySystem
+		seedItem(t, mem, sys)
+		intent := domain.ArchiveIntent{RequestID: "r", ItemID: "sys", ExpectedVersion: 1}
+		for _, a := range []domain.Authority{domain.AuthorityHarness, domain.AuthorityUser, domain.AuthorityAgent, domain.AuthorityTool} {
+			if _, err := s.ArchiveStandalone(ctx, storetest.NewPrincipal("s", a), intent); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+				t.Fatalf("%s archived SYSTEM target: %v", a, err)
+			}
 		}
-	}
-	harness := storetest.NewPrincipal("s", domain.AuthorityHarness)
-	grantTo(t, mem, "unarchive-only", domain.ActionUnarchive, "sys", harness)
-	if _, err := s.ArchiveStandalone(ctx, harness, intent); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
-		t.Fatalf("grant for another action authorized archive: %v", err)
-	}
-	grantTo(t, mem, "archive-grant", domain.ActionArchive, "sys", harness)
-	var out LifecycleOutcome
-	if err := mem.Update(ctx, "s", func(tx store.Tx) error {
-		var err error
-		out, err = s.Archive(tx, harness, intent, tx.NextSeq())
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	r := out.Result
-	if out.GrantID != "archive-grant" || out.MutationReceiptID == "" || r.Before.Residency != domain.ResidencyResident || r.After.Residency != domain.ResidencyArchived ||
-		r.After.Authority != domain.AuthoritySystem || r.After.Generation != r.Before.Generation || r.Before.Currentness != domain.ItemUnkeyed || r.ExplicitProtectedRemoval {
-		t.Fatalf("archive outcome: %+v", out)
-	}
-	private := storetest.NewItem("s", "private", 0, "private")
-	private.AgentID, private.Access = "other", domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: "s", AgentID: "other"}
-	private.Scope = domain.ScopeAgent
-	seedItem(t, mem, private)
-	for _, id := range []string{"private", "missing"} {
-		if _, err := s.ArchiveStandalone(ctx, storetest.NewPrincipal("s", domain.AuthorityUser), domain.ArchiveIntent{RequestID: "r-" + id, ItemID: id, ExpectedVersion: 1}); !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("%s: %v", id, err)
+		harness := storetest.NewPrincipal("s", domain.AuthorityHarness)
+		grantTo(t, mem, "unarchive-only", domain.ActionUnarchive, "sys", harness)
+		if _, err := s.ArchiveStandalone(ctx, harness, intent); !errors.Is(err, domain.ErrInvalidAuthorityPromotion) {
+			t.Fatalf("grant for another action authorized archive: %v", err)
 		}
-	}
+		grantTo(t, mem, "archive-grant", domain.ActionArchive, "sys", harness)
+		var out LifecycleOutcome
+		if err := mem.Update(ctx, "s", func(tx store.Tx) error {
+			var err error
+			out, err = s.Archive(tx, harness, intent, tx.NextSeq())
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		r := out.Result
+		if out.GrantID != "archive-grant" || out.MutationReceiptID == "" || r.Before.Residency != domain.ResidencyResident || r.After.Residency != domain.ResidencyArchived ||
+			r.After.Authority != domain.AuthoritySystem || r.After.Generation != r.Before.Generation || r.Before.Currentness != domain.ItemUnkeyed || r.ExplicitProtectedRemoval {
+			t.Fatalf("archive outcome: %+v", out)
+		}
+		private := storetest.NewItem("s", "private", 0, "private")
+		private.AgentID, private.Access = "other", domain.AccessBoundary{Scope: domain.ScopeAgent, SessionID: "s", AgentID: "other"}
+		private.Scope = domain.ScopeAgent
+		seedItem(t, mem, private)
+		for _, id := range []string{"private", "missing"} {
+			if _, err := s.ArchiveStandalone(ctx, storetest.NewPrincipal("s", domain.AuthorityUser), domain.ArchiveIntent{RequestID: "r-" + id, ItemID: id, ExpectedVersion: 1}); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("%s: %v", id, err)
+			}
+		}
+	})
 }
 
 func TestArchiveDisclosesExplicitProtectedRemoval(t *testing.T) {
