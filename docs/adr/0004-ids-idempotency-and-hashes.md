@@ -546,7 +546,12 @@ Another principal, a caller predicting a future event, and anyone
 replaying a past event cannot name a runtime request, even a principal
 whose fields equal the lowered actor's. They are refused identically
 whether or not the owner's receipt exists, so there is neither an oracle
-nor a squat.
+nor a squat. Tests: `TestLoweredActorCannotReplayRelayReceipt_SEC36`
+(standalone path) and `TestLoweredActorCannotReplayRelayReceiptTxLevel_SEC36`
+(transaction-level `Resolve(tx, ...)`), both
+`internal/ingest/sec36_relay_replay_test.go`, both stores — a USER whose
+fields equal a HARNESS relay's lowered actor can neither replay the relay's
+runtime `req_` receipt nor distinguish it from an absent one.
 
 `req_`, `gc_`, `gcq_`, and `outcome-` (`domain.OutcomeEventID`/
 `ToolOutcomeEventID`, above) are reserved prefixes: no caller EventID can
@@ -569,8 +574,9 @@ Tests: `TestToolsRefuseReservedRequestIDs_SEC37` (`internal/tools`),
 `TestMembershipRefusesReservedRequestIDs_SEC37` (`internal/graph`),
 `TestObligationEntriesRefuseReservedRequestIDs_SEC37`
 (`internal/obligation`), `TestRetrievalRefusesReservedRequestIDs_SEC37`
-(`internal/retrieve`), and `TestLifecycleTxEntriesRefuseReserved
-RequestIDs_SEC37` (`internal/ingest`) — all five named, because the
+(`internal/retrieve`), and
+`TestLifecycleTxEntriesRefuseReservedRequestIDs_SEC37`
+(`internal/ingest`) — all five named, because the
 `*RefuseReservedRequestIDs_SEC37` glob this sentence used missed the two
 spelled `Refuses`. Stores derive keys with
 `MutationReceiptKey(session, family, requestID)` and check ownership with

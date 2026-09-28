@@ -165,8 +165,9 @@ Tests: `TestToolsRefuseReservedRequestIDs_SEC37` (`internal/tools`),
 `TestMembershipRefusesReservedRequestIDs_SEC37` (`internal/graph`),
 `TestObligationEntriesRefuseReservedRequestIDs_SEC37`
 (`internal/obligation`), `TestRetrievalRefusesReservedRequestIDs_SEC37`
-(`internal/retrieve`), and `TestLifecycleTxEntriesRefuseReserved
-RequestIDs_SEC37` (`internal/ingest`) — all five named, because the
+(`internal/retrieve`), and
+`TestLifecycleTxEntriesRefuseReservedRequestIDs_SEC37`
+(`internal/ingest`) — all five named, because the
 `*RefuseReservedRequestIDs_SEC37` glob this sentence used missed the two
 spelled `Refuses`.
 
