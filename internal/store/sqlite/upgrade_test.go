@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1128,6 +1130,491 @@ func TestUpgradePendingGCByTrigger(t *testing.T) {
 		pg, err := r.PendingGCRequestsByTrigger([]domain.GCTrigger{domain.GCSupersession}, store.Page{Limit: 5})
 		if err != nil || len(pg.Records) != 1 || pg.Records[0].ID != "g0" {
 			t.Errorf("PendingGCRequestsByTrigger after 0047 = %+v (%v), want g0", pg.Records, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// k1FpA and k1FpB are two distinct workspace fingerprints of the K1
+// upgrade history.
+var (
+	k1FpA = domain.HashBytes([]byte("k1 workspace A"))
+	k1FpB = domain.HashBytes([]byte("k1 workspace B"))
+)
+
+// k1Report is one report of TestUpgradeK1Pointers_0048's history: a KNOWN
+// report at fp naming paths — recording content for the ones it covers — or
+// an UNKNOWN gap, which carries no fingerprint and every path.
+type k1Report struct {
+	id      string
+	fp      string
+	unknown bool
+	paths   []string
+	content map[string]string
+}
+
+// k1Reports is the report history the test writes: KNOWN reports at two
+// fingerprints, an UNKNOWN gap and a KNOWN resync, and path reports
+// including same-content ones (u2 and u7 re-record src/a.go's content) and
+// an ancestor directory (u6 names src).
+var k1Reports = []k1Report{
+	{"u1", k1FpA, false, []string{"src/a.go"}, map[string]string{"src/a.go": "v1"}},
+	{"u2", k1FpA, false, []string{"src/a.go"}, map[string]string{"src/a.go": "v1"}},
+	{"u3", k1FpB, false, []string{"docs/b.md"}, map[string]string{"docs/b.md": "v1"}},
+	{"u4", "", true, nil, nil},
+	{"u5", k1FpA, false, nil, nil},
+	{"u6", k1FpA, false, []string{"src"}, nil},
+	{"u7", k1FpA, false, []string{"src/a.go"}, map[string]string{"src/a.go": "v1"}},
+}
+
+// k1Update is the stored report h moving resource "repo" from revision
+// from to from+1.
+func k1Update(h k1Report, seq, from uint64) domain.ResourceUpdate {
+	u := storetest.NewResourceUpdate("s", h.id, "repo", seq, from, h.fp, h.paths...)
+	if h.unknown {
+		u.Freshness, u.AllPaths, u.ChangedPaths, u.WorkspaceFingerprint = domain.ResourceUnknown, true, nil, ""
+	}
+	return u
+}
+
+// k1ReplayReport accepts one report of resource "repo" (revision from+1)
+// through the runtime, the way the service layer does: the update, the
+// state it produces, and a content row for every covered path.
+func k1ReplayReport(t *testing.T, s *Store, h k1Report, from uint64) domain.ResourceUpdate {
+	t.Helper()
+	var u domain.ResourceUpdate
+	if err := s.Update(context.Background(), "s", func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		u = k1Update(h, tx.NextSeq(), from)
+		if err := sem.InsertResourceUpdate(u); err != nil {
+			return err
+		}
+		if _, err := sem.PutResourceState(storetest.StateAfter(u, tx.NextSeq()), from); err != nil {
+			return err
+		}
+		for _, p := range h.paths {
+			c, ok := h.content[p]
+			if !ok {
+				continue
+			}
+			loc := domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: p}
+			var expected uint64
+			if cur, err := sem.ResourcePathState(loc); err == nil {
+				expected = cur.Revision
+			} else if !errors.Is(err, domain.ErrNotFound) {
+				return err
+			}
+			_, err = sem.PutResourcePathState(domain.ResourcePathState{SemanticMeta: storetest.Meta("s", "ps-"+p, tx.NextSeq()), Locator: loc,
+				ContentHash: domain.HashBytes([]byte(c)), ResourceUpdateID: u.ID, ResourceRevision: u.ResultingAuthoritativeRevision,
+				Revision: 1, Freshness: domain.ResourceKnown}, expected)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("replay %s: %v", h.id, err)
+	}
+	return u
+}
+
+// k1RaiseRows reads both of migration 0048's pointer tables whole: "div"
+// holds the workspace-divergence raises and "affect:"+path_key the
+// affecting raises, each mapping revision to update ID. Comparing whole
+// tables makes a stray or missing backfilled row visible.
+func k1RaiseRows(t *testing.T, s *Store) map[string]map[uint64]string {
+	t.Helper()
+	out := map[string]map[uint64]string{}
+	add := func(key, id string, rev uint64) {
+		if out[key] == nil {
+			out[key] = map[uint64]string{}
+		}
+		out[key][rev] = id
+	}
+	rows, err := s.db.Query("SELECT session_id, revision, update_id FROM lookup_workspace_divergence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var sess, id string
+		var rev uint64
+		if err := rows.Scan(&sess, &rev, &id); err != nil {
+			t.Fatal(err)
+		}
+		if sess != "s" {
+			t.Fatalf("divergence raise for session %q", sess)
+		}
+		add("div", id, rev)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = s.db.Query("SELECT session_id, path_key, revision, update_id FROM lookup_affecting_raise")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var sess, key, id string
+		var rev uint64
+		if err := rows.Scan(&sess, &key, &rev, &id); err != nil {
+			t.Fatal(err)
+		}
+		if sess != "s" {
+			t.Fatalf("affecting raise for session %q", sess)
+		}
+		add("affect:"+key, id, rev)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// k1SameRaises compares two of k1RaiseRows's maps, key set and every
+// raise.
+func k1SameRaises(a, b map[string]map[uint64]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, revs := range a {
+		if !maps.Equal(revs, b[key]) {
+			return false
+		}
+	}
+	return true
+}
+
+// TestUpgradeK1Pointers_0048 checks migration 0048's backfill on a database
+// migrated through 0047 (K1 A1, SPEC-4.4): the backfilled write-time
+// pointers cover at least every raise the runtime would have written for
+// the same history and match it exactly where the history is unambiguous
+// (the divergence chain, UNKNOWN and ALL-paths reports); a same-content
+// path report raises conservatively, which may settle a proof a live
+// report would have spared; the live-proof index and the settlement cursor
+// are consistent after the upgrade; and a report accepted after the
+// upgrade raises exactly what the same report raises on a fresh database
+// that lived the same history.
+func TestUpgradeK1Pointers_0048(t *testing.T) {
+	l := openLegacy(t, 47)
+	l.insert("resource_binding", storetest.NewResourceBinding("s", "repo", 1), nil)
+	// The history as the version-47 binary stored it: report rows, the
+	// resulting resource state, and the content rows the reports recorded.
+	pathRows := map[string]domain.ResourcePathState{}
+	var last domain.ResourceUpdate
+	for i, h := range k1Reports {
+		u := k1Update(h, uint64(2+i), uint64(i))
+		l.insert("resource_update", u, nil)
+		for _, p := range h.paths {
+			c, ok := h.content[p]
+			if !ok {
+				continue
+			}
+			row := pathRows[p]
+			row.Locator = domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: p}
+			row.SemanticMeta = storetest.Meta("s", "ps-"+p, uint64(2+i))
+			row.ContentHash = domain.HashBytes([]byte(c))
+			row.ResourceUpdateID, row.ResourceRevision = u.ID, u.ResultingAuthoritativeRevision
+			row.Revision++
+			row.Freshness = domain.ResourceKnown
+			pathRows[p] = row
+		}
+		last = u
+	}
+	state := storetest.StateAfter(last, 9)
+	state.Revision = last.ResultingAuthoritativeRevision
+	l.insert("resource_state", state, nil)
+	for _, row := range pathRows {
+		key, err := row.Locator.Key()
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.insert("path_state", pathStateRow{SessionID: "s", LocatorKey: key, State: row}, nil)
+	}
+	// SATISFIED resource-bound proofs around the history: the early ones
+	// rest below raises the history causes, the fixed one never falls, the
+	// mid one sits between the ancestor-directory report and the last
+	// same-content one, and the late one past the last report.
+	dep := func(id, proof string, kind domain.ProofDependencyKind, p string, rev uint64) domain.ProofDependency {
+		d := domain.ProofDependency{SemanticMeta: storetest.Meta("s", id, 40), ProofID: proof, ResourceID: "repo", Kind: kind,
+			ResourceRevision: rev, Fingerprint: k1FpA}
+		if p != "" {
+			d.Locator = &domain.ResourceLocator{ResourceID: "repo", BaseDir: ".", Path: p}
+		}
+		return d
+	}
+	satisfy := func(obID, proofID string, version, seq uint64, current bool, deps ...domain.ProofDependency) {
+		o := storetest.BoundObligation(t, "s", obID, version, seq, "src")
+		o.Status, o.CurrentProofID, o.Revision, o.Current = domain.ObligationSatisfied, proofID, 2, current
+		ids := make([]string, len(deps))
+		for i, d := range deps {
+			ids[i] = d.ID
+			l.insert("proof_dependency", d, nil)
+		}
+		slices.Sort(ids)
+		l.insert("proof", domain.ApplicabilityProof{ResourceID: "repo", Fingerprint: k1FpA, ResourceRevision: deps[0].ResourceRevision,
+			SemanticMeta: storetest.Meta("s", proofID, seq), Target: storetest.Ref(o), TransitionID: "tr-" + obID,
+			RuleVersion: "rule/1", AssertionID: "asr-" + obID, DependencyIDs: ids, Access: o.Access}, nil)
+		l.insert("obligation", o, nil)
+	}
+	satisfy("o-early", "prf-early", 1, 20, true, dep("d-early", "prf-early", domain.DependencyWorkspace, "", 1))
+	satisfy("o-early-path", "prf-early-path", 1, 21, true, dep("d-early-path", "prf-early-path", domain.DependencyCurrentPath, "src/a.go", 1))
+	satisfy("o-fixed", "prf-fixed", 1, 22, true, dep("d-fixed", "prf-fixed", domain.DependencyFixedContent, "docs/fixed.md", 1))
+	satisfy("o-mid", "prf-mid", 1, 23, true, dep("d-mid", "prf-mid", domain.DependencyCurrentPath, "src/a.go", 6))
+	satisfy("o-after", "prf-after", 1, 24, true,
+		dep("d-after-path", "prf-after", domain.DependencyCurrentPath, "src/a.go", 7),
+		dep("d-after-ws", "prf-after", domain.DependencyWorkspace, "", 7))
+	// A superseded version's proof is not live: only the current version's
+	// proof belongs in the index.
+	satisfy("o-old", "prf-old-v1", 1, 26, false, dep("d-old-1", "prf-old-v1", domain.DependencyFixedContent, "docs/fixed.md", 1))
+	satisfy("o-old", "prf-old-v2", 2, 27, true, dep("d-old-2", "prf-old-v2", domain.DependencyFixedContent, "docs/fixed.md", 1))
+
+	s := l.upgrade()
+	ctx := context.Background()
+	rows := k1RaiseRows(t, s)
+	// The raises the runtime would have written for this history (K1 A1):
+	// the divergence chain exactly — u1's first fingerprint counts as a
+	// change, u3 changes it, u4 is UNKNOWN, u5's KNOWN resync follows an
+	// UNKNOWN that left no fingerprint, and u2, u6 and u7 keep the
+	// fingerprint of the report before them — the ALL key on the UNKNOWN
+	// gap and the AllPaths resync, docs/b.md on u3, and the ancestor
+	// directory src on u6. Only src/a.go is ambiguous: u2 and u7 re-record
+	// the same content, which spares the exact key at runtime but not in
+	// the backfill.
+	runtimeRaises := map[string]map[uint64]string{
+		"div":                                  {1: "u1", 3: "u3", 4: "u4", 5: "u5"},
+		"affect:all":                           {4: "u4", 5: "u5"},
+		"affect:" + updatePathKey("docs/b.md"): {3: "u3"},
+		"affect:" + updatePathKey("src"):       {6: "u6"},
+		"affect:" + updatePathKey("src/a.go"):  {1: "u1"},
+	}
+	// Every backfilled raise must name a stored report that could raise its
+	// key: an UNKNOWN or ALL-paths report for ALL, a report naming the path
+	// for exact keys.
+	allowed := map[string]map[uint64]string{}
+	for i, h := range k1Reports {
+		add := func(key string) {
+			if allowed[key] == nil {
+				allowed[key] = map[uint64]string{}
+			}
+			allowed[key][uint64(i+1)] = h.id
+		}
+		if h.unknown || len(h.paths) == 0 {
+			add("affect:all")
+		}
+		for _, p := range h.paths {
+			add("affect:" + updatePathKey(p))
+		}
+	}
+	// (a) The divergence chain is backfilled exactly, every runtime raise
+	// survived the upgrade, no raise names a report that could not raise
+	// its key, and the one ambiguous key carries exactly the documented
+	// conservative raises of the same-content reports (SPEC-4.4).
+	if !maps.Equal(rows["div"], runtimeRaises["div"]) {
+		t.Errorf("divergence raises after 0048 = %v, want exactly %v", rows["div"], runtimeRaises["div"])
+	}
+	if len(rows) != len(runtimeRaises) {
+		t.Errorf("raised keys after 0048 = %v, want only %v", rows, runtimeRaises)
+	}
+	for key, want := range runtimeRaises {
+		if key == "div" {
+			continue // checked exactly above
+		}
+		if !maps.Equal(rows[key], allowed[key]) {
+			t.Errorf("%s raises after 0048 = %v, want %v: a report's own raises, conservative only where content history is ambiguous", key, rows[key], allowed[key])
+			continue
+		}
+		for rev, id := range want {
+			if rows[key][rev] != id {
+				t.Errorf("%s raise %d after 0048 = %q, want %q", key, rev, rows[key][rev], id)
+			}
+		}
+	}
+	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		// The monotone reads return the newest backfilled raise, and the
+		// keyset seeks walk the backfilled chain.
+		if rev, err := r.LastWorkspaceDivergenceRev("repo"); err != nil || rev != 5 {
+			t.Errorf("LastWorkspaceDivergenceRev after 0048 = %d (%v), want 5", rev, err)
+		}
+		for _, k := range []struct {
+			path string
+			rev  uint64
+		}{{"", 5}, {"docs/b.md", 3}, {"src", 6}, {"src/a.go", 7}, {"other/x.go", 0}} {
+			if rev, err := r.LastAffectingRev("repo", k.path); err != nil || rev != k.rev {
+				t.Errorf("LastAffectingRev(%q) after 0048 = %d (%v), want %d", k.path, rev, err, k.rev)
+			}
+		}
+		for _, c := range []struct {
+			after uint64
+			id    string
+		}{{0, "u1"}, {1, "u3"}, {3, "u4"}, {4, "u5"}} {
+			u, err := r.FirstWorkspaceDivergenceAfter("repo", c.after)
+			if err != nil || u.ID != c.id {
+				t.Errorf("FirstWorkspaceDivergenceAfter(%d) after 0048 = %s (%v), want %s", c.after, u.ID, err, c.id)
+			}
+		}
+		if _, err := r.FirstWorkspaceDivergenceAfter("repo", 5); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("FirstWorkspaceDivergenceAfter(5) error = %v, want ErrNotFound", err)
+		}
+		// (b) Derived validity over the backfill: the early workspace and
+		// path proofs — which the runtime rule fells through the divergence
+		// and ALL pointers, backfilled exactly — are invalid; the mid proof
+		// shows the documented conservatism, settled by u7's same-content
+		// raise while the runtime rule (highest key src at revision 6)
+		// would keep it (SPEC-4.4); the FIXED_CONTENT proof and the one
+		// written after the last report stay valid.
+		valid := func(id string) bool {
+			ok, err := store.ProofDerivedValid(r, id)
+			if err != nil {
+				t.Fatalf("ProofDerivedValid(%s): %v", id, err)
+			}
+			return ok
+		}
+		for _, id := range []string{"prf-early", "prf-early-path", "prf-mid"} {
+			if valid(id) {
+				t.Errorf("proof %s derived valid after 0048, want invalid", id)
+			}
+		}
+		for _, id := range []string{"prf-fixed", "prf-after", "prf-old-v2"} {
+			if !valid(id) {
+				t.Errorf("proof %s derived invalid after 0048, want valid", id)
+			}
+		}
+		// (c) The live-proof index holds exactly the current proofs of
+		// current satisfied versions — the superseded version's proof is
+		// not live — in (Seq, ID) order.
+		var live []string
+		p := store.Page{Limit: 2}
+		for {
+			pg, err := r.LiveProofs(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, pr := range pg.Records {
+				live = append(live, pr.Target.ObligationID+"/"+pr.ID)
+			}
+			if !pg.More {
+				break
+			}
+			p.After = pg.Next
+		}
+		if want := []string{"o-early/prf-early", "o-early-path/prf-early-path", "o-fixed/prf-fixed",
+			"o-mid/prf-mid", "o-after/prf-after", "o-old/prf-old-v2"}; !slices.Equal(live, want) {
+			t.Errorf("LiveProofs after 0048 = %v, want %v", live, want)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// (c) The settlement cursor is unsequenced operational state: absent
+	// before its first put, then a plain CAS write on the upgraded file.
+	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		if _, err := r.SettlementCursor(); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("SettlementCursor after 0048 error = %v, want ErrNotFound", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put := func(c store.SettlementCursor, expected uint64) (store.SettlementCursor, error) {
+		var out store.SettlementCursor
+		err := s.Update(ctx, "s", func(tx store.Tx) error {
+			sem, err := store.Semantic(tx)
+			if err != nil {
+				return err
+			}
+			out, err = sem.PutSettlementCursor(c, expected)
+			return err
+		})
+		return out, err
+	}
+	if got, err := put(store.SettlementCursor{Session: "s", After: store.Cursor{Seq: 9, ID: "prf-fixed"}}, 0); err != nil || got.Revision != 1 {
+		t.Errorf("PutSettlementCursor after 0048 = %+v (%v), want revision 1", got, err)
+	}
+	if _, err := put(store.SettlementCursor{Session: "s"}, 0); !errors.Is(err, domain.ErrVersionConflict) {
+		t.Errorf("stale PutSettlementCursor error = %v, want ErrVersionConflict", err)
+	}
+	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		c, err := r.SettlementCursor()
+		if err != nil || c.After != (store.Cursor{Seq: 9, ID: "prf-fixed"}) || c.Revision != 1 {
+			t.Errorf("SettlementCursor after the put = %+v (%v)", c, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// (d) A report accepted after the upgrade raises exactly what the same
+	// report raises on a fresh database that lived the same history through
+	// the runtime. The fresh replay also cross-checks the runtime raises
+	// the backfill was measured against.
+	fresh, _ := openTemp(t)
+	if err := fresh.Update(ctx, "s", func(tx store.Tx) error {
+		sem, err := store.Semantic(tx)
+		if err != nil {
+			return err
+		}
+		return sem.InsertResourceBinding(storetest.NewResourceBinding("s", "repo", tx.NextSeq()))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i, h := range k1Reports {
+		k1ReplayReport(t, fresh, h, uint64(i))
+	}
+	beforeLegacy, beforeFresh := k1RaiseRows(t, s), k1RaiseRows(t, fresh)
+	if !k1SameRaises(beforeFresh, runtimeRaises) {
+		t.Errorf("fresh replay raises = %v, want the runtime raises %v", beforeFresh, runtimeRaises)
+	}
+	post := k1Report{id: "u8", fp: k1FpB, paths: []string{"src/a.go"}, content: map[string]string{"src/a.go": "v2"}}
+	k1ReplayReport(t, s, post, 7)
+	k1ReplayReport(t, fresh, post, 7)
+	added := func(before, now map[string]map[uint64]string) map[string]map[uint64]string {
+		out := map[string]map[uint64]string{}
+		for key, revs := range now {
+			for rev, id := range revs {
+				if before[key][rev] == id {
+					continue
+				}
+				if out[key] == nil {
+					out[key] = map[uint64]string{}
+				}
+				out[key][rev] = id
+			}
+		}
+		return out
+	}
+	if want, got := added(beforeFresh, k1RaiseRows(t, fresh)), added(beforeLegacy, k1RaiseRows(t, s)); !k1SameRaises(got, want) {
+		t.Errorf("u8 raises on the upgraded database = %v, want the fresh database's %v", got, want)
+	}
+	// The new raises land on top of the backfill and stay monotone.
+	if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		if rev, err := r.LastWorkspaceDivergenceRev("repo"); err != nil || rev != 8 {
+			t.Errorf("LastWorkspaceDivergenceRev after u8 = %d (%v), want 8", rev, err)
+		}
+		if rev, err := r.LastAffectingRev("repo", "src/a.go"); err != nil || rev != 8 {
+			t.Errorf("LastAffectingRev(src/a.go) after u8 = %d (%v), want 8", rev, err)
+		}
+		if u, err := r.FirstWorkspaceDivergenceAfter("repo", 5); err != nil || u.ID != "u8" {
+			t.Errorf("FirstWorkspaceDivergenceAfter(5) after u8 = %s (%v), want u8", u.ID, err)
 		}
 		return nil
 	}); err != nil {
