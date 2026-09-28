@@ -115,7 +115,9 @@ func testSemanticGCBatchReceipts(t *testing.T, s store.Store) {
 func testSemanticGCProgress(t *testing.T, s store.Store) {
 	req := gcWorld(t, s)
 	progress := func(batches uint64, cursor domain.GCCursor, attempts uint64) domain.GCProgress {
-		return domain.GCProgress{SessionID: sessA, GCRequestID: req.ID, Cursor: cursor, Batches: batches, Attempts: attempts}
+		// The frozen candidate viewer (SPEC-5.2) round-trips with the row.
+		return domain.GCProgress{SessionID: sessA, GCRequestID: req.ID, Cursor: cursor, Batches: batches, Attempts: attempts,
+			Viewer: HarnessPrincipal(sessA)}
 	}
 	read := func() (domain.GCProgress, error) {
 		var p domain.GCProgress

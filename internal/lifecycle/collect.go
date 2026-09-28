@@ -105,7 +105,17 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 	if link != nil {
 		progress = link.progress
 	}
-	plan, err := s.planBatch(tx, sem, p, i, seq, progress)
+	// The candidate VIEWER freezes at the request level (SPEC-5.2): batch
+	// 1's collector defines which candidates exist for the whole request,
+	// so a continuation by another authorized collector (SEC-4.5) pages and
+	// decides the same set instead of silently dropping or adding
+	// candidates (J1/J2). Per-target Archive authorization stays with each
+	// batch's executing collector (P3-38).
+	viewer := p
+	if progress.Batches > 0 {
+		viewer = progress.Viewer
+	}
+	plan, err := s.planBatch(tx, sem, p, viewer, i, seq, progress)
 	if err != nil {
 		return out, err
 	}
@@ -139,7 +149,7 @@ func (s *Service) collect(tx store.Tx, p domain.Principal, i domain.CollectInten
 		next := domain.GCProgress{SessionID: p.SessionID, GCRequestID: link.requestID, Cursor: plan.next,
 			// A progressing batch resets the request's attempt counter: it
 			// counts consecutive failures without progress (J4, DUR-3.4).
-			Batches: link.progress.Batches + 1, Attempts: 0, SnapshotSeq: receipt.SnapshotSeq, BatchSize: plan.batchSize, ItemAttempts: plan.itemAttempts, ItemAttemptID: plan.itemAttemptID, Revision: link.progress.Revision + 1}
+			Viewer: viewer, Batches: link.progress.Batches + 1, Attempts: 0, SnapshotSeq: receipt.SnapshotSeq, BatchSize: plan.batchSize, ItemAttempts: plan.itemAttempts, ItemAttemptID: plan.itemAttemptID, Revision: link.progress.Revision + 1}
 		if _, err = sem.PutGCProgress(next, link.progress.Revision); err != nil {
 			return out, err
 		}
@@ -177,12 +187,15 @@ type batchPlan struct {
 // their decisions before any effect (H3). It stops cleanly when the batch's
 // work budget, MaxGCDecisions or MaxReceiptBytes would be exceeded and
 // reports more, so a large collection proceeds across passes instead of
-// failing as a whole. The caller's seq authorizes the first archive; a
-// candidate whose authorization fails, or that the batch does not finish,
-// returns its reserved seq for the next one. Candidates the collector may
-// access but not archive are INELIGIBLE. An item that exceeds a fresh
-// single-item batch records a closed skip code, never an archive.
-func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Principal, i domain.CollectIntent, seq uint64, progress domain.GCProgress) (batchPlan, error) {
+// failing as a whole. The candidate pages are read under viewer — the
+// request's frozen viewer, or the collector itself on batch 1 (SPEC-5.2) —
+// while p stays the executing collector for authorization and attribution.
+// The caller's seq authorizes the first archive; a candidate whose
+// authorization fails, or that the batch does not finish, returns its
+// reserved seq for the next one. Candidates the collector may access but
+// not archive are INELIGIBLE. An item that exceeds a fresh single-item
+// batch records a closed skip code, never an archive.
+func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p, viewer domain.Principal, i domain.CollectIntent, seq uint64, progress domain.GCProgress) (batchPlan, error) {
 	after := progress.Cursor
 	snap := seq - 1
 	if progress.Batches > 0 {
@@ -219,7 +232,7 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 		if err := b.spend(1); err != nil {
 			return stop(true)
 		}
-		page, err := sem.GCCandidates(store.GCCandidateFilter{Viewer: p, Scope: i.Scope, TaskID: i.TaskID, SnapshotSeq: snap, Page: store.Page{After: cursor, Limit: min(b.pageSize, room)}})
+		page, err := sem.GCCandidates(store.GCCandidateFilter{Viewer: viewer, Scope: i.Scope, TaskID: i.TaskID, SnapshotSeq: snap, Page: store.Page{After: cursor, Limit: min(b.pageSize, room)}})
 		if err != nil {
 			return plan, err
 		}
@@ -227,7 +240,7 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 			return plan, domain.ErrIntegrity
 		}
 		for _, it := range page.Records {
-			if seen[it.ID] || it.SessionID != p.SessionID || it.Seq > snap || !it.Access.Permits(p) || i.Scope == domain.CollectTask && it.TaskID != i.TaskID ||
+			if seen[it.ID] || it.SessionID != p.SessionID || it.Seq > snap || !it.Access.Permits(viewer) || i.Scope == domain.CollectTask && it.TaskID != i.TaskID ||
 				it.Seq < cursor.Seq || it.Seq == cursor.Seq && it.ID <= cursor.ID {
 				return plan, domain.ErrIntegrity
 			}
@@ -296,6 +309,14 @@ func (s *Service) planBatch(tx store.Tx, sem store.SemanticReader, p domain.Prin
 // distinguishable for the planner to retry or skip at item granularity;
 // missing Archive authority is INELIGIBLE (SEC-1.5, G2).
 func (s *Service) decideCandidate(tx store.Tx, sem store.SemanticReader, p domain.Principal, i domain.CollectIntent, it domain.ContextItem, snap uint64, cache *gcCache, b *workBudget, seqs *seqPool) (domain.GCDecisionCode, *itemEffect, error) {
+	// Authorization is per target under the EXECUTING collector (P3-38,
+	// SPEC-5.2): a candidate inside the frozen set that this principal
+	// cannot access gets an explicit INELIGIBLE decision — it never
+	// vanishes from the request — and entry authority alone never archives
+	// content the collector cannot read.
+	if !it.Access.Permits(p) {
+		return domain.GCIneligible, nil, nil
+	}
 	gs, err := s.gcBase(tx, sem, it, snap, cache, b)
 	if err != nil {
 		return "", nil, err
