@@ -30,16 +30,25 @@ func settlementCursorOf(t *testing.T, f fixture) store.SettlementCursor {
 // live-proof scan.
 func proofCursorOf(t *testing.T, f fixture, ref domain.ObligationRef) store.Cursor {
 	t.Helper()
+	// Read the version before opening the view: f.status opens its own
+	// view, and the SQLite store serves one view at a time, so nesting
+	// them deadlocks.
+	proofID := f.status(t, ref).CurrentProofID
 	var c store.Cursor
-	_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
-		r, _ := store.ReadSemantic(tx)
-		p, err := r.ApplicabilityProof(f.status(t, ref).CurrentProofID)
+	if err := f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		r, err := store.ReadSemantic(tx)
+		if err != nil {
+			return err
+		}
+		p, err := r.ApplicabilityProof(proofID)
 		if err != nil {
 			return err
 		}
 		c = store.Cursor{Seq: p.Seq, ID: p.ID}
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("proof cursor of %v: %v", ref, err)
+	}
 	return c
 }
 
