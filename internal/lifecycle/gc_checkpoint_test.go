@@ -30,6 +30,10 @@ func seedCheckpointItem(t *testing.T, mem store.Store) {
 	}
 }
 
+// TestGCProtectsOnlyTheNewestRelevantCheckpoint runs its stubbed decision
+// half on both stores (P3-38, ADR 8 :1445): the stub fixes the lookup answer
+// so the decision rule itself — protect the newest, collect the older — is
+// what is exercised, on memory and SQLite alike.
 func TestGCProtectsOnlyTheNewestRelevantCheckpoint(t *testing.T) {
 	defer func(orig func(store.ReadTx, domain.Principal, string, int, int) (domain.Checkpoint, bool, error)) {
 		checkpointOfItem = orig
@@ -49,30 +53,30 @@ func TestGCProtectsOnlyTheNewestRelevantCheckpoint(t *testing.T) {
 		"bounded lookup is skipped": {err: domain.ErrResourceLimit, want: domain.GCSkipResourceLimit},
 	} {
 		t.Run(name, func(t *testing.T) {
-			mem := memory.New()
-			t.Cleanup(func() { mem.Close() })
-			seedCheckpointItem(t, mem)
-			var viewer domain.Principal
-			checkpointOfItem = func(tx store.ReadTx, v domain.Principal, id string, page, work int) (domain.Checkpoint, bool, error) {
-				viewer = v
-				return domain.Checkpoint{ItemID: id}, tc.newest, tc.err
-			}
-			pol := testPolicy()
-			pol.MaxGCDecisions = 1
-			s, _ := New(mem, pol)
-			out, err := collect(newFacets(), mem, s, harness, domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual})
-			if tc.fails != nil {
-				if !errors.Is(err, tc.fails) {
-					t.Fatalf("got %v, want %v", err, tc.fails)
+			eachStore(t, func(t *testing.T, mem store.Store) {
+				seedCheckpointItem(t, mem)
+				var viewer domain.Principal
+				checkpointOfItem = func(tx store.ReadTx, v domain.Principal, id string, page, work int) (domain.Checkpoint, bool, error) {
+					viewer = v
+					return domain.Checkpoint{ItemID: id}, tc.newest, tc.err
 				}
-				return
-			}
-			if err != nil || len(out.Result.Collect.Decisions) != 1 || out.Result.Collect.Decisions[0].Code != tc.want {
-				t.Fatalf("decision: %+v %v", out, err)
-			}
-			if viewer.Authority != domain.AuthorityAgent || viewer.TaskID != "task" || viewer.AgentID != "agent" || viewer.SessionID != "s" {
-				t.Fatalf("lookup viewer is not the conversation's agent: %+v", viewer)
-			}
+				pol := testPolicy()
+				pol.MaxGCDecisions = 1
+				s, _ := New(mem, pol)
+				out, err := collect(newFacets(), mem, s, harness, domain.CollectIntent{RequestID: "c", Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCManual})
+				if tc.fails != nil {
+					if !errors.Is(err, tc.fails) {
+						t.Fatalf("got %v, want %v", err, tc.fails)
+					}
+					return
+				}
+				if err != nil || len(out.Result.Collect.Decisions) != 1 || out.Result.Collect.Decisions[0].Code != tc.want {
+					t.Fatalf("decision: %+v %v", out, err)
+				}
+				if viewer.Authority != domain.AuthorityAgent || viewer.TaskID != "task" || viewer.AgentID != "agent" || viewer.SessionID != "s" {
+					t.Fatalf("lookup viewer is not the conversation's agent: %+v", viewer)
+				}
+			})
 		})
 	}
 }
