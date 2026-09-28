@@ -321,7 +321,7 @@ both forms share.
   `TestJ7ManualSessionCollectionResumesAndReplays` run on both stores.
   **DUR round 3 strengthens three of these rulings, all now landed
   (DUR-3.2/3.3/3.4, PR #6 round 3, reconciled at head `4ff6ca1`; SPEC-4.3
-  corrects the prior "not yet merged" text).** J6's queue continuation is
+  corrects the prior pending-merge wording).** J6's queue continuation is
   durable: `gc_queue_cursor` (migration 0047) is a CAS-written, per-session
   cursor position, and `lookup_pending_gc_trigger` (migration 0047,
   backfilled from `lookup_pending_gc`) indexes pending requests by trigger
@@ -462,7 +462,7 @@ both forms share.
   control).
   **Grant issuance room is tiered by authority, not a flat quarter-share
   (SEC-2.7, superseded by SEC-3.8/DUR-3.6, landed at `4a00b06`; SPEC-4.3
-  corrects the prior "not yet merged" text).** `liveGrantRoom`
+  corrects the prior pending-merge wording).** `liveGrantRoom`
   (`internal/lifecycle/grants.go`) limits any one issuer's authority class:
   USER issuers together hold at most half of `MaxTargets` live grants per
   `(action, target)`; USER+HARNESS together at most three quarters; SYSTEM
