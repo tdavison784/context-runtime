@@ -15,11 +15,11 @@ tests, not a proposed contract. **This ADR remains Proposed for one
 narrower reason than before:** the P3-42 required-test mapping is now
 met after the round-5 SPEC-5.1 remap (every wrong/partial/adjacent
 citation moved to a better existing test, read and confirmed before
-citing; memory-only coverage labeled in-row), with the round-5 t3 test
-pass since closing the open-exchange half of P3-38, except for the one
-clause the coverage table below marks MISSING — P3-20's "no
-filesystem/network reads during replay" — plus a small number of
-adjacent-test/Low-confidence caveats it still records inline (see
+citing; memory-only coverage labeled in-row), with the round-5 t3 and t2
+test passes since closing the open-exchange half of P3-38 and the P3-20
+filesystem/network-read clause — the coverage table below now marks no
+clause MISSING — though it still records a small number of
+adjacent-test/Low-confidence caveats inline (see
 "Outstanding required tests" below), and K1 has fully landed, but
 the commander has not yet
 ruled this ADR Accepted at the Phase 3 gate — that ruling is explicitly
@@ -1476,7 +1476,7 @@ first time it appears in a row when not already obvious from context.
 | P3-42 | trace assertions distinguish state from transmitted requests | `TestGateT02_ReplacementRetiresOldRequirement` et al. (Gate evidence table, T02/T06/T07 rows) |
 | P3-42 | no unresolved C or missing schema field is labeled Accepted | this ADR's own Status line |
 
-**Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. **Update (commander ruling M3, round 4):** this table originally found 52 genuinely MISSING clauses beyond the 21 the "Outstanding required tests" section below had already tracked (that section's 21 were always a subset, scoped to bullets a prior round had already flagged, not every clause in phase3-decisions.md). M3 ruled none of the 52 deferred; two GLM test writers wrote all of them as `p342_p3<N>_test.go` files, and every MISSING row above has been flipped to that real citation. **(SPEC-5.1, round 5) a full remap pass then re-examined all 51 rows whose citation was a wrong, partial, or adjacent test and moved each to a better existing test, read and confirmed to assert its clause before citing; memory-only coverage is labeled in-row where it applies. Two clauses are MISSING as of this pass, both recorded in-row: P3-20 "no filesystem/network reads during replay" (the package-boundary guarantee is weaker than a direct assertion and does not count) and the open-exchange half of P3-38 "open exchange and leased historical content survive" (the lease half is covered by `TestLeaseTakenAfterFirstBatchProtects_SEC42`).** **(Round-5 t3 pass, same series) the open-exchange half of P3-38 is now covered — `TestP3_38_OpenExchangeMemberSurvivesCollectUntilClosed` (`internal/lifecycle/p342b_p3_38_test.go`, both stores) — leaving P3-20's filesystem/network-read clause the table's only MISSING row.**
+**Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. **Update (commander ruling M3, round 4):** this table originally found 52 genuinely MISSING clauses beyond the 21 the "Outstanding required tests" section below had already tracked (that section's 21 were always a subset, scoped to bullets a prior round had already flagged, not every clause in phase3-decisions.md). M3 ruled none of the 52 deferred; two GLM test writers wrote all of them as `p342_p3<N>_test.go` files, and every MISSING row above has been flipped to that real citation. **(SPEC-5.1, round 5) a full remap pass then re-examined all 51 rows whose citation was a wrong, partial, or adjacent test and moved each to a better existing test, read and confirmed to assert its clause before citing; memory-only coverage is labeled in-row where it applies. Two clauses are MISSING as of this pass, both recorded in-row: P3-20 "no filesystem/network reads during replay" (the package-boundary guarantee is weaker than a direct assertion and does not count) and the open-exchange half of P3-38 "open exchange and leased historical content survive" (the lease half is covered by `TestLeaseTakenAfterFirstBatchProtects_SEC42`).** **(Round-5 t3 pass, same series) the open-exchange half of P3-38 is now covered — `TestP3_38_OpenExchangeMemberSurvivesCollectUntilClosed` (`internal/lifecycle/p342b_p3_38_test.go`, both stores) — leaving P3-20's filesystem/network-read clause the table's only MISSING row.** **(Round-5 t2 pass, same series) that last clause is now covered too — `TestP3_20_ReplayPackagesImportNoFilesystemOrNetwork` and `TestP3_20_ReplayUsesStoredBytesNotTheLocator` (`internal/ingest/p342b_p3_20_test.go`) — and the same pass adds direct assertions for the P3-16 through P3-25 rows above (29 tests across `internal/{obligation,tools,ingest,graph}`, every body read and grep-verified before citing; single-layer mutation survivors are recorded in-row as layered defense-in-depth, each naming its second layer). The table now has no MISSING row.**
 
 **SPEC-5.11 (round 5, P3-42 test hygiene of the `p342_*` files cited
 above) — fixed in six commits on the t3 test pass (branch `p3fix5/t3`,
@@ -1498,12 +1498,30 @@ P3-31/P3-39's millisecond sleeps with a statically pinned instant — the
 decision path consults no wall clock, and time-valued fields were
 already swept by the ambient table.
 
+**SPEC-5.3 (round 5, Medium — a P3-42 citation was not actually narrower)
+— fixed in `fab04d6` on the t2 test pass (branch `p3fix5/t2`, not yet
+merged at this writing).** `TestP3_25_NarrowerCitationDoesNotChangeKeyBoundary`
+(`internal/tools/p342_p3_25_test.go`) cited an occurrence whose access was
+exactly the keyed item's frozen boundary (`conversationBoundary(i.Principal)`),
+so the citation was not narrower and a keyed write that took its boundary
+from the citation (`internal/tools/keyed.go:62`) survived the test's
+mutation check. The fix seeds cited evidence whose access differs from the
+frozen boundary in both directions — one TURN-scoped occurrence inside the
+conjunction, one task-wide occurrence without the agent constraint —
+asserts that difference as a precondition (the narrow one is a distinct
+boundary `Within` the frozen one; the broad one permits a teammate the
+frozen conjunction excludes), and keeps asserting the filing lands on the
+frozen boundary with its closed identity fields and the citation recorded
+as qualifying support; taking the boundary from either citation now fails
+the test on both stores.
+
 ## Outstanding required tests (SPEC-1.23, SPEC-2.14, SPEC-3.9, SPEC-4.9) — closed, PR #6 round 4
 
-**All bullets this section tracked are now resolved, except one: the
-P3-20 "no filesystem/network reads during replay" clause is MISSING
-(SPEC-5.1, round 5 — previously carried as a known-weak `imports_test.go`
-citation, now marked MISSING rather than deferred).** PR #6 review round 1
+**All bullets this section tracked are now resolved, including the last
+one: the P3-20 "no filesystem/network reads during replay" clause, MISSING
+since the round-5 SPEC-5.1 remap, is now covered by the round-5 t2 test
+pass (`internal/ingest/p342b_p3_20_test.go` — see the P3-42 table's P3-20
+row above).** PR #6 review round 1
 (`r6-spec1.md`, SPEC-1.23) searched every package and found no real
 counterpart for 24 required-test bullets across P3-1 through P3-38 (21
 after three gained a test as a side effect of round-1 code fixes, per
@@ -1531,9 +1549,11 @@ enumerated are covered as follows:
   `TestP3_15_MigrationInventsNoExemptionOrProof` (`internal/obligation/p342_p3_15_test.go`).
 - **P3-20** "uncertain aliases invalidate conservatively" — `TestP3_20_UncertainAliasesInvalidateConservatively`
   (`internal/obligation/p342_p320_test.go`); "no filesystem/network reads
-  during replay" is MISSING (SPEC-5.1: the `imports_test.go` package-
-  boundary guarantee is weaker than a direct assertion and is not counted
-  as coverage — see the P3-42 table's P3-20 row above).
+  during replay" — MISSING since the SPEC-5.1 remap — is now covered by
+  `TestP3_20_ReplayPackagesImportNoFilesystemOrNetwork` and
+  `TestP3_20_ReplayUsesStoredBytesNotTheLocator`
+  (`internal/ingest/p342b_p3_20_test.go`, both stores — see the P3-42
+  table's P3-20 row above).
 - **P3-24** "same invocation with a different method/principal conflicts"
   — `TestP3_24_SameInvocationDifferentToolPrincipalOrArgsConflicts`
   (`internal/tools/p342_p3_24_test.go`).
@@ -1566,10 +1586,11 @@ unaffected by this pass and keep their existing citations, still real:
 `TestIdenticalRestatementOfUnknownIdentityFailsClosed`/`TestUnknownIdentityRestatementIsALineDiagnostic`.
 
 **P3-42's own gate requirement — "every P3 decision maps to named
-required tests" — is met as of this pass except for the one clause the
-table marks MISSING (P3-20's filesystem/network-read guarantee; the
-open-exchange half of P3-38 is now covered by
-`TestP3_38_OpenExchangeMemberSurvivesCollectUntilClosed`)**, plus the
+required tests" — is met as of this pass: the table marks no clause
+MISSING (the open-exchange half of P3-38 is covered by
+`TestP3_38_OpenExchangeMemberSurvivesCollectUntilClosed`; P3-20's
+filesystem/network-read guarantee by the round-5 t2 pass's two
+`internal/ingest` tests)**, plus the
 small number of memory-only and
 adjacent-test caveats the P3-42 table above records inline. Moving
 this ADR's Status line from Proposed to Accepted is the commander's call,
