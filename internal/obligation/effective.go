@@ -43,8 +43,12 @@ func EffectiveStatus(r store.SemanticReader, o domain.ObligationVersion) (status
 // alone exceeds a whole pass's budget is left pending and skipped past, so
 // the cursor never stalls (K1-api.3 §4). The cursor is CAS-advanced and
 // wraps to the start when the scan ends; more reports whether the scan
-// continues. It never touches or blocks a report, and correctness never
-// depends on it having run.
+// continues. It never touches or blocks a report. Nothing in production
+// calls it: the embedder schedules the worker (K1 A4, SPEC-5.12), and
+// correctness never depends on it having run — inline settlement (A3)
+// settles every pending version at its next transition, so a scheduler
+// that never fires costs only the timeliness of the recorded state, never
+// a guarantee.
 func (s *Service) SettlePendingTx(tx store.Tx, actor domain.Principal, max int) (settled int, more bool, err error) {
 	if err := actor.Validate(); err != nil {
 		return 0, false, err
