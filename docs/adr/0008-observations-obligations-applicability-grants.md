@@ -492,8 +492,8 @@ section until PR #6 round 3, DUR-3.10/SPEC-3.8): `TestH1NewerFailAtOtherFingerpr
 
 ### 13. Invalidation is atomic and narrowly scoped (§P3-23, C-10, §W4-17)
 
-`obligation.invalidateResource`/`invalidateProof` (`internal/obligation/invalidate.go`,
-`evaluate.go`) implement the restricted, paged, work-bounded invalidation
+`obligation.settle` (`internal/obligation/effective.go:153`, plus the inline
+`invalidateProof` helper, `evaluate.go:98`/`invalidate.go:36`) implements the restricted, paged, work-bounded invalidation
 transaction. `domain.CauseResourceInvalidation` and `CauseProofRejected`
 (`internal/domain/assertion.go`) are the two causes this restricted path
 actually uses, and only these two require a non-nil `OriginAuthorization`
@@ -624,8 +624,8 @@ and its refusal path entirely (K1a, K1d):
   and, since round 5's K1-api.3 amendment below, not on a broad raise
   whose report explicitly recorded the path's prior content either;
   `FIXED_CONTENT` never; the directory-intersection half of the old
-  `change.affects` predicate also survives as `under`,
-  `internal/obligation/invalidate.go`). This is decided from two write-time pointers,
+  `change.affects` predicate also survives as `store.PathAffectKeys`,
+  `internal/store/semantic_resource.go:129`; `under` remains a test-only helper, `internal/obligation/invalidate.go:18`). This is decided from two write-time pointers,
   migration 0048's `lookup_workspace_divergence` (per resource, the
   raises' revision order — `LastWorkspaceDivergenceRev`) and
   `lookup_affecting_raise` (per resource/key, `LastAffectingRev`),
@@ -880,9 +880,9 @@ placeholder.
 
 **A changed directory intersects files under it (PR #6 round 1, SPEC-1.18).**
 `change.affects` (round 1, then at `internal/obligation/invalidate.go:39,50`;
-the predicate is gone under K1, and its rule lives on as `under`,
-`internal/obligation/invalidate.go`, plus the ancestor keys
-`store.PathAffectKeys` emits, `internal/store/semantic_resource.go`)
+the predicate is gone under K1, and its rule lives on as the ancestor keys
+`store.PathAffectKeys` emits, `internal/store/semantic_resource.go:129`,
+used by both stores and `settle`; `under` itself is test-only now)
 originally
 compared a reported path to a dependency's path by exact string equality
 only, so a report naming a changed directory (e.g. `src`) never invalidated
@@ -1037,9 +1037,9 @@ numbered decision above is the obvious place for them:
   `graph.Relationship`.** Rejected at §4/Q2: `graph.Relationship` has no
   SATISFIES variant; `obligation.Satisfies` is the only read.
 - **Reusing `AuthorizeMutation`'s live grant-target check for the
-  invalidation path (§13).** Rejected as part of C-10: `invalidateResource`/
-  `invalidateProof` run as an internal, runtime-only consequence, never
-  through the public grant-authorized mutation path.
+  invalidation path (§13).** Rejected as part of C-10: `settle` (K1) and
+  the inline `invalidateProof` helper run as internal, runtime-only
+  consequences, never through the public grant-authorized mutation path.
 
 ## SDD amendment (applied in v0.10)
 
