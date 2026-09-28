@@ -36,10 +36,15 @@ func EffectiveStatus(r store.SemanticReader, o domain.ObligationVersion) (status
 // the same exact-keyed path as the inline settle, so the two are
 // idempotent with each other. Settled, re-satisfied, waived and retired
 // versions are skipped (LiveProofs holds only current proofs of current
-// versions, and settle re-checks validity at write time). The cursor is
-// CAS-advanced and wraps to the start when the scan ends; more reports
-// whether the scan continues. It never touches or blocks a report, and
-// correctness never depends on it having run.
+// versions, and settle re-checks validity at write time). The pass is also
+// sized by the remaining work budget (XREV-5.3): it stops before a
+// settlement that would exceed it, commits the completed prefix, and
+// advances the cursor only past proofs it actually processed; a proof that
+// alone exceeds a whole pass's budget is left pending and skipped past, so
+// the cursor never stalls (K1-api.3 §4). The cursor is CAS-advanced and
+// wraps to the start when the scan ends; more reports whether the scan
+// continues. It never touches or blocks a report, and correctness never
+// depends on it having run.
 func (s *Service) SettlePendingTx(tx store.Tx, actor domain.Principal, max int) (settled int, more bool, err error) {
 	if err := actor.Validate(); err != nil {
 		return 0, false, err
@@ -68,31 +73,47 @@ func (s *Service) SettlePendingTx(tx store.Tx, actor domain.Principal, max int) 
 		return 0, false, err
 	}
 	work := s.newBudget()
+	after := cur.After
+	stopped := false
 	for _, p := range pg.Records {
 		o, err := sem.ExactObligation(p.Target)
 		if err != nil {
 			return 0, false, err
 		}
-		if !o.Current || o.CurrentProofID != p.ID {
-			continue
+		if o.Current && o.CurrentProofID == p.ID {
+			// A settlement charges its whole cost before its first write, so
+			// a work-budget refusal leaves the transaction prefix intact.
+			fresh := work.left == s.policy.MaxTransactionWork
+			_, did, err := s.settle(tx, sem, work, o)
+			if errors.Is(err, domain.ErrResourceLimit) {
+				if !fresh {
+					// The remaining budget cannot fit this settlement: stop
+					// before it, commit the completed prefix, and leave the
+					// cursor before this proof for the next pass (XREV-5.3).
+					stopped = true
+					break
+				}
+				// One proof alone exceeds a whole pass's budget (K1-api.3
+				// §4): leave it pending — its next transition still settles
+				// it inline (A3) — and move past it so the cursor never
+				// stalls.
+			} else if err != nil {
+				return 0, false, err
+			} else if did {
+				settled++
+			}
 		}
-		_, did, err := s.settle(tx, sem, work, o)
-		if err != nil {
-			return 0, false, err
-		}
-		if did {
-			settled++
-		}
+		after = store.Cursor{Seq: p.Seq, ID: p.ID}
 	}
-	next := store.SettlementCursor{Session: tx.SessionID(), After: pg.Next}
-	if !pg.More {
+	next := store.SettlementCursor{Session: tx.SessionID(), After: after}
+	if !pg.More && !stopped {
 		next.After = store.Cursor{} // wrap: the next pass starts over
 	}
 	if _, err := sem.PutSettlementCursor(next, cur.Revision); err != nil {
 		tx.Poison(err)
 		return 0, false, err
 	}
-	return settled, pg.More, nil
+	return settled, pg.More || stopped, nil
 }
 
 // SettleBeforeRetireTx is graph's PendingSettler hook (K1 A3, ruling M2):

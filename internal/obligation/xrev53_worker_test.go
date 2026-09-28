@@ -159,7 +159,9 @@ func TestXREV5SettlementWorkerSkipsOversizedProofWithoutStalling(t *testing.T) {
 		}
 	}
 
-	// The skipped proof still settles inline at its next transition (A3).
+	// The skipped proof still settles inline at its next transition (A3),
+	// under a budget a settlement fits.
+	f.s.policy.MaxTransactionWork = 64
 	o := f.status(t, refs[0])
 	if _, err := f.s.transition(t, f.st, f.system, intent(refs[0], o.Revision, domain.ObligationBlocked)); err != nil {
 		t.Fatalf("block a skipped pending version: %v", err)
