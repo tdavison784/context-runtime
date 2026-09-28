@@ -2,9 +2,12 @@ package domain
 
 import (
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,87 +15,151 @@ import (
 )
 
 // K1 A2: an obligation's effective status comes from ONE helper,
-// obligation.EffectiveStatus. No other production code may select or branch
-// on the stored status of an obligation version (X.Status compared with an
-// obligation-status constant): a stored SATISFIED resource-bound version may
-// be effectively UNRESOLVED. The transition table compares requested from/to
-// values, not stored status, and is not affected; the domain package (record
-// validation) and internal/store (guards and backends) are allowed.
+// obligation.EffectiveStatus. No other production code may read the stored
+// Status field of an ObligationVersion, however it is used — compared,
+// assigned to a local, a map key, converted, a method value — because a
+// stored SATISFIED resource-bound version may be effectively UNRESOLVED.
+// The check is type-based (SPEC-5.9), so an alias through a local variable
+// or any other indirection is caught. The domain package (record
+// validation), internal/store (guards and backends) and test files are
+// exempt; the transition table compares requested from/to values, not
+// stored status.
 
-// obligationStatusConstants are the ObligationStatus constant names.
-var obligationStatusConstants = map[string]bool{
-	"ObligationUnresolved": true, "ObligationSatisfied": true, "ObligationBlocked": true, "ObligationWaived": true,
+const boundaryModule = "github.com/tdavison784/context-runtime"
+
+// statusReadAllowlist: functions allowed to read the stored status, and why.
+// A read that selects or branches on the status is NEVER allowlisted; only
+// the helper itself, the write-side transition machinery, and mechanical
+// copies that quote the status as data.
+var statusReadAllowlist = map[string]string{
+	"internal/obligation:EffectiveStatus":           "the one K1 A2 effective-status helper",
+	"internal/obligation:Service.ApplyTransitionTx": "the write path: transition-table check, recorded cause and history (K1 A2's transition-table exemption; a pending version is settled first)",
+	"internal/graph:settleBeforeRetirement":         "M2 settlement pre-check before retirement (settlement machinery, like the store guards)",
+	"internal/lifecycle:completionBlockers":         "Status.Valid() enum shape validation only; selection goes through openObligation -> effectiveStatus",
 }
 
-// effectiveStatusAllowed are the functions allowed to compare stored status.
-var effectiveStatusAllowed = map[string]string{
-	"internal/obligation:EffectiveStatus":   "the one K1 A2 effective-status helper",
-	"internal/graph:settleBeforeRetirement": "M2 settlement pre-check before retirement (settlement machinery, like the store guards)",
-}
+// statusReadPending lists stored-status reads that predate K1 and must move
+// onto obligation.EffectiveStatus. It may only shrink: a new read fails, and
+// an entry that no longer occurs fails until it is removed here.
+var statusReadPending = map[string]string{}
 
-// effectiveStatusPending lists stored-status comparisons that predate K1 and
-// must move onto obligation.EffectiveStatus (W3c in internal/lifecycle; W4b
-// finished internal/obligation at 51a09a1). It may only shrink: a new comparison fails, and an
-// entry that no longer occurs fails until it is removed here.
-var effectiveStatusPending = map[string]string{}
-
+// TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2 type-checks every
+// production package (domain and store excepted) and fails on any read of
+// ObligationVersion.Status outside the allowlist.
 func TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2(t *testing.T) {
 	root := filepath.Join("..", "..")
-	found := map[string][]string{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	fset := token.NewFileSet()
+	imp := importer.ForCompiler(fset, "source", nil)
+	dom, err := imp.Import(boundaryModule + "/internal/domain")
+	if err != nil {
+		t.Fatalf("type-check domain: %v", err)
+	}
+	tn, ok := dom.Scope().Lookup("ObligationVersion").(*types.TypeName)
+	if !ok {
+		t.Fatalf("ObligationVersion is a %T", dom.Scope().Lookup("ObligationVersion"))
+	}
+	st, ok := tn.Type().Underlying().(*types.Struct)
+	if !ok {
+		t.Fatalf("ObligationVersion underlying is a %T", tn.Type().Underlying())
+	}
+	var statusField types.Object
+	for i := range st.NumFields() {
+		if f := st.Field(i); f.Name() == "Status" {
+			statusField = f
+		}
+	}
+	if statusField == nil {
+		t.Fatal("ObligationVersion has no Status field")
+	}
+
+	// Group the production files by package directory.
+	pkgs := map[string][]string{}
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			if path != root && strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || rel == "internal/domain" || rel == "internal/store" {
+			if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" ||
+				rel == "internal/domain" || rel == "internal/store") {
 				return filepath.SkipDir
+			}
+			// Nested modules (probes/) are outside this module's build.
+			if path != root {
+				if _, err := stat(filepath.Join(path, "go.mod")); err == nil {
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}
 		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
 			return nil
 		}
-		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			return err
+		dir := filepath.ToSlash(filepath.Dir(rel))
+		if dir == "." {
+			dir = ""
 		}
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			name := fn.Name.Name
-			if fn.Recv != nil && len(fn.Recv.List) == 1 {
-				name = receiverName(fn.Recv.List[0].Type) + "." + name
-			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				switch x := n.(type) {
-				case *ast.BinaryExpr:
-					if (x.Op == token.EQL || x.Op == token.NEQ) &&
-						(isStatusField(x.X) && isStatusConstant(x.Y) || isStatusField(x.Y) && isStatusConstant(x.X)) {
-						found[rel+":"+name] = append(found[rel+":"+name], fset.Position(x.Pos()).String())
-					}
-				case *ast.SwitchStmt:
-					if isStatusField(x.Tag) {
-						for _, c := range x.Body.List {
-							for _, e := range c.(*ast.CaseClause).List {
-								if isStatusConstant(e) {
-									found[rel+":"+name] = append(found[rel+":"+name], fset.Position(e.Pos()).String())
-								}
-							}
-						}
-					}
-				}
-				return true
-			})
-		}
+		pkgs[dir] = append(pkgs[dir], path)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var dirs []string
+	for dir := range pkgs {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+
+	found := map[string][]string{}
+	for _, dir := range dirs {
+		files := make([]*ast.File, len(pkgs[dir]))
+		for i, path := range pkgs[dir] {
+			f, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+			files[i] = f
+		}
+		pkgPath := boundaryModule + "/" + dir
+		if dir == "" {
+			pkgPath = boundaryModule
+		}
+		info := &types.Info{Selections: map[*ast.SelectorExpr]*types.Selection{}}
+		conf := types.Config{Importer: imp, Error: func(error) {}}
+		if _, err := conf.Check(pkgPath, fset, files, info); err != nil {
+			// Fail closed: a package that does not type-check could hide a read.
+			t.Fatalf("%s: %v", pkgPath, err)
+		}
+		funcs := map[token.Pos]string{}
+		for _, f := range files {
+			for _, decl := range f.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				name := fn.Name.Name
+				if fn.Recv != nil && len(fn.Recv.List) == 1 {
+					name = receiverName(fn.Recv.List[0].Type) + "." + name
+				}
+				funcs[fn.Pos()] = name
+			}
+		}
+		for sel, selection := range info.Selections {
+			if selection.Kind() != types.FieldVal || selection.Obj() != statusField {
+				continue
+			}
+			name := "(top-level)"
+			var at token.Pos
+			for pos, fn := range funcs {
+				if pos <= sel.Pos() && (name == "(top-level)" || pos > at) {
+					name, at = fn, pos
+				}
+			}
+			key := dir + ":" + name
+			found[key] = append(found[key], fset.Position(sel.Pos()).String())
+		}
 	}
 	var keys []string
 	for k := range found {
@@ -100,39 +167,19 @@ func TestEffectiveStatusIsTheOnlyStoredStatusReader_K1A2(t *testing.T) {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		dir := k[:strings.LastIndex(k[:strings.Index(k, ":")], "/")]
-		fnName := k[strings.Index(k, ":")+1:]
-		if i := strings.LastIndex(fnName, "."); i >= 0 {
-			fnName = fnName[i+1:]
-		}
-		if _, ok := effectiveStatusAllowed[dir+":"+fnName]; ok {
+		if _, ok := statusReadAllowlist[k]; ok {
 			continue
 		}
-		if _, ok := effectiveStatusPending[k]; ok {
+		if _, ok := statusReadPending[k]; ok {
 			continue
 		}
-		t.Errorf("%s compares stored obligation status at %v; read it through obligation.EffectiveStatus (K1 A2)", k, found[k])
+		t.Errorf("%s reads the stored obligation status at %v; read it through obligation.EffectiveStatus (K1 A2)", k, found[k])
 	}
-	for k, why := range effectiveStatusPending {
+	for k, why := range statusReadPending {
 		if _, ok := found[k]; !ok {
-			t.Errorf("pending K1 A2 entry %q (%s) no longer occurs; remove it from effectiveStatusPending", k, why)
+			t.Errorf("pending K1 A2 entry %q (%s) no longer occurs; remove it from statusReadPending", k, why)
 		}
 	}
-}
-
-func isStatusField(e ast.Expr) bool {
-	s, ok := e.(*ast.SelectorExpr)
-	return ok && s.Sel.Name == "Status"
-}
-
-func isStatusConstant(e ast.Expr) bool {
-	switch x := e.(type) {
-	case *ast.SelectorExpr:
-		return obligationStatusConstants[x.Sel.Name]
-	case *ast.Ident:
-		return obligationStatusConstants[x.Name]
-	}
-	return false
 }
 
 func receiverName(e ast.Expr) string {
@@ -146,3 +193,6 @@ func receiverName(e ast.Expr) string {
 	}
 	return "?"
 }
+
+// stat is os.Stat for the nested-module check.
+var stat = os.Stat
