@@ -336,3 +336,121 @@ func TestP3_23_SettlementLimitAndFinalPageCrashRollBackEverything(t *testing.T) 
 // errCrashAfterFinalPage stands in for the process dying after the worker's
 // last write of a pass: the transaction must not commit.
 var errCrashAfterFinalPage = errors.New("crash after final page")
+
+// TestP3_23_UnrelatedResourceEditsLeaveOtherResourceProofsUntouched: a
+// resource change invalidates only proofs bound to THAT resource — an edit
+// of one resource never disturbs an obligation, proof, or report of another
+// (P3-23 — the cited TestSEC18DeadSubjectStatesDoNotWedgeReports works one
+// resource's dead states only, so nothing of the cross-resource bound is
+// asserted). The sharpest form: two resources carrying the SAME canonical
+// path, each with its own binding, obligation, and live CURRENT_PATH proof.
+// An edit of repo1's docs/a.md invalidates repo1's proof, records its
+// settlement, and leaves repo2's obligation byte-identical — status, proof,
+// revision, and transition history unmoved — while repo2's next report
+// still lands (no wedge). Reversed, an edit of repo2's docs/a.md
+// invalidates repo2's proof and leaves repo1's re-established proof
+// untouched. Affecting keys are (resource, path): the resource axis is the
+// only thing separating these two proofs.
+func TestP3_23_UnrelatedResourceEditsLeaveOtherResourceProofsUntouched(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newEvalFixture(t)
+
+		// repo1's obligation, bound through the task-context binding ws1.
+		ref1 := f.fileObligation(t, "40")
+		f.matcherGrant(t, "g-23u1", ref1, FileReadV1, f.userP)
+
+		// A second resource carrying the same canonical path. A
+		// source-context binding shadows the task-context one for pu, so
+		// repo2's obligation resolves its own workspace without ambiguity.
+		seedResource(t, f.st, "repo2", f.harness)
+		ws2r := bindIntent("ws2r", 1, domain.WorkspaceSourceContext{Kind: domain.WorkspaceSource, ID: "pu"})
+		ws2r.ResourceID = "repo2"
+		if _, err := f.s.bindWS(t, f.st, f.harness, ws2r); err != nil {
+			t.Fatalf("bind ws2r: %v", err)
+		}
+		var r2 repo1
+		report2 := func(request, fp string, resync, all bool, changed []string, contents ...domain.ResourcePathContent) {
+			t.Helper()
+			r2.n++
+			in := domain.ReportResourceChangeIntent{RequestID: request, ResourceID: "repo2", ExpectedRevision: r2.rev,
+				ExpectedAuthoritativeRevision: r2.auth, ResultingAuthoritativeRevision: r2.auth + 1, WorkspaceFingerprint: hashOf(fp),
+				Resynchronization: resync, AllPaths: all, ChangedPaths: changed, PathContents: contents}
+			if _, err := f.s.report(t, f.st, f.harness, in); err != nil {
+				t.Fatalf("repo2 report %s: %v", fp, err)
+			}
+			r2.rev++
+			r2.auth++
+		}
+		report2("r2-a", "R2-a", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("X1")})
+
+		target2 := fileTarget("repo2", "docs/a.md", domain.FileCurrentContent, "")
+		in2 := domain.DeclareObligationIntent{RequestID: "d-23u2", SourceItemID: "pu", DeclarationSlot: "41", Description: "read it",
+			ExpectedSourceVersion: 1, Target: &target2, Matcher: &FileReadV1}
+		if _, err := f.s.declare(t, f.st, f.harness, in2); err != nil {
+			t.Fatal(err)
+		}
+		key, _ := f.item(t, "pu").CurrentKey()
+		n41, _ := harnessSlot("41")
+		ref2 := domain.ObligationRef{SessionID: testSession, ObligationID: domain.DerivedObligationID(key, n41), Version: 1}
+		if o := f.status(t, ref2); o.BindingState != domain.BindingBound {
+			t.Fatalf("repo2 obligation = %+v", o)
+		}
+		f.matcherGrant(t, "g-23u2", ref2, FileReadV1, f.userP)
+		claim2 := func(content string) error {
+			t.Helper()
+			o := f.status(t, ref2)
+			l := domain.ResourceLocator{ResourceID: "repo2", BaseDir: ".", Path: "docs/a.md"}
+			ci := intent(ref2, o.Revision, domain.ObligationSatisfied)
+			ci.AssertionMode = domain.AssertionResourceBound
+			ci.Resources = []domain.ResourceClaim{{Kind: domain.DependencyCurrentPath, ResourceID: "repo2", ResourceRevision: r2.auth, Fingerprint: hashOf(content), Locator: &l}}
+			_, err := f.s.transition(t, f.st, f.system, ci)
+			return err
+		}
+
+		// Both proofs live at the same path of two resources.
+		f.resourceReport(t, "W-a", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+		if err := f.assertPath(t, ref1, f.r.auth, "H1"); err != nil {
+			t.Fatalf("repo1 proof: %v", err)
+		}
+		if err := claim2("X1"); err != nil {
+			t.Fatalf("repo2 proof: %v", err)
+		}
+		untouched := func(ref domain.ObligationRef, was domain.ObligationVersion, wasHistory int, msg string) {
+			t.Helper()
+			if o := f.status(t, ref); o.Status != was.Status || o.CurrentProofID != was.CurrentProofID || o.Revision != was.Revision {
+				t.Fatalf("%s: %+v (was %+v)", msg, o, was)
+			}
+			if got := len(f.history(t, ref)); got != wasHistory {
+				t.Fatalf("%s: %d new transitions recorded", msg, got-wasHistory)
+			}
+		}
+		snap1, snap2 := f.status(t, ref1), f.status(t, ref2)
+		hist1, hist2 := len(f.history(t, ref1)), len(f.history(t, ref2))
+
+		// repo1's edit: repo1's proof settles, repo2 is byte-identical, and
+		// repo2's reporting is not wedged.
+		f.resourceReport(t, "W-b", false, false, []string{"docs/a.md"})
+		f.wantInvalidated(t, ref1, "repo1", "repo1 edit left repo1's proof live")
+		untouched(ref2, snap2, hist2, "repo1 edit disturbed repo2's obligation")
+		report2("r2-b", "R2-b", false, false, []string{"docs/other.md"})
+		untouched(ref2, snap2, hist2, "repo2 report after repo1 edit disturbed repo2")
+		if st, _ := f.effective(t, ref2); st != domain.ObligationSatisfied {
+			t.Fatalf("repo2 effective %s after repo1 edit", st)
+		}
+
+		// repo1 re-establishes at its new content.
+		f.resourceReport(t, "W-c", true, false, nil, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H2")})
+		if err := f.assertPath(t, ref1, f.r.auth, "H2"); err != nil {
+			t.Fatalf("repo1 re-proof: %v", err)
+		}
+		snap1, hist1 = f.status(t, ref1), len(f.history(t, ref1))
+
+		// The reverse: repo2's edit invalidates repo2's proof only.
+		report2("r2-c", "R2-c", false, false, []string{"docs/a.md"})
+		f.wantInvalidated(t, ref2, "repo2", "repo2 edit left repo2's proof live")
+		untouched(ref1, snap1, hist1, "repo2 edit disturbed repo1's obligation")
+		if st, _ := f.effective(t, ref1); st != domain.ObligationSatisfied {
+			t.Fatalf("repo1 effective %s after repo2 edit", st)
+		}
+	})
+}
