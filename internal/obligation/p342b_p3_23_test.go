@@ -198,3 +198,141 @@ func TestP3_23_ReportAliasesRefusedAndDirectoriesHitContainedProofs(t *testing.T
 		f.wantInvalidated(t, ref, "repo1", "changed directory left the contained file's proof live")
 	})
 }
+
+// TestP3_23_SettlementLimitAndFinalPageCrashRollBackEverything: a bounded
+// settlement pass wedges nothing, and a crash after the final page rolls back
+// the whole pass — recorded settlements, cursor, and stored statuses alike
+// (P3-23 — the cited TestFailureInjectionAtomicity injects failures into
+// single-proof scenarios with no paging, and K1 moved multi-proof settlement
+// onto SettlePendingTx's cursor). Five file obligations of docs/a.md each
+// hold a live CURRENT_PATH proof; one edit to the directory makes all five
+// pending. A pass limited to two settles at most two and reports more; every
+// obligation — settled or not — reads UNRESOLVED (derivation is pure read),
+// so the limit changes recording, never status. A pass that crashes after
+// its final page (the enclosing transaction refuses to commit) persists
+// nothing: no obligation has a recorded settlement, every stored status is
+// still SATISFIED with its proof, and the next clean pass settles all five
+// from the same cursor — the crash rolled the cursor back too.
+func TestP3_23_SettlementLimitAndFinalPageCrashRollBackEverything(t *testing.T) {
+	p342BothStores(t, func(t *testing.T) {
+		f := newEvalFixture(t)
+		var refs []domain.ObligationRef
+		for i, slot := range []string{"30", "31", "32", "33", "34"} {
+			ref := f.fileObligation(t, slot)
+			refs = append(refs, ref)
+			f.matcherGrant(t, fmt.Sprintf("g-23s%d", i), ref, FileReadV1, f.userP)
+		}
+		f.resourceReport(t, "W-a", false, false, []string{"docs/a.md"}, domain.ResourcePathContent{Path: "docs/a.md", ContentHash: hashOf("H1")})
+		for _, ref := range refs {
+			if err := f.assertPath(t, ref, f.r.auth, "H1"); err != nil {
+				t.Fatalf("proof for %s: %v", ref.ObligationID, err)
+			}
+			if st, _ := f.effective(t, ref); st != domain.ObligationSatisfied {
+				t.Fatalf("setup: %s effective %s", ref.ObligationID, st)
+			}
+		}
+
+		// One edit makes every proof pending.
+		f.resourceReport(t, "W-dir", false, false, []string{"docs"})
+		for _, ref := range refs {
+			if st, _ := f.effective(t, ref); st != domain.ObligationUnresolved {
+				t.Fatalf("edit left %s effective %s", ref.ObligationID, st)
+			}
+		}
+
+		settled := func() int {
+			n := 0
+			for _, ref := range refs {
+				if o := f.status(t, ref); o.Status != domain.ObligationSatisfied || o.CurrentProofID == "" {
+					n++
+				}
+			}
+			return n
+		}
+		runWorker := func(max int) (int, bool, error) {
+			var n int
+			var more bool
+			err := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+				var err error
+				n, more, err = f.s.SettlePendingTx(tx, f.system, max)
+				return err
+			})
+			return n, more, err
+		}
+
+		// The bounded pass: at most one settles, more remain, and no status
+		// differs — derivation already reads every one UNRESOLVED.
+		n, more, err := runWorker(1)
+		if err != nil || n > 1 || !more {
+			t.Fatalf("limited pass = %d settled, more=%v (%v), want <=1 and more", n, more, err)
+		}
+		for _, ref := range refs {
+			if st, _ := f.effective(t, ref); st != domain.ObligationUnresolved {
+				t.Fatalf("limited pass changed a status: %s -> %s", ref.ObligationID, st)
+			}
+		}
+
+		// The crash after the final page: the whole pass rolls back. The
+		// limited pass's committed settlements stand; the crashed one must
+		// add nothing on top of them.
+		afterLimit := settled()
+		countSettlements := func() int {
+			n := 0
+			for _, ref := range refs {
+				for _, tr := range f.history(t, ref) {
+					if tr.Cause == domain.CauseResourceInvalidation {
+						n++
+					}
+				}
+			}
+			return n
+		}
+		settlementsAfterLimit := countSettlements()
+		storedAfterLimit := make(map[string]domain.ObligationVersion, len(refs))
+		for _, ref := range refs {
+			o := f.status(t, ref)
+			storedAfterLimit[ref.ObligationID] = o
+		}
+		crash := f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+			if _, _, err := f.s.SettlePendingTx(tx, f.system, 64); err != nil {
+				return err
+			}
+			return errCrashAfterFinalPage
+		})
+		if crash == nil {
+			t.Fatal("crash injection committed")
+		}
+		if got := settled(); got != afterLimit {
+			t.Fatalf("crashed pass settled %d, want the limited pass's %d to stand unchanged", got, afterLimit)
+		}
+		if got := countSettlements(); got != settlementsAfterLimit {
+			t.Fatalf("crashed pass persisted %d settlements, want %d", got, settlementsAfterLimit)
+		}
+		for _, ref := range refs {
+			o, was := f.status(t, ref), storedAfterLimit[ref.ObligationID]
+			if o.Status != was.Status || o.CurrentProofID != was.CurrentProofID || o.Revision != was.Revision {
+				t.Fatalf("crashed pass changed stored state of %s: %+v (was %+v)", ref.ObligationID, o, was)
+			}
+		}
+
+		// The cursor rolled back too: one clean pass settles everything.
+		for more := true; more; {
+			var n int
+			n, more, err = runWorker(64)
+			if err != nil {
+				t.Fatalf("clean pass: %v", err)
+			}
+			_ = n
+		}
+		if got := settled(); got != len(refs) {
+			t.Fatalf("clean pass after crash settled %d of %d", got, len(refs))
+		}
+		for _, ref := range refs {
+			f.wantSettled(t, ref, "repo1", "settlement after crash did not record")
+		}
+	})
+}
+
+// errCrashAfterFinalPage stands in for the process dying after the worker's
+// last write of a pass: the transaction must not commit.
+var errCrashAfterFinalPage = errors.New("crash after final page")
