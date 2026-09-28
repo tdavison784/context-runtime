@@ -1478,6 +1478,35 @@ first time it appears in a row when not already obvious from context.
 
 **Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. **Update (commander ruling M3, round 4):** this table originally found 52 genuinely MISSING clauses beyond the 21 the "Outstanding required tests" section below had already tracked (that section's 21 were always a subset, scoped to bullets a prior round had already flagged, not every clause in phase3-decisions.md). M3 ruled none of the 52 deferred; two GLM test writers wrote all of them as `p342_p3<N>_test.go` files, and every MISSING row above has been flipped to that real citation. **(SPEC-5.1, round 5) a full remap pass then re-examined all 51 rows whose citation was a wrong, partial, or adjacent test and moved each to a better existing test, read and confirmed to assert its clause before citing; memory-only coverage is labeled in-row where it applies. Two clauses are MISSING as of this pass, both recorded in-row: P3-20 "no filesystem/network reads during replay" (the package-boundary guarantee is weaker than a direct assertion and does not count) and the open-exchange half of P3-38 "open exchange and leased historical content survive" (the lease half is covered by `TestLeaseTakenAfterFirstBatchProtects_SEC42`).** **(Round-5 t3 pass, same series) the open-exchange half of P3-38 is now covered — `TestP3_38_OpenExchangeMemberSurvivesCollectUntilClosed` (`internal/lifecycle/p342b_p3_38_test.go`, both stores) — leaving P3-20's filesystem/network-read clause the table's only MISSING row.** **(Round-5 t2 pass, same series) that last clause is now covered too — `TestP3_20_ReplayPackagesImportNoFilesystemOrNetwork` and `TestP3_20_ReplayUsesStoredBytesNotTheLocator` (`internal/ingest/p342b_p3_20_test.go`) — and the same pass adds direct assertions for the P3-16 through P3-25 rows above (29 tests across `internal/{obligation,tools,ingest,graph}`, every body read and grep-verified before citing; single-layer mutation survivors are recorded in-row as layered defense-in-depth, each naming its second layer). The table now has no MISSING row.**
 
+**(Round 7, SPEC-6.1 remediation — p7-docsa, docs only) every P3-1..P3-20
+row (the 136 rows at lines 1195-1330 above) was re-audited against the code:
+each cited test was opened and the exact asserting line(s) — a `t.Fatalf`/
+`t.Errorf`, a `require` call, or a table-driven check — identified and
+appended in-row as "— asserts at <file>:<line>"; no line is cited that was
+not opened this pass, memory-only coverage is labeled in-row, and one line
+per row (test, asserting file:line, verdict OK/FIXED/MISSING/MEMORY-ONLY)
+is recorded in `.worktrees/_commander/p7-docsa-log.md`. Corrections this
+pass, beyond the asserting-line citations: the P3-2 concurrent-identical
+row's package was fixed to `internal/tools` (memory-only labeled, the
+both-stores port named); the P3-4 identical-restatement row's
+`TestLinkDuplicate_RestatementAfterResolveStaysResolved` was moved to
+`internal/graph/duplicate_test.go` and two P3-4 rows regained their package;
+the P3-9 in-flight row's two tests were un-swapped
+(`TestCompletionX8RejectsEveryReservationAndOpenExchange` is the
+`completion_blockers_test.go` one); and P3-16's blocked/waived row dropped
+an "and unblock" overclaim. Rows 1282, 1290 and 1323 were re-cited to the
+better existing tests SPEC-6.1 named (`TestTransitionEvidence`,
+`TestConformance/SemanticProofReferences`,
+`TestP3_19_CurrentContentClaimsMatchAuthoritativeState`) — no marker
+needed, the tests exist and assert their clauses. Five clauses (or clause
+halves) are now marked MISSING, pending the p7-ta/p7-tb test pass:
+P3-1's inclusive expiry/revocation *during a multi-command event*, P3-5's
+expiry at each *other* indirect write, the BLOCKED half of P3-8's unpin
+clause, the SQLite half of P3-11's lower-authority grant/revoke denial,
+and the before-grant half of P3-17's observation-before-grant clause — so
+round 5's "no MISSING row" state above no longer holds for this range
+until those tests land.**
+
 **SPEC-5.11 (round 5, P3-42 test hygiene of the `p342_*` files cited
 above) — fixed in six commits on the t3 test pass, merged in the round-5
 integration (head `3eb4aca`).** `80a3a6e` turns the unpublished-facet
