@@ -204,6 +204,24 @@ func TestP3_38_InaccessibleCandidateNotExposedSQLite(t *testing.T) {
 				t.Fatalf("inaccessible candidate exposed in frozen candidates: %+v", ref)
 			}
 		}
+		// ...and every READABLE candidate is decided (SPEC-6.8): an empty
+		// decision list is not a passing collection. The expected set is the
+		// memory half's (collect_test.go): one candidate per rule, minus the
+		// inaccessible one.
+		want := map[string]domain.GCDecisionCode{"old": domain.GCArchive, "new": domain.GCProtected, "eph": domain.GCArchive, "live": domain.GCIneligible,
+			"leased": domain.GCProtected, "sys": domain.GCIneligible, "now": domain.GCProtected}
+		got := map[string]domain.GCDecisionCode{}
+		for _, d := range r.Decisions {
+			got[d.Target.ItemID] = d.Code
+		}
+		if len(got) != len(want) {
+			t.Fatalf("decisions %+v: every readable candidate must be decided, want %+v", r.Decisions, want)
+		}
+		for item, code := range want {
+			if got[item] != code {
+				t.Errorf("%s decided %q, want %q", item, got[item], code)
+			}
+		}
 		readSemantic(t, db, func(sem store.SemanticReader) error {
 			stored, err := sem.CollectReceipt(r.ID)
 			if err != nil || stored.RequestID != "c39b" {
