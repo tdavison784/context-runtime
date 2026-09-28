@@ -273,11 +273,25 @@ excluded by it).
   since 0048 introduces its own dedicated pointers rather than reusing
   them. Tests: `TestK1ReportsNeverFanOut`, `TestK1ValidityIsMonotone`,
   `TestK1DependencySemantics`, `TestConformance/SemanticProofDerivedValid`,
-  `TestConformance/SemanticA5CommitGuard` (storetest). **Gap, not yet
-  fixed as of this pass:** unlike 0045-0047, this migration has no
-  dedicated `TestUpgrade*` fixture confirming the backfill against a
-  real pre-0048 database — only its checksum and Go-step identity are
-  pinned (`TestCommittedMigrationsUnchanged`, `TestCommittedStepsUnchanged`).
+  `TestConformance/SemanticA5CommitGuard` (storetest).
+  **`TestUpgradeK1Pointers_0048` (`internal/store/sqlite/upgrade_test.go`)
+  closes the upgrade-parity gap this bullet previously flagged as open,
+  against a real pre-0048 database:** the divergence chain backfills
+  exactly; the ALL/directory/exact-path affecting keys backfill equal to
+  the runtime raises, with the one path key whose content history is
+  genuinely ambiguous (two reports re-recording the same content)
+  carrying exactly the documented conservative superset a live report
+  would have spared, never fewer raises than the runtime rule requires;
+  `ProofDerivedValid` is false for every proof the runtime rule would
+  also derive invalid, and stays true for a `FIXED_CONTENT` proof and one
+  written after the last report; `LiveProofs` holds exactly the current
+  proofs of current SATISFIED versions (a superseded version's proof is
+  excluded) in `(Seq, ID)` order; `SettlementCursor` is absent before its
+  first `Put` and CAS-versioned after. A fresh database that lives the
+  same report history through the runtime path (never the backfill)
+  raises identically, cross-checking the backfill against real runtime
+  behavior rather than only against the test's own expectations. No case
+  fails open.
 
 **Tests that lock this list (all in `internal/store/sqlite`, extending this
 ADR's existing migration-checksum/upgrade discipline):**
@@ -294,7 +308,9 @@ missing from this list). **`TestUpgradeLiveProofPaths`,
 plus `TestCursorPagesSeekRange` and `TestLiveProofPathReadsSeek`
 (keyset-cursor seeks over the new indexes) and
 `TestLatestBindingVersionIsKeyed` (DUR-3.7) were also missing from this
-list (DUR-4.10).** `internal/obligation`'s own SQLite suite
+list (DUR-4.10).** `TestUpgradeK1Pointers_0048` (round 4, SPEC-4.4) is
+0048's own upgrade-parity fixture, landed after this list's prior pass.
+`internal/obligation`'s own SQLite suite
 (50/50 subtests, 8/8 failure-injection scenarios, ADR 8) runs against these
 migrations through W2's `sqlitetest` template.
 

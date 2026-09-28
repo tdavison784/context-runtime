@@ -612,11 +612,16 @@ and its refusal path entirely (K1a, K1d):
   overapproximation, not an ongoing behavior). Tests:
   `TestK1ReportsNeverFanOut`, `TestK1ValidityIsMonotone`,
   `TestK1DependencySemantics`, `TestConformance/SemanticProofDerivedValid`
-  (storetest). **Gap, not yet fixed as of this pass:** unlike 0045-0047,
-  migration 0048 has no dedicated `TestUpgrade*` upgrade-parity fixture —
-  only its checksum is pinned (`TestCommittedMigrationsUnchanged`,
-  `TestCommittedStepsUnchanged`), so a pre-0048 database's divergence
-  pointers backfilling correctly is untested by a real upgrade replay.
+  (storetest); `TestUpgradeK1Pointers_0048`
+  (`internal/store/sqlite/upgrade_test.go`, round 4 — closes the upgrade-
+  parity gap this ADR previously flagged: against a real pre-0048
+  database, the divergence chain and affecting keys backfill exactly
+  (the one genuinely content-ambiguous path key carries the documented
+  conservative superset, never fewer raises than the runtime rule
+  requires), `ProofDerivedValid` matches the runtime rule exactly,
+  `LiveProofs`/`SettlementCursor` are consistent, and a fresh database
+  living the same history through the runtime path — never the
+  backfill — raises identically; no case fails open).
 - **A2 — one effective-status helper, everywhere status is selected.**
   `obligation.EffectiveStatus(r, o)` (`internal/obligation/effective.go`)
   is the one helper: a stored SATISFIED version is effectively SATISFIED
