@@ -1076,8 +1076,8 @@ first time it appears in a row when not already obvious from context.
 |---|---|---|
 | P3-1 | failure injection after each constituent write | `TestFailureInjectionAtomicity` (`internal/obligation/failure_test.go`) |
 | P3-1 | ignored-error poisoning | `TestTransitionIgnoredErrorPoisons` (`internal/obligation/transition_test.go`) |
-| P3-1 | inclusive expiry/revocation during a multi-command event | `TestGateT06_GrantExpiryAtActualSequence` (`internal/ingest`) |
-| P3-1 | retirement at a later sequence | `TestReplaceDirective_ObligationFanOut` (`internal/graph/fanout_test.go`) |
+| P3-1 | inclusive expiry/revocation during a multi-command event | `TestAuthorizationUsesActualAllocatedGrantBoundary` (authorization at the exact allocated sequence, inclusive); `TestAuthorizationIgnoresDeadGrantHistory` (revoked grants never authorize) — both `internal/graph/authorize_seq_test.go`, both stores |
+| P3-1 | retirement at a later sequence | `TestRetirementAuthorizesAndWritesSameExactSequence` (`internal/graph/retirement_sequence_test.go` — the retirement's authorization and its audit write share one exact allocated sequence) |
 | P3-1 | Prepare/MarkSent stale after every new semantic record family | `TestP3_1_PrepareMarkSentStaleAfterEverySemanticRecordFamily` (`internal/invocation/p342_p3_1_test.go`) |
 | P3-1 | TargetCall sequence reuse rejected | `TestConformance/SemanticLedgerSeqIsolation` (storetest); `TestPhase3RowsCarrySemanticSeq` (sqlite) — **Resolved** |
 | P3-2 | retry after lifecycle changes and restart | `TestCommandReplayUsesOriginalGrantAndFrozenResult` (`internal/lifecycle`); `TestCompletionReplaysAcrossSQLiteRestart` |
@@ -1088,16 +1088,16 @@ first time it appears in a row when not already obvious from context.
 | P3-2 | expired retrieval receipt replay | `TestRetrievalReceiptReplayPrecedesCurrentState` (`internal/retrieve`) |
 | P3-2 | concurrent identical requests produce one effect/result | `TestConcurrentIdenticalInvocationsProduceOneEffect`; `TestConcurrentCompletionExecutesOnce` (`internal/lifecycle`) |
 | P3-3 | same textual key in all three namespaces | `TestP3_3_SameTextualKeyInAllThreeNamespaces` (`internal/graph/p342_p3_3_test.go`) |
-| P3-3 | literal lifecycle IDs never resolve agent/observation records | `TestR6_LifecycleResolvesOnlyDirectiveNamespace` (`internal/graph/namespace_test.go`) |
-| P3-3 | two agents cannot overwrite each other | `TestAuthorizeSupersession_AgentDifferentKeyFails` (`internal/domain/authz_test.go`) |
+| P3-3 | literal lifecycle IDs never resolve agent/observation records | `TestP3_3_SameTextualKeyInAllThreeNamespaces` (`internal/graph/p342_p3_3_test.go`, observation namespace included) |
+| P3-3 | two agents cannot overwrite each other | `TestAgentUpdatesOwnPreUpgradeKey` ("other agent's key" subtest, `internal/graph/legacy_agent_key_test.go` — the second agent's write is its own first version and leaves the first current, both stores) |
 | P3-3 | authority/boundary mismatch | `TestAuthorizeSupersession_DifferentAccessBoundariesFail` |
-| P3-3 | namespace round-trip and old-key migration | `TestAgentUpdatesOwnPreUpgradeKey` (`internal/graph`); `TestUpgradeAgentOwnOldKey_G5` (`internal/ingest`) — **Resolved** |
+| P3-3 | namespace round-trip and old-key migration | `TestAgentUpdatesOwnPreUpgradeKey` (`internal/graph`); `TestUpgradeAgentOwnOldKey_G5` (`internal/ingest`); `TestUpgradeCurrentNamespace`; `TestUpgradeCurrentVersionNamespaces` (`internal/store/sqlite/upgrade_test.go`, the real migrations rather than hand-inserted `Namespace=""` rows) — **Resolved** |
 | P3-3 | duplicate occurrence never becomes current | `TestD10_DuplicateDirectiveNeverCurrent`, `TestD10_MappedDuplicateNeverCurrent` (`internal/graph/current_test.go`) |
 | P3-4 | identical restatement after Resolve/Unpin/Archive | `TestLinkDuplicate_RestatementAfterResolveStaysResolved`; `TestP336_UnpinnedRestatementStaysUnpinned`; `TestP336_ResolvedRestatementStaysResolved` (`internal/ingest`) |
 | P3-4 | changed accepted versus ignored attributes | `TestDeclareCreationUsesStoredDefaultsAndCopiesAcceptedInputs` (`internal/graph`) |
 | P3-4 | changed claim | `TestLinkDuplicate_ComparesObligationClaim` (`internal/graph/duplicate_test.go`) |
 | P3-4 | policy bump | `TestDeclarationDedupSurvivesLifecycleAndPolicyChanges` |
-| P3-4 | new turn/TTL origin | `TestLinkDuplicate_RestatedAcrossTurns` |
+| P3-4 | new turn/TTL origin | `TestLinkDuplicate_RejectsNonDuplicates` (`internal/graph/duplicate_test.go` — a changed TURN/TTL eligibility origin is a new version, never a duplicate); `TestLinkDuplicate_RestatedAcrossTurns` (same-origin restatement does dedup) |
 | P3-4 | unchanged Working snapshot after lifecycle updates | `TestWorkingSnapshotDeclarationPreservesWholeOrderedIdentity` |
 | P3-4 | duplicate raw text not an active requirement | `TestNonDirectiveDuplicates_D10` |
 | P3-4 | legacy unknown declaration fails closed | `TestIdenticalRestatementOfUnknownIdentityFailsClosed` (`internal/graph`); `TestUnknownIdentityRestatementIsALineDiagnostic` (`internal/ingest`) — **Resolved** |
@@ -1108,9 +1108,9 @@ first time it appears in a row when not already obvious from context.
 | P3-5 | exact target-set validation | `TestAuthorizeGrantIssuance` (`internal/domain/authz_test.go`) |
 | P3-5 | legacy grant inertness | `TestLegacyObligationCannotAcquireExecutableTarget` (`internal/domain/obligation_target_test.go`) |
 | P3-5 | revocation after retirement | `TestP3_5_RevocationAfterRetirement` (`internal/lifecycle/p342_p3_5_test.go`) |
-| P3-5 | expiry at each indirect write | `TestGateT06_GrantExpiryAtActualSequence` |
+| P3-5 | expiry at each indirect write | `TestRetirementAuthorizesAndWritesSameExactSequence` (expired-grant half — an obligation retirement is refused when the grant's sequence boundary has passed, `internal/graph/retirement_sequence_test.go`) |
 | P3-6 | N sources produce O(N) members/edges | `TestDerivedCoverageWritesOneSetAndLinearEdges` (`internal/graph/coverage_link_test.go`) |
-| P3-6 | no union copied N times | `TestCoverageIdentityAndClone` (`internal/domain/coverage_test.go`) |
+| P3-6 | no union copied N times | `TestDerivedCoverageWritesOneSetAndLinearEdges` (`internal/graph/coverage_link_test.go`) |
 | P3-6 | complete reconstruction after restart | `TestP3_6_CoverageReconstructionAfterRestart` (`internal/graph/p342_p3_6_test.go`) |
 | P3-6 | missing source or nested expired lease fails admission | `TestApplyRejectsProjectionSourceWithoutInheritedCoverage`; `TestProjectionRequiresOriginalLiveLease` (`internal/retrieve`) |
 | P3-6 | semantic support excludes transcript-only provenance | `TestToolAcknowledgmentIsNeverEvidenceSupport` (`internal/tools/ack_evidence_test.go`) |
@@ -1310,7 +1310,7 @@ first time it appears in a row when not already obvious from context.
 | P3-35 | old receipt replay no seq/turn/status change | `TestPhase2FixtureReplay` |
 | P3-35 | hidden successful versus nonexistent command indistinguishable to another source viewer | `TestRecordsNeverRevealHiddenVersions_SEC22` |
 | P3-35 | mismatch/ambiguity cause boundaries | `TestP3_35_MismatchAndAmbiguityCauseBoundaries` (`internal/ingest/p342_p3_35_test.go`) |
-| P3-35 | source actor grant at actual sequence | `TestD1_AuthorizeLifecycleCommand_Grant` |
+| P3-35 | source actor grant at actual sequence | `TestAuthorizationUsesActualAllocatedGrantBoundary` (`internal/graph/authorize_seq_test.go`, both stores); `TestGateT06_GrantExpiryAtActualSequence` (`internal/ingest`) |
 | P3-35 | unauthorized command rolls back earlier event writes | `TestLifecycle_SourceActor_R7` |
 | P3-36 | Resolve→identical raw Goal restatement remains resolved | `TestP336_ResolvedRestatementStaysResolved` |
 | P3-36 | Unpin restatement stays unpinned | `TestP336_UnpinnedRestatementStaysUnpinned` |
