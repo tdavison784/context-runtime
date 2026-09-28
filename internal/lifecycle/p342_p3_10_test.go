@@ -39,7 +39,11 @@ func TestP3_10_ExpiredOriginUnchangedByPromotion(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return !domain.TTLLive(1, task.Turn, 1)
+			got, err := tx.Item("aging")
+			if err != nil || got.TTLTurns == nil {
+				t.Fatal(err)
+			}
+			return !domain.TTLLive(got.CreatedTurn, task.Turn, *got.TTLTurns)
 		}
 		if err := db.View(ctx, "s", func(tx store.ReadTx) error {
 			if !ttlExpired(tx) {
