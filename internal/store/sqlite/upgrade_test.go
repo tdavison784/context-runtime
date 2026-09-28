@@ -16,6 +16,8 @@ import (
 	"testing/fstest"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
+	"github.com/tdavison784/context-runtime/internal/lifecycle"
+	"github.com/tdavison784/context-runtime/internal/policy"
 	"github.com/tdavison784/context-runtime/internal/store"
 	"github.com/tdavison784/context-runtime/internal/store/storetest"
 )
@@ -1832,6 +1834,281 @@ func TestUpgradePathConfirmations_0049(t *testing.T) {
 		}
 		if rev, err := r.LastAffectingRev("repo", ""); err != nil || rev != 5 {
 			t.Errorf("LastAffectingRev(ALL) after u5 = %d (%v), want 5", rev, err)
+		}
+	})
+}
+
+// upgradeCollectReceiptID is lifecycle's collect-receipt identity
+// (context-runtime/collect-receipt/v1), replicated here because the
+// upgrade test seeds receipts from outside the lifecycle package; the
+// encoder domain keeps the two honest with each other.
+func upgradeCollectReceiptID(session, request string) string {
+	return "collect_" + domain.NewCanonicalEncoder("context-runtime/collect-receipt/v1").String(session).String(request).Hash()
+}
+
+// upgradeGCPolicy is lifecycle's test policy, replicated for the same
+// reason (the seeded request records its version and must replay).
+func upgradeGCPolicy() domain.Phase3Policy {
+	return domain.Phase3Policy{Version: domain.Phase3PolicyVersion, Claim: "claim/v1", Matcher: "matcher/v1", ObservationState: "obs-state/1",
+		Eligibility: policy.EligibilityVersion, Locator: domain.ResourceLocatorEncodingV1, Coverage: "coverage/v1", Dedup: domain.DeclarationEncodingV1,
+		MaxPageSize: 64, MaxReceiptBytes: 65536, MaxGCDecisions: 128, MaxOperations: 128, MaxMetadataBytes: 4096, MaxTargets: 128, MaxEvidence: 128,
+		MaxCoverageMembers: 128, MaxTransactionWork: 512, MaxToolResultBytes: 65536, MaxCheckpointSemanticBytes: 16384, DefaultLeaseCalls: 2, MaxLeaseCalls: 8, MaxLiveProofDependents: 1,
+		CheckpointGeneration: domain.GenerationWorking, CheckpointRetention: domain.RetentionNormal, GCTriggers: domain.DefaultGCTriggers()}
+}
+
+// seedLegacyGCInFlight writes, at migration 49, exactly the rows a
+// 49-binary left after batch 1 of a task-scoped SUPERSESSION request: a
+// live task on turn 2, three ended-turn ephemeral items (eph-000 archived
+// by batch 1 at version 2; eph-001 and eph-002 resident and visible only
+// to the harness agent "agent"), the request and its queue rows, and —
+// when receipt is true — batch 1's committed collect receipt (principal
+// first, snapshot 19, eph-000 ARCHIVED), then the in-flight progress row
+// (Batches 1, cursor after eph-000, BatchSize 1). The progress row's
+// viewer columns do not exist at 49, so the row decodes with a zero
+// viewer after the upgrade. It returns the request's record ID and the
+// two collectors.
+func seedLegacyGCInFlight(t *testing.T, l *legacyDB, receipt bool) (string, domain.Principal, domain.Principal) {
+	t.Helper()
+	first := storetest.NewPrincipal("s", domain.AuthorityHarness) // AgentID "agent"
+	mate := first
+	mate.AgentID = "agent-2"
+	task := storetest.NewTask("s", "task")
+	task.Turn, task.TurnID = 2, "turn-2"
+	l.insert("task", task, nil)
+	newItem := func(id string, seq uint64) domain.ContextItem {
+		it := storetest.NewItem("s", id, seq, "scratch")
+		it.Generation = domain.GenerationEphemeral
+		return it
+	}
+	archived := newItem("eph-000", 10)
+	archived.Version, archived.Residency = 2, domain.ResidencyArchived
+	l.insert("item", archived, nil)
+	for _, c := range []struct {
+		id  string
+		seq uint64
+	}{{"eph-001", 11}, {"eph-002", 12}} {
+		it := newItem(c.id, c.seq)
+		it.Scope, it.AgentID = domain.ScopeTask, "agent"
+		it.Access = domain.AccessBoundary{Scope: domain.ScopeTask, SessionID: "s", TaskID: "task", AgentID: "agent"}
+		l.insert("item", it, nil)
+	}
+	origin := storetest.NewPrincipal("s", domain.AuthoritySystem)
+	requestID, err := domain.GCTriggerRequestID(origin, domain.GCSupersession, "scratch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID, err := domain.GCRequestRecordID("s", requestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const reqSeq, snap = 15, 19
+	l.insert("gc_request", domain.GCRequest{SemanticMeta: domain.SemanticMeta{ID: recordID, SessionID: "s", SchemaVersion: domain.SemanticSchemaV1, Seq: reqSeq},
+		CollectIntent: domain.CollectIntent{RequestID: requestID, Scope: domain.CollectTask, TaskID: "task", Trigger: domain.GCSupersession},
+		Origin:        origin, PolicyVersion: domain.Phase3PolicyVersion}, nil)
+	for _, q := range []string{
+		"INSERT INTO lookup_pending_gc(session_id,seq,request_id) VALUES('s'," + strconv.Itoa(reqSeq) + ",'" + recordID + "')",
+		"INSERT INTO lookup_pending_gc_trigger(session_id,trigger,seq,request_id) VALUES('s','SUPERSESSION'," + strconv.Itoa(reqSeq) + ",'" + recordID + "')",
+	} {
+		if _, err := l.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if receipt {
+		batch1, err := domain.GCBatchRequestID(requestID, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.insert("collect_receipt", domain.CollectReceipt{
+			SemanticMeta: domain.SemanticMeta{ID: upgradeCollectReceiptID("s", batch1), SessionID: "s", SchemaVersion: domain.SemanticSchemaV1, Seq: snap + 1},
+			RequestID:    batch1, GCRequestID: recordID, PolicyVersion: domain.Phase3PolicyVersion, Principal: first, SnapshotSeq: snap,
+			CandidateRefs: []domain.ItemRevisionRef{{ItemID: "eph-000", Version: 1}},
+			Decisions:     []domain.GCDecision{{Target: domain.ItemRevisionRef{ItemID: "eph-000", Version: 1}, Code: domain.GCArchive}},
+			ArchivedRefs:  []domain.ItemRevisionRef{{ItemID: "eph-000", Version: 2}}}, nil)
+	}
+	l.insert("gc_progress", domain.GCProgress{SessionID: "s", GCRequestID: recordID, Cursor: domain.GCCursor{Seq: 10, ID: "eph-000"},
+		Batches: 1, BatchSize: 1, SnapshotSeq: snap, Revision: 1}, nil)
+	return recordID, first, mate
+}
+
+// TestUpgradeGCCandidateViewer_0050 checks migration 0050's lazy backfill
+// (SPEC-5.2, SPEC-6.7): a gc_progress row a 49-binary left in flight has
+// no viewer columns, so after the upgrade the frozen viewer is recovered
+// from batch 1's committed receipt. A continuation by a DIFFERENT
+// collector pages the first collector's candidate set and decides every
+// frozen candidate — each one it cannot access gets an explicit INELIGIBLE
+// (P3-38) — and the recovered viewer is what the next progress row
+// records. Without batch 1's receipt the continuation fails closed: the
+// error propagates, the request stays pending, nothing is archived and the
+// progress row is untouched.
+func TestUpgradeGCCandidateViewer_0050(t *testing.T) {
+	ctx := context.Background()
+	t.Run("viewer recovered from batch 1's receipt", func(t *testing.T) {
+		l := openLegacy(t, 49)
+		id, first, mate := seedLegacyGCInFlight(t, l, true)
+		s := l.upgrade()
+		pol := upgradeGCPolicy()
+		pol.MaxGCDecisions = 1
+		svc, err := lifecycle.New(s, pol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Continuation by the other agent: every batch pages the frozen
+		// (recovered) candidate set, one decision at a time.
+		var result domain.GCResult
+		for range 8 {
+			if err := s.Update(ctx, "s", func(tx store.Tx) error {
+				_, err := svc.ExecuteGCRequest(tx, mate, id, 0)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+				sem, err := store.ReadSemantic(tx)
+				if err != nil {
+					return err
+				}
+				r, err := sem.GCResult(id)
+				if errors.Is(err, domain.ErrNotFound) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				result = r
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if result.Outcome == domain.GCCollected {
+				break
+			}
+		}
+		if result.Outcome != domain.GCCollected {
+			t.Fatalf("request did not finish COLLECTED: %+v", result)
+		}
+		// Every frozen candidate is decided, exactly once, and the agent-
+		// limited ones are INELIGIBLE to the continuator, never archived.
+		want := map[string]domain.GCDecisionCode{
+			"eph-000": domain.GCArchive, "eph-001": domain.GCIneligible, "eph-002": domain.GCIneligible,
+		}
+		if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+			sem, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			req, err := sem.GCRequest(id)
+			if err != nil {
+				return err
+			}
+			got := map[string]domain.GCDecisionCode{}
+			for n := uint64(1); ; n++ {
+				batch, err := req.BatchRequestID(n)
+				if err != nil {
+					return err
+				}
+				rec, err := sem.CollectReceipt(upgradeCollectReceiptID("s", batch))
+				if errors.Is(err, domain.ErrNotFound) {
+					break
+				}
+				if err != nil {
+					return err
+				}
+				for _, d := range rec.Decisions {
+					if _, dup := got[d.Target.ItemID]; dup {
+						t.Errorf("%s decided twice", d.Target.ItemID)
+					}
+					got[d.Target.ItemID] = d.Code
+				}
+			}
+			if len(got) != len(want) {
+				t.Fatalf("decisions = %v, want every frozen candidate decided: %v", got, want)
+			}
+			for item, code := range want {
+				if got[item] != code {
+					t.Errorf("%s decided %q, want %q", item, got[item], code)
+				}
+			}
+			// The recovered viewer is what the continuation recorded: the
+			// first collector, not the continuator.
+			p, err := sem.GCProgress(id)
+			if err != nil {
+				return err
+			}
+			if p.Viewer != first {
+				t.Errorf("progress viewer after continuation = %v, want the recovered %v", p.Viewer, first)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// Residency follows the decisions: only batch 1's item is archived.
+		if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+			for _, c := range []struct {
+				id       string
+				archived bool
+			}{{"eph-000", true}, {"eph-001", false}, {"eph-002", false}} {
+				it, err := tx.Item(c.id)
+				if err != nil {
+					return err
+				}
+				if arch := it.Residency == domain.ResidencyArchived; arch != c.archived {
+					t.Errorf("%s residency archived=%v, want %v", c.id, arch, c.archived)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("missing batch 1 receipt fails closed", func(t *testing.T) {
+		l := openLegacy(t, 49)
+		id, _, mate := seedLegacyGCInFlight(t, l, false)
+		s := l.upgrade()
+		svc, err := lifecycle.New(s, upgradeGCPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = s.Update(ctx, "s", func(tx store.Tx) error {
+			_, err := svc.ExecuteGCRequest(tx, mate, id, 0)
+			return err
+		})
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("ExecuteGCRequest without batch 1's receipt: err = %v, want ErrNotFound (fail closed)", err)
+		}
+		// The request stays pending, nothing was archived, and the
+		// legacy progress row is untouched (no invented viewer).
+		if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+			sem, err := store.ReadSemantic(tx)
+			if err != nil {
+				return err
+			}
+			if _, err := sem.GCResult(id); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("GCResult after the failed continuation = %v, want none (still pending)", err)
+			}
+			p, err := sem.GCProgress(id)
+			if err != nil {
+				return err
+			}
+			if p.Revision != 1 || p.Batches != 1 || p.Viewer != (domain.Principal{}) {
+				t.Errorf("progress after the failed continuation = %+v, want the untouched legacy row", p)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.View(ctx, "s", func(tx store.ReadTx) error {
+			for _, id := range []string{"eph-001", "eph-002"} {
+				it, err := tx.Item(id)
+				if err != nil {
+					return err
+				}
+				if it.Residency != domain.ResidencyResident {
+					t.Errorf("%s residency = %s, want RESIDENT (nothing archived)", id, it.Residency)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
 	})
 }
