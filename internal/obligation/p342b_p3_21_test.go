@@ -1,12 +1,16 @@
 package obligation
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/tdavison784/context-runtime/internal/domain"
 	"github.com/tdavison784/context-runtime/internal/store"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite"
+	"github.com/tdavison784/context-runtime/internal/store/sqlite/sqlitetest"
 )
 
 // TestP3_21_ForgedPassTextIsInert: text claiming PASS under any authority a
@@ -177,4 +181,139 @@ func TestP3_21_WrongOrMissingSpanReferencesRefused(t *testing.T) {
 			return nil
 		})
 	})
+}
+
+// TestP3_21_EnvelopeImmutableAcrossRestart: the recorded observation
+// envelope is immutable across a restart (P3-21; the cited test replays on
+// one open store and never reopens). A SQLite store records one run and its
+// closing PASS, closes, and reopens: the run and observation records come
+// back byte-identical, a contradictory second terminal observation of the
+// same run is refused (a run closes once, DUR-1.1), a different payload
+// under the observation's request is a conflict, and none of the refused
+// probes move the sequence or alter the records. A genuinely new
+// observation of a genuinely new run still lands (the reopened service is
+// live). (Memory has no restart: Close destroys the state.)
+func TestP3_21_EnvelopeImmutableAcrossRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("SQLite backend skipped in -short mode")
+	}
+	path := sqlitetest.Path(t)
+	epoch := func() (*fixture, func()) {
+		s, err := sqlite.Open(context.Background(), path)
+		if err != nil {
+			t.Fatalf("open epoch: %v", err)
+		}
+		f := &fixture{s: newTestService(t), st: &testStore{Store: s}, harness: actorOf(domain.AuthorityHarness),
+			system: actorOf(domain.AuthoritySystem), userP: actorOf(domain.AuthorityUser)}
+		return f, func() { _ = s.Close() }
+	}
+	lastSeq := func(f *fixture) uint64 {
+		t.Helper()
+		var n uint64
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error { n = tx.LastSeq(); return nil })
+		return n
+	}
+	envelope := func(f *fixture, runID string) (domain.ObservationRun, domain.ObservationRecord) {
+		t.Helper()
+		var run domain.ObservationRun
+		var obs domain.ObservationRecord
+		_ = f.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+			r, _ := store.ReadSemantic(tx)
+			run, _ = r.ObservationRun(runID)
+			obs, _ = r.Observation(recordID("obs_", "observation", "r21-pass"))
+			return nil
+		})
+		return run, obs
+	}
+
+	// Epoch one: the run and its closing PASS.
+	f1, close1 := epoch()
+	setupWorkspace(t, f1.s, f1.st, f1.harness)
+	if _, err := pinAndDeclare(t, f1.s, f1.st, "pu", "u", domain.AuthorityUser, "All tests must pass.", ""); err != nil {
+		t.Fatal(err)
+	}
+	runIn := runIntent("r21", "exec-r21", testsTarget(nil))
+	var runRes domain.MutationResult
+	mustUpdate(t, f1.st, func(tx store.Tx) error {
+		var err error
+		runRes, err = f1.s.RegisterRunTx(tx, f1.harness, runIn, tx.NextSeq())
+		return err
+	})
+	var run domain.ObservationRun
+	_ = f1.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		r, _ := store.ReadSemantic(tx)
+		run, _ = r.ObservationRun(runRes.Records.IDs[0])
+		return nil
+	})
+	if run.ID == "" {
+		t.Fatal("setup: run not recorded")
+	}
+	report := func(f *fixture, in domain.ObservationIntent, seq uint64) error {
+		return f.st.Update(t.Context(), testSession, func(tx store.Tx) error {
+			_, err := f.s.ReportObservationTx(tx, f.harness, in, seq)
+			return err
+		})
+	}
+	ev := evidenceFor(t, f1.st, run)
+	if err := report(f1, obsIntent("r21-pass", run, ev.ID, domain.OutcomePass, hashOf("W1")), 0); err != nil {
+		t.Fatalf("epoch-one PASS: %v", err)
+	}
+	wantRun, wantObs := envelope(f1, runRes.Records.IDs[0])
+	if wantRun.ID == "" || wantObs.ID == "" || wantObs.Outcome != domain.OutcomePass {
+		t.Fatalf("setup: envelope incomplete: run %+v obs %+v", wantRun, wantObs)
+	}
+	before := lastSeq(f1)
+	close1()
+
+	// Epoch two: the envelope is immutable.
+	f2, close2 := epoch()
+	defer close2()
+	gotRun, gotObs := envelope(f2, runRes.Records.IDs[0])
+	if !reflect.DeepEqual(gotRun, wantRun) || !reflect.DeepEqual(gotObs, wantObs) {
+		t.Fatalf("envelope changed across restart: run %+v -> %+v, obs %+v -> %+v", wantRun, gotRun, wantObs, gotObs)
+	}
+	// A contradictory second terminal observation of the closed run.
+	fail := obsIntent("r21-fail", run, ev.ID, domain.OutcomeFail, hashOf("W1"))
+	if err := report(f2, fail, 0); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("second terminal observation after restart: %v, want ErrInvalidTransition", err)
+	}
+	// A changed payload under the observation's own request.
+	changed := obsIntent("r21-pass", run, ev.ID, domain.OutcomePass, hashOf("W1"))
+	changed.Passed, changed.Failed, changed.Outcome = 2, 1, domain.OutcomeFail
+	if err := report(f2, changed, 0); !errors.Is(err, domain.ErrEventIDConflict) {
+		t.Fatalf("changed payload after restart: %v, want ErrEventIDConflict", err)
+	}
+	// Nothing the refusals touched moved.
+	if after := lastSeq(f2); after != before {
+		t.Fatalf("refused mutations moved the sequence: %d -> %d", before, after)
+	}
+	gotRun, gotObs = envelope(f2, runRes.Records.IDs[0])
+	if !reflect.DeepEqual(gotRun, wantRun) || !reflect.DeepEqual(gotObs, wantObs) {
+		t.Fatalf("refused mutations changed the envelope: run %+v, obs %+v", gotRun, gotObs)
+	}
+
+	// A genuinely new observation of a new run still lands.
+	run2 := runIntent("r21b", "exec-r21b", testsTarget(nil))
+	var run2Res domain.MutationResult
+	mustUpdate(t, f2.st, func(tx store.Tx) error {
+		var err error
+		run2Res, err = f2.s.RegisterRunTx(tx, f2.harness, run2, 0)
+		return err
+	})
+	var fresh domain.ObservationRun
+	_ = f2.st.View(t.Context(), testSession, func(tx store.ReadTx) error {
+		r, _ := store.ReadSemantic(tx)
+		fresh, _ = r.ObservationRun(run2Res.Records.IDs[0])
+		return nil
+	})
+	if fresh.ID == "" {
+		t.Fatal("new run after restart not recorded")
+	}
+	ev2 := evidenceFor(t, f2.st, fresh)
+	if err := report(f2, obsIntent("r21b-pass", fresh, ev2.ID, domain.OutcomePass, hashOf("W1")), 0); err != nil {
+		t.Fatalf("new observation after restart: %v", err)
+	}
+	if after := lastSeq(f2); after <= before {
+		t.Fatalf("new envelope wrote nothing: %d -> %d", before, after)
+	}
 }
