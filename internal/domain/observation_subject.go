@@ -89,8 +89,9 @@ type SubjectState struct {
 	// Deprecated: it is never maintained afterwards (DUR-3.1 (B)) and so is
 	// not the subject's current applicability. Filtering or deciding on it
 	// fails open (SEC-4.11): derive the live value with
-	// obligation.Service.SubjectApplicability. It remains for record
-	// compatibility (flattened SQLite column, P3-40).
+	// store.SubjectApplicability (internal/store/subject_applicability.go,
+	// L1). It remains for record compatibility (flattened SQLite column,
+	// P3-40).
 	Applicability ApplicabilityState
 }
 
