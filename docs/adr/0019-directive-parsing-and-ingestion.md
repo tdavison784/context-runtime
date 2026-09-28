@@ -135,6 +135,9 @@ the first:
 1. `domain.CheckRequestBeforeLookup(tx, p, requestID)` — the function that
    actually "runs before any receipt lookup": a current-format `req_` ID
    is refused unless it was allocated in this transaction (SEC-3.6).
+   Tests: `TestLoweredActorCannotReplayRelayReceipt_SEC36` and
+   `TestLoweredActorCannotReplayRelayReceiptTxLevel_SEC36`
+   (`internal/ingest/sec36_relay_replay_test.go`).
 2. The exact-replay lookup (`sem.MutationReceipt`), with
    `domain.RuntimeRequestOwnedBy` applied only to a foreign receipt
    (SEC-2.8's no-existence-oracle rule, above).
@@ -158,9 +161,14 @@ mutations (item, grant, `CompleteTask`, `ReplaceDirective`) and manual
 `Collect`, plus the semantic-tool handlers (`internal/tools`), retrieval
 (`internal/retrieve`), graph membership (`internal/graph`), obligation
 mutations (`internal/obligation`), and the harness checkpoint path.
-Tests: `*RefuseReservedRequestIDs_SEC37` in `internal/tools`,
-`internal/graph`, `internal/obligation`, `internal/retrieve`, and
-`internal/ingest`.
+Tests: `TestToolsRefuseReservedRequestIDs_SEC37` (`internal/tools`),
+`TestMembershipRefusesReservedRequestIDs_SEC37` (`internal/graph`),
+`TestObligationEntriesRefuseReservedRequestIDs_SEC37`
+(`internal/obligation`), `TestRetrievalRefusesReservedRequestIDs_SEC37`
+(`internal/retrieve`), and `TestLifecycleTxEntriesRefuseReserved
+RequestIDs_SEC37` (`internal/ingest`) — all five named, because the
+`*RefuseReservedRequestIDs_SEC37` glob this sentence used missed the two
+spelled `Refuses`.
 
 **Reserved-namespace rejection runs after the exact-replay lookup, not
 before (PR #6 round 2, DUR-2.8/SEC-2.8).** Checking a reserved prefix

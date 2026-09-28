@@ -333,7 +333,10 @@ both forms share.
   `FAILED` request becomes re-armable only through SYSTEM/HARNESS calling
   `lifecycle.Service.RearmGCRequest` (`internal/lifecycle/gc_requests.go`),
   which derives a new deterministic request identity from the failed
-  request's own scope/task/trigger (`gcqueue.Enqueue(..., "rearm/"+req.ID)`)
+  request alone — `domain.GCRearmRequestID(failed.ID)` filed through
+  `gcqueue.EnqueueRearm` (`internal/gcqueue`), the form SEC-4.4/DUR-4.8's
+  paragraph below describes; the `Enqueue(..., "rearm/"+req.ID)` shape this
+  sentence originally recorded no longer exists —
   and leaves the original `FAILED` record immutable (DUR-3.3). J4's attempt
   counter resets whenever a batch makes any progress, not only on full
   success: every successful batch write carries `Attempts: 0`
@@ -422,7 +425,9 @@ both forms share.
   identity holds at most half the tier's slots (SEC-4.6, fixed round 4):**
   no single issuer, however many grants it issues, can starve its own
   class's peers. Tests: `TestGrantRoomIsTieredByAuthority`,
-  `TestSmallGrantRoomHasNoReserves` (`internal/lifecycle/grants_test.go`)
+  `TestSmallGrantRoomHasNoReserves`,
+  `TestOneIdentityCannotTakeItsWholeGrantTier_SEC46`
+  (`internal/lifecycle/grants_test.go`)
   — `TestLiveGrantCapIsSharedFairly`, the flat-quarter-share test this
   text previously cited, no longer exists.
   `lifecycle.CollectPending`/`ExecuteGCRequest` execute a durable request

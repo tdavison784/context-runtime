@@ -702,7 +702,11 @@ and its refusal path entirely (K1a, K1d):
   page of live proofs after the cursor, settles each pending one through
   the same exact-keyed path as the inline settle (idempotent with it),
   skips settled/re-satisfied/waived/retired versions, and never blocks or
-  charges a report — correctness never depends on it having run. The
+  charges a report — correctness never depends on it having run. Nothing
+  in production schedules it yet (its only current callers are tests):
+  the embedding harness is the intended driver — it should call
+  `SettlePendingTx` periodically, as it drains the GC queue, since the
+  audit is a disclosure/completeness concern, never a validity one. The
   settlement's actor is always the session SYSTEM runtime; the causing
   update's own `Reporter` field (unchanged from P3-19/ADR 8 §9) is the
   record of who actually reported the change, kept separate from the
@@ -979,14 +983,18 @@ code has landed. This ADR does not itself edit SDD.md.
   presented as current, whether or not its audit transition has yet been
   recorded."
 
-**Not yet reflected in either amendment, because it depends on K1's own
-implementation landing:** the exact monotone validity rule (K1-spec.md
+**The K1 amendments were freeze-time text that has since landed, so this
+paragraph's round-3 "not yet reflected … pending code" hedge is itself
+historical:** the exact monotone validity rule (K1-spec.md
 A1), the "one effective-status helper" enforcement test (A2), the inline
-settle plus async audit worker (A3/A4), the commit guard and property-test
-wording (A5), and A6/A7's disclosure and bounded-dependency rules. Those
-remain this ADR's own Decision-section text once implemented, not SDD
-normative prose — the K1 subsection above records them as decided,
-pending code.
+settle plus async audit worker (A3/A4), the commit guard and
+property-test wording (A5), and A6/A7's disclosure and bounded-dependency
+rules are all implemented at the round-4 integration, and the K1
+subsection above cites each one's real code and tests. The SDD keeps
+only INV-16's normative wording (v0.11, above); the rest of K1 remains
+this ADR's Decision-section text, as ADR 19's freeze-time precedent
+allows, and that text is now descriptive of landed code, not forward-
+looking.
 
 ## Consequences / compatibility impact
 
