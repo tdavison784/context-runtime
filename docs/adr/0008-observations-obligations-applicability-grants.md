@@ -13,9 +13,14 @@ fixes. `go test -race -count=1 -timeout 45m ./...` passes with no
 exceptions; every decision below cites real, `grep`-verified code and
 tests, not a proposed contract. **This ADR remains Proposed for one
 narrower reason than before:** the P3-42 required-test mapping is now
-met, modulo a small number of adjacent-test/Low-confidence caveats the
-coverage table below still records inline (see "Outstanding required
-tests" below), and K1 has fully landed, but the commander has not yet
+met after the round-5 SPEC-5.1 remap (every wrong/partial/adjacent
+citation moved to a better existing test, read and confirmed before
+citing; memory-only coverage labeled in-row), except for the two clauses
+the coverage table below marks MISSING — P3-20's "no filesystem/network
+reads during replay" and the open-exchange half of P3-38 — plus a small
+number of adjacent-test/Low-confidence caveats it still records inline
+(see "Outstanding required tests" below), and K1 has fully landed, but
+the commander has not yet
 ruled this ADR Accepted at the Phase 3 gate — that ruling is explicitly
 outside this docs pass's authority.)
 Date: 2026-09-26
@@ -1209,7 +1214,7 @@ first time it appears in a row when not already obvious from context.
 | P3-20 | uncertain aliases invalidate conservatively | `TestP3_20_UncertainAliasesInvalidateConservatively` (`internal/obligation/p342_p320_test.go`) |
 | P3-20 | T1 binding unaffected by T2 declaration | `TestH2BindingVersionsDoNotWedgeDeclaration` |
 | P3-20 | completed-task resource report | `TestP3_20_CompletedTaskDoesNotSuppressInvalidation` (`internal/obligation/p342_p320_test.go`) |
-| P3-20 | no filesystem/network reads during replay | `TestPackageBoundaries`/`imports_test.go` (weaker guarantee than a direct assertion — carried over as a known-weak citation, not resolved) |
+| P3-20 | no filesystem/network reads during replay | MISSING — `TestPackageBoundaries`/`imports_test.go` enforce only the package-dependency allowlist, which is a weaker guarantee than a direct assertion and is not counted as coverage (SPEC-5.1: marked MISSING, not deferred) |
 | P3-21 | forged PASS in TOOL/USER/AGENT/retrieved text inert | `TestObservationCannotFabricateEvidenceOrPass` |
 | P3-21 | wrong/missing span | `TestObservationIntentEvidenceReferenceIsExclusive` |
 | P3-21 | changed typed field conflicts on retry | `TestRunAndObservationReceipts` |
@@ -1323,7 +1328,7 @@ first time it appears in a row when not already obvious from context.
 | P3-37 | replay | `TestLifecycleEndToEndOnSQLite` ("grant archive revoke" subtest, `internal/lifecycle/sqlite_test.go`, SQLite); `TestUnarchiveRestoresResidencyOnlyAndReplays` (memory half) |
 | P3-37 | no content deletion | `TestP3_37_NoContentDeletionOnArchive` (`internal/lifecycle/p342_p3_37_test.go`) |
 | P3-38 | mid-turn pending result survives | `TestCollectDecisionMatrix` ("superseded mid-turn kept", `internal/policy/gc_test.go`); `TestP3_39_StableResultsIndependentOfClockAndCounter` (current-turn ephemeral stays PROTECTED, both stores) |
-| P3-38 | open exchange and leased historical content survive | `TestLiveItemsDoNotExhaustCollectionBudget` (adjacent — the lease half is SEC-4.2/SPEC-4.2's known regression, ADR 16) |
+| P3-38 | open exchange and leased historical content survive | lease half: `TestLeaseTakenAfterFirstBatchProtects_SEC42` (`internal/lifecycle/gc_round4_test.go` — a leased item taken into the first Collect batch protects the rest, SEC-4.2's fix); open-exchange half: MISSING — no test asserts an open exchange's content survives collection (SPEC-5.1) |
 | P3-38 | newest eligible checkpoint preserved | `TestCheckpointLookupsFindNewestAndCoveringCheckpoints` (`internal/tools/checkpoint_lookup_test.go` — the real newest/covering lookups, both stores); `TestGCProtectsOnlyTheNewestRelevantCheckpoint` (decision half; memory-only, stubs `checkpointOfItem`) |
 | P3-38 | expired lease releases only lease protection | `TestP3_38_ExpiredLeaseReleasesOnlyLeaseProtection` (`internal/lifecycle/p342_p3_38_test.go`) |
 | P3-38 | superseded SYSTEM instruction collectible with proper actor | `TestP3_38_SupersededSystemInstructionCollectibleWithProperActor` (`internal/lifecycle/p342_p3_38_test.go`) |
@@ -1358,11 +1363,14 @@ first time it appears in a row when not already obvious from context.
 | P3-42 | trace assertions distinguish state from transmitted requests | `TestGateT02_ReplacementRetiresOldRequirement` et al. (Gate evidence table, T02/T06/T07 rows) |
 | P3-42 | no unresolved C or missing schema field is labeled Accepted | this ADR's own Status line |
 
-**Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. **Update (commander ruling M3, round 4):** this table originally found 52 genuinely MISSING clauses beyond the 21 the "Outstanding required tests" section below had already tracked (that section's 21 were always a subset, scoped to bullets a prior round had already flagged, not every clause in phase3-decisions.md). M3 ruled none of the 52 deferred; two GLM test writers wrote all of them as `p342_p3<N>_test.go` files, and every MISSING row above has been flipped to that real citation. No row in this table is MISSING as of this pass.
+**Method note:** rows marked with an adjacent-test caveat ("adjacent," "partial," "not independently confirmed") point at a real test that covers most, but not quite all, of the clause's exact scenario; a fresh reviewer should not assume the adjacent test proves the narrower claim word-for-word. **Update (commander ruling M3, round 4):** this table originally found 52 genuinely MISSING clauses beyond the 21 the "Outstanding required tests" section below had already tracked (that section's 21 were always a subset, scoped to bullets a prior round had already flagged, not every clause in phase3-decisions.md). M3 ruled none of the 52 deferred; two GLM test writers wrote all of them as `p342_p3<N>_test.go` files, and every MISSING row above has been flipped to that real citation. **(SPEC-5.1, round 5) a full remap pass then re-examined all 51 rows whose citation was a wrong, partial, or adjacent test and moved each to a better existing test, read and confirmed to assert its clause before citing; memory-only coverage is labeled in-row where it applies. Two clauses are MISSING as of this pass, both recorded in-row: P3-20 "no filesystem/network reads during replay" (the package-boundary guarantee is weaker than a direct assertion and does not count) and the open-exchange half of P3-38 "open exchange and leased historical content survive" (the lease half is covered by `TestLeaseTakenAfterFirstBatchProtects_SEC42`).**
 
 ## Outstanding required tests (SPEC-1.23, SPEC-2.14, SPEC-3.9, SPEC-4.9) — closed, PR #6 round 4
 
-**All bullets this section tracked are now resolved.** PR #6 review round 1
+**All bullets this section tracked are now resolved, except one: the
+P3-20 "no filesystem/network reads during replay" clause is MISSING
+(SPEC-5.1, round 5 — previously carried as a known-weak `imports_test.go`
+citation, now marked MISSING rather than deferred).** PR #6 review round 1
 (`r6-spec1.md`, SPEC-1.23) searched every package and found no real
 counterpart for 24 required-test bullets across P3-1 through P3-38 (21
 after three gained a test as a side effect of round-1 code fixes, per
@@ -1390,9 +1398,9 @@ enumerated are covered as follows:
   `TestP3_15_MigrationInventsNoExemptionOrProof` (`internal/obligation/p342_p3_15_test.go`).
 - **P3-20** "uncertain aliases invalidate conservatively" — `TestP3_20_UncertainAliasesInvalidateConservatively`
   (`internal/obligation/p342_p320_test.go`); "no filesystem/network reads
-  during replay" remains the weaker `imports_test.go` guarantee (this
-  specific clause was not part of the 52 GLM wrote and stays an open, Low
-  gap — see the P3-42 table's P3-20 row above).
+  during replay" is MISSING (SPEC-5.1: the `imports_test.go` package-
+  boundary guarantee is weaker than a direct assertion and is not counted
+  as coverage — see the P3-42 table's P3-20 row above).
 - **P3-24** "same invocation with a different method/principal conflicts"
   — `TestP3_24_SameInvocationDifferentToolPrincipalOrArgsConflicts`
   (`internal/tools/p342_p3_24_test.go`).
@@ -1425,9 +1433,10 @@ unaffected by this pass and keep their existing citations, still real:
 `TestIdenticalRestatementOfUnknownIdentityFailsClosed`/`TestUnknownIdentityRestatementIsALineDiagnostic`.
 
 **P3-42's own gate requirement — "every P3 decision maps to named
-required tests" — is met as of this pass**, modulo the small number of
-adjacent-test and Low-confidence caveats the P3-42 table above still
-records inline (e.g. P3-20's filesystem/network-read guarantee). Moving
+required tests" — is met as of this pass except for the two clauses the
+table marks MISSING (P3-20's filesystem/network-read guarantee and the
+open-exchange half of P3-38)**, plus the small number of memory-only and
+adjacent-test caveats the P3-42 table above records inline. Moving
 this ADR's Status line from Proposed to Accepted is the commander's call,
 not this docs pass's; flagged for that ruling separately.
 
