@@ -240,10 +240,10 @@ both forms share.
   item-count limit, and attempts for the next candidate. Later insertions
   cannot extend the request. Continuations require the first batch's
   collector principal, preserving its access boundary.
-  **Known regression, not yet fixed as of this pass (SEC-4.2/SPEC-4.2,
-  round 4, introduced by `920e9e8`; assigned to W3c): freezing the
-  candidate set at `SnapshotSeq` does not also freeze protection
-  decisions.** `gc_snapshot.go` evaluates lease liveness against the
+  **Regression, fixed round 4 (SEC-4.2/SPEC-4.2, introduced by
+  `920e9e8`): freezing the candidate set at `SnapshotSeq` did not also
+  freeze protection decisions.** `gc_snapshot.go` evaluated lease
+  liveness against the
   frozen `SnapshotSeq` rather than the current sequence, so a lease taken
   on an item after batch 1 was invisible to a later batch and that item
   was archived despite P3-38's "active lease contents" protection; every
